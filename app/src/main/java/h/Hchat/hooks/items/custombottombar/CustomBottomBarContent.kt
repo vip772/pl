@@ -52,9 +52,8 @@ import androidx.compose.ui.unit.sp
 import h.Hchat.ui.miuix.FloatingBottomBar
 import h.Hchat.ui.miuix.FloatingBottomBarItem
 import h.Hchat.ui.miuix.rememberViewBackdrop
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.darkColorScheme
-import top.yukonga.miuix.kmp.theme.lightColorScheme
+import androidx.compose.material3.MaterialTheme
+import h.Hchat.ui.material3.HchatMaterialTheme
 
 internal data class CustomBottomBarConfig(
     val glass: Boolean,
@@ -113,18 +112,15 @@ internal fun CustomBottomBarRoot(
 ) {
     val dark = (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
         Configuration.UI_MODE_NIGHT_YES
-    MiuixTheme(
-        colors = if (dark) darkColorScheme() else lightColorScheme(),
-        content = {
-            FloatingNavigationBar(
-                sourceView = sourceView,
-                state = state,
-                config = config,
-                touchState = touchState,
-                onTabClicked = onTabClicked
-            )
-        }
-    )
+    HchatMaterialTheme(darkTheme = dark) {
+        FloatingNavigationBar(
+            sourceView = sourceView,
+            state = state,
+            config = config,
+            touchState = touchState,
+            onTabClicked = onTabClicked
+        )
+    }
 }
 
 @Composable
@@ -137,7 +133,7 @@ private fun FloatingNavigationBar(
 ) {
     val backdrop = rememberViewBackdrop(sourceView)
     val contentColor = if (isDarkMode()) Color(0xFFE8E8E8) else Color(0xFF202020)
-    val selectedColor = MiuixTheme.colorScheme.primary
+    val selectedColor = MaterialTheme.colorScheme.primary
     Box(
         modifier = Modifier
             .fillMaxWidth()
