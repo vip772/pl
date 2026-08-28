@@ -507,6 +507,7 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import h.Hchat.ui.material3.HchatMaterialTheme
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Card as MaterialCard
 import androidx.compose.material3.CardDefaults as MaterialCardDefaults
 import androidx.compose.material3.HorizontalDivider as MaterialHorizontalDivider
@@ -3328,6 +3329,7 @@ private fun SearchPageTopBar(
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun SearchBarSurface(
     query: String,
     placeholder: String,
@@ -10169,7 +10171,7 @@ private fun FloatingShortcutAppearanceMiuixPage(
 }
 
 @Composable
-private fun FloatingShortcutTextSizeMaterialSlider(
+private fun FloatingShortcutTextSizeSlider(
     title: String,
     value: Int,
     onValueChange: (Int) -> Unit
@@ -10193,7 +10195,7 @@ private fun FloatingShortcutTextSizeMaterialSlider(
 }
 
 @Composable
-private fun FloatingShortcutSizeMaterialSlider(
+private fun FloatingShortcutSizeSlider(
     title: String,
     value: Int,
     onValueChange: (Int) -> Unit
@@ -40728,6 +40730,7 @@ private fun UnsupportedFeaturePage(provider: FeatureSettingsProvider, onBack: ()
 }
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 internal fun PageScaffold(
     title: String,
     largeTitle: String,

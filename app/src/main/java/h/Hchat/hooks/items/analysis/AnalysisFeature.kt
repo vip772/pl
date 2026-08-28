@@ -22,12 +22,12 @@ class AnalysisFeature : BaseFeature() {
 
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(
-            SimpleFeatureSettingsProvider(
+            object : SimpleFeatureSettingsProvider(
                 ID,
                 "分析",
                 "群聊消息、成员活跃度与时间分布",
                 FeatureSettingsProvider.CATEGORY_PRACTICAL
-            )
+            ) {}
         )
     }
 
