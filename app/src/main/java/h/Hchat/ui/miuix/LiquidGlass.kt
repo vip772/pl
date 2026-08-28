@@ -2,13 +2,13 @@ package h.Hchat.ui.miuix
 
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.ui.unit.LayoutDirection
-import top.yukonga.miuix.kmp.blur.BackdropEffectScope
+import h.Hchat.ui.miuix.HchatBackdropEffectScope
 import top.yukonga.miuix.kmp.blur.colorControls
 import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
 import top.yukonga.miuix.kmp.blur.runtimeShaderEffect
 
 // Adapted from compose-miuix-ui's liquid glass example.
-internal fun BackdropEffectScope.vibrancy() {
+internal fun HchatBackdropEffectScope.vibrancy() {
     colorControls(
         brightness = 0f,
         contrast = 1f,
@@ -16,7 +16,7 @@ internal fun BackdropEffectScope.vibrancy() {
     )
 }
 
-internal fun BackdropEffectScope.lens(
+internal fun HchatBackdropEffectScope.lens(
     refractionHeight: Float,
     refractionAmount: Float,
     depthEffect: Boolean = false,
@@ -57,7 +57,7 @@ internal fun BackdropEffectScope.lens(
     }
 }
 
-private fun BackdropEffectScope.roundedRectCornerRadii(): FloatArray? {
+private fun HchatBackdropEffectScope.roundedRectCornerRadii(): FloatArray? {
     val cornerShape = shape as? CornerBasedShape ?: return null
     val maxRadius = size.minDimension / 2f
     val isLtr = layoutDirection == LayoutDirection.Ltr
