@@ -15,6 +15,7 @@ class ScriptPluginFeature : BaseFeature() {
 
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(ScriptPluginSettingsProvider())
+        registerSettingsProvider(AnalysisSettingsProvider())
     }
 
     override fun onFeatureInstall(context: FeatureContext) {

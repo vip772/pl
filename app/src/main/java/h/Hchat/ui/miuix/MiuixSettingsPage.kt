@@ -397,6 +397,7 @@ import h.Hchat.hooks.items.realtail.RealNameTailStore
 import h.Hchat.hooks.items.roundavatar.RoundAvatarFeature
 import h.Hchat.hooks.items.roundavatar.RoundAvatarSettings
 import h.Hchat.hooks.items.script.ScriptPluginFeature
+import h.Hchat.hooks.items.script.AnalysisSettingsProvider
 import h.Hchat.hooks.items.script.ScriptPluginManager
 import h.Hchat.hooks.items.script.ScriptPluginRuntime
 import h.Hchat.hooks.items.script.ScriptPluginSettings
@@ -3034,7 +3035,8 @@ private fun practicalFeatureGroups(
                 SwipeQuoteFeature.ID,
                 EmojiSaveFeature.ID,
                 CallMediaLimitFeature.ID,
-                CallRingtoneBlockFeature.ID
+                CallRingtoneBlockFeature.ID,
+                AnalysisSettingsProvider.FEATURE_ID
             )
         ),
         FeatureGroupEntry(
@@ -3939,6 +3941,7 @@ private fun featureSubSearchTerms(featureId: String): List<String> {
         GroupNicknameColorSettings.FEATURE_ID -> listOf("群昵称自定义颜色", "群昵称颜色", "群内昵称颜色", "昵称渐变", "昵称粗细", "颜色取色器")
         MemberTitleFeature.ID -> listOf("群成员头衔", "头衔颜色", "自定义头衔", "头衔模板", "群昵称头衔", "颜色取色器")
         ScriptPluginFeature.ID -> listOf("脚本插件", "插件列表", "插件 Agent", "AI 生成插件", "插件 README", "插件配置", "启用插件", "禁用插件")
+        AnalysisSettingsProvider.FEATURE_ID -> listOf("分析", "群聊分析", "消息统计", "成员活跃度", "AI 总结")
         else -> emptyList()
     }
 }
@@ -4597,6 +4600,7 @@ private fun FeatureSettingsPage(
         ProtobufPacketFeature.ID -> ProtobufPacketMiuixPage(context, provider, onBack)
         CrashReportSettingsProvider.ID -> CrashReportMiuixPage(context, provider, onBack)
         StatusTextLimitFeature.ID -> StatusTextLimitMiuixPage(context, provider, onBack)
+        AnalysisSettingsProvider.FEATURE_ID -> BuiltinAnalysisMiuixPage(context)
         ScriptPluginFeature.ID -> ScriptPluginMiuixPage(
             context,
             provider,
@@ -36100,6 +36104,37 @@ private fun ClickHintTag() {
             .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f))
             .padding(horizontal = 8.dp, vertical = 2.dp)
     )
+}
+
+
+@Composable
+private fun BuiltinAnalysisMiuixPage(context: Context) {
+    val pluginId = ScriptPluginRuntime.BUILTIN_ANALYSIS_PLUGIN_ID
+    var checked by remember { mutableStateOf(ScriptPluginRuntime.isPluginEnabled(context, pluginId)) }
+    SettingsCard {
+        SwitchRow(
+            checked = checked,
+            title = "分析",
+            summary = "在群聊消息长按菜单中添加“分析”，查看消息、成员活跃度和 AI 总结。默认关闭。",
+            onCheckedChange = { next ->
+                val old = checked
+                checked = next
+                Thread({
+                    val result = ScriptPluginRuntime.setPluginEnabled(context, pluginId, next)
+                    Handler(Looper.getMainLooper()).post {
+                        if (result.isFailure) {
+                            checked = old
+                            Toast.makeText(
+                                context,
+                                "切换失败: ${result.exceptionOrNull()?.message}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
+                    }
+                }, "Hchat-Builtin-Analysis").start()
+            }
+        )
+    }
 }
 
 private object ScriptPluginSettingsMiuixContent {
