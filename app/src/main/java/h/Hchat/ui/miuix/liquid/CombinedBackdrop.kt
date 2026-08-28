@@ -10,13 +10,13 @@ import androidx.compose.ui.graphics.GraphicsLayerScope
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.unit.Density
-import top.yukonga.miuix.kmp.blur.Backdrop
+import h.Hchat.ui.miuix.HchatBackdrop
 
 @Stable
 class CombinedBackdrop(
-    val first: Backdrop,
-    val second: Backdrop,
-) : Backdrop {
+    val first: HchatBackdrop,
+    val second: HchatBackdrop,
+) : HchatBackdrop {
 
     override val isCoordinatesDependent: Boolean = first.isCoordinatesDependent || second.isCoordinatesDependent
 
@@ -35,5 +35,5 @@ class CombinedBackdrop(
 }
 
 @Composable
-fun rememberCombinedBackdrop(first: Backdrop, second: Backdrop): Backdrop =
+fun rememberCombinedBackdrop(first: HchatBackdrop, second: HchatBackdrop): HchatBackdrop =
     remember(first, second) { CombinedBackdrop(first, second) }

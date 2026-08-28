@@ -499,7 +499,7 @@ import androidx.compose.material3.Surface
 import h.Hchat.ui.material3.MaterialSectionTitle as SmallTitle
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import top.yukonga.miuix.kmp.blur.Backdrop
+import h.Hchat.ui.miuix.HchatBackdrop
 import h.Hchat.ui.miuix.hchatLayerBackdrop
 import h.Hchat.ui.miuix.rememberHchatLayerBackdrop
 import h.Hchat.ui.material3.HchatMaterialTheme
@@ -4389,7 +4389,7 @@ private fun MainNavigationBar(
     selectedTab: MainTab,
     floating: Boolean,
     glass: Boolean,
-    backdrop: Backdrop,
+    backdrop: HchatBackdrop,
     onSelected: (MainTab) -> Unit
 ) {
     val items = remember {
@@ -40723,7 +40723,7 @@ internal fun PageScaffold(
     scrollBehavior: TopAppBarScrollBehavior,
     onBack: (() -> Unit)? = null,
     topBarActions: @Composable RowScope.() -> Unit = {},
-    bottomBar: @Composable ((Backdrop) -> Unit)? = null,
+    bottomBar: @Composable ((HchatBackdrop) -> Unit)? = null,
     content: @Composable (PaddingValues) -> Unit
 ) {
     RegisterSettingsBackHandler(onBack)

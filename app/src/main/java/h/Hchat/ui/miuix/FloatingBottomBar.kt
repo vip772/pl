@@ -63,7 +63,7 @@ import h.Hchat.ui.miuix.vibrancy
 import h.Hchat.ui.miuix.animation.DampedDragAnimation
 import h.Hchat.ui.miuix.animation.InteractiveHighlight
 import androidx.compose.foundation.isSystemInDarkTheme
-import top.yukonga.miuix.kmp.blur.Backdrop
+import h.Hchat.ui.miuix.HchatBackdrop
 import top.yukonga.miuix.kmp.blur.blur
 import top.yukonga.miuix.kmp.blur.drawBackdrop
 import top.yukonga.miuix.kmp.blur.highlight.BloomStroke
@@ -184,7 +184,7 @@ fun RowScope.FloatingBottomBarItem(
 
 @Composable
 internal fun FloatingGlassBarSurface(
-    backdrop: Backdrop,
+    backdrop: HchatBackdrop,
     isBlurEnabled: Boolean,
     modifier: Modifier = Modifier,
     content: @Composable BoxScope.() -> Unit
@@ -238,7 +238,7 @@ fun FloatingBottomBar(
     modifier: Modifier = Modifier,
     selectedIndex: Int,
     onSelected: (index: Int) -> Unit,
-    backdrop: Backdrop,
+    backdrop: HchatBackdrop,
     tabsCount: Int,
     isBlurEnabled: Boolean = true,
     blurRadius: Dp = 4.dp,

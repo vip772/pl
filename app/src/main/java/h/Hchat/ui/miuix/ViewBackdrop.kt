@@ -26,7 +26,7 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.LayoutDirection
-import top.yukonga.miuix.kmp.blur.Backdrop
+
 import kotlin.math.round
 
 /** Captures a native Android [View] for use by the Compose blur pipeline. */
@@ -58,7 +58,7 @@ fun rememberViewBackdrop(sourceView: View): ViewBackdrop {
 @Stable
 class ViewBackdrop internal constructor(
     private val graphicsLayer: GraphicsLayer
-) : Backdrop {
+) : HchatBackdrop {
     internal var sourceView: View? = null
     internal var density: Density = Density(1f)
     internal var layoutDirection: LayoutDirection = LayoutDirection.Ltr
