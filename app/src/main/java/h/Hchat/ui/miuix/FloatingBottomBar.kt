@@ -73,7 +73,7 @@ import top.yukonga.miuix.kmp.blur.highlight.LightSource
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.blur.sensor.rememberDeviceTilt
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.material3.MaterialTheme
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
@@ -192,7 +192,7 @@ internal fun FloatingGlassBarSurface(
     val effectiveBlurEnabled = isBlurEnabled && Build.VERSION.SDK_INT >= 33
     val isInDark = isSystemInDarkTheme()
     val pillShape = remember { CircleShape }
-    val surfaceContainer = MiuixTheme.colorScheme.surfaceContainer
+    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
     val containerColor = if (effectiveBlurEnabled) surfaceContainer.copy(alpha = 0.4f) else surfaceContainer
     val highlight = rememberGravityRotatedHighlight(iosIndicatorSpecular, extraDegrees = -45f)
 
@@ -249,8 +249,8 @@ fun FloatingBottomBar(
     val effectiveBlurEnabled = isBlurEnabled && Build.VERSION.SDK_INT >= 33
     val isInDark = isSystemInDarkTheme()
     val pillShape = remember { CircleShape }
-    val accentColor = MiuixTheme.colorScheme.primary
-    val surfaceContainer = MiuixTheme.colorScheme.surfaceContainer
+    val accentColor = MaterialTheme.colorScheme.primary
+    val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
     val containerColor = if (effectiveBlurEnabled) surfaceContainer.copy(0.4f) else surfaceContainer
 
     val tabsBackdrop = rememberLayerBackdrop()
