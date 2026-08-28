@@ -505,7 +505,6 @@ import top.yukonga.miuix.kmp.basic.TopAppBar
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
-import top.yukonga.miuix.kmp.theme.MiuixTheme
 import h.Hchat.ui.material3.HchatMaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Card as MaterialCard
@@ -526,8 +525,6 @@ import androidx.compose.material3.Slider as MaterialSlider
 import androidx.compose.material3.Checkbox as MaterialCheckbox
 import androidx.compose.material3.Card as M3Card
 
-import top.yukonga.miuix.kmp.theme.darkColorScheme
-import top.yukonga.miuix.kmp.theme.lightColorScheme
 import top.yukonga.miuix.kmp.extra.WindowDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
@@ -2846,14 +2843,7 @@ private fun rememberPressFeedbackColor(pressed: Boolean): Color {
 
 @Composable
 private fun HchatMiuixTheme(context: Context, content: @Composable () -> Unit) {
-    val colors = if (isDarkMode(context)) {
-        darkColorScheme()
-    } else {
-        lightColorScheme()
-    }
-    HchatMaterialTheme(darkTheme = isDarkMode(context)) {
-        MiuixTheme(colors = colors, content = content)
-    }
+    HchatMaterialTheme(darkTheme = isDarkMode(context), content = content)
 }
 
 @OptIn(ExperimentalAnimationApi::class)
