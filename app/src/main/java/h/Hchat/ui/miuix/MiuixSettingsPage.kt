@@ -514,6 +514,9 @@ import androidx.compose.material3.Switch as MaterialSwitch
 import androidx.compose.material3.Text as MaterialText
 import androidx.compose.material3.NavigationBar as MaterialNavigationBar
 import androidx.compose.material3.NavigationBarItem as MaterialNavigationBarItem
+import androidx.compose.material3.Scaffold as MaterialScaffold
+import androidx.compose.material3.TopAppBar as MaterialTopAppBar
+import androidx.compose.material3.IconButton as MaterialIconButton
 
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -25053,51 +25056,25 @@ private fun FeatureListCard(
 
 @Composable
 private fun FeatureGroupRow(group: FeatureGroupEntry, onClick: () -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
-    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(pressFeedbackColor)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = group.title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(
-                text = "${group.providers.size} 项功能",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 12.sp
-            )
-        }
-        Text(text = "›", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 22.sp)
-    }
+    MaterialSettingsLinkRow(group.title, "${group.providers.size} 项功能", onClick)
 }
 
 @Composable
 private fun FeatureRow(provider: FeatureSettingsProvider, onClick: () -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
-    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
+    MaterialSettingsLinkRow(provider.title(), provider.subtitle(), onClick)
+}
+
+@Composable
+private fun MaterialSettingsLinkRow(title: String, summary: String, onClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(pressFeedbackColor)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = provider.title(), color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(text = provider.subtitle(), color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            MaterialText(title, style = androidx.compose.material3.MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Medium)
+            if (summary.isNotBlank()) MaterialText(summary, style = androidx.compose.material3.MaterialTheme.typography.bodySmall, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Text(text = "›", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 22.sp)
+        MaterialText("›", style = androidx.compose.material3.MaterialTheme.typography.headlineSmall, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -40821,61 +40798,34 @@ internal fun PageScaffold(
     val navigationInset = navigationButtonBottomInset()
     val navigationGap = if (navigationInset > 0.dp) NAVIGATION_BUTTON_EXTRA_GAP else 0.dp
     val bottomAvoidance = navigationInset + navigationGap
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MiuixTheme.colorScheme.background)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .layerBackdrop(backdrop)
-        ) {
-            top.yukonga.miuix.kmp.basic.Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = title,
-                        largeTitle = largeTitle,
-                        scrollBehavior = scrollBehavior,
-                        navigationIcon = {
-                            onBack?.let { back ->
-                                Box(
-                                    modifier = Modifier.size(40.dp).responsiveTap(onClick = back),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Image(
-                                        imageVector = NavIcons.Back,
-                                        contentDescription = "返回",
-                                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
-                        },
-                        actions = topBarActions,
-                        defaultWindowInsetsPadding = true
-                    )
-                },
-                bottomBar = {},
-                contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                content = { padding ->
-                    content(
-                        PaddingValues(
-                            top = padding.calculateTopPadding(),
-                            bottom = padding.calculateBottomPadding() + bottomAvoidance
+    MaterialScaffold(
+        modifier = Modifier.fillMaxSize(),
+        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.background,
+        contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onBackground,
+        topBar = {
+            MaterialTopAppBar(
+                title = { MaterialText(largeTitle.ifBlank { title }) },
+                navigationIcon = {
+                    if (onBack != null) MaterialIconButton(onClick = onBack) {
+                        Image(
+                            imageVector = NavIcons.Back,
+                            contentDescription = "返回",
+                            colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurface),
+                            modifier = Modifier.size(24.dp)
                         )
-                    )
-                }
+                    }
+                },
+                actions = topBarActions
             )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = bottomAvoidance)
-                .align(Alignment.BottomCenter)
-        ) {
-            bottomBar?.invoke(backdrop)
-        }
+        },
+        bottomBar = {
+            Box(modifier = Modifier.fillMaxWidth().padding(bottom = bottomAvoidance)) {
+                bottomBar?.invoke(backdrop)
+            }
+        },
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+    ) { padding ->
+        Box(modifier = Modifier.fillMaxSize().layerBackdrop(backdrop)) { content(padding) }
     }
 }
 
