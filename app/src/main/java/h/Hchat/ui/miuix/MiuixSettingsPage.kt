@@ -490,20 +490,15 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import org.json.JSONArray
 import org.json.JSONObject
-import top.yukonga.miuix.kmp.basic.ButtonDefaults
-import top.yukonga.miuix.kmp.basic.Card
-import top.yukonga.miuix.kmp.basic.Checkbox
+import androidx.compose.material3.ButtonDefaults as MaterialButtonDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
-import top.yukonga.miuix.kmp.basic.Slider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Surface
 import h.Hchat.ui.material3.MaterialSectionTitle as SmallTitle
-import top.yukonga.miuix.kmp.basic.Switch
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.basic.TopAppBar
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import top.yukonga.miuix.kmp.blur.Backdrop
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
@@ -9962,7 +9957,7 @@ private fun FloatingShortcutMiuixPage(
                             text = "取消",
                             onClick = ::dismissEditor,
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "保存",
@@ -9989,7 +9984,7 @@ private fun FloatingShortcutMiuixPage(
                                 editor = null
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -10313,13 +10308,13 @@ private fun FloatingShortcutIconActionRow(
         TextButton(
             text = "选择",
             onClick = onSelect,
-            colors = ButtonDefaults.textButtonColorsPrimary()
+            colors = MaterialButtonDefaults.textButtonColors()
         )
         if (onReset != null) {
             TextButton(
                 text = "默认",
                 onClick = onReset,
-                colors = ButtonDefaults.textButtonColorsPrimary()
+                colors = MaterialButtonDefaults.textButtonColors()
             )
         }
     }
@@ -15608,13 +15603,13 @@ private fun ZombieCheckMainPage(
                             confirmAutoDelete = false
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     TextButton(
                         text = "取消",
                         onClick = { confirmAutoDelete = false },
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -15651,13 +15646,13 @@ private fun ZombieCheckMainPage(
                             toastResult(result)
                         },
                         modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     TextButton(
                         text = "取消",
                         onClick = onDismissDelete,
                         modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -17016,13 +17011,13 @@ private fun FakeLocationManualInputDialog(
                         text = "取消",
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     TextButton(
                         text = "保存",
                         onClick = { parsed?.let { onConfirm(it.first, it.second) } },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -19953,7 +19948,7 @@ private fun ConversationGroupEditorPage(
                             text = "取消",
                             onClick = { showDeleteConfirm = false },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "确认删除",
@@ -19962,7 +19957,7 @@ private fun ConversationGroupEditorPage(
                                 onDelete()
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -27191,7 +27186,7 @@ private fun RedPacketBindingListPage(
                             text = "取消",
                             onClick = { showDeleteConfirm = false },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "确认删除",
@@ -27203,7 +27198,7 @@ private fun RedPacketBindingListPage(
                                 onDeleteBindings(targets)
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -28800,7 +28795,7 @@ fun ScriptPluginMarketPage(
                                 text = "重试",
                                 onClick = { refreshVersion++ },
                                 modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
-                                colors = ButtonDefaults.textButtonColorsPrimary()
+                                colors = MaterialButtonDefaults.textButtonColors()
                             )
                         }
                     }
@@ -28909,7 +28904,7 @@ fun ScriptPluginMarketPage(
                             text = "取消",
                             onClick = { pendingOverwrite = null },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "确认覆盖",
@@ -28918,7 +28913,7 @@ fun ScriptPluginMarketPage(
                                 performInstall(plugin, overwrite = true)
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -29041,7 +29036,7 @@ private fun PluginMarketNotificationDialog(
                         text = if (loading) "正在刷新" else "刷新",
                         onClick = onRetry,
                         enabled = !loading,
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
                 Column(
@@ -29056,7 +29051,7 @@ private fun PluginMarketNotificationDialog(
                                 text = "重试",
                                 onClick = onRetry,
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.textButtonColorsPrimary()
+                                colors = MaterialButtonDefaults.textButtonColors()
                             )
                         }
                         notifications.isEmpty() -> EmptyText("暂无回复通知")
@@ -29073,7 +29068,7 @@ private fun PluginMarketNotificationDialog(
                     text = "关闭",
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
+                    colors = MaterialButtonDefaults.textButtonColors()
                 )
             }
         }
@@ -29329,7 +29324,7 @@ private fun PluginMarketDetailDialog(
                                 text = "重新加载",
                                 onClick = onRetry,
                                 modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.textButtonColorsPrimary()
+                                colors = MaterialButtonDefaults.textButtonColors()
                             )
                         }
                     }
@@ -29420,7 +29415,7 @@ private fun PluginMarketDetailDialog(
                                         replyDraft = ""
                                     },
                                     enabled = !submittingComment,
-                                    colors = ButtonDefaults.textButtonColorsPrimary()
+                                    colors = MaterialButtonDefaults.textButtonColors()
                                 )
                                 TextButton(
                                     text = if (submittingComment) "正在回复" else "发送",
@@ -29436,7 +29431,7 @@ private fun PluginMarketDetailDialog(
                                         }
                                     },
                                     enabled = replyDraft.isNotBlank() && !submittingComment,
-                                    colors = ButtonDefaults.textButtonColorsPrimary()
+                                    colors = MaterialButtonDefaults.textButtonColors()
                                 )
                             }
                         }
@@ -29452,7 +29447,7 @@ private fun PluginMarketDetailDialog(
                             enabled = !installing && !deleting && !updatingLike &&
                                 !submittingComment && deletingCommentId == null,
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         if (owned) {
                             TextButton(
@@ -29461,7 +29456,7 @@ private fun PluginMarketDetailDialog(
                                 enabled = !installing && !deleting && !updatingLike &&
                                     !submittingComment && deletingCommentId == null,
                                 modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.textButtonColorsPrimary()
+                                colors = MaterialButtonDefaults.textButtonColors()
                             )
                         }
                         TextButton(
@@ -29474,7 +29469,7 @@ private fun PluginMarketDetailDialog(
                             enabled = detail != null && !loading && error.isBlank() && !installing &&
                                 !deleting && !updatingLike && !submittingComment && deletingCommentId == null,
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -29501,7 +29496,7 @@ private fun PluginMarketDetailDialog(
                             text = "取消",
                             onClick = { confirmDelete = false },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "确认删除",
@@ -29510,7 +29505,7 @@ private fun PluginMarketDetailDialog(
                                 onDelete()
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -29537,7 +29532,7 @@ private fun PluginMarketDetailDialog(
                             text = "取消",
                             onClick = { pendingDeleteComment = null },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "确认删除",
@@ -29546,7 +29541,7 @@ private fun PluginMarketDetailDialog(
                                 onDeleteComment(comment)
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -29597,7 +29592,7 @@ private fun PluginMarketSocialSection(
             onClick = onToggleLike,
             enabled = enabled && currentUserWxId.isNotBlank() && !updatingLike,
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.textButtonColorsPrimary()
+            colors = MaterialButtonDefaults.textButtonColors()
         )
         Text(
             text = "$likeCount 个赞 · $commentCount 条评论",
@@ -29653,7 +29648,7 @@ private fun PluginMarketSocialSection(
             onClick = onSubmitComment,
             enabled = enabled && currentUserWxId.isNotBlank() &&
                 commentDraft.isNotBlank() && !submittingComment,
-            colors = ButtonDefaults.textButtonColorsPrimary()
+            colors = MaterialButtonDefaults.textButtonColors()
         )
     }
     if (interactionError.isNotBlank()) {
@@ -29679,7 +29674,7 @@ private fun PluginMarketSocialSection(
                 text = "重试",
                 onClick = onRetryComments,
                 modifier = Modifier.fillMaxWidth(),
-                colors = ButtonDefaults.textButtonColorsPrimary()
+                colors = MaterialButtonDefaults.textButtonColors()
             )
         }
         comments.isEmpty() -> EmptyText("暂无评论")
@@ -29758,7 +29753,7 @@ private fun PluginMarketCommentRow(
                 text = if (deleting) "正在删除" else "删除",
                 onClick = onDelete,
                 enabled = enabled && !deleting,
-                colors = ButtonDefaults.textButtonColorsPrimary()
+                colors = MaterialButtonDefaults.textButtonColors()
             )
         }
     }
@@ -29810,7 +29805,7 @@ private fun PluginMarketReplyRow(
                 text = if (deleting) "正在删除" else "删除",
                 onClick = onDelete,
                 enabled = enabled && !deleting,
-                colors = ButtonDefaults.textButtonColorsPrimary()
+                colors = MaterialButtonDefaults.textButtonColors()
             )
         }
     }
@@ -30047,7 +30042,7 @@ private fun PluginMarketUploadDialog(
                                     text = "重试",
                                     onClick = { reloadVersion++ },
                                     modifier = Modifier.fillMaxWidth(),
-                                    colors = ButtonDefaults.textButtonColorsPrimary()
+                                    colors = MaterialButtonDefaults.textButtonColors()
                                 )
                             }
                         }
@@ -30104,14 +30099,14 @@ private fun PluginMarketUploadDialog(
                         onClick = { onDismiss(uploadedAny) },
                         enabled = !uploading,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     TextButton(
                         text = if (uploading) "正在上传" else "上传已选",
                         onClick = ::startUpload,
                         enabled = !uploading && selectedIds.isNotEmpty(),
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -30237,14 +30232,14 @@ private fun PluginMarketUploadRow(
                     text = "选择",
                     onClick = onPickExtraFiles,
                     enabled = enabled,
-                    colors = ButtonDefaults.textButtonColorsPrimary()
+                    colors = MaterialButtonDefaults.textButtonColors()
                 )
                 if (extraFiles.isNotEmpty()) {
                     TextButton(
                         text = "清空",
                         onClick = onClearExtraFiles,
                         enabled = enabled,
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -30300,7 +30295,7 @@ private object PluginMarketHistoryUi {
                     text = "重新加载",
                     onClick = onRetry,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
+                    colors = MaterialButtonDefaults.textButtonColors()
                 )
             }
             versions.isEmpty() -> EmptyText("暂无历史版本")
@@ -30338,7 +30333,7 @@ private object PluginMarketHistoryUi {
                         text = if (installingVersionId == version.versionId) "读取中" else "安装",
                         onClick = { onInstall(version) },
                         enabled = enabled && installingVersionId == null,
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -32638,7 +32633,7 @@ fun ScriptPluginAgentWorkspacePage(
                                     approval.resolve(ScriptPluginAgentWorkspaceWriteDecision.CANCEL)
                                 },
                                 modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.textButtonColorsPrimary()
+                                colors = MaterialButtonDefaults.textButtonColors()
                             )
                             TextButton(
                                 text = "确认并继续",
@@ -32659,7 +32654,7 @@ fun ScriptPluginAgentWorkspacePage(
                                     )
                                 },
                                 modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.textButtonColorsPrimary()
+                                colors = MaterialButtonDefaults.textButtonColors()
                             )
                         }
                     }
@@ -32764,7 +32759,7 @@ fun ScriptPluginAgentWorkspacePage(
                             text = "取消",
                             onClick = { dismissWorkspaceChange() },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = when {
@@ -32784,7 +32779,7 @@ fun ScriptPluginAgentWorkspacePage(
                                 applyWorkspaceChange(pending.messageIndex, pending.change)
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -32859,7 +32854,7 @@ fun ScriptPluginAgentWorkspacePage(
                             text = "取消",
                             onClick = { dismissPendingWrite() },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = when {
@@ -32878,7 +32873,7 @@ fun ScriptPluginAgentWorkspacePage(
                                 writeAgentDraft(pending.messageIndex, pending.draft, pending.isNewPlugin)
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -32917,7 +32912,7 @@ fun ScriptPluginAgentWorkspacePage(
                             text = "取消",
                             onClick = { dismissPendingDelete() },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "确认删除",
@@ -32932,7 +32927,7 @@ fun ScriptPluginAgentWorkspacePage(
                                 deleteAgentPlugin(pending.messageIndex, pending.pluginId)
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -33202,7 +33197,7 @@ private fun ScriptPluginAgentConfigPage(
                             text = "取消",
                             onClick = { profileDialog = "" },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "确认",
@@ -33217,7 +33212,7 @@ private fun ScriptPluginAgentConfigPage(
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -33244,7 +33239,7 @@ private fun ScriptPluginAgentConfigPage(
                             text = "取消",
                             onClick = { showDeleteConfirm = false },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "删除",
@@ -33253,7 +33248,7 @@ private fun ScriptPluginAgentConfigPage(
                                 onDeleteProfile()
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -33307,7 +33302,7 @@ private fun ScriptPluginAgentConfigPage(
                             minHeight = 34.dp,
                             cornerRadius = 10.dp,
                             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                     PopupChoiceRow(
@@ -33333,7 +33328,7 @@ private fun ScriptPluginAgentConfigPage(
                             minHeight = 34.dp,
                             cornerRadius = 10.dp,
                             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "删除",
@@ -33344,7 +33339,7 @@ private fun ScriptPluginAgentConfigPage(
                             minHeight = 34.dp,
                             cornerRadius = 10.dp,
                             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = if (testingConnection) "测试中" else "测试连接",
@@ -33355,7 +33350,7 @@ private fun ScriptPluginAgentConfigPage(
                             minHeight = 34.dp,
                             cornerRadius = 10.dp,
                             insideMargin = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -34213,7 +34208,7 @@ private fun ScriptPluginAgentMessageBlock(
                             minWidth = 0.dp,
                             minHeight = 30.dp,
                             insideMargin = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                     if (onRetry != null) {
@@ -34223,7 +34218,7 @@ private fun ScriptPluginAgentMessageBlock(
                             minWidth = 0.dp,
                             minHeight = 30.dp,
                             insideMargin = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -34631,7 +34626,7 @@ private fun ScriptPluginAgentToolEventDialog(
                         text = "复制结果",
                         onClick = { onCopy(event.result) },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
                 if (!workspaceWrite && event.resultHandle.isNotBlank()) {
@@ -34654,7 +34649,7 @@ private fun ScriptPluginAgentToolEventDialog(
                             }
                         },
                         modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     fullResult?.let { value ->
                         ScriptPluginAgentToolResultBlock(event, value)
@@ -34662,7 +34657,7 @@ private fun ScriptPluginAgentToolEventDialog(
                             text = "复制完整结果",
                             onClick = { onCopy(value) },
                             modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -34670,7 +34665,7 @@ private fun ScriptPluginAgentToolEventDialog(
                     text = "关闭",
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
+                    colors = MaterialButtonDefaults.textButtonColors()
                 )
             }
         }
@@ -34929,7 +34924,7 @@ private fun ScriptPluginAgentMessageInfoDialog(
                     text = "关闭",
                     onClick = onDismiss,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
+                    colors = MaterialButtonDefaults.textButtonColors()
                 )
             }
         }
@@ -35051,7 +35046,7 @@ private fun ScriptPluginAgentHistoryDrawer(
                             text = "取消",
                             onClick = { renameSessionId = null },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "保存",
@@ -35062,7 +35057,7 @@ private fun ScriptPluginAgentHistoryDrawer(
                                 }
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -35089,7 +35084,7 @@ private fun ScriptPluginAgentHistoryDrawer(
                             text = "取消",
                             onClick = { deleteSessionId = null },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                         TextButton(
                             text = "删除",
@@ -35098,7 +35093,7 @@ private fun ScriptPluginAgentHistoryDrawer(
                                 onDelete(deleteSession)
                             },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                 }
@@ -35171,7 +35166,7 @@ private fun ScriptPluginAgentHistoryDrawer(
                         text = "取消",
                         onClick = { actionSessionId = null },
                         modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -35203,7 +35198,7 @@ private fun ScriptPluginAgentHistoryDrawer(
                 TextButton(
                     text = "关闭",
                     onClick = onClose,
-                    colors = ButtonDefaults.textButtonColorsPrimary()
+                    colors = MaterialButtonDefaults.textButtonColors()
                 )
             }
             TextButton(
@@ -35211,7 +35206,7 @@ private fun ScriptPluginAgentHistoryDrawer(
                 onClick = onNewSession,
                 enabled = enabled,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
-                colors = ButtonDefaults.textButtonColorsPrimary()
+                colors = MaterialButtonDefaults.textButtonColors()
             )
             if (showGestureHint) {
                 Row(
@@ -36839,13 +36834,13 @@ private fun ScriptPluginSelectionToolbar(
             text = if (allVisibleSelected) "取消全选" else "全选",
             enabled = enabled,
             onClick = onSelectAll,
-            colors = ButtonDefaults.textButtonColorsPrimary()
+            colors = MaterialButtonDefaults.textButtonColors()
         )
         TextButton(
             text = "反选",
             enabled = enabled,
             onClick = onInvert,
-            colors = ButtonDefaults.textButtonColorsPrimary()
+            colors = MaterialButtonDefaults.textButtonColors()
         )
     }
 }
@@ -37162,14 +37157,14 @@ private fun ScriptPluginRenameDialog(
                         text = "取消",
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     TextButton(
                         text = "确定",
                         onClick = { onConfirm(name.trim()) },
                         enabled = name.trim().isNotEmpty(),
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -37206,13 +37201,13 @@ private fun ScriptPluginDeleteDialog(
                         text = "取消",
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     TextButton(
                         text = "删除",
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -37293,14 +37288,14 @@ private fun ScriptPluginImportDialog(
                         onClick = onDismiss,
                         enabled = !applying,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     TextButton(
                         text = if (applying) "正在导入" else "导入",
                         onClick = onConfirm,
                         enabled = !applying,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -37521,13 +37516,13 @@ private fun ScriptPluginPathDialog(
                         onClose()
                     },
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
+                    colors = MaterialButtonDefaults.textButtonColors()
                 )
                 TextButton(
                     text = "关闭",
                     onClick = onClose,
                     modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
+                    colors = MaterialButtonDefaults.textButtonColors()
                 )
             }
         }
@@ -37626,7 +37621,7 @@ fun FirstUseAgreementDialog(
                         text = "取消",
                         onClick = onCancel,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     TextButton(
                         text = if (remainingSeconds > 0) "继续（${remainingSeconds}s）" else "同意并继续",
@@ -37644,7 +37639,7 @@ fun FirstUseAgreementDialog(
                             }
                         },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -37699,7 +37694,7 @@ fun ScriptPluginReadmeDialog(
                     text = "关闭",
                     onClick = onClose,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
+                    colors = MaterialButtonDefaults.textButtonColors()
                 )
             }
         }
@@ -41766,19 +41761,19 @@ private fun RedPacketReplyStepActions(
             text = "上移",
             onClick = { if (canMoveUp) onMoveUp() },
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.textButtonColorsPrimary()
+            colors = MaterialButtonDefaults.textButtonColors()
         )
         TextButton(
             text = "下移",
             onClick = { if (canMoveDown) onMoveDown() },
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.textButtonColorsPrimary()
+            colors = MaterialButtonDefaults.textButtonColors()
         )
         TextButton(
             text = "删除",
             onClick = onDelete,
             modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.textButtonColorsPrimary()
+            colors = MaterialButtonDefaults.textButtonColors()
         )
     }
 }
@@ -41934,14 +41929,14 @@ private fun TimeOfDayPickerDialog(
                             text = "清空",
                             onClick = { onConfirm("") },
                             modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                            colors = MaterialButtonDefaults.textButtonColors()
                         )
                     }
                     TextButton(
                         text = "取消",
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     TextButton(
                         text = "确定",
@@ -41959,7 +41954,7 @@ private fun TimeOfDayPickerDialog(
                             }
                         },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -42112,13 +42107,13 @@ private fun BatchDeleteConfirmDialog(
                         text = "取消",
                         onClick = onDismiss,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                     TextButton(
                         text = "确认删除",
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        colors = MaterialButtonDefaults.textButtonColors()
                     )
                 }
             }
@@ -42760,7 +42755,7 @@ private fun FavoriteMediaPreviewDialog(
                     text = "关闭",
                     onClick = onClose,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
+                    colors = MaterialButtonDefaults.textButtonColors()
                 )
             }
         }
