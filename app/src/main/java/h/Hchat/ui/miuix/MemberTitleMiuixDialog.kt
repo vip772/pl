@@ -65,12 +65,12 @@ import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.extra.WindowDialog
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.darkColorScheme
-import top.yukonga.miuix.kmp.theme.lightColorScheme
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import h.Hchat.ui.material3.MaterialOverlayDialog
+import h.Hchat.ui.material3.showMaterialOverlay
+import h.Hchat.ui.theme.HchatMaterialTheme
 
 object MemberTitleMiuixDialog {
     fun show(
@@ -149,11 +149,11 @@ object MemberTitleMiuixDialog {
         val colors = if ((context.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK)
             == android.content.res.Configuration.UI_MODE_NIGHT_YES
         ) {
-            darkColorScheme()
+            androidx.compose.material3.darkColorScheme()
         } else {
-            lightColorScheme()
+            androidx.compose.material3.lightColorScheme()
         }
-        MiuixTheme(colors = colors, content = content)
+        HchatMaterialTheme(content = content)
     }
 
     @Composable
@@ -172,7 +172,7 @@ object MemberTitleMiuixDialog {
         val screenHeight = LocalConfiguration.current.screenHeightDp.dp
         val dialogMaxHeight = (screenHeight * 0.78f).coerceAtMost(560.dp)
         val contentMaxHeight = (screenHeight * 0.58f).coerceIn(240.dp, 430.dp)
-        WindowDialog(
+        MaterialOverlayDialog(
             show = true,
             title = "设置群员头衔",
             onDismissRequest = onClose,
@@ -192,7 +192,7 @@ object MemberTitleMiuixDialog {
                             if (summary.isNotBlank()) {
                                 Text(
                                     text = summary,
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp,
                                     modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
                                 )
@@ -222,12 +222,10 @@ object MemberTitleMiuixDialog {
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         TextButton(
-                            text = "重置",
                             onClick = onReset,
                             modifier = Modifier.weight(1f)
-                        )
+                        ) { Text("重置") }
                         TextButton(
-                            text = "保存",
                             onClick = {
                                 onSave(
                                     titleValue,
@@ -236,12 +234,11 @@ object MemberTitleMiuixDialog {
                                 )
                             },
                             modifier = Modifier.weight(1f)
-                        )
+                        ) { Text("保存") }
                         TextButton(
-                            text = "取消",
                             onClick = onClose,
                             modifier = Modifier.weight(1f)
-                        )
+                        ) { Text("取消") }
                     }
                 }
             }
@@ -258,7 +255,7 @@ object MemberTitleMiuixDialog {
         Column(modifier = Modifier.fillMaxWidth().padding(top = 10.dp)) {
             Text(
                 text = label,
-                color = MiuixTheme.colorScheme.onSurface,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(bottom = 6.dp)
             )
@@ -266,15 +263,15 @@ object MemberTitleMiuixDialog {
                 value = value,
                 onValueChange = onValueChange,
                 singleLine = true,
-                textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(8.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .border(
                         width = 1.dp,
-                        color = MiuixTheme.colorScheme.primary.copy(alpha = 0.45f),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f),
                         shape = RoundedCornerShape(8.dp)
                     )
                     .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -282,7 +279,7 @@ object MemberTitleMiuixDialog {
                     if (value.isEmpty()) {
                         Text(
                             text = placeholder,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 14.sp
                         )
                     }
@@ -316,7 +313,7 @@ object MemberTitleMiuixDialog {
                     ) {
                         Text(
                             text = label,
-                            color = MiuixTheme.colorScheme.onSurface,
+                            color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -324,7 +321,7 @@ object MemberTitleMiuixDialog {
                     }
                     Text(
                         text = "$summary，支持 #RRGGBB / #AARRGGBB / #A,#B",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                 }
@@ -334,13 +331,13 @@ object MemberTitleMiuixDialog {
                 value = value,
                 onValueChange = { onValueChange(it.take(19)) },
                 singleLine = true,
-                textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(top = 8.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant)
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             )
         }
@@ -380,7 +377,7 @@ object MemberTitleMiuixDialog {
             )
             Text(
                 text = "先选起始色或结束色，再用色盘取色；清空输入框可恢复默认",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 8.dp)
             )
@@ -391,12 +388,12 @@ object MemberTitleMiuixDialog {
     private fun ClickHintTag() {
         Text(
             text = "单击",
-            color = MiuixTheme.colorScheme.primary,
+            color = MaterialTheme.colorScheme.primary,
             fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier
                 .clip(RoundedCornerShape(999.dp))
-                .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
                 .padding(horizontal = 8.dp, vertical = 2.dp)
         )
     }
@@ -409,7 +406,7 @@ object MemberTitleMiuixDialog {
         onClick: () -> Unit,
         modifier: Modifier = Modifier
     ) {
-        val borderColor = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.outline.copy(alpha = 0.45f)
+        val borderColor = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
         Row(
             modifier = modifier
                 .clip(RoundedCornerShape(8.dp))
@@ -421,10 +418,10 @@ object MemberTitleMiuixDialog {
         ) {
             ColorPreviewDot(value)
             Column {
-                Text(text = label, color = MiuixTheme.colorScheme.onSurface, fontSize = 12.sp)
+                Text(text = label, color = MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
                 Text(
                     text = value.ifEmpty { "未设置" },
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp
                 )
             }
@@ -433,17 +430,17 @@ object MemberTitleMiuixDialog {
 
     @Composable
     private fun ColorPreviewDot(value: String) {
-        val color = composeColorFromHex(value) ?: MiuixTheme.colorScheme.surfaceVariant
+        val color = composeColorFromHex(value) ?: MaterialTheme.colorScheme.surfaceVariant
         Box(
             modifier = Modifier
                 .size(24.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .background(color)
-                .border(1.dp, MiuixTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+                .border(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
             contentAlignment = Alignment.Center
         ) {
             if (value.isEmpty()) {
-                Text(text = "-", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+                Text(text = "-", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
         }
     }
@@ -455,7 +452,7 @@ object MemberTitleMiuixDialog {
         modifier: Modifier = Modifier
     ) {
         val selected = colorPickerSelection(value)
-        val markerColor = MiuixTheme.colorScheme.onSurface
+        val markerColor = MaterialTheme.colorScheme.onSurface
         val density = LocalDensity.current
         val paletteSize = 204.dp
         val hueBarWidth = 36.dp
