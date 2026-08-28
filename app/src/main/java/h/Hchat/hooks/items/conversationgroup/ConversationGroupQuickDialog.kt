@@ -37,7 +37,6 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.ViewCompositionStrategy
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -68,13 +67,13 @@ import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
-import top.yukonga.miuix.kmp.basic.Checkbox
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.extra.WindowDialog
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.darkColorScheme
-import top.yukonga.miuix.kmp.theme.lightColorScheme
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import h.Hchat.ui.material3.MaterialOverlayDialog
+import h.Hchat.ui.material3.showMaterialOverlay
+import h.Hchat.ui.theme.HchatMaterialTheme
 
 internal object ConversationGroupQuickDialog {
     private const val TAG = "[Hchat:ConversationGroup]"
@@ -162,7 +161,7 @@ internal object ConversationGroupQuickDialog {
             }
         }
 
-        WindowDialog(
+        MaterialOverlayDialog(
             show = true,
             title = "聊天分组",
             onDismissRequest = close,
@@ -327,7 +326,7 @@ internal object ConversationGroupQuickDialog {
                     is Target.Conversation -> "选择当前会话所属分组"
                     is Target.Group -> "移动分组：${groups.firstOrNull { it.id == target.groupId }?.name.orEmpty()}"
                 },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp)
             )
@@ -340,7 +339,7 @@ internal object ConversationGroupQuickDialog {
             if (visible.isEmpty()) {
                 Text(
                     text = if (groups.isEmpty()) "暂无聊天分组" else "没有匹配的聊天分组",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
                     textAlign = TextAlign.Center
                 )
@@ -397,10 +396,9 @@ internal object ConversationGroupQuickDialog {
                 enabled = groups.isNotEmpty()
             )
             TextButton(
-                text = "返回",
                 onClick = onBack,
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-            )
+            ) { Text("返回") }
         }
     }
 
@@ -428,7 +426,7 @@ internal object ConversationGroupQuickDialog {
             ) { onPinnedChange(!pinned) }
             Text(
                 text = "上级分组",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 4.dp, top = 12.dp, bottom = 4.dp)
             )
@@ -463,7 +461,7 @@ internal object ConversationGroupQuickDialog {
             SectionTitle("删除多个")
             Text(
                 text = "已选择 ${selectedIds.size} 个分组",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(bottom = 6.dp)
             )
@@ -493,7 +491,7 @@ internal object ConversationGroupQuickDialog {
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = message,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 14.sp,
                 modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)
             )
@@ -517,19 +515,19 @@ internal object ConversationGroupQuickDialog {
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
-            textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 15.sp),
-            cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 15.sp),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             modifier = modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(10.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant)
+                .background(MaterialTheme.colorScheme.surfaceVariant)
                 .padding(horizontal = 12.dp, vertical = 11.dp),
             decorationBox = { field ->
                 Box {
                     if (value.isEmpty()) {
                         Text(
                             text = placeholder,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 15.sp
                         )
                     }
@@ -543,7 +541,7 @@ internal object ConversationGroupQuickDialog {
     private fun SectionTitle(value: String) {
         Text(
             text = value,
-            color = MiuixTheme.colorScheme.onSurface,
+            color = MaterialTheme.colorScheme.onSurface,
             fontSize = 16.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp)
@@ -569,22 +567,22 @@ internal object ConversationGroupQuickDialog {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium
                 )
                 if (summary.isNotBlank() && summary != title) {
                     Text(
                         text = summary,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                 }
             }
             Checkbox(
+                checked = selected,
                 modifier = Modifier.size(22.dp),
-                state = if (selected) ToggleableState.On else ToggleableState.Off,
-                onClick = null
+                onCheckedChange = null
             )
         }
     }
@@ -608,16 +606,16 @@ internal object ConversationGroupQuickDialog {
                 Text(
                     text = title,
                     color = if (enabled) {
-                        MiuixTheme.colorScheme.onSurface
+                        MaterialTheme.colorScheme.onSurface
                     } else {
-                        MiuixTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
                     },
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     text = summary,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
                         alpha = if (enabled) 1f else 0.45f
                     ),
                     fontSize = 12.sp,
@@ -657,9 +655,9 @@ internal object ConversationGroupQuickDialog {
                 .clip(RoundedCornerShape(10.dp))
                 .background(
                     if (primary) {
-                        MiuixTheme.colorScheme.primary
+                        MaterialTheme.colorScheme.primary
                     } else {
-                        MiuixTheme.colorScheme.secondaryVariant
+                        MaterialTheme.colorScheme.surfaceVariant
                     }
                 )
                 .clickable(onClick = onClick)
@@ -671,7 +669,7 @@ internal object ConversationGroupQuickDialog {
                 color = if (primary) {
                     androidx.compose.ui.graphics.Color.White
                 } else {
-                    MiuixTheme.colorScheme.onSurface
+                    MaterialTheme.colorScheme.onSurface
                 },
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
@@ -776,8 +774,8 @@ internal object ConversationGroupQuickDialog {
     private fun DialogTheme(context: Context, content: @Composable () -> Unit) {
         val colors = if ((context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
             == Configuration.UI_MODE_NIGHT_YES
-        ) darkColorScheme() else lightColorScheme()
-        MiuixTheme(colors = colors, content = content)
+        ) androidx.compose.material3.darkColorScheme() else androidx.compose.material3.lightColorScheme()
+        HchatMaterialTheme(content = content)
     }
 
     private sealed class Target {
