@@ -3,13 +3,13 @@ package h.Hchat.ui.miuix
 import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.ui.unit.LayoutDirection
 import h.Hchat.ui.miuix.HchatBackdropEffectScope
-import top.yukonga.miuix.kmp.blur.colorControls
-import top.yukonga.miuix.kmp.blur.isRuntimeShaderSupported
-import top.yukonga.miuix.kmp.blur.runtimeShaderEffect
+
+
+
 
 // Adapted from compose-miuix-ui's liquid glass example.
 internal fun HchatBackdropEffectScope.vibrancy() {
-    colorControls(
+    hchatColorControls(
         brightness = 0f,
         contrast = 1f,
         saturation = 1.5f
@@ -22,7 +22,7 @@ internal fun HchatBackdropEffectScope.lens(
     depthEffect: Boolean = false,
     chromaticAberration: Float = 0f
 ) {
-    if (!isRuntimeShaderSupported()) return
+    if (!hchatIsRuntimeShaderSupported()) return
     if (refractionHeight <= 0f || refractionAmount <= 0f) return
 
     if (padding < refractionAmount) {
@@ -40,7 +40,7 @@ internal fun HchatBackdropEffectScope.lens(
 
     val scale = downscaleFactor.coerceAtLeast(1).toFloat()
     val scaledPadding = padding / scale
-    runtimeShaderEffect(
+    hchatRuntimeShaderEffect(
         key = key,
         shaderString = shaderString,
         uniformShaderName = "content"
