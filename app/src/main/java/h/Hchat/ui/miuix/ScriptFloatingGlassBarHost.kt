@@ -38,9 +38,7 @@ import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.darkColorScheme
-import top.yukonga.miuix.kmp.theme.lightColorScheme
+import h.Hchat.ui.material3.HchatMaterialTheme
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -291,7 +289,7 @@ internal object ScriptFloatingGlassBarHost {
     private fun FloatingHostTheme(activity: Activity, content: @Composable () -> Unit) {
         val dark = (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
             Configuration.UI_MODE_NIGHT_YES
-        MiuixTheme(colors = if (dark) darkColorScheme() else lightColorScheme(), content = content)
+        HchatMaterialTheme(darkTheme = dark, content = content)
     }
 
     private data class ContentChild(
