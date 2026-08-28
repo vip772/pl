@@ -523,6 +523,7 @@ import androidx.compose.material3.Icon as MaterialIcon
 import androidx.compose.material3.TextButton as MaterialTextButton
 import androidx.compose.material3.Slider as MaterialSlider
 import androidx.compose.material3.Checkbox as MaterialCheckbox
+import androidx.compose.material3.Card as M3Card
 
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -10254,7 +10255,7 @@ private fun FloatingShortcutSettingsItemRow(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            Switch(checked = item.enabled, onCheckedChange = onEnabledChange)
+            MaterialSwitch(checked = item.enabled, onCheckedChange = onEnabledChange)
         }
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -12383,9 +12384,9 @@ private fun AutoReplyLabelPickerPage(
                 else -> visible.forEach { label ->
                     val name = label.labelName.ifBlank { label.labelId }
                     item {
-                        Card(
+                        M3Card(
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-                            cornerRadius = 14.dp
+        shape = RoundedCornerShape(14.dp)
                         ) {
                             AutoReplyLabelRow(
                                 name = name,
@@ -13363,9 +13364,9 @@ private fun ZhiliaModelSelectCard(
 ) {
     val selected = modelName == pendingModel
     val current = modelName == currentModel
-    Card(
+    M3Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        cornerRadius = 14.dp
+        shape = RoundedCornerShape(14.dp)
     ) {
         var pressed by remember { mutableStateOf(false) }
         val pressFeedbackColor = rememberPressFeedbackColor(pressed)
@@ -37418,7 +37419,7 @@ private fun PathSwitchRow(
             }
             Text(text = summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
-        Switch(
+        MaterialSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange,
             modifier = Modifier.padding(start = 12.dp)
@@ -37487,7 +37488,7 @@ private fun ScriptPluginRow(
                 .size(22.dp)
                 .responsiveTap(onClick = onOpenManager)
         )
-        Switch(
+        MaterialSwitch(
             checked = checked,
             onCheckedChange = onCheckedChange
         )
@@ -42452,9 +42453,9 @@ private fun MessageBlockLabelListCard(
     label: MessageBlockLabelOption,
     onClick: () -> Unit
 ) {
-    Card(
+    M3Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        cornerRadius = 14.dp
+        shape = RoundedCornerShape(14.dp)
     ) {
         var pressed by remember { mutableStateOf(false) }
         val pressFeedbackColor = rememberPressFeedbackColor(pressed)
@@ -42506,9 +42507,9 @@ private fun MessageBlockContactListCard(
     } else {
         option.id + " · " + row.labelNames.joinToString(" / ")
     }
-    Card(
+    M3Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        cornerRadius = 14.dp
+        shape = RoundedCornerShape(14.dp)
     ) {
         MessageBlockContactRow(
             option = option,
@@ -42555,9 +42556,9 @@ private fun ContactListCard(
     multiSelect: Boolean,
     onClick: () -> Unit
 ) {
-    Card(
+    M3Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        cornerRadius = 14.dp
+        shape = RoundedCornerShape(14.dp)
     ) {
         ContactRow(
             option = option,
@@ -42576,9 +42577,9 @@ private fun FavoriteListCard(
     onPreview: (String) -> Unit,
     onClick: () -> Unit
 ) {
-    Card(
+    M3Card(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        cornerRadius = 8.dp
+        shape = RoundedCornerShape(8.dp)
     ) {
         var pressed by remember { mutableStateOf(false) }
         val pressFeedbackColor = rememberPressFeedbackColor(pressed)
