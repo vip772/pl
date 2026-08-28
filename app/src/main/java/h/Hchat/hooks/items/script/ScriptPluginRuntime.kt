@@ -59,8 +59,6 @@ object ScriptPluginRuntime {
     private const val MAIN_FILE = "main.java"
     private const val INFO_FILE = "info.prop"
     private const val README_FILE = "README.md"
-    const val BUILTIN_ANALYSIS_PLUGIN_ID = "builtin_analysis"
-    private const val BUILTIN_ANALYSIS_ASSET_DIR = "builtin_plugins/analysis"
     private const val SNAPSHOT_SUFFIX = ".bshs"
     private const val RELOAD_DEBOUNCE_MS = 500L
     private const val INITIAL_LOAD_READY_TIMEOUT_MS = 30_000L
@@ -1359,47 +1357,7 @@ object ScriptPluginRuntime {
     fun ensureDirs(context: Context): File {
         val dir = scriptDir(context)
         if (!dir.isDirectory) dir.mkdirs()
-        installBuiltinAnalysisPlugin(context, dir)
         return dir
-    }
-
-    private fun installBuiltinAnalysisPlugin(context: Context, root: File) {
-        val pluginDir = File(root, BUILTIN_ANALYSIS_PLUGIN_ID)
-        val marker = File(pluginDir, ".builtin_version")
-        val version = "1"
-        if (File(pluginDir, MAIN_FILE).isFile && marker.readTextOrNull() == version) return
-        runCatching {
-            pluginDir.mkdirs()
-            val firstInstall = !File(pluginDir, MAIN_FILE).isFile
-            copyAssetTree(context, BUILTIN_ANALYSIS_ASSET_DIR, pluginDir)
-            marker.writeText(version)
-            if (firstInstall) {
-                HchatStorage.preferences(context, ScriptPluginSettings.PREFS_NAME).edit()
-                    .putBoolean(ScriptPluginSettings.pluginEnableKey(BUILTIN_ANALYSIS_PLUGIN_ID), false)
-                    .apply()
-            }
-        }.onFailure {
-            h.Hchat.utils.HLog.e("$TAG 安装内置分析插件失败: ${it.message}", it)
-        }
-    }
-
-    private fun copyAssetTree(context: Context, assetPath: String, target: File) {
-        val children = context.assets.list(assetPath).orEmpty()
-        if (children.isEmpty()) {
-            target.parentFile?.mkdirs()
-            context.assets.open(assetPath).use { input ->
-                FileOutputStream(target).use { output -> input.copyTo(output) }
-            }
-            return
-        }
-        target.mkdirs()
-        children.forEach { name -> copyAssetTree(context, "$assetPath/$name", File(target, name)) }
-    }
-
-    private fun File.readTextOrNull(): String? = try {
-        if (isFile) readText() else null
-    } catch (_: Throwable) {
-        null
     }
 
     fun subscribePluginCatalog(context: Context, listener: () -> Unit): PluginCatalogSubscription {
