@@ -517,6 +517,10 @@ import androidx.compose.material3.NavigationBarItem as MaterialNavigationBarItem
 import androidx.compose.material3.Scaffold as MaterialScaffold
 import androidx.compose.material3.TopAppBar as MaterialTopAppBar
 import androidx.compose.material3.IconButton as MaterialIconButton
+import androidx.compose.material3.SearchBar as MaterialSearchBar
+import androidx.compose.material3.SearchBarDefaults as MaterialSearchBarDefaults
+import androidx.compose.material3.Icon as MaterialIcon
+import androidx.compose.material3.TextButton as MaterialTextButton
 
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -3311,33 +3315,12 @@ private fun SearchPageTopBar(
     onCancel: () -> Unit
 ) {
     Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(androidx.compose.material3.MaterialTheme.colorScheme.background)
-            .padding(
-                top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 8.dp,
-                start = 12.dp,
-                end = 12.dp,
-                bottom = 8.dp
-            ),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp)
+        modifier = Modifier.fillMaxWidth().background(androidx.compose.material3.MaterialTheme.colorScheme.background)
+            .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 8.dp, start = 12.dp, end = 12.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        SearchBarSurface(
-            query = query,
-            placeholder = "搜索功能和插件",
-            modifier = Modifier.weight(1f),
-            focusRequester = focusRequester,
-            onQueryChange = onQueryChange
-        )
-        Text(
-            text = "取消",
-            color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
-            fontSize = 16.sp,
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .clickable { onCancel() }
-                .padding(horizontal = 4.dp, vertical = 10.dp)
-        )
+        SearchBarSurface(query, "搜索功能和插件", Modifier.weight(1f), false, focusRequester, null, onQueryChange)
+        MaterialTextButton(onClick = onCancel, modifier = Modifier.padding(start = 8.dp)) { MaterialText("取消") }
     }
 }
 
@@ -3351,57 +3334,27 @@ private fun SearchBarSurface(
     onClick: (() -> Unit)? = null,
     onQueryChange: (String) -> Unit
 ) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .height(48.dp)
-            .clip(RoundedCornerShape(24.dp))
-            .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
-            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
-            .padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Image(
-            imageVector = NavIcons.Search,
-            contentDescription = null,
-            modifier = Modifier.size(22.dp),
-            colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
-        )
-        if (readOnly) {
-            Text(
-                text = query.ifEmpty { placeholder },
-                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                fontSize = 16.sp,
-                modifier = Modifier.weight(1f).padding(start = 10.dp)
+    MaterialSearchBar(
+        inputField = {
+            MaterialSearchBarDefaults.InputField(
+                query = query,
+                onQueryChange = onQueryChange,
+                onSearch = {},
+                expanded = false,
+                onExpandedChange = {},
+                enabled = !readOnly,
+                placeholder = { MaterialText(placeholder) },
+                leadingIcon = { MaterialIcon(NavIcons.Search, contentDescription = null) },
+                modifier = Modifier.then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
+                    .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
             )
-        } else {
-            BasicTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                singleLine = true,
-                textStyle = TextStyle(
-                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
-                    fontSize = 16.sp
-                ),
-                cursorBrush = SolidColor(androidx.compose.material3.MaterialTheme.colorScheme.primary),
-                modifier = Modifier.weight(1f)
-                    .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
-                    .padding(start = 10.dp),
-                decorationBox = { innerTextField ->
-                    Box(contentAlignment = Alignment.CenterStart) {
-                        if (query.isEmpty()) {
-                            Text(
-                                text = placeholder,
-                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 16.sp
-                            )
-                        }
-                        innerTextField()
-                    }
-                }
-            )
-        }
-    }
+        },
+        expanded = false,
+        onExpandedChange = {},
+        modifier = modifier.fillMaxWidth(),
+        colors = MaterialSearchBarDefaults.colors(containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainerHigh),
+        content = {}
+    )
 }
 
 @Composable
