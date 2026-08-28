@@ -29,11 +29,11 @@ import h.Hchat.hooks.items.custombottombar.FloatingBottomBarSettings
 import h.Hchat.preferences.HchatStorage
 import h.Hchat.ui.FeatureSettingsProvider
 import java.util.concurrent.atomic.AtomicBoolean
-import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.Slider
-import top.yukonga.miuix.kmp.basic.SmallTitle
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.theme.MiuixTheme
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.Slider
+import h.Hchat.ui.material3.MaterialSectionTitle as SmallTitle
+import androidx.compose.material3.Text
+import androidx.compose.material3.MaterialTheme
 
 @Composable
 internal fun CustomBottomBarMiuixPage(
@@ -74,7 +74,7 @@ internal fun CustomBottomBarMiuixPage(
     val pageActive = remember { AtomicBoolean(true) }
     val activity = context as? Activity
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     DisposableEffect(context) {
         pageActive.set(true)
@@ -340,7 +340,7 @@ internal fun FloatingBottomBarMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -395,7 +395,7 @@ internal fun FloatingBottomBarMiuixPage(
                             ) {
                                 Text(
                                     text = "模糊半径 ${blurRadius}dp",
-                                    color = MiuixTheme.colorScheme.onSurface,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontWeight = FontWeight.Medium
                                 )
                                 Slider(
@@ -455,7 +455,7 @@ internal fun FloatingBottomBarMiuixPage(
                             ) {
                                 Text(
                                     text = "振动强度 ${vibrationStrength}%",
-                                    color = MiuixTheme.colorScheme.onSurface,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontWeight = FontWeight.Medium
                                 )
                                 Slider(
