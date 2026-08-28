@@ -493,8 +493,8 @@ import org.json.JSONObject
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
 import top.yukonga.miuix.kmp.basic.Checkbox
-import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.ScrollBehavior
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.TopAppBarScrollBehavior
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.extra.WindowDropdown
 import h.Hchat.ui.material3.MaterialSectionTitle as SmallTitle
@@ -2883,7 +2883,7 @@ private fun MainSettingsPage(
     val entertainmentGroups = remember(entertainmentProviders) {
         entertainmentFeatureGroups(entertainmentProviders)
     }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "Hchat",
         largeTitle = "Hchat",
@@ -3551,7 +3551,7 @@ private fun FeatureGroupSettingsPage(
     onBack: () -> Unit,
     onOpenProvider: (FeatureSettingsProvider) -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = group.title,
         largeTitle = group.title,
@@ -4581,7 +4581,7 @@ private fun MultiRecallMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, MultiRecallSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -4767,7 +4767,7 @@ private fun SelectedMessagesMainPage(
     onBack: () -> Unit,
     onCompose: () -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var officialIntervalMinutes by remember {
         mutableStateOf(
             sp.getInt(
@@ -4874,7 +4874,7 @@ private fun SelectedMessagesCustomEditorPage(
     onPickFavorite: (Int) -> Unit,
     onSend: () -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val official = channel == SelectedMessagesRuntimeCoordinator.CHANNEL_OFFICIAL
     val items = scheduledTaskEditableItems(draft)
     PageScaffold(
@@ -4989,7 +4989,7 @@ private fun MessageForwardMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, MessageForwardSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -5060,7 +5060,7 @@ private fun CallMediaLimitMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, CallMediaLimitSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5102,7 +5102,7 @@ private fun CallRingtoneBlockMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, CallMediaLimitSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5150,7 +5150,7 @@ private fun StatusTextLimitMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, StatusTextLimitSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5192,7 +5192,7 @@ private fun EditMessageMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, EditMessageSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5234,7 +5234,7 @@ private fun QuickContactEditMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, QuickContactEditSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5274,7 +5274,7 @@ private fun QuickGroupChatLabelMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, QuickGroupChatLabelSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5314,7 +5314,7 @@ private fun QuickMomentsMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, QuickMomentsSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5354,7 +5354,7 @@ private fun QuickTerminateMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, QuickTerminateSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5394,7 +5394,7 @@ private fun TypingReportBlockMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, TypingReportBlockSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5450,7 +5450,7 @@ private fun MessageAffixMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5567,7 +5567,7 @@ private fun InputHintMiuixPage(
     }
     val preview = InputHintSettings.renderTemplate(template, stats)
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5654,7 +5654,7 @@ private fun PatBlockMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, PatBlockSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5694,7 +5694,7 @@ private fun AutoOriginalImageMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, AutoOriginalImageSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5734,7 +5734,7 @@ private fun AutoViewOriginalMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, AutoViewOriginalSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5774,7 +5774,7 @@ private fun RemoveForwardLimitMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, RemoveForwardLimitSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -5822,7 +5822,7 @@ private fun AtAllNotificationBlockMiuixPage(
     var legacyAllGroups by remember { mutableStateOf(enabled && !sp.contains(AtAllNotificationBlockSettings.KEY_GROUPS)) }
     var route by remember { mutableStateOf<AtAllNotificationBlockRoute>(AtAllNotificationBlockRoute.Main) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     SettingsRouteTransition(
         targetState = route,
@@ -5911,7 +5911,7 @@ private fun DisableHotUpdateMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, DisableHotUpdateSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -6075,7 +6075,7 @@ private fun MomentsAutoLikeMainPage(
         else -> "已选择 ${list.size} 位好友"
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -6474,7 +6474,7 @@ private object MomentsAutoCommentPage {
         else -> "已选择 ${list.size} 位好友"
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -7031,7 +7031,7 @@ private fun MomentsAutoForwardMainPage(
     } else {
         "已选择 $targetCount 位好友"
     }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -7317,7 +7317,7 @@ private fun KeywordReplacementRulesPage(
 ) {
     var rules by remember(initialRules) { mutableStateOf(initialRules) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     fun updateRule(index: Int, update: (KeywordReplacementRule) -> KeywordReplacementRule) {
         if (index !in rules.indices) return
@@ -7425,7 +7425,7 @@ private fun MomentsAutoRefreshMiuixPage(
     var lastTime by remember { mutableStateOf(sp.getLong(MomentsAutoRefreshSettings.KEY_LAST_TIME, 0L)) }
     var lastResult by remember { mutableStateOf(sp.getString(MomentsAutoRefreshSettings.KEY_LAST_RESULT, "").orEmpty()) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -7584,7 +7584,7 @@ private fun MomentsContactFilterMainPage(
         else -> "隐藏所选 ${targets.size} 位好友"
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -7668,7 +7668,7 @@ private fun MomentsKeywordBlockMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -7753,7 +7753,7 @@ private fun MomentsBottomDetailMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -7920,7 +7920,7 @@ private fun MomentsPostNotificationMainPage(
         mutableStateOf(sp.getString(MomentsPostNotificationSettings.KEY_TOAST_TEMPLATE, MomentsPostNotificationSettings.DEFAULT_TOAST_TEMPLATE).orEmpty())
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -8001,7 +8001,7 @@ private fun OriginalMomentsUploadMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, OriginalMomentsUploadSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -8043,7 +8043,7 @@ private fun MomentsUploadTailMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, MomentsUploadTailSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var enabled by remember {
         mutableStateOf(
             sp.getBoolean(
@@ -8156,7 +8156,7 @@ private fun SnsAntiRecallMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -8371,7 +8371,7 @@ private fun MomentsFakeInteractionMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -8874,7 +8874,7 @@ private fun RemoveMomentsAdsMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, RemoveMomentsAdsSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -8916,7 +8916,7 @@ private fun FinderMediaDownloadMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, FinderMediaDownloadSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -8959,7 +8959,7 @@ private fun HchatExtraToggleMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, HchatExtraSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -9171,7 +9171,7 @@ private fun MessageDetailsConfigPage(
     }
 
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "消息显示时间",
         largeTitle = "消息显示时间",
@@ -9348,7 +9348,7 @@ private fun ProfileIdMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, ProfileIdSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -9401,7 +9401,7 @@ private fun HideChatMenuMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     fun save() {
         val normalized = HideChatMenuSettings.parseTitles(titles).joinToString(",")
@@ -9476,7 +9476,7 @@ private fun SettingsEntryMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, SettingsEntrySettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -9526,7 +9526,7 @@ private fun PluginAgentEntryMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, SettingsEntrySettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -9608,7 +9608,7 @@ private fun FloatingShortcutMiuixPage(
     var editor by remember { mutableStateOf<FloatingShortcutEditorRequest?>(null) }
     var route by remember { mutableStateOf(FloatingShortcutRoute.MAIN) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     fun saveShortcuts(value: List<FloatingShortcutItem>) {
         shortcuts = value
@@ -10061,7 +10061,7 @@ private fun FloatingShortcutAppearanceMiuixPage(
     val currentLabelTextSize by rememberUpdatedState(labelTextSize)
     val currentLabelColor by rememberUpdatedState(labelColor)
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     fun persistAppearance() {
         sp.edit()
@@ -10392,7 +10392,7 @@ private fun QuickMarkReadMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, QuickMarkReadSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -10450,7 +10450,7 @@ private fun WeChatKeepAliveMiuixPage(
     var networkHeartbeat by remember { mutableStateOf(sp.getBoolean(WeChatKeepAliveSettings.KEY_NETWORK_HEARTBEAT, WeChatKeepAliveSettings.DEFAULT_NETWORK_HEARTBEAT)) }
     var ignoringBattery by remember { mutableStateOf(WeChatKeepAliveRuntime.isIgnoringBatteryOptimizations(context)) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     fun saveBoolean(key: String, value: Boolean) {
         sp.edit().putBoolean(key, value).apply()
@@ -11277,7 +11277,7 @@ private fun AutoMessageForwardMainPage(
     onOpenRules: () -> Unit
 ) {
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -11342,7 +11342,7 @@ private fun AutoMessageForwardRuleListPage(
     val visibleIds = visible.mapTo(LinkedHashSet()) { it.id }
     val selected = rules.filter { it.id in selectedIds }
     val allVisibleSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "转发规则",
         largeTitle = "转发规则",
@@ -11461,7 +11461,7 @@ private fun AutoMessageForwardRuleEditorPage(
 ) {
     val context = LocalContext.current
     val current = rule
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "编辑转发规则",
         largeTitle = "编辑转发规则",
@@ -11587,7 +11587,7 @@ private fun AutoMessageForwardTypePickerPage(
     var selected by remember(selectedKinds) { mutableStateOf(selectedKinds) }
     val options = autoMessageForwardTypeOptions()
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "选择消息类型",
         largeTitle = "选择消息类型",
@@ -11705,7 +11705,7 @@ private fun AutoReplyMainPage(
         mutableStateOf(sp.getString(AutoReplySettings.KEY_EXCLUDED_TALKERS, "").orEmpty())
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -11777,7 +11777,7 @@ private fun AutoReplyRuleListPage(
     val visibleIds = visible.mapTo(LinkedHashSet()) { it.id }
     val allVisibleSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
     val selectedRules = rules.filter { it.id in selectedIds }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "回复规则",
         largeTitle = "回复规则",
@@ -11988,7 +11988,7 @@ private fun AutoReplyRuleEditorContent(
     onGroupMemberPicker: (GroupMemberPickerRequest) -> Unit
 ) {
     val current = rule
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "编辑规则",
         largeTitle = "编辑规则",
@@ -12196,7 +12196,7 @@ private fun AutoReplyFriendPage(
     var remarkDateEnabled by remember { mutableStateOf(automationKeys?.let { sp.getBoolean(it.remarkDateEnable, false) } ?: false) }
     var remarkCustomEnabled by remember { mutableStateOf(automationKeys?.let { sp.getBoolean(it.remarkCustomEnable, false) } ?: false) }
     var tagEnabled by remember { mutableStateOf(sp.getBoolean(tagEnabledKey, false)) }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = title,
         largeTitle = title,
@@ -12337,7 +12337,7 @@ private fun AutoReplyLabelPickerPage(
         val key = query.trim().lowercase(Locale.US)
         key.isBlank() || name.lowercase(Locale.US).contains(key)
     }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "选择标签",
         largeTitle = "选择标签",
@@ -12863,7 +12863,7 @@ private fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: () 
     ) { currentRoute ->
         when (currentRoute) {
             AutoReplyAiRoute.Main -> {
-                val scrollBehavior = MiuixScrollBehavior()
+                val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
                 PageScaffold(
                     title = "AI 配置",
                     largeTitle = "AI 配置",
@@ -12891,7 +12891,7 @@ private fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: () 
                 }
             }
             AutoReplyAiRoute.Xiaozhi -> {
-                val scrollBehavior = MiuixScrollBehavior()
+                val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
                 PageScaffold(
                     title = "小智AI配置",
                     largeTitle = "小智AI配置",
@@ -13101,7 +13101,7 @@ private fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: () 
                 }
             }
             AutoReplyAiRoute.Zhilia -> {
-                val scrollBehavior = MiuixScrollBehavior()
+                val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
                 PageScaffold(
                     title = "智聊AI配置",
                     largeTitle = "智聊AI配置",
@@ -13186,7 +13186,7 @@ private fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: () 
                 }
             }
             AutoReplyAiRoute.ZhiliaConfigs -> {
-                val scrollBehavior = MiuixScrollBehavior()
+                val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
                 PageScaffold(
                     title = "智聊配置列表",
                     largeTitle = "智聊配置列表",
@@ -13261,7 +13261,7 @@ private fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: () 
                 }
             }
             AutoReplyAiRoute.ZhiliaModels -> {
-                val scrollBehavior = MiuixScrollBehavior()
+                val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
                 PageScaffold(
                     title = "智聊模型选择",
                     largeTitle = "智聊模型选择",
@@ -13429,7 +13429,7 @@ private fun AutoReplyStepsPage(
     var contactPicker by remember { mutableStateOf<ContactPickerRequest?>(null) }
     var favoritePicker by remember { mutableStateOf<FavoritePickerRequest?>(null) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     fun update(index: Int, step: AutoReplyStep) {
         steps = steps.toMutableList().also { if (index in it.indices) it[index] = step }
     }
@@ -13890,7 +13890,7 @@ private fun CustomNotificationMainPage(
     onEditDefault: (CustomNotificationDefaultKind) -> Unit
 ) {
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -13967,7 +13967,7 @@ private fun CustomNotificationRuleListPage(
     var batchDeleteMode by remember { mutableStateOf(false) }
     var selectedTalkers by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val lower = query.trim().lowercase(Locale.US)
     val visible = rules.filter {
         conversationRuleCategoryMatches(it, category) && (
@@ -14150,7 +14150,7 @@ private fun CustomNotificationBatchEditorPage(
     var applyAtRules by remember { mutableStateOf(false) }
     var blockAtAll by remember { mutableStateOf(false) }
     var blockAtMe by remember { mutableStateOf(false) }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "批量配置",
         largeTitle = "批量配置",
@@ -14313,7 +14313,7 @@ private fun CustomNotificationBatchEditorPage(
 
 @Composable
 private fun CustomNotificationMissingRulePage(onBack: () -> Unit) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "会话规则",
         largeTitle = "会话规则",
@@ -14362,7 +14362,7 @@ private fun CustomNotificationRuleEditorPage(
     var blockAtMe by remember(initialRule) { mutableStateOf(initialRule.blockAtMe) }
     var onlyMembers by remember(initialRule) { mutableStateOf(initialRule.onlyMembers) }
     var blockMembers by remember(initialRule) { mutableStateOf(initialRule.blockMembers) }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = when {
@@ -14882,7 +14882,7 @@ private fun TextSpeechMainPage(
     onPickContacts: () -> Unit
 ) {
     val context = LocalContext.current
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var enabled by remember {
         mutableStateOf(sp.getBoolean(TextSpeechSettings.KEY_ENABLE, TextSpeechSettings.DEFAULT_ENABLE))
     }
@@ -15356,7 +15356,7 @@ private fun ZombieCheckMainPage(
     var deleteDelay by remember { mutableStateOf(sp.getInt(ZombieCheckSettings.KEY_DELETE_DELAY_SECONDS, ZombieCheckSettings.DEFAULT_DELETE_DELAY_SECONDS).toString()) }
     var confirmAutoDelete by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(Unit) {
         while (true) {
@@ -15750,7 +15750,7 @@ private fun QQMusicOrderMainPage(
     onPickTalkers: () -> Unit
 ) {
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var customSingerEnabled by remember {
         mutableStateOf(sp.getBoolean(QQMusicOrderSettings.KEY_CUSTOM_SINGER, QQMusicOrderSettings.DEFAULT_CUSTOM_SINGER))
     }
@@ -15890,7 +15890,7 @@ private fun KeywordNotificationMainPage(
     onPickContacts: (Boolean) -> Unit,
     onClearContacts: (Boolean) -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var filterMode by remember { mutableStateOf(sp.getBoolean(KeywordNotificationSettings.KEY_FILTER_MODE, KeywordNotificationSettings.DEFAULT_FILTER_MODE)) }
     var quietEnabled by remember {
         mutableStateOf(sp.getBoolean(KeywordNotificationSettings.KEY_QUIET, KeywordNotificationSettings.DEFAULT_QUIET))
@@ -16118,7 +16118,7 @@ private fun KeywordNotificationKeywordListPage(
     onEdit: (KeywordRule) -> Unit,
     onClear: () -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val lower = query.trim().lowercase(Locale.US)
     val visible = keywords.filter {
         lower.isBlank() || it.keyword.lowercase(Locale.US).contains(lower)
@@ -16185,7 +16185,7 @@ private fun KeywordNotificationKeywordEditorPage(
 ) {
     var keyword by remember(initial) { mutableStateOf(initial?.keyword.orEmpty()) }
     var wholeWord by remember(initial) { mutableStateOf(initial?.wholeWord ?: false) }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = if (initial == null) "添加关键词" else "编辑关键词",
         largeTitle = if (initial == null) "添加关键词" else "编辑关键词",
@@ -16243,7 +16243,7 @@ private fun KeywordNotificationTemplatePage(
     var atAllTitle by remember { mutableStateOf(sp.getString(KeywordNotificationSettings.KEY_AT_ALL_TITLE, "").orEmpty()) }
     var atAllContent by remember { mutableStateOf(sp.getString(KeywordNotificationSettings.KEY_AT_ALL_CONTENT, "").orEmpty()) }
     var atAllToast by remember { mutableStateOf(sp.getString(KeywordNotificationSettings.KEY_AT_ALL_TOAST, "").orEmpty()) }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     fun save() {
         sp.edit()
             .putString(KeywordNotificationSettings.KEY_KEYWORD_TITLE, keywordTitle)
@@ -16333,7 +16333,7 @@ private fun QuoteDeleteClearMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, QuoteDeleteClearSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -16375,7 +16375,7 @@ private fun EmojiSaveMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, EmojiSaveSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -16415,7 +16415,7 @@ private fun SwipeQuoteMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, SwipeQuoteSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -16477,7 +16477,7 @@ private fun FakeVoiceDurationMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, FakeVoiceDurationSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var enabled by remember {
         mutableStateOf(
             sp.getBoolean(
@@ -16555,7 +16555,7 @@ private fun VoicePreviewMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, VoicePreviewSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -16595,7 +16595,7 @@ private fun FakeMiniProgramBaseLibMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, FakeMiniProgramBaseLibSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var enabled by remember {
         mutableStateOf(
             sp.getBoolean(
@@ -16648,7 +16648,7 @@ private fun SkipMiniProgramVideoAdsMiuixPage(
         HchatStorage.preferences(context, SkipMiniProgramVideoAdsSettings.PREFS_NAME)
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var enabled by remember {
         mutableStateOf(
             sp.getBoolean(
@@ -16704,7 +16704,7 @@ private fun SkipGlobalMiniProgramSplashAdsMiuixPage(
         HchatStorage.preferences(context, SkipGlobalMiniProgramSplashAdsSettings.PREFS_NAME)
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var enabled by remember {
         mutableStateOf(
             sp.getBoolean(
@@ -16768,7 +16768,7 @@ private fun FakeLocationMiuixPage(
     }
     var showManualInput by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     fun saveLocation(lat: Double, lon: Double) {
         latitude = formatFakeLocationCoordinate(lat)
@@ -16890,7 +16890,7 @@ private fun GameEmojiMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -17079,7 +17079,7 @@ private fun MessageBubbleMiuixPage(
     }
     var revision by remember { mutableStateOf(0) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -17277,7 +17277,7 @@ private fun BackgroundBeautyMiuixPage(
     }
     var revision by remember { mutableStateOf(sp.getInt(BackgroundBeautySettings.KEY_REVISION, 0)) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -17484,7 +17484,7 @@ private fun MessageTextColorMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -17598,7 +17598,7 @@ private fun ChatTimeStyleMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -17667,7 +17667,7 @@ private fun HideChatAvatarMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, HideChatAvatarSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -17727,7 +17727,7 @@ private fun RoundAvatarMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -17825,7 +17825,7 @@ private fun CustomFriendAvatarMiuixPage(
                 val configuredIds = remember(revision) { CustomFriendAvatarStore.configuredFriends(context) }
                 val configured = contacts.filter { it.id in configuredIds }
                 val listState = rememberLazyListState()
-                val scrollBehavior = MiuixScrollBehavior()
+                val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
                 PageScaffold(
                     title = provider.title(),
                     largeTitle = provider.title(),
@@ -18035,7 +18035,7 @@ private fun MessageBlockMiuixPage(
     var showTemplateManager by remember { mutableStateOf(false) }
     var showListManager by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(Unit) {
         if (initialState.shouldPersist) {
@@ -18411,7 +18411,7 @@ private fun MessageBlockTemplateListPage(
     onAddTemplate: () -> Unit
 ) {
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "模板管理",
         largeTitle = "模板管理",
@@ -18471,7 +18471,7 @@ private fun MessageBlockListManagerPage(
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val lower = query.trim().lowercase(Locale.US)
     val visibleBindings = bindings.mapIndexed { index, binding -> index to binding }
         .filter { (_, binding) ->
@@ -18638,7 +18638,7 @@ private fun MessageBlockBatchBindingPage(
     var action by remember(request) { mutableStateOf(MessageBlockSettings.ACTION_BLOCK) }
     var templateIds by remember(request) { mutableStateOf(defaultMessageBlockTemplateIds(templates)) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = request.title,
         largeTitle = request.title,
@@ -18764,7 +18764,7 @@ private fun MessageBlockDefaultRulePage(
     var types by remember(rule) { mutableStateOf(rule.types) }
     var textKeywords by remember(rule) { mutableStateOf(rule.textKeywords) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val title = when {
         rule.official -> "默认公众号规则"
         rule.group -> "默认群聊规则"
@@ -18931,7 +18931,7 @@ private fun MessageBlockTemplatePage(
     var types by remember(request) { mutableStateOf(request.template.types) }
     var textKeywords by remember(request) { mutableStateOf(request.template.textKeywords) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = name.ifBlank { "模板" },
@@ -19057,7 +19057,7 @@ private fun MessageBlockBindingPage(
     var types by remember(request) { mutableStateOf(request.binding.types) }
     var textKeywords by remember(request) { mutableStateOf(request.binding.textKeywords) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val targetTitle = request.binding.label.ifBlank { request.binding.targetId }
     fun copySelectedTemplateRules() {
         val rules = messageBlockRuleStateFromTemplates(templateIds, templates)
@@ -19444,7 +19444,7 @@ private fun ConversationGroupListPage(
 ) {
     var query by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val flattened = remember(groups) { flattenConversationGroups(groups) }
     val lower = query.trim().lowercase(Locale.US)
     val visible = flattened.filter { row ->
@@ -19537,7 +19537,7 @@ private fun ConversationGroupAutomaticGroupingPage(
         }
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "群聊归拢",
         largeTitle = "群聊归拢",
@@ -19707,7 +19707,7 @@ private fun ConversationGroupAutomaticPickerPage(
     var error by remember(kind) { mutableStateOf("") }
     var query by remember(kind) { mutableStateOf("") }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     LaunchedEffect(kind) {
         loading = true
         error = ""
@@ -19823,7 +19823,7 @@ private fun ConversationGroupEditorPage(
     var showDeleteConfirm by remember(group.id) { mutableStateOf(false) }
     var showReorderChoices by remember(group.id) { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val draft = group.copy(name = name.trim(), pinned = pinned)
     val parentPath = group.parentId?.let { conversationGroupPath(groups, it) }.orEmpty()
     val siblings = remember(groups, group.parentId) {
@@ -19988,7 +19988,7 @@ private fun ConversationGroupConversationPickerPage(
     val initialSelected = remember(group) { group.conversationIds.toSet() }
     var selectedIds by remember(group) { mutableStateOf(initialSelected) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(group.id, groups) {
         loading = true
@@ -20177,7 +20177,7 @@ private fun ConversationGroupParentPickerPage(
         flattenConversationGroups(groups).filterNot { it.group.id in excluded }
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "选择上级分组",
         largeTitle = "选择上级分组",
@@ -20457,7 +20457,7 @@ private fun GroupChatLabelListPage(
     onOpen: (GroupChatLabel) -> Unit
 ) {
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = title,
         largeTitle = title,
@@ -20513,7 +20513,7 @@ private fun GroupChatLabelEditorPage(
     var name by remember(label) { mutableStateOf(label.name) }
     val groupIds = label.groupIds
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val draft = label.copy(name = name.trim(), groupIds = groupIds)
     PageScaffold(
         title = if (existing) "编辑群聊标签" else "新增群聊标签",
@@ -20606,7 +20606,7 @@ private fun GroupRenameMonitorMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     SettingsRouteTransition(
         targetState = route,
@@ -20925,7 +20925,7 @@ private fun GroupRenameGroupManagerPage(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val selectedIds = remember(listenGroups) { parseIds(listenGroups).toList() }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(listenGroups) {
         loadContacts(context, ContactPickerMode.GROUPS) { result, throwable ->
@@ -21086,7 +21086,7 @@ private fun GroupRenameTemplateListPage(
     onAddTemplate: () -> Unit
 ) {
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "改名提醒模板",
         largeTitle = "改名提醒模板",
@@ -21147,7 +21147,7 @@ private fun GroupRenameTemplateEditorPage(
     var cardTitle by rememberSaveable(template.id) { mutableStateOf(template.cardTitle) }
     var cardDesc by rememberSaveable(template.id) { mutableStateOf(template.cardDesc) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = name.ifBlank { "改名提醒模板" },
         largeTitle = "编辑改名模板",
@@ -21265,7 +21265,7 @@ private fun GroupRenameBatchTemplateBindingPage(
     var selectedGroups by remember(listenGroups) { mutableStateOf(parseIds(listenGroups)) }
     val selectedIds = remember(listenGroups) { parseIds(listenGroups).toList() }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(listenGroups) {
         loadContacts(context, ContactPickerMode.GROUPS) { result, throwable ->
@@ -21410,7 +21410,7 @@ private fun GroupRenameGroupEditorPage(
         PopupChoice(it.name.ifBlank { it.id }, it.id)
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = groupLabel.ifBlank { groupId },
         largeTitle = "专属改名设置",
@@ -21761,7 +21761,7 @@ private fun GroupLeaveMonitorMiuixPage(
     var favoriteDelay by remember { mutableStateOf(sp.getInt(GroupLeaveMonitorSettings.KEY_FAVORITE_DELAY_MS, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS).toString()) }
     val listState = rememberLazyListState()
     val groupEditorListStates = remember { mutableMapOf<String, LazyListState>() }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     val route = when {
         templateEditor != null -> GroupLeaveRoute.TemplateEditor(templateEditor!!)
@@ -22287,7 +22287,7 @@ private fun GroupMemberGroupManagerPage(
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val selectedIds = remember(listenGroups) { parseIds(listenGroups).toList() }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(listenGroups) {
         loadContacts(context, ContactPickerMode.GROUPS) { result, throwable ->
@@ -22452,7 +22452,7 @@ private fun GroupLeaveTemplateListPage(
     onAddTemplate: () -> Unit
 ) {
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "回复模板",
         largeTitle = "回复模板",
@@ -22513,7 +22513,7 @@ private fun GroupLeaveBatchTemplateBindingPage(
     var selectedGroups by remember(listenGroups) { mutableStateOf(parseIds(listenGroups)) }
     val selectedIds = remember(listenGroups) { parseIds(listenGroups).toList() }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(listenGroups) {
         loadContacts(context, ContactPickerMode.GROUPS) { result, throwable ->
@@ -22684,7 +22684,7 @@ private fun GroupLeaveTemplateEditorPage(
     var fileDelay by remember(request) { mutableStateOf(request.template.fileDelayMs.coerceAtLeast(0).toString()) }
     var favoriteDelay by remember(request) { mutableStateOf(request.template.favoriteDelayMs.coerceAtLeast(0).toString()) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     SettingsRouteTransition(
         targetState = favoritePicker,
@@ -23002,7 +23002,7 @@ private fun GroupMemberGroupEditorPage(
     var videoDelay by rememberSaveable(groupId) { mutableStateOf(groupMemberIntString(sp, GroupLeaveMonitorSettings.KEY_VIDEO_DELAY_MS, groupId, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)) }
     var fileDelay by rememberSaveable(groupId) { mutableStateOf(groupMemberIntString(sp, GroupLeaveMonitorSettings.KEY_FILE_DELAY_MS, groupId, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)) }
     var favoriteDelay by rememberSaveable(groupId) { mutableStateOf(groupMemberIntString(sp, GroupLeaveMonitorSettings.KEY_FAVORITE_DELAY_MS, groupId, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)) }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     SettingsRouteTransition(
         targetState = favoritePicker,
@@ -23761,7 +23761,7 @@ private fun TextVoiceMainPage(
 ) {
     val context = LocalContext.current
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val installedTtsEngines = remember(context) { TextSpeechEngineCatalog.installed(context) }
     val engineOptions = remember(installedTtsEngines, selectedEngine) {
         buildList {
@@ -23944,7 +23944,7 @@ private fun VoiceForwardMiuixPage(
     val sp = remember { HchatStorage.preferences(context, VoiceForwardSettings.PREFS_NAME) }
     val legacyDefault = remember { sp.getBoolean(VoiceForwardSettings.KEY_ENABLE, VoiceForwardSettings.DEFAULT_ENABLE) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -24414,7 +24414,7 @@ private fun AudioTransformMainPage(
     onCancel: () -> Unit,
     onStart: () -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val actionText = if (mode == AudioTransformSettings.MODE_AUDIO_TO_SILK_SEND) "开始发送" else "开始转换"
     val cancellable = running && mode == AudioTransformSettings.MODE_AUDIO_TO_SILK_SEND && splitEnabled
     PageScaffold(
@@ -25258,7 +25258,7 @@ private fun ScheduledTaskMainPage(
     onAdd: () -> Unit,
     onEdit: (ScheduledTaskItem) -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -25332,7 +25332,7 @@ private fun ScheduledTaskEditorPage(
     onDelete: (() -> Unit)?,
     onExecuteNow: (() -> Unit)?
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = if (isEditing) "编辑任务" else "新增任务",
         largeTitle = if (isEditing) "编辑任务" else "新增任务",
@@ -26208,7 +26208,7 @@ private fun FakeScanCameraMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, FakeScanCameraSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -26330,7 +26330,7 @@ private fun RedPacketMiuixPage(
     var showListManager by remember { mutableStateOf(false) }
     var editingReplyStepsForGroup by remember { mutableStateOf<Boolean?>(null) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     fun persistRules(
         nextTemplates: List<RedPacketRuleTemplate> = templates,
         nextBindings: List<RedPacketRuleBinding> = bindings,
@@ -26975,7 +26975,7 @@ private fun RedPacketTemplateListPage(
     onAddTemplate: () -> Unit
 ) {
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "红包模板",
         largeTitle = "红包模板",
@@ -27034,7 +27034,7 @@ private fun RedPacketBindingListPage(
     var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var showDeleteConfirm by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val lower = query.trim().lowercase(Locale.US)
     val visibleBindings = bindings.mapIndexed { index, binding -> index to binding }
         .filter { (_, binding) ->
@@ -27386,7 +27386,7 @@ private fun RedPacketTemplatePage(
     }
     var editingReplyStepsForGroup by remember(request) { mutableStateOf<Boolean?>(null) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     editingReplyStepsForGroup?.let { group ->
         RedPacketReplyStepsPage(
@@ -27757,7 +27757,7 @@ private fun RedPacketBindingPage(
     var enabled by remember(request) { mutableStateOf(request.binding.enabled) }
     var templateId by remember(request) { mutableStateOf(request.binding.templateId) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val targetTitle = request.binding.label.ifBlank { request.binding.targetId }
 
     PageScaffold(
@@ -27870,7 +27870,7 @@ private fun AntiRecallMiuixPage(
     val usesTimeVariable = noticeText.contains(AntiRecallSettings.VAR_SEND_TIME) ||
         noticeText.contains(AntiRecallSettings.VAR_RECALL_TIME)
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -27979,7 +27979,7 @@ private fun CrashReportMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -28064,7 +28064,7 @@ private fun ProtobufPacketMiuixPage(
         ) ?: ProtobufPacketSettings.DEFAULT_SEND_PAYLOAD)
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -28180,7 +28180,7 @@ private fun ScriptPluginMiuixPage(
     onOpenManager: () -> Unit = {}
 ) {
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -28234,7 +28234,7 @@ fun ScriptPluginMarketPage(
 ) {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var query by rememberSaveable { mutableStateOf("") }
     var sort by rememberSaveable { mutableStateOf("latest") }
     var refreshVersion by remember { mutableStateOf(0) }
@@ -33261,7 +33261,7 @@ private fun ScriptPluginAgentConfigPage(
     }
 
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "Agent 配置",
         largeTitle = "Agent 配置",
@@ -33541,7 +33541,7 @@ private fun ScriptPluginAgentModelPickerPage(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var models by remember(config.apiBaseUrl, config.apiKey) { mutableStateOf<List<String>>(emptyList()) }
     var pendingModel by remember(currentModel) { mutableStateOf(currentModel) }
     var query by remember { mutableStateOf("") }
@@ -33722,7 +33722,7 @@ private fun ScriptPluginAgentChatPage(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val imeVisible = WindowInsets.isImeVisible
     var actionMessageId by remember { mutableStateOf<String?>(null) }
     var infoMessageId by remember { mutableStateOf<String?>(null) }
@@ -36366,7 +36366,7 @@ fun ScriptPluginManagerPage(
 ) {
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     var query by rememberSaveable { mutableStateOf("") }
     var refreshVersion by remember { mutableStateOf(0) }
     var loading by remember { mutableStateOf(true) }
@@ -38058,7 +38058,7 @@ private fun WeChatTabletMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, WeChatTabletSettings.PREFS_NAME) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -38164,7 +38164,7 @@ private fun AutoTransferMiuixPage(
     var showReplySteps by remember { mutableStateOf(false) }
     var replyTarget by remember { mutableStateOf(TransferReplyTarget.PRIVATE) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     fun persistRules(
         nextTemplates: List<TransferRuleTemplate> = templates,
@@ -38516,7 +38516,7 @@ private fun TransferTemplateListPage(
     onOpen: (Int, TransferRuleTemplate) -> Unit,
     onAdd: () -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "收款规则模板",
         largeTitle = "收款规则模板",
@@ -38578,7 +38578,7 @@ private fun TransferBindingListPage(
     val visibleIds = visible.mapTo(LinkedHashSet()) { it.second.id }
     val allVisibleSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
     val selectedBindings = bindings.filter { it.id in selectedIds }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "适用聊天",
         largeTitle = "适用聊天",
@@ -38706,7 +38706,7 @@ private fun TransferBindingEditorPage(
 ) {
     var enabled by remember(request) { mutableStateOf(request.binding.enabled) }
     var templateId by remember(request) { mutableStateOf(request.binding.templateId) }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = request.binding.label.ifBlank { request.binding.targetId },
         largeTitle = request.binding.label.ifBlank { request.binding.targetId },
@@ -38769,7 +38769,7 @@ private fun TransferBatchApplyPage(
     onBack: () -> Unit,
     onPickChats: (String) -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = "批量套用模板",
         largeTitle = "批量套用模板",
@@ -38845,7 +38845,7 @@ private fun TransferTemplateEditorPage(
         )
         return
     }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = value.name.ifBlank { "收款模板" },
         largeTitle = value.name.ifBlank { "收款模板" },
@@ -39152,7 +39152,7 @@ private fun FakeWalletBalanceMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     PageScaffold(
         title = provider.title(),
@@ -39334,7 +39334,7 @@ private fun MemberTitleMiuixPage(
     var customTextColor by remember { mutableStateOf(sp.getString(MemberTitleSettings.KEY_CUSTOM_TEXT_COLOR, MemberTitleSettings.DEFAULT_TEXT_COLOR) ?: MemberTitleSettings.DEFAULT_TEXT_COLOR) }
     var showMember by remember { mutableStateOf(sp.getBoolean(MemberTitleSettings.KEY_SHOW_MEMBER, MemberTitleSettings.DEFAULT_SHOW_MEMBER)) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -39444,7 +39444,7 @@ private fun GroupNicknameColorMiuixPage(
         )
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -39527,7 +39527,7 @@ private fun RealNameTailMiuixPage(
     var showGender by remember { mutableStateOf(sp.getBoolean(RealNameTailSettings.KEY_SHOW_GENDER, RealNameTailSettings.DEFAULT_SHOW_GENDER)) }
     var showRegion by remember { mutableStateOf(sp.getBoolean(RealNameTailSettings.KEY_SHOW_REGION, RealNameTailSettings.DEFAULT_SHOW_REGION)) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -39646,7 +39646,7 @@ private fun MessageBlockContactPickerPage(
     var contactFilter by remember(request) { mutableStateOf(MessageBlockContactFilter.ALL) }
     var selectedLabel by remember(request) { mutableStateOf<MessageBlockLabelOption?>(null) }
     var selectedConversationGroupId by remember(request) { mutableStateOf("") }
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(request) {
         loadMessageBlockContacts(context) { result, throwable ->
@@ -39931,7 +39931,7 @@ private fun ContactPickerPage(
         }
     }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(request) {
         loadContacts(context, request.mode, request.enableLabels) { result, throwable ->
@@ -40317,7 +40317,7 @@ private fun FavoritePickerPage(
     val initialSelectedIds = remember(request) { parseFavoriteIds(request.existingValue) }
     var selectedIds by remember(request) { mutableStateOf(initialSelectedIds) }
     val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(request) {
         loading = favorites.isEmpty()
@@ -40498,7 +40498,7 @@ private fun GroupMemberPickerPage(
     var selectionEdited by remember(request) { mutableStateOf(initialSelectedEntries.isNotEmpty()) }
     val groupListState = rememberLazyListState()
     val memberListState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     LaunchedEffect(request) {
         loadContacts(context, ContactPickerMode.GROUPS) { result, throwable ->
@@ -40651,7 +40651,7 @@ private fun OptionPickerPage(
     onBack: () -> Unit,
     onSelected: (OptionItem) -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val listState = rememberLazyListState()
     var selectedValue by remember(request) { mutableStateOf(request.currentValue) }
     PageScaffold(
@@ -40692,7 +40692,7 @@ private fun OptionPickerPage(
 
 @Composable
 private fun UnsupportedFeaturePage(provider: FeatureSettingsProvider, onBack: () -> Unit) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     val listState = rememberLazyListState()
     PageScaffold(
         title = provider.title(),
@@ -40724,7 +40724,7 @@ private fun UnsupportedFeaturePage(provider: FeatureSettingsProvider, onBack: ()
 internal fun PageScaffold(
     title: String,
     largeTitle: String,
-    scrollBehavior: ScrollBehavior,
+    scrollBehavior: TopAppBarScrollBehavior,
     onBack: (() -> Unit)? = null,
     topBarActions: @Composable RowScope.() -> Unit = {},
     bottomBar: @Composable ((Backdrop) -> Unit)? = null,
@@ -41588,7 +41588,7 @@ private fun RedPacketReplyStepsListPage(
     onMoveDown: (Int) -> Unit,
     onDelete: (Int) -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = title,
         largeTitle = title,
@@ -41664,7 +41664,7 @@ private fun RedPacketReplyStepEditorPage(
     onMoveDown: () -> Unit,
     onDelete: () -> Unit
 ) {
-    val scrollBehavior = MiuixScrollBehavior()
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
     PageScaffold(
         title = title,
         largeTitle = title,
