@@ -496,7 +496,9 @@ import top.yukonga.miuix.kmp.basic.Checkbox
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.TopAppBarScrollBehavior
 import top.yukonga.miuix.kmp.basic.Slider
-import top.yukonga.miuix.kmp.extra.WindowDropdown
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Surface
 import h.Hchat.ui.material3.MaterialSectionTitle as SmallTitle
 import top.yukonga.miuix.kmp.basic.Switch
 import top.yukonga.miuix.kmp.basic.Text
@@ -525,7 +527,6 @@ import androidx.compose.material3.Slider as MaterialSlider
 import androidx.compose.material3.Checkbox as MaterialCheckbox
 import androidx.compose.material3.Card as M3Card
 
-import top.yukonga.miuix.kmp.extra.WindowDialog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
@@ -40885,17 +40886,25 @@ private fun PopupOptionRow(
 ) {
     val selectedIndex = options.indexOfFirst { it.value == currentValue }.takeIf { it >= 0 } ?: 0
     val labels = options.map { it.label }
-    WindowDropdown(
-        items = labels,
-        selectedIndex = selectedIndex,
-        title = title,
-        summary = summary,
-        enabled = enabled,
-        showValue = true,
-        onSelectedIndexChange = { index ->
-            options.getOrNull(index)?.let { onValueChanged(it.value) }
+    MaterialOptionDropdown(title, summary, labels, selectedIndex, enabled) { index ->
+        options.getOrNull(index)?.let { onValueChanged(it.value) }
+    }
+}
+
+@Composable
+private fun MaterialOptionDropdown(
+    title: String, summary: String, labels: List<String>, selectedIndex: Int, enabled: Boolean,
+    onSelected: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Column(modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) { expanded = true }.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(title, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+        if (summary.isNotBlank()) Text(summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+        Text(labels.getOrNull(selectedIndex).orEmpty(), color = androidx.compose.material3.MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
+        DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            labels.forEachIndexed { index, label -> DropdownMenuItem(text = { Text(label) }, onClick = { expanded = false; onSelected(index) }) }
         }
-    )
+    }
 }
 
 @Composable
@@ -40935,17 +40944,9 @@ private fun PopupChoiceRow(
     enabled: Boolean = true
 ) {
     val selectedIndex = options.indexOfFirst { it.value == currentValue }.takeIf { it >= 0 } ?: 0
-    WindowDropdown(
-        items = options.map { it.label },
-        selectedIndex = selectedIndex,
-        title = title,
-        summary = summary,
-        enabled = enabled,
-        showValue = true,
-        onSelectedIndexChange = { index ->
-            options.getOrNull(index)?.let { onValueChanged(it.value) }
-        }
-    )
+    MaterialOptionDropdown(title, summary, options.map { it.label }, selectedIndex, enabled) { index ->
+        options.getOrNull(index)?.let { onValueChanged(it.value) }
+    }
 }
 
 @Composable
