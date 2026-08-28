@@ -36,8 +36,8 @@ import androidx.navigationevent.compose.LocalNavigationEventDispatcherOwner
 import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
-import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import h.Hchat.ui.miuix.hchatLayerBackdrop
+import h.Hchat.ui.miuix.rememberHchatLayerBackdrop
 import h.Hchat.ui.material3.HchatMaterialTheme
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -257,11 +257,11 @@ internal object ScriptFloatingGlassBarHost {
     ) {
         val density = androidx.compose.ui.platform.LocalDensity.current
         val barHeightDp = with(density) { barHeightPx.toDp() }
-        val backdrop = rememberLayerBackdrop()
+        val backdrop = rememberHchatLayerBackdrop()
         Box(modifier = Modifier.fillMaxSize()) {
             AndroidView(
                 factory = { nativeContentHost },
-                modifier = Modifier.fillMaxSize().layerBackdrop(backdrop)
+                modifier = Modifier.fillMaxSize().hchatLayerBackdrop(backdrop)
             )
             Box(
                 modifier = Modifier.fillMaxSize().padding(

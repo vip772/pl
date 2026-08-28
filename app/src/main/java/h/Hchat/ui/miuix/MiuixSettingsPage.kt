@@ -500,8 +500,8 @@ import h.Hchat.ui.material3.MaterialSectionTitle as SmallTitle
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import top.yukonga.miuix.kmp.blur.Backdrop
-import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import h.Hchat.ui.miuix.hchatLayerBackdrop
+import h.Hchat.ui.miuix.rememberHchatLayerBackdrop
 import h.Hchat.ui.material3.HchatMaterialTheme
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Card as MaterialCard
@@ -40728,7 +40728,7 @@ internal fun PageScaffold(
 ) {
     RegisterSettingsBackHandler(onBack)
     val graphicsLayer = rememberGraphicsLayer()
-    val backdrop = rememberLayerBackdrop(graphicsLayer)
+    val backdrop = rememberHchatLayerBackdrop(graphicsLayer)
     val navigationInset = navigationButtonBottomInset()
     val navigationGap = if (navigationInset > 0.dp) NAVIGATION_BUTTON_EXTRA_GAP else 0.dp
     val bottomAvoidance = navigationInset + navigationGap
@@ -40759,7 +40759,7 @@ internal fun PageScaffold(
         },
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().layerBackdrop(backdrop)) { content(padding) }
+        Box(modifier = Modifier.fillMaxSize().hchatLayerBackdrop(backdrop)) { content(padding) }
     }
 }
 

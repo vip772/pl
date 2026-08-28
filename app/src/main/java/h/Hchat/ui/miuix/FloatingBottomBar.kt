@@ -70,8 +70,8 @@ import top.yukonga.miuix.kmp.blur.highlight.BloomStroke
 import top.yukonga.miuix.kmp.blur.highlight.Highlight
 import top.yukonga.miuix.kmp.blur.highlight.LightPosition
 import top.yukonga.miuix.kmp.blur.highlight.LightSource
-import top.yukonga.miuix.kmp.blur.layerBackdrop
-import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
+import h.Hchat.ui.miuix.hchatLayerBackdrop
+import h.Hchat.ui.miuix.rememberHchatLayerBackdrop
 import top.yukonga.miuix.kmp.blur.sensor.rememberDeviceTilt
 import androidx.compose.material3.MaterialTheme
 import kotlin.math.PI
@@ -253,7 +253,7 @@ fun FloatingBottomBar(
     val surfaceContainer = MaterialTheme.colorScheme.surfaceContainer
     val containerColor = if (effectiveBlurEnabled) surfaceContainer.copy(0.4f) else surfaceContainer
 
-    val tabsBackdrop = rememberLayerBackdrop()
+    val tabsBackdrop = rememberHchatLayerBackdrop()
     val density = LocalDensity.current
     val isLtr = LocalLayoutDirection.current == LayoutDirection.Ltr
     val animationScope = rememberCoroutineScope()
@@ -438,7 +438,7 @@ fun FloatingBottomBar(
                     Modifier
                         .clearAndSetSemantics {}
                         .alpha(0f)
-                        .layerBackdrop(tabsBackdrop)
+                        .hchatLayerBackdrop(tabsBackdrop)
                         .graphicsLayer { translationX = panelOffset }
                         .drawBackdrop(
                             backdrop = backdrop,
