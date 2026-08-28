@@ -46,13 +46,12 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import h.Hchat.hooks.items.editmsg.EditableChatMessage
-import java.util.concurrent.atomic.AtomicBoolean
-import top.yukonga.miuix.kmp.basic.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.extra.WindowDialog
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.darkColorScheme
-import top.yukonga.miuix.kmp.theme.lightColorScheme
+import androidx.compose.material3.MaterialTheme
+import h.Hchat.ui.material3.HchatMaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import h.Hchat.ui.material3.MaterialOverlayDialog
+import h.Hchat.ui.material3.showMaterialOverlay
 
 object EditMessageMiuixDialog {
     interface DialogHandle {
@@ -66,8 +65,8 @@ object EditMessageMiuixDialog {
         onSave: (String, String) -> Boolean,
         onRestore: () -> Boolean
     ): DialogHandle {
-        return show(activity) { close ->
-            WindowDialog(
+        return showMaterialOverlay(activity) { close ->
+            MaterialOverlayDialog(
                 show = true,
                 title = if (message.isTransfer) "修改转账金额" else "修改聊天记录",
                 onDismissRequest = close,
@@ -103,7 +102,7 @@ object EditMessageMiuixDialog {
         ) {
             Text(
                 text = message.displayText.ifBlank { "当前内容为空" },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
                 modifier = Modifier.fillMaxWidth().heightIn(max = 96.dp)
             )
@@ -145,7 +144,7 @@ object EditMessageMiuixDialog {
             if (error.isNotBlank()) {
                 Text(
                     text = error,
-                    color = MiuixTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.primary,
                     fontSize = 12.sp,
                     modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.End
@@ -157,18 +156,15 @@ object EditMessageMiuixDialog {
             ) {
                 if (message.hasBackup) {
                     TextButton(
-                        text = "恢复",
                         onClick = onRestore,
                         modifier = Modifier.weight(1f)
-                    )
+                    ) { Text("恢复") }
                 }
                 TextButton(
-                    text = "取消",
                     onClick = onCancel,
                     modifier = Modifier.weight(1f)
-                )
+                ) { Text("取消") }
                 TextButton(
-                    text = "保存",
                     onClick = {
                         if (message.isTransfer && reply.trim().isBlank()) {
                             error = "请输入金额"
@@ -177,11 +173,10 @@ object EditMessageMiuixDialog {
                         }
                     },
                     modifier = Modifier.weight(1f)
-                )
+                ) { Text("保存") }
             }
         }
     }
-
     @Composable
     private fun EditBox(
         label: String,
@@ -193,7 +188,7 @@ object EditMessageMiuixDialog {
         Column(modifier = Modifier.fillMaxWidth()) {
             Text(
                 text = label,
-                color = MiuixTheme.colorScheme.onSurface,
+                color = MaterialTheme.colorScheme.onSurface,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
@@ -204,15 +199,15 @@ object EditMessageMiuixDialog {
                 singleLine = singleLine,
                 keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
                 textStyle = TextStyle(
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 15.sp
                 ),
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(min = if (singleLine) 44.dp else 92.dp, max = 170.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(MiuixTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             )
         }
@@ -220,14 +215,8 @@ object EditMessageMiuixDialog {
 
     @Composable
     private fun DialogTheme(activity: Activity, content: @Composable () -> Unit) {
-        val colors = if ((activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
-            == Configuration.UI_MODE_NIGHT_YES
-        ) {
-            darkColorScheme()
-        } else {
-            lightColorScheme()
-        }
-        MiuixTheme(colors = colors, content = content)
+        val dark = (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+        HchatMaterialTheme(darkTheme = dark, content = content)
     }
 
     private fun show(
