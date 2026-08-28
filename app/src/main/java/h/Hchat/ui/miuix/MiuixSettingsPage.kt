@@ -504,6 +504,11 @@ import top.yukonga.miuix.kmp.blur.layerBackdrop
 import top.yukonga.miuix.kmp.blur.rememberLayerBackdrop
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 import h.Hchat.ui.material3.HchatMaterialTheme
+import androidx.compose.material3.Card as MaterialCard
+import androidx.compose.material3.CardDefaults as MaterialCardDefaults
+import androidx.compose.material3.HorizontalDivider as MaterialHorizontalDivider
+import androidx.compose.material3.Switch as MaterialSwitch
+import androidx.compose.material3.Text as MaterialText
 
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -40828,9 +40833,13 @@ internal fun SettingsCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    Card(
+    MaterialCard(
         modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp),
-        cornerRadius = 18.dp
+        shape = RoundedCornerShape(20.dp),
+        colors = MaterialCardDefaults.cardColors(
+            containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer
+        ),
+        elevation = MaterialCardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         content()
     }
@@ -40845,26 +40854,9 @@ internal fun SwitchRow(
     defaultValue: Boolean
 ) {
     var checked by remember { mutableStateOf(sp.getBoolean(key, defaultValue)) }
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable {
-            checked = !checked
-            sp.edit().putBoolean(key, checked).apply()
-        }.padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            if (summary.isNotBlank()) {
-                Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-            }
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = {
-                checked = it
-                sp.edit().putBoolean(key, it).apply()
-            }
-        )
+    MaterialSwitchRow(checked, title, summary) { next ->
+        checked = next
+        sp.edit().putBoolean(key, next).apply()
     }
 }
 
@@ -40876,23 +40868,42 @@ internal fun SwitchRow(
     enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    MaterialSwitchRow(checked, title, summary, enabled, onCheckedChange)
+}
+
+@Composable
+private fun MaterialSwitchRow(
+    checked: Boolean,
+    title: String,
+    summary: String,
+    enabled: Boolean = true,
+    onCheckedChange: (Boolean) -> Unit
+) {
     Row(
-        modifier = Modifier.fillMaxWidth().then(
-            if (enabled) {
-                Modifier.clickable { onCheckedChange(!checked) }
-            } else {
-                Modifier
-            }
-        ).padding(horizontal = 16.dp, vertical = 14.dp),
+        modifier = Modifier.fillMaxWidth()
+            .clickable(enabled = enabled) { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+        Column(modifier = Modifier.weight(1f).padding(end = 16.dp)) {
+            MaterialText(
+                text = title,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
+                style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
+            )
+            if (summary.isNotBlank()) {
+                MaterialText(
+                    text = summary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                )
+            }
         }
-        Switch(
+        MaterialSwitch(
             checked = checked,
-            onCheckedChange = { if (enabled) onCheckedChange(it) }
+            enabled = enabled,
+            onCheckedChange = onCheckedChange
         )
     }
 }
@@ -42462,26 +42473,32 @@ internal fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
 
 @Composable
 private fun SelectRow(title: String, summary: String, onClick: () -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
-    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
     Row(
         modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(pressFeedbackColor)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
+            .clickable(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+        Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
+            MaterialText(
+                text = title,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
+                style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium
+            )
             if (summary.isNotBlank()) {
-                Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+                MaterialText(
+                    text = summary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                )
             }
         }
-        Text(text = "›", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 22.sp)
+        MaterialText(
+            text = "›",
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
+            style = androidx.compose.material3.MaterialTheme.typography.headlineSmall
+        )
     }
 }
 
@@ -43243,12 +43260,9 @@ private fun EmptyText(text: String) {
 
 @Composable
 internal fun InsetDivider(start: Dp = 16.dp) {
-    Box(
-        modifier = Modifier
-            .padding(start = start)
-            .fillMaxWidth()
-            .height(Dp.Hairline)
-            .background(MiuixTheme.colorScheme.dividerLine)
+    MaterialHorizontalDivider(
+        modifier = Modifier.padding(start = start),
+        color = androidx.compose.material3.MaterialTheme.colorScheme.outlineVariant
     )
 }
 
