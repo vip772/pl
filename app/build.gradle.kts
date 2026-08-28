@@ -101,6 +101,8 @@ dependencies {
     implementation("com.alibaba.fastjson2:fastjson2:2.0.61.android8")
     implementation(compose.runtime)
     implementation(compose.foundation)
+    implementation("androidx.compose.material3:material3:1.3.2")
+
     implementation(compose.ui)
     implementation("androidx.lifecycle:lifecycle-runtime:2.8.7")
     implementation("androidx.lifecycle:lifecycle-viewmodel:2.8.7")
