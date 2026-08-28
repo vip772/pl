@@ -68,7 +68,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.Lifecycle
@@ -94,13 +93,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import top.yukonga.miuix.kmp.basic.Checkbox
-import top.yukonga.miuix.kmp.basic.Text
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.extra.WindowDialog
-import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.theme.darkColorScheme
-import top.yukonga.miuix.kmp.theme.lightColorScheme
+import androidx.compose.material3.MaterialTheme
+import h.Hchat.ui.material3.HchatMaterialTheme
 
 object VoiceForwardMiuixDialog {
     interface DialogHandle {
@@ -161,7 +159,7 @@ object VoiceForwardMiuixDialog {
                         if (message.isNotBlank()) {
                             Text(
                                 text = message,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 14.sp,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)
                             )
@@ -210,14 +208,14 @@ object VoiceForwardMiuixDialog {
                                 .fillMaxWidth()
                                 .weight(1f, fill = false)
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(MiuixTheme.colorScheme.onSurface.copy(alpha = 0.06f))
+                                .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f))
                                 .clickable(onClick = copyLog)
                                 .verticalScroll(rememberScrollState())
                                 .padding(12.dp)
                         ) {
                             Text(
                                 text = message,
-                                color = MiuixTheme.colorScheme.onSurface,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace,
                                 lineHeight = 17.sp,
@@ -269,7 +267,7 @@ object VoiceForwardMiuixDialog {
                         if (message.isNotBlank()) {
                             Text(
                                 text = message,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 14.sp,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 8.dp)
                             )
@@ -316,7 +314,7 @@ object VoiceForwardMiuixDialog {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = message,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp),
                             textAlign = TextAlign.Center
                         )
@@ -445,7 +443,7 @@ object VoiceForwardMiuixDialog {
                         )
                         Text(
                             text = filter.title,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(start = 6.dp, top = 10.dp, bottom = 6.dp)
                         )
@@ -457,7 +455,7 @@ object VoiceForwardMiuixDialog {
                             if (visible.isEmpty()) {
                                 Text(
                                     text = "没有匹配结果",
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
                                     textAlign = TextAlign.Center
                                 )
@@ -560,7 +558,7 @@ object VoiceForwardMiuixDialog {
                         if (summary.isNotBlank()) {
                             Text(
                                 text = summary,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 13.sp,
                                 modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
                             )
@@ -575,7 +573,7 @@ object VoiceForwardMiuixDialog {
                         if (visibleChoices.isEmpty()) {
                             Text(
                                 text = "没有匹配结果",
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 28.dp),
                                 textAlign = TextAlign.Center
                             )
@@ -626,7 +624,7 @@ object VoiceForwardMiuixDialog {
                         if (summary.isNotBlank()) {
                             Text(
                                 text = summary,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 13.sp,
                                 modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
                             )
@@ -673,7 +671,7 @@ object VoiceForwardMiuixDialog {
                         if (summary.isNotBlank()) {
                             Text(
                                 text = summary,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 13.sp,
                                 modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
                             )
@@ -763,7 +761,7 @@ object VoiceForwardMiuixDialog {
                         if (summary.isNotBlank()) {
                             Text(
                                 text = summary,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 13.sp,
                                 modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
                             )
@@ -773,13 +771,13 @@ object VoiceForwardMiuixDialog {
                                 .fillMaxWidth()
                                 .heightIn(min = if (singleLine) 0.dp else 140.dp)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(MiuixTheme.colorScheme.secondaryVariant)
+                                .background(MaterialTheme.colorScheme.secondaryContainer)
                                 .padding(horizontal = 12.dp, vertical = 12.dp)
                         ) {
                             if (value.text.isEmpty() && placeholder.isNotBlank()) {
                                 Text(
                                     text = placeholder,
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 16.sp
                                 )
                             }
@@ -795,10 +793,10 @@ object VoiceForwardMiuixDialog {
                                 singleLine = singleLine,
                                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                                 textStyle = TextStyle(
-                                    color = MiuixTheme.colorScheme.onSurface,
+                                    color = MaterialTheme.colorScheme.onSurface,
                                     fontSize = 16.sp
                                 ),
-                                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester)
                             )
                         }
@@ -882,16 +880,16 @@ object VoiceForwardMiuixDialog {
                             singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             textStyle = TextStyle(
-                                color = MiuixTheme.colorScheme.onSurface,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 fontSize = 16.sp,
                                 textAlign = TextAlign.Center
                             ),
-                            cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .focusRequester(focusRequester)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(MiuixTheme.colorScheme.secondaryVariant)
+                                .background(MaterialTheme.colorScheme.secondaryContainer)
                                 .padding(horizontal = 12.dp, vertical = 12.dp)
                         )
                         Text(
@@ -899,7 +897,7 @@ object VoiceForwardMiuixDialog {
                                 maxValue?.let { "请输入 $minValue-$it" } ?: "请输入不小于 $minValue 的整数"
                             },
                             color = if (error.isBlank()) {
-                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                MaterialTheme.colorScheme.onSurfaceVariant
                             } else {
                                 Color(0xFFD32F2F)
                             },
@@ -997,7 +995,7 @@ object VoiceForwardMiuixDialog {
                                 )
                             } ?: "请输入有效的年、月、日、时、分、秒",
                             color = if (pickedTime != null) {
-                                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                MaterialTheme.colorScheme.onSurfaceVariant
                             } else {
                                 Color(0xFFD32F2F)
                             },
@@ -1044,7 +1042,7 @@ object VoiceForwardMiuixDialog {
         Column(modifier = modifier) {
             Text(
                 text = label,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
                 textAlign = TextAlign.Center
@@ -1061,16 +1059,16 @@ object VoiceForwardMiuixDialog {
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                 textStyle = TextStyle(
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 20.sp,
                     textAlign = TextAlign.Center
                 ),
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant)
+                    .background(MaterialTheme.colorScheme.secondaryContainer)
                     .padding(horizontal = 8.dp, vertical = 10.dp)
             )
         }
@@ -1115,7 +1113,7 @@ object VoiceForwardMiuixDialog {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = "已选择 ${voiceCount.coerceAtLeast(1)} 条语音",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 13.sp,
                             modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
                         )
@@ -1161,7 +1159,7 @@ object VoiceForwardMiuixDialog {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = "发送到当前聊天？",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 14.sp,
                             modifier = Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 10.dp),
                             textAlign = TextAlign.Center
@@ -1279,9 +1277,9 @@ object VoiceForwardMiuixDialog {
                 .clip(RoundedCornerShape(10.dp))
                 .background(
                     if (primary) {
-                        MiuixTheme.colorScheme.primary
+                        MaterialTheme.colorScheme.primary
                     } else {
-                        MiuixTheme.colorScheme.secondaryVariant
+                        MaterialTheme.colorScheme.secondaryContainer
                     }
                 )
                 .clickable(onClick = onClick)
@@ -1290,7 +1288,7 @@ object VoiceForwardMiuixDialog {
         ) {
             Text(
                 text = text,
-                color = if (primary) Color.White else MiuixTheme.colorScheme.onSurface,
+                color = if (primary) Color.White else MaterialTheme.colorScheme.onSurface,
                 fontSize = 13.sp,
                 lineHeight = 18.sp,
                 fontWeight = FontWeight.Medium,
@@ -1392,7 +1390,7 @@ object VoiceForwardMiuixDialog {
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant)
+                .background(MaterialTheme.colorScheme.secondaryContainer)
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         ) {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -1406,9 +1404,9 @@ object VoiceForwardMiuixDialog {
                             .clip(RoundedCornerShape(19.dp))
                             .background(
                                 if (prepared) {
-                                    MiuixTheme.colorScheme.primary
+                                    MaterialTheme.colorScheme.primary
                                 } else {
-                                    MiuixTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
                                 }
                             )
                             .clickable(enabled = prepared) {
@@ -1430,7 +1428,7 @@ object VoiceForwardMiuixDialog {
                     ) {
                         Text(
                             text = if (playing) "Ⅱ" else "▶",
-                            color = if (prepared) Color.White else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = if (prepared) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 16.sp,
                             fontWeight = FontWeight.Bold,
                             textAlign = TextAlign.Center
@@ -1438,7 +1436,7 @@ object VoiceForwardMiuixDialog {
                     }
                     Text(
                         text = "${formatTime(position)} / ${formatTime(duration)}",
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = MaterialTheme.colorScheme.onSurface,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(start = 10.dp)
@@ -1452,7 +1450,7 @@ object VoiceForwardMiuixDialog {
                     if (message.isNotBlank()) {
                         Text(
                             text = message,
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             modifier = Modifier.weight(1f).padding(start = 10.dp),
                             textAlign = TextAlign.End
@@ -1488,9 +1486,9 @@ object VoiceForwardMiuixDialog {
                 .clip(RoundedCornerShape(8.dp))
                 .background(
                     if (enabled) {
-                        MiuixTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
                     } else {
-                        MiuixTheme.colorScheme.onSurface.copy(alpha = 0.04f)
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.04f)
                     }
                 )
                 .clickable(enabled = enabled, onClick = onClick),
@@ -1498,7 +1496,7 @@ object VoiceForwardMiuixDialog {
         ) {
             Text(
                 text = text,
-                color = if (enabled) MiuixTheme.colorScheme.onSurface else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium
             )
@@ -1529,7 +1527,7 @@ object VoiceForwardMiuixDialog {
                     .fillMaxWidth()
                     .height(4.dp)
                     .clip(RoundedCornerShape(2.dp))
-                    .background(MiuixTheme.colorScheme.onSurface.copy(alpha = 0.12f))
+                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f))
             )
             Box(
                 modifier = Modifier
@@ -1538,9 +1536,9 @@ object VoiceForwardMiuixDialog {
                     .clip(RoundedCornerShape(2.dp))
                     .background(
                         if (enabled) {
-                            MiuixTheme.colorScheme.primary
+                            MaterialTheme.colorScheme.primary
                         } else {
-                            MiuixTheme.colorScheme.onSurface.copy(alpha = 0.18f)
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.18f)
                         }
                     )
             )
@@ -1567,14 +1565,14 @@ object VoiceForwardMiuixDialog {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium
                 )
                 if (summary.isNotBlank()) {
                     Text(
                         text = summary,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(top = 2.dp)
                     )
@@ -1601,14 +1599,14 @@ object VoiceForwardMiuixDialog {
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = title,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Medium
                 )
                 if (summary.isNotBlank()) {
                     Text(
                         text = summary,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(top = 2.dp)
                     )
@@ -1616,8 +1614,8 @@ object VoiceForwardMiuixDialog {
             }
             Checkbox(
                 modifier = Modifier.size(22.dp),
-                state = if (selected) ToggleableState.On else ToggleableState.Off,
-                onClick = null
+                checked = selected,
+                onCheckedChange = null
             )
         }
     }
@@ -1641,9 +1639,9 @@ object VoiceForwardMiuixDialog {
                         .clip(RoundedCornerShape(12.dp))
                         .background(
                             if (active) {
-                                MiuixTheme.colorScheme.primary
+                                MaterialTheme.colorScheme.primary
                             } else {
-                                MiuixTheme.colorScheme.onSurface.copy(alpha = 0.06f)
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
                             }
                         )
                         .clickable { onSelected(item) },
@@ -1651,7 +1649,7 @@ object VoiceForwardMiuixDialog {
                 ) {
                     Text(
                         text = item.label,
-                        color = if (active) Color.White else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 14.sp,
                         fontWeight = if (active) FontWeight.Medium else FontWeight.Normal,
                         modifier = Modifier.padding(horizontal = 10.dp)
@@ -1666,7 +1664,7 @@ object VoiceForwardMiuixDialog {
         if (labels.isEmpty()) {
             Text(
                 text = "没有好友标签",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 6.dp, bottom = 8.dp)
             )
@@ -1684,9 +1682,9 @@ object VoiceForwardMiuixDialog {
                         .clip(RoundedCornerShape(12.dp))
                         .background(
                             if (active) {
-                                MiuixTheme.colorScheme.primary
+                                MaterialTheme.colorScheme.primary
                             } else {
-                                MiuixTheme.colorScheme.onSurface.copy(alpha = 0.06f)
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
                             }
                         )
                         .clickable { onSelected(label) }
@@ -1695,7 +1693,7 @@ object VoiceForwardMiuixDialog {
                 ) {
                     Text(
                         text = label,
-                        color = if (active) Color.White else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 13.sp,
                         fontWeight = if (active) FontWeight.Medium else FontWeight.Normal
                     )
@@ -1721,8 +1719,8 @@ object VoiceForwardMiuixDialog {
                         .height(34.dp)
                         .clip(RoundedCornerShape(12.dp))
                         .background(
-                            if (active) MiuixTheme.colorScheme.primary
-                            else MiuixTheme.colorScheme.onSurface.copy(alpha = 0.06f)
+                            if (active) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.06f)
                         )
                         .clickable { onSelected(group.first) }
                         .padding(horizontal = 12.dp),
@@ -1730,7 +1728,7 @@ object VoiceForwardMiuixDialog {
                 ) {
                     Text(
                         text = group.second,
-                        color = if (active) Color.White else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = if (active) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 13.sp
                     )
                 }
@@ -1748,18 +1746,18 @@ object VoiceForwardMiuixDialog {
             value = value,
             onValueChange = onValueChange,
             singleLine = true,
-            textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
-            cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+            textStyle = TextStyle(color = MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(12.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant)
+                .background(MaterialTheme.colorScheme.secondaryContainer)
                 .padding(horizontal = 12.dp, vertical = 10.dp),
             decorationBox = { innerTextField ->
                 if (value.isEmpty()) {
                     Text(
                         text = placeholder,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 14.sp
                     )
                 }
@@ -1782,7 +1780,7 @@ object VoiceForwardMiuixDialog {
             Column(modifier = Modifier.weight(1f).padding(start = 10.dp)) {
                 Text(
                     text = contact.label,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Medium,
                     fontSize = 15.sp
                 )
@@ -1793,14 +1791,14 @@ object VoiceForwardMiuixDialog {
                 }
                 Text(
                     text = summary,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             }
             Checkbox(
                 modifier = Modifier.size(22.dp),
-                state = if (selected) ToggleableState.On else ToggleableState.Off,
-                onClick = null
+                checked = selected,
+                onCheckedChange = null
             )
         }
     }
@@ -1814,14 +1812,14 @@ object VoiceForwardMiuixDialog {
         }
         val image = bitmap
         val avatarBg = if (image == null && contact.group) {
-            MiuixTheme.colorScheme.primary
+            MaterialTheme.colorScheme.primary
         } else {
-            MiuixTheme.colorScheme.secondaryVariant
+            MaterialTheme.colorScheme.secondaryContainer
         }
         val avatarTextColor = if (image == null && contact.group) {
             Color.White
         } else {
-            MiuixTheme.colorScheme.onSecondaryVariant
+            MaterialTheme.colorScheme.onSecondaryContainer
         }
         val avatarShape = if (RoundAvatarSettings.enabled(context)) {
             RoundedCornerShape((42f * RoundAvatarSettings.radiusFactor(context)).dp)
@@ -1894,7 +1892,7 @@ object VoiceForwardMiuixDialog {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MiuixTheme.colorScheme.windowDimming)
+                .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
                 .statusBarsPadding()
                 .navigationBarsPadding()
                 .imePadding()
@@ -1911,13 +1909,13 @@ object VoiceForwardMiuixDialog {
                     .heightIn(max = maxHeight)
                     .pointerInput(Unit) { detectTapGestures { } }
                     .clip(RoundedCornerShape(32.dp))
-                    .background(MiuixTheme.colorScheme.background)
+                    .background(MaterialTheme.colorScheme.background)
                     .padding(24.dp)
             ) {
                 if (title.isNotBlank()) {
                     Text(
                         text = title,
-                        color = MiuixTheme.colorScheme.onBackground,
+                        color = MaterialTheme.colorScheme.onBackground,
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Medium,
                         textAlign = TextAlign.Center,
@@ -1931,16 +1929,10 @@ object VoiceForwardMiuixDialog {
 
     @Composable
     private fun DialogTheme(context: Context, content: @Composable () -> Unit) {
-        val colors = if ((context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
-            == Configuration.UI_MODE_NIGHT_YES
-        ) {
-            darkColorScheme()
-        } else {
-            lightColorScheme()
-        }
-        MiuixTheme(colors = colors, content = content)
+        val dark = (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+        HchatMaterialTheme(darkTheme = dark, content = content)
     }
-
     private fun show(
         activity: Activity,
         onDismiss: () -> Unit,
