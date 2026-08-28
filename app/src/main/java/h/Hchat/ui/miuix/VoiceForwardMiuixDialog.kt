@@ -95,8 +95,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Text
-import top.yukonga.miuix.kmp.basic.TextButton
-import top.yukonga.miuix.kmp.extra.WindowDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import h.Hchat.ui.material3.HchatMaterialTheme
 
@@ -319,10 +318,9 @@ object VoiceForwardMiuixDialog {
                             textAlign = TextAlign.Center
                         )
                         TextButton(
-                            text = "取消",
                             onClick = close,
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                        )
+                        ) { Text("取消") }
                     }
                 }
             )
@@ -594,16 +592,14 @@ object VoiceForwardMiuixDialog {
                             }
                         }
                         TextButton(
-                            text = "取消",
                             onClick = close,
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp).heightIn(min = 44.dp)
-                        )
+                        ) { Text("取消") }
                     }
                 }
             )
         }
     }
-
     fun showChoices(
         activity: Activity,
         title: String,
@@ -636,16 +632,14 @@ object VoiceForwardMiuixDialog {
                             }
                         }
                         TextButton(
-                            text = "取消",
                             onClick = close,
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 6.dp).heightIn(min = 44.dp)
-                        )
+                        ) { Text("取消") }
                     }
                 }
             )
         }
     }
-
     fun showMultiChoices(
         activity: Activity,
         title: String,
@@ -1126,13 +1120,12 @@ object VoiceForwardMiuixDialog {
                             onSeparate()
                         }
                         TextButton(
-                            text = "取消",
                             onClick = close,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(top = 8.dp, bottom = 6.dp)
                                 .heightIn(min = 44.dp)
-                        )
+                        ) { Text("取消") }
                     }
                 }
             )
@@ -1859,6 +1852,22 @@ object VoiceForwardMiuixDialog {
     }
 
     @Composable
+    private fun WindowDialog(
+        show: Boolean,
+        title: String,
+        onDismissRequest: () -> Unit,
+        content: @Composable () -> Unit
+    ) {
+        PositionedWindowDialog(
+            show = show,
+            title = title,
+            position = DialogPosition.BOTTOM,
+            onDismissRequest = onDismissRequest,
+            content = content
+        )
+    }
+
+    @Composable
     private fun PositionedWindowDialog(
         show: Boolean,
         title: String,
@@ -1866,15 +1875,6 @@ object VoiceForwardMiuixDialog {
         onDismissRequest: () -> Unit,
         content: @Composable () -> Unit
     ) {
-        if (position == DialogPosition.BOTTOM) {
-            WindowDialog(
-                show = show,
-                title = title,
-                onDismissRequest = onDismissRequest,
-                content = content
-            )
-            return
-        }
         if (!show) return
 
         val navigationState = rememberNavigationEventState(currentInfo = NavigationEventInfo.None)
@@ -1908,8 +1908,8 @@ object VoiceForwardMiuixDialog {
                     .fillMaxWidth()
                     .heightIn(max = maxHeight)
                     .pointerInput(Unit) { detectTapGestures { } }
-                    .clip(RoundedCornerShape(32.dp))
-                    .background(MaterialTheme.colorScheme.background)
+                    .clip(RoundedCornerShape(28.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                     .padding(24.dp)
             ) {
                 if (title.isNotBlank()) {
