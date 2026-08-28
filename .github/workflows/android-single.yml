@@ -9,7 +9,6 @@ permissions:
 env:
   HCAT_SINGLE_VERSION_NAME_BASE: "5.5.6"
   HCAT_SINGLE_VERSION_CODE_BASE: "490"
-  HCAT_SINGLE_RUN_NUMBER_BASE: "294"
 
 jobs:
   build:
@@ -91,11 +90,7 @@ jobs:
             version_name="$(bump_version "$version_name")"
           done
 
-          version_code=$((
-            HCAT_SINGLE_VERSION_CODE_BASE +
-            GITHUB_RUN_NUMBER -
-            HCAT_SINGLE_RUN_NUMBER_BASE
-          ))
+          version_code=$((HCAT_SINGLE_VERSION_CODE_BASE + GITHUB_RUN_NUMBER))
           if [ "$version_code" -le "$HCAT_SINGLE_VERSION_CODE_BASE" ] \
             || [ "$version_code" -gt 2147483647 ]; then
             echo "单频道构建版本 Code 超出有效范围: ${version_code}"
