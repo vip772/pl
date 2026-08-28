@@ -512,6 +512,8 @@ import androidx.compose.material3.CardDefaults as MaterialCardDefaults
 import androidx.compose.material3.HorizontalDivider as MaterialHorizontalDivider
 import androidx.compose.material3.Switch as MaterialSwitch
 import androidx.compose.material3.Text as MaterialText
+import androidx.compose.material3.NavigationBar as MaterialNavigationBar
+import androidx.compose.material3.NavigationBarItem as MaterialNavigationBarItem
 
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -4451,43 +4453,29 @@ private fun MainNavigationBar(
             MainNavItem(MainTab.SETTINGS, "设置", NavIcons.Settings)
         )
     }
-    val selectedIndex = items.indexOfFirst { it.tab == selectedTab }.coerceAtLeast(0)
-    val contentColor = MiuixTheme.colorScheme.onSurface
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = if (floating) 12.dp else 4.dp),
-        contentAlignment = Alignment.BottomCenter
+    MaterialNavigationBar(
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = androidx.compose.material3.MaterialTheme.colorScheme.surfaceContainer,
+        tonalElevation = 3.dp
     ) {
-        FloatingBottomBar(
-            selectedIndex = selectedIndex,
-            onSelected = { index -> onSelected(items[index].tab) },
-            backdrop = backdrop,
-            tabsCount = items.size,
-            isBlurEnabled = glass,
-            floating = floating
-        ) { selectTab ->
-            items.forEachIndexed { index, item ->
-                val selected = index == selectedIndex
-                FloatingBottomBarItem(
-                    onClick = { selectTab(index) },
-                    modifier = Modifier.defaultMinSize(minWidth = 76.dp)
-                ) {
+        items.forEach { item ->
+            val selected = item.tab == selectedTab
+            MaterialNavigationBarItem(
+                selected = selected,
+                onClick = { onSelected(item.tab) },
+                icon = {
                     Image(
                         imageVector = item.icon,
                         contentDescription = item.label,
-                        colorFilter = ColorFilter.tint(contentColor),
-                        modifier = Modifier.size(26.dp)
+                        colorFilter = ColorFilter.tint(
+                            if (selected) androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer
+                            else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        modifier = Modifier.size(24.dp)
                     )
-                    Text(
-                        text = item.label,
-                        color = contentColor,
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal
-                    )
-                }
-            }
+                },
+                label = { MaterialText(item.label) }
+            )
         }
     }
 }
