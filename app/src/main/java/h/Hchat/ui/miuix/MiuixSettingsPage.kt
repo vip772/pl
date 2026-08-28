@@ -1216,7 +1216,7 @@ object MiuixSettingsPage {
                                 ) + fadeOut(animationSpec = tween(160))
                                 enter togetherWith exit
                             },
-                            modifier = Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background),
+                            modifier = Modifier.fillMaxSize().background(androidx.compose.material3.MaterialTheme.colorScheme.background),
                             label = "HchatPageTransition"
                         ) { targetPage ->
                             if (targetPage == null) {
@@ -2825,7 +2825,7 @@ private fun rememberPressFeedbackColor(pressed: Boolean): Color {
         }
     }
     val target = if (feedbackVisible) {
-        MiuixTheme.colorScheme.onSurface.copy(alpha = 0.075f)
+        androidx.compose.material3.MaterialTheme.colorScheme.onSurface.copy(alpha = 0.075f)
     } else {
         Color.Transparent
     }
@@ -3019,7 +3019,7 @@ private fun MainSettingsPage(
                             Text(
                                 modifier = Modifier.fillMaxWidth().padding(top = 18.dp),
                                 text = "Hchat",
-                                color = MiuixTheme.colorScheme.onBackgroundVariant,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center
                             )
                         }
@@ -3256,7 +3256,7 @@ private fun SettingsSearchPage(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MiuixTheme.colorScheme.background)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.background)
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize(),
@@ -3312,7 +3312,7 @@ private fun SearchPageTopBar(
 ) {
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(MiuixTheme.colorScheme.background)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.background)
             .padding(
                 top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding() + 8.dp,
                 start = 12.dp,
@@ -3331,7 +3331,7 @@ private fun SearchPageTopBar(
         )
         Text(
             text = "取消",
-            color = MiuixTheme.colorScheme.primary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
             fontSize = 16.sp,
             modifier = Modifier
                 .clip(RoundedCornerShape(10.dp))
@@ -3356,7 +3356,7 @@ private fun SearchBarSurface(
             .fillMaxWidth()
             .height(48.dp)
             .clip(RoundedCornerShape(24.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
             .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -3365,12 +3365,12 @@ private fun SearchBarSurface(
             imageVector = NavIcons.Search,
             contentDescription = null,
             modifier = Modifier.size(22.dp),
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary)
+            colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
         )
         if (readOnly) {
             Text(
                 text = query.ifEmpty { placeholder },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 16.sp,
                 modifier = Modifier.weight(1f).padding(start = 10.dp)
             )
@@ -3380,10 +3380,10 @@ private fun SearchBarSurface(
                 onValueChange = onQueryChange,
                 singleLine = true,
                 textStyle = TextStyle(
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontSize = 16.sp
                 ),
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                cursorBrush = SolidColor(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                 modifier = Modifier.weight(1f)
                     .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
                     .padding(start = 10.dp),
@@ -3392,7 +3392,7 @@ private fun SearchBarSurface(
                         if (query.isEmpty()) {
                             Text(
                                 text = placeholder,
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 16.sp
                             )
                         }
@@ -3441,7 +3441,7 @@ private fun SearchHistorySection(
     }
     Text(
         text = "清除搜索记录",
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 14.sp,
         modifier = Modifier.fillMaxWidth()
             .padding(top = 18.dp)
@@ -3488,14 +3488,14 @@ private fun FeatureSearchResultRow(result: FeatureSearchResult, onClick: () -> U
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = result.provider.title(), color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text(text = result.provider.title(), color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
             Text(
                 text = result.summary,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )
         }
-        Text(text = "›", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 22.sp)
+        Text(text = "›", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 22.sp)
     }
 }
 
@@ -3558,7 +3558,7 @@ private fun PluginSearchResultRow(plugin: ScriptPluginRuntime.ScriptPlugin, onCl
             ) {
                 Text(
                     text = title,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f, fill = false)
                 )
@@ -3566,11 +3566,11 @@ private fun PluginSearchResultRow(plugin: ScriptPluginRuntime.ScriptPlugin, onCl
             }
             Text(
                 text = summary,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )
         }
-        Text(text = "›", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 22.sp)
+        Text(text = "›", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 22.sp)
     }
 }
 
@@ -4433,7 +4433,7 @@ private fun <T> SettingsRouteTransition(
                 enter togetherWith exit
             }
         },
-        modifier = modifier.background(MiuixTheme.colorScheme.background),
+        modifier = modifier.background(androidx.compose.material3.MaterialTheme.colorScheme.background),
         label = label
     ) { route ->
         content(route)
@@ -6355,7 +6355,7 @@ private fun MomentsAutoLikeMainPage(
                                 InsetDivider()
                                 Text(
                                     text = logs.take(5000),
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp,
                                     fontFamily = FontFamily.Monospace,
                                     modifier = Modifier.fillMaxWidth().padding(16.dp)
@@ -6785,7 +6785,7 @@ private object MomentsAutoCommentPage {
                                 InsetDivider()
                                 Text(
                                     text = logs.take(5000),
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp,
                                     fontFamily = FontFamily.Monospace,
                                     modifier = Modifier.fillMaxWidth().padding(16.dp)
@@ -7341,7 +7341,7 @@ private fun MomentsAutoForwardMainPage(
                                 InsetDivider()
                                 Text(
                                     text = logs.take(5000),
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp,
                                     fontFamily = FontFamily.Monospace,
                                     modifier = Modifier.fillMaxWidth().padding(16.dp)
@@ -9848,7 +9848,7 @@ private fun FloatingShortcutMiuixPage(
                         if (shortcuts.isEmpty()) {
                             Text(
                                 text = "暂无快捷项",
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
                                 textAlign = TextAlign.Center
                             )
@@ -10221,7 +10221,7 @@ private fun FloatingShortcutTextSizeSlider(
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
         Text(
             text = "$title ${value}sp",
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium
         )
         Slider(
@@ -10247,7 +10247,7 @@ private fun FloatingShortcutSizeSlider(
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
         Text(
             text = "$title ${value}dp",
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium
         )
         Slider(
@@ -10286,7 +10286,7 @@ private fun FloatingShortcutSettingsItemRow(
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(
                     text = item.title,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -10297,7 +10297,7 @@ private fun FloatingShortcutSettingsItemRow(
                         FloatingShortcutSettings.ACTION_PLUGIN_AGENT -> "插件 Agent"
                         else -> item.target
                     },
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -10327,9 +10327,9 @@ private fun FloatingShortcutItemAction(
     destructive: Boolean = false
 ) {
     val color = when {
-        !enabled -> MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.35f)
+        !enabled -> androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
         destructive -> Color(0xFFD93025)
-        else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+        else -> androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
     }
     Image(
         imageVector = icon,
@@ -10356,10 +10356,10 @@ private fun FloatingShortcutIconActionRow(
     ) {
         FloatingShortcutIconPreview(iconPath, title)
         Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text(text = title, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
             Text(
                 text = if (iconPath.isBlank()) defaultSummary else File(iconPath).name,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -10391,11 +10391,11 @@ private fun FloatingShortcutIconPreview(
     val bitmap = remember(path, previewSizePx) {
         path.takeIf { it.isNotBlank() }?.let { decodeFavoriteImage(it, previewSizePx) }
     }
-    val fallbackTint = MiuixTheme.colorScheme.onSecondaryVariant.toArgb()
+    val fallbackTint = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer.toArgb()
     Box(
         modifier = Modifier.size(40.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant),
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer),
         contentAlignment = Alignment.Center
     ) {
         if (bitmap != null) {
@@ -10433,7 +10433,7 @@ private fun FloatingShortcutIconPreview(
             Image(
                 imageVector = NavIcons.Practical,
                 contentDescription = description,
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSecondaryVariant),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer),
                 modifier = Modifier.size(22.dp)
             )
         }
@@ -12475,18 +12475,18 @@ private fun AutoReplyLabelRow(
         Box(
             modifier = Modifier.size(42.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant),
+                .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer),
             contentAlignment = Alignment.Center
         ) {
             Text(
                 text = name.take(1).ifEmpty { "签" },
-                color = MiuixTheme.colorScheme.onSecondaryVariant,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
                 fontWeight = FontWeight.Bold
             )
         }
         Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(text = name, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+            Text(text = name, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text(text = summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         SelectionMark(selected = selected, multiSelect = true)
     }
@@ -12502,7 +12502,7 @@ private fun XiaozhiCaptchaSvgView(svg: String) {
     AndroidView(
         modifier = Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 16.dp, vertical = 8.dp)
             .clip(RoundedCornerShape(10.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant),
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer),
         factory = { context ->
             WebView(context).apply {
                 setBackgroundColor(AndroidColor.TRANSPARENT)
@@ -13430,7 +13430,7 @@ private fun ZhiliaModelSelectCard(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Text(text = modelName, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+                    Text(text = modelName, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
                     val state = buildString {
                         if (current) append("当前")
                         if (selected && !current) {
@@ -13443,11 +13443,11 @@ private fun ZhiliaModelSelectCard(
                         }
                         if (isEmpty()) append("点击选择")
                     }
-                    Text(text = state, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+                    Text(text = state, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
                 }
                 Text(
                     text = if (selected) "已选" else "选择",
-                    color = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = if (selected) androidx.compose.material3.MaterialTheme.colorScheme.primary else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -13463,7 +13463,7 @@ private fun ZhiliaModelSelectCard(
                         .clickable { onToggleFavorite() }
                         .padding(horizontal = 10.dp, vertical = 6.dp),
                     text = if (favorite) "取消收藏" else "收藏",
-                    color = MiuixTheme.colorScheme.primary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -15652,7 +15652,7 @@ private fun ZombieCheckMainPage(
                 Column {
                     Text(
                         text = "检测依据来自微信支付接口返回文案。支付风控或服务端文案变化可能产生检测失败，请先小范围验证结果。",
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     TextButton(
@@ -15692,7 +15692,7 @@ private fun ZombieCheckMainPage(
                             if (names.isNotBlank()) append("\n\n$names")
                             if (pendingDeleteTargets.size > 6) append(" 等")
                         },
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     TextButton(
@@ -15729,7 +15729,7 @@ private fun ZombieCheckResultRow(name: String, summary: String) {
         Text(
             text = name,
             modifier = Modifier.fillMaxWidth(),
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
@@ -15737,7 +15737,7 @@ private fun ZombieCheckResultRow(name: String, summary: String) {
         Text(
             text = summary,
             modifier = Modifier.fillMaxWidth(),
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
@@ -17471,7 +17471,7 @@ private fun BackgroundBeautyAssetBlock(
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
             Text(
                 text = "背景不透明度 ${(opacity * 100f).toInt()}%",
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Medium
             )
             Slider(
@@ -17820,7 +17820,7 @@ private fun RoundAvatarMiuixPage(
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
                             Text(
                                 text = "圆角弧度 ${RoundAvatarSettings.displayPercent(radiusFactor)}%",
-                                color = MiuixTheme.colorScheme.onSurface,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.Medium
                             )
                             Slider(
@@ -18052,7 +18052,7 @@ private fun CustomFriendAvatarRow(
     ) {
         Box(
             modifier = Modifier.size(42.dp).clip(RoundedCornerShape(12.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant),
+                .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer),
             contentAlignment = Alignment.Center
         ) {
             if (bitmap != null) {
@@ -18062,10 +18062,10 @@ private fun CustomFriendAvatarRow(
             }
         }
         Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(option.label, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text("点击更换或恢复微信头像", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+            Text(option.label, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text("点击更换或恢复微信头像", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
-        Text(text = "›", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 22.sp)
+        Text(text = "›", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 22.sp)
     }
 }
 
@@ -20001,7 +20001,7 @@ private fun ConversationGroupEditorPage(
                 Column {
                     Text(
                         text = "确定删除“${group.name}”？聊天记录、联系人和群聊不会被删除。",
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     Row(
@@ -23970,7 +23970,7 @@ private fun TextVoiceMainPage(
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
                             Text(
                                 text = "语速 ${String.format(Locale.ROOT, "%.1f", speechRate)}x",
-                                color = MiuixTheme.colorScheme.onSurface,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.Medium
                             )
                             Slider(
@@ -24812,7 +24812,7 @@ private fun AudioTransformPreviewEditor(
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
             Text(
                 text = inputName.ifBlank { File(inputPath).name.ifBlank { "已选音频" } },
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -24827,9 +24827,9 @@ private fun AudioTransformPreviewEditor(
                         .clip(RoundedCornerShape(20.dp))
                         .background(
                             if (playEnabled) {
-                                MiuixTheme.colorScheme.primary
+                                androidx.compose.material3.MaterialTheme.colorScheme.primary
                             } else {
-                                MiuixTheme.colorScheme.onSurface.copy(alpha = 0.08f)
+                                androidx.compose.material3.MaterialTheme.colorScheme.onSurface.copy(alpha = 0.08f)
                             }
                         )
                         .clickable(enabled = playEnabled) {
@@ -24866,7 +24866,7 @@ private fun AudioTransformPreviewEditor(
                         imageVector = if (playing) NavIcons.Pause else NavIcons.Play,
                         contentDescription = if (playing) "暂停" else "播放",
                         colorFilter = ColorFilter.tint(
-                            if (playEnabled) Color.White else MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            if (playEnabled) Color.White else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
                         ),
                         modifier = Modifier.size(22.dp)
                     )
@@ -24875,13 +24875,13 @@ private fun AudioTransformPreviewEditor(
                     Text(
                         text = "${formatAudioTransformTime(positionMillis.toLong())} / " +
                             formatAudioTransformTime(durationMillis.toLong()),
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
                     )
                     Text(
                         text = statusText,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -24903,7 +24903,7 @@ private fun AudioTransformPreviewEditor(
                 Text(
                     text = "选定区间  ${formatAudioTransformTime(effectiveClipStart)} - " +
                         formatAudioTransformTime(effectiveClipEnd),
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(top = 4.dp)
                 )
@@ -27242,7 +27242,7 @@ private fun RedPacketBindingListPage(
                             if (names.isNotBlank()) append("\n\n$names")
                             if (selectedBindings.size > 6) append(" 等")
                         },
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     Row(
@@ -28841,7 +28841,7 @@ fun ScriptPluginMarketPage(
                 SettingsCard(modifier = Modifier.padding(top = 10.dp)) {
                     Text(
                         text = "社区插件由用户上传，安装前请核对作者、说明和文件内容。下载后的插件默认禁用。",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 13.sp,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)
                     )
@@ -28960,7 +28960,7 @@ fun ScriptPluginMarketPage(
                 Column {
                     Text(
                         text = "本地已存在目录“${PluginMarketInstaller.defaultLocalPluginId(plugin)}”。更新会覆盖 main.java、main.java.bshs、info.prop 和 README.md，并保留其它本地配置文件。更新后插件保持禁用。",
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     Row(
@@ -29049,7 +29049,7 @@ private fun PluginMarketNotificationBell(
         Image(
             imageVector = NavIcons.Bell,
             contentDescription = "回复通知",
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
+            colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurface),
             modifier = Modifier.size(24.dp)
         )
         if (unreadCount > 0L) {
@@ -29096,7 +29096,7 @@ private fun PluginMarketNotificationDialog(
                 ) {
                     Text(
                         text = "共 ${notifications.size} 条",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                     TextButton(
@@ -29153,33 +29153,33 @@ private fun PluginMarketNotificationRow(
         modifier = Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
             .background(
-                if (pressed) feedbackColor else MiuixTheme.colorScheme.secondaryVariant
+                if (pressed) feedbackColor else androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer
             )
             .responsiveTap(onClick = onClick, onPressedChange = { pressed = it })
             .padding(horizontal = 12.dp, vertical = 10.dp)
     ) {
         Text(
             text = "${notification.actorNickname.ifBlank { "微信用户" }} 回复了你的评论",
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontSize = 14.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.fillMaxWidth()
         )
         Text(
             text = notification.pluginName.ifBlank { notification.remotePluginId },
-            color = MiuixTheme.colorScheme.primary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
             fontSize = 12.sp,
             modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
         )
         Text(
             text = notification.content,
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontSize = 13.sp,
             modifier = Modifier.fillMaxWidth().padding(top = 7.dp)
         )
         Text(
             text = "原评论：${notification.originalContent}",
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -29187,7 +29187,7 @@ private fun PluginMarketNotificationRow(
         )
         Text(
             text = formatPluginMarketTime(notification.createdAt),
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 11.sp,
             modifier = Modifier.padding(top = 4.dp)
         )
@@ -29212,7 +29212,7 @@ private fun PluginMarketListRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = plugin.name.ifBlank { plugin.remotePluginId },
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -29226,7 +29226,7 @@ private fun PluginMarketListRow(
                     append(" | 评论: ").append(plugin.commentCount)
                     append("\n更新: ").append(formatPluginMarketTime(plugin.updateTime))
                 },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 maxLines = 3,
                 overflow = TextOverflow.Ellipsis
@@ -29234,7 +29234,7 @@ private fun PluginMarketListRow(
         }
         Text(
             text = "›",
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 22.sp,
             modifier = Modifier.padding(start = 8.dp)
         )
@@ -29308,7 +29308,7 @@ private fun PluginMarketDetailDialog(
                     if (detail?.description?.isNotBlank() == true) {
                         Text(
                             text = detail.description,
-                            color = MiuixTheme.colorScheme.onSurface,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                             fontSize = 14.sp,
                             modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
                         )
@@ -29316,13 +29316,13 @@ private fun PluginMarketDetailDialog(
                     if (detail != null) {
                         Text(
                             text = "包含文件",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 12.dp)
                         )
                         Text(
                             text = detail.files.joinToString("、") { it.name }.ifBlank { "未知" },
-                            color = MiuixTheme.colorScheme.onSurface,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                             fontSize = 13.sp,
                             modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                         )
@@ -29331,7 +29331,7 @@ private fun PluginMarketDetailDialog(
                             ?.let { readme ->
                                 Text(
                                     text = "插件说明",
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(top = 12.dp)
                                 )
@@ -29401,7 +29401,7 @@ private fun PluginMarketDetailDialog(
                             color = if (installMessage.startsWith("安装失败")) {
                                 Color(0xFFD93025)
                             } else {
-                                MiuixTheme.colorScheme.primary
+                                androidx.compose.material3.MaterialTheme.colorScheme.primary
                             },
                             fontSize = 13.sp,
                             modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
@@ -29420,18 +29420,18 @@ private fun PluginMarketDetailDialog(
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(MiuixTheme.colorScheme.secondaryVariant)
+                            .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                             .padding(horizontal = 12.dp, vertical = 10.dp)
                     ) {
                         Text(
                             text = "回复 ${activeReply.userNickname.ifBlank { "微信用户" }}",
-                            color = MiuixTheme.colorScheme.onSurface,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
                         )
                         Text(
                             text = activeReply.content.replace('\n', ' ').trim(),
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
@@ -29440,13 +29440,13 @@ private fun PluginMarketDetailDialog(
                         Box(
                             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(MiuixTheme.colorScheme.background)
+                                .background(androidx.compose.material3.MaterialTheme.colorScheme.background)
                                 .padding(horizontal = 10.dp, vertical = 9.dp)
                         ) {
                             if (replyDraft.isBlank()) {
                                 Text(
                                     text = "回复 ${activeReply.userNickname.ifBlank { "微信用户" }}",
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 14.sp
                                 )
                             }
@@ -29457,10 +29457,10 @@ private fun PluginMarketDetailDialog(
                                 minLines = 1,
                                 maxLines = 4,
                                 textStyle = TextStyle(
-                                    color = MiuixTheme.colorScheme.onSurface,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                                     fontSize = 14.sp
                                 ),
-                                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                                cursorBrush = SolidColor(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                                 modifier = Modifier.fillMaxWidth().focusRequester(focusRequester)
                             )
                         }
@@ -29471,7 +29471,7 @@ private fun PluginMarketDetailDialog(
                         ) {
                             Text(
                                 text = "${replyDraft.length}/1000",
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp
                             )
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -29552,7 +29552,7 @@ private fun PluginMarketDetailDialog(
                 Column {
                     Text(
                         text = "确定删除“${summary.name.ifBlank { summary.remotePluginId }}”吗？线上插件及全部历史版本都会被删除，本地插件不会删除。此操作无法撤销。",
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     Row(
@@ -29588,7 +29588,7 @@ private fun PluginMarketDetailDialog(
                 Column {
                     Text(
                         text = "确定删除这条评论吗？此操作无法撤销。",
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     Row(
@@ -29641,7 +29641,7 @@ private fun PluginMarketSocialSection(
 ) {
     Text(
         text = "互动",
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 12.sp,
         modifier = Modifier.padding(top = 16.dp)
     )
@@ -29663,7 +29663,7 @@ private fun PluginMarketSocialSection(
         )
         Text(
             text = "$likeCount 个赞 · $commentCount 条评论",
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp,
             textAlign = TextAlign.End,
             modifier = Modifier.weight(1f)
@@ -29671,7 +29671,7 @@ private fun PluginMarketSocialSection(
     }
     Text(
         text = "发表评论",
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 12.sp,
         modifier = Modifier.padding(top = 10.dp)
     )
@@ -29681,14 +29681,14 @@ private fun PluginMarketSocialSection(
         enabled = enabled && currentUserWxId.isNotBlank() && !submittingComment,
         minLines = 2,
         maxLines = 4,
-        textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
-        cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+        textStyle = TextStyle(color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+        cursorBrush = SolidColor(androidx.compose.material3.MaterialTheme.colorScheme.primary),
         decorationBox = { innerTextField ->
             Box(contentAlignment = Alignment.TopStart) {
                 if (commentDraft.isBlank()) {
                     Text(
                         text = if (currentUserWxId.isBlank()) "当前微信账号资料尚未就绪" else "填写评论内容",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 14.sp
                     )
                 }
@@ -29697,7 +29697,7 @@ private fun PluginMarketSocialSection(
         },
         modifier = Modifier.fillMaxWidth().padding(top = 5.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
             .padding(horizontal = 12.dp, vertical = 10.dp)
     )
     Row(
@@ -29707,7 +29707,7 @@ private fun PluginMarketSocialSection(
     ) {
         Text(
             text = "${commentDraft.length}/1000",
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp
         )
         TextButton(
@@ -29728,7 +29728,7 @@ private fun PluginMarketSocialSection(
     }
     Text(
         text = "评论 ($commentCount)",
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 12.sp,
         modifier = Modifier.padding(top = 10.dp)
     )
@@ -29757,7 +29757,7 @@ private fun PluginMarketSocialSection(
                 Column(
                     modifier = Modifier.fillMaxWidth().padding(start = 14.dp, bottom = 8.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(MiuixTheme.colorScheme.secondaryVariant)
+                        .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                         .padding(horizontal = 10.dp, vertical = 3.dp)
                 ) {
                     thread.replies.forEachIndexed { replyIndex, reply ->
@@ -29797,7 +29797,7 @@ private fun PluginMarketCommentRow(
         ) {
             Text(
                 text = comment.userNickname.ifBlank { "微信用户" },
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -29805,12 +29805,12 @@ private fun PluginMarketCommentRow(
             )
             Text(
                 text = formatPluginMarketTime(comment.createdAt),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp
             )
             Text(
                 text = comment.content,
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontSize = 14.sp,
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
             )
@@ -29856,13 +29856,13 @@ private fun PluginMarketReplyRow(
                     append("：")
                     append(comment.content)
                 },
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontSize = 13.sp,
                 modifier = Modifier.fillMaxWidth()
             )
             Text(
                 text = formatPluginMarketTime(comment.createdAt),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(top = 2.dp)
             )
@@ -29925,12 +29925,12 @@ private fun PluginMarketDialogInfoRow(label: String, value: String) {
     ) {
         Text(
             text = label,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 13.sp
         )
         Text(
             text = value,
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontSize = 13.sp,
             textAlign = TextAlign.End,
             modifier = Modifier.weight(1f).padding(start = 16.dp)
@@ -30076,16 +30076,16 @@ private fun PluginMarketUploadDialog(
                 ) {
                     Text(
                         text = "已选 ${selectedIds.size} / ${localPlugins.size}",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.weight(1f)
                     )
                     Text(
                         text = if (allFilteredSelected) "取消当前筛选" else "全选当前筛选",
                         color = if (filteredPlugins.isEmpty() || uploading) {
-                            MiuixTheme.colorScheme.onSurfaceVariantSummary
+                            androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
                         } else {
-                            MiuixTheme.colorScheme.primary
+                            androidx.compose.material3.MaterialTheme.colorScheme.primary
                         },
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
@@ -30205,7 +30205,7 @@ private fun PluginMarketUploadRow(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = plugin.name.ifBlank { plugin.id },
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -30216,7 +30216,7 @@ private fun PluginMarketUploadRow(
                         append(" · ").append(plugin.author.ifBlank { "未知作者" })
                         append(" · ").append(plugin.version.ifBlank { "未知版本" })
                     },
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -30227,7 +30227,7 @@ private fun PluginMarketUploadRow(
         if (selected) {
             Text(
                 text = "在线名称",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 4.dp, top = 4.dp)
             )
@@ -30236,16 +30236,16 @@ private fun PluginMarketUploadRow(
                 onValueChange = onRemoteNameChange,
                 enabled = enabled,
                 singleLine = true,
-                textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                textStyle = TextStyle(color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+                cursorBrush = SolidColor(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                 modifier = Modifier.fillMaxWidth().padding(top = 5.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant)
+                    .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             )
             Text(
                 text = "更新说明",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(start = 4.dp, top = 8.dp)
             )
@@ -30255,14 +30255,14 @@ private fun PluginMarketUploadRow(
                 enabled = enabled,
                 minLines = 2,
                 maxLines = 3,
-                textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
-                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                textStyle = TextStyle(color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
+                cursorBrush = SolidColor(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                 decorationBox = { innerTextField ->
                     Box(contentAlignment = Alignment.TopStart) {
                         if (releaseNotes.isBlank()) {
                             Text(
                                 text = "填写本次版本的更新内容",
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 14.sp
                             )
                         }
@@ -30271,7 +30271,7 @@ private fun PluginMarketUploadRow(
                 },
                 modifier = Modifier.fillMaxWidth().padding(top = 5.dp)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant)
+                    .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             )
             Row(
@@ -30281,13 +30281,13 @@ private fun PluginMarketUploadRow(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "附加文件${if (extraFiles.isEmpty()) "" else " (${extraFiles.size})"}",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp
                     )
                     if (extraFiles.isNotEmpty()) {
                         Text(
                             text = extraFiles.joinToString("、") { it.name },
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis,
@@ -30313,10 +30313,10 @@ private fun PluginMarketUploadRow(
         }
         if (status != null) {
             val color = when (status.phase) {
-                PluginMarketUploadPhase.SUCCESS -> MiuixTheme.colorScheme.primary
-                PluginMarketUploadPhase.PENDING_REVIEW -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+                PluginMarketUploadPhase.SUCCESS -> androidx.compose.material3.MaterialTheme.colorScheme.primary
+                PluginMarketUploadPhase.PENDING_REVIEW -> androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
                 PluginMarketUploadPhase.FAILED -> Color(0xFFD93025)
-                else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+                else -> androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
             }
             Text(
                 text = status.message,
@@ -30350,7 +30350,7 @@ private object PluginMarketHistoryUi {
     ) {
         Text(
             text = "历史版本",
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             modifier = Modifier.padding(top = 14.dp)
         )
@@ -30378,20 +30378,20 @@ private object PluginMarketHistoryUi {
                                 append(version.versionName.ifBlank { "未命名版本" })
                                 if (index == 0) append("（最新）")
                             },
-                            color = MiuixTheme.colorScheme.onSurface,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Medium
                         )
                         Text(
                             text = "${formatPluginMarketTime(version.createdAt)} · ${formatBytes(version.totalSize)}",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 11.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
                             text = "更新说明：${version.releaseNotes.ifBlank { "暂无更新说明" }}",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 3.dp)
                         )
@@ -32670,12 +32670,12 @@ fun ScriptPluginAgentWorkspacePage(
                         ) {
                             Text(
                                 text = "Agent 正在修改插件 ${approval.confirmation.pluginId}，确认后继续执行。",
-                                color = MiuixTheme.colorScheme.onSurface,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                                 fontSize = 13.sp
                             )
                             Text(
                                 text = "代码差异",
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp,
                                 modifier = Modifier.padding(top = 12.dp)
                             )
@@ -32802,12 +32802,12 @@ fun ScriptPluginAgentWorkspacePage(
                                     )
                                 }
                             },
-                            color = MiuixTheme.colorScheme.onSurface,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                             fontSize = 13.sp
                         )
                         Text(
                             text = "代码差异",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 12.dp)
                         )
@@ -32897,12 +32897,12 @@ fun ScriptPluginAgentWorkspacePage(
                                     append("\n\n静态检查发现网络、反射、Hook、文件删除或进程执行等高风险代码，请确认代码来源和用途。")
                                 }
                             },
-                            color = MiuixTheme.colorScheme.onSurface,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                             fontSize = 13.sp
                         )
                         Text(
                             text = "代码差异",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 12.dp)
                         )
@@ -32963,7 +32963,7 @@ fun ScriptPluginAgentWorkspacePage(
                 Column {
                     Text(
                         text = "确定删除插件“${pending.pluginName}”（${pending.pluginId}）吗？插件目录内的全部文件都会被删除，此操作无法撤销。",
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 13.sp
                     )
                     ScriptPluginAgentAlwaysAllowRow(
@@ -33295,7 +33295,7 @@ private fun ScriptPluginAgentConfigPage(
                 Column {
                     Text(
                         text = "确定删除“$activeProfileName”吗？",
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     Row(
@@ -33355,7 +33355,7 @@ private fun ScriptPluginAgentConfigPage(
                     ) {
                         Text(
                             text = "选择模型配置",
-                            color = MiuixTheme.colorScheme.onSurface,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.weight(1f)
                         )
@@ -33582,12 +33582,12 @@ private fun ScriptPluginAgentEndpointPreview(endpoint: String) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         Text(
             text = "实际请求地址",
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium
         )
         Text(
             text = endpoint,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             modifier = Modifier.padding(top = 4.dp)
         )
@@ -33935,19 +33935,19 @@ private fun ScriptPluginAgentChatPage(
             Image(
                 imageVector = NavIcons.Compact,
                 contentDescription = "压缩上下文",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurface),
                 modifier = Modifier.size(24.dp).responsiveTap(onClick = onCompact)
             )
             Image(
                 imageVector = NavIcons.History,
                 contentDescription = "会话历史",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurface),
                 modifier = Modifier.padding(start = 14.dp).size(24.dp).responsiveTap(onClick = onOpenHistory)
             )
             Image(
                 imageVector = NavIcons.Settings,
                 contentDescription = "Agent 配置",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurface),
                 modifier = Modifier.padding(start = 14.dp).size(24.dp).responsiveTap(onClick = onOpenConfig)
             )
         },
@@ -33968,7 +33968,7 @@ private fun ScriptPluginAgentChatPage(
                         item {
                             Text(
                                 text = "开始一个新会话",
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 14.sp,
                                 modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
                                 textAlign = TextAlign.Center
@@ -34029,7 +34029,7 @@ private fun ScriptPluginAgentChatPage(
                             .padding(end = 16.dp, bottom = 8.dp)
                             .size(36.dp)
                             .clip(RoundedCornerShape(18.dp))
-                            .background(MiuixTheme.colorScheme.primary)
+                            .background(androidx.compose.material3.MaterialTheme.colorScheme.primary)
                             .clickable {
                                 showScrollToBottom = false
                                 autoFollowOutput = true
@@ -34097,7 +34097,7 @@ private fun ScriptPluginAgentAlwaysAllowRow(
 private fun ScriptPluginAgentPendingConfirmationBar(label: String, onClick: () -> Unit) {
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(MiuixTheme.colorScheme.surfaceVariant)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
             .responsiveTap(onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -34105,19 +34105,19 @@ private fun ScriptPluginAgentPendingConfirmationBar(label: String, onClick: () -
         Image(
             imageVector = NavIcons.Modules,
             contentDescription = null,
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
+            colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.primary),
             modifier = Modifier.size(20.dp)
         )
         Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
             Text(
                 text = "待确认的插件修改",
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium
             )
             Text(
                 text = label,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -34125,7 +34125,7 @@ private fun ScriptPluginAgentPendingConfirmationBar(label: String, onClick: () -
         }
         Text(
             text = "查看 Diff",
-            color = MiuixTheme.colorScheme.primary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(start = 10.dp)
@@ -34180,7 +34180,7 @@ private fun ScriptPluginAgentMessageBlock(
                 modifier = Modifier
                     .then(longPressModifier)
                     .clip(RoundedCornerShape(18.dp))
-                    .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.14f))
+                    .background(androidx.compose.material3.MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
                     .padding(horizontal = 14.dp, vertical = 10.dp)
             ) {
                 Column {
@@ -34191,11 +34191,11 @@ private fun ScriptPluginAgentMessageBlock(
                             modifier = Modifier.padding(bottom = 8.dp)
                         )
                     }
-                    Text(text = message.content, color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp)
+                    Text(text = message.content, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontSize = 14.sp)
                     if (message.attachments.isNotEmpty()) {
                         Text(
                             text = message.attachments.joinToString("\n") { "附件: ${it.name}" },
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 12.sp,
                             modifier = Modifier.padding(top = 6.dp)
                         )
@@ -34218,7 +34218,7 @@ private fun ScriptPluginAgentMessageBlock(
             } else if (message.role == "tool") {
                 Text(
                     text = "工具调用",
-                    color = MiuixTheme.colorScheme.primary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Medium
                 )
@@ -34231,7 +34231,7 @@ private fun ScriptPluginAgentMessageBlock(
                         "interrupted" -> "已中断，尚未收到回复"
                         else -> "本轮没有返回可显示内容"
                     },
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontSize = 14.sp,
                     modifier = Modifier.padding(top = if (message.toolEvents.isNotEmpty()) 8.dp else 4.dp)
                 )
@@ -34239,7 +34239,7 @@ private fun ScriptPluginAgentMessageBlock(
                 if (message.status == "streaming") {
                     Text(
                         text = message.content,
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp,
                         modifier = Modifier.padding(top = 4.dp)
                     )
@@ -34264,7 +34264,7 @@ private fun ScriptPluginAgentMessageBlock(
                 ) {
                     Text(
                         text = if (message.status == "interrupted") "已中断" else "请求失败",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.weight(1f)
                     )
@@ -34322,7 +34322,7 @@ private fun ScriptPluginAgentWorkingIndicator(startedAt: Long, label: String = "
             append("Working (").append(elapsedText).append(')')
             if (label.isNotBlank()) append(" · ").append(label)
         },
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
         fontSize = 13.sp,
         fontWeight = FontWeight.Medium
     )
@@ -34362,12 +34362,12 @@ private fun ScriptPluginAgentReasoningGroup(message: ScriptPluginAgentChatMessag
             Image(
                 imageVector = NavIcons.Expand,
                 contentDescription = if (expanded) "收起思考过程" else "展开思考过程",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation }
             )
             Text(
                 text = if (message.status == "streaming") "思考中" else "思考过程",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(start = 7.dp)
@@ -34381,7 +34381,7 @@ private fun ScriptPluginAgentReasoningGroup(message: ScriptPluginAgentChatMessag
             MarkdownUi.Text(
                 context = context,
                 text = reasoning,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.fillMaxWidth().padding(start = 25.dp, bottom = 6.dp)
             )
@@ -34399,20 +34399,20 @@ private fun ScriptPluginAgentQuotedMessagePreview(
     Row(
         modifier = modifier.fillMaxWidth()
             .clip(RoundedCornerShape(4.dp))
-            .background(MiuixTheme.colorScheme.onSurface.copy(alpha = 0.05f))
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f))
             .padding(start = 8.dp, top = 6.dp, end = if (onClear == null) 8.dp else 4.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = if (quotedMessage.role == "assistant") "引用 Agent" else "引用用户",
-                color = MiuixTheme.colorScheme.primary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Medium
             )
             Text(
                 text = quotedMessage.content,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 maxLines = maxLines,
                 overflow = TextOverflow.Ellipsis
@@ -34422,7 +34422,7 @@ private fun ScriptPluginAgentQuotedMessagePreview(
             Image(
                 imageVector = NavIcons.Close,
                 contentDescription = "取消引用",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.padding(start = 6.dp).size(24.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .clickable(onClick = onClear)
@@ -34476,12 +34476,12 @@ private fun ScriptPluginAgentToolGroup(message: ScriptPluginAgentChatMessage) {
             Image(
                 imageVector = NavIcons.Expand,
                 contentDescription = if (expanded) "收起" else "展开",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation }
             )
             Text(
                 text = "工具调用（${message.toolEvents.size}）",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(start = 7.dp)
@@ -34545,12 +34545,12 @@ private fun ScriptPluginAgentToolEventRow(
             Image(
                 imageVector = icon,
                 contentDescription = null,
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                 modifier = Modifier.size(18.dp)
             )
             Text(
                 text = event.name,
-                color = MiuixTheme.colorScheme.primary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 maxLines = 1,
@@ -34559,7 +34559,7 @@ private fun ScriptPluginAgentToolEventRow(
             )
             Text(
                 text = listOf(statusText, durationText).filter { it.isNotBlank() }.joinToString(" "),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 modifier = Modifier.padding(start = 8.dp)
             )
@@ -34568,7 +34568,7 @@ private fun ScriptPluginAgentToolEventRow(
             if (event.progress.isNotBlank() && event.status == "running") {
                 Text(
                     text = event.progress,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -34580,7 +34580,7 @@ private fun ScriptPluginAgentToolEventRow(
         if (event.arguments.isNotBlank()) {
             Text(
                 text = scriptPluginAgentToolPreview(event.arguments),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -34590,7 +34590,7 @@ private fun ScriptPluginAgentToolEventRow(
         if (event.progress.isNotBlank() && event.status == "running") {
             Text(
                 text = event.progress,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
@@ -34605,12 +34605,12 @@ private fun ScriptPluginAgentToolEventRow(
                 Image(
                     imageVector = NavIcons.Modules,
                     contentDescription = null,
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
+                    colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                     modifier = Modifier.size(14.dp)
                 )
                 Text(
                     text = "查看 Diff",
-                    color = MiuixTheme.colorScheme.primary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                     fontSize = 11.sp,
                     modifier = Modifier.padding(start = 6.dp)
                 )
@@ -34624,12 +34624,12 @@ private fun ScriptPluginAgentToolEventRow(
                 Image(
                     imageVector = NavIcons.Back,
                     contentDescription = null,
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                    colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                     modifier = Modifier.size(14.dp).graphicsLayer { rotationZ = 180f }
                 )
                 Text(
                     text = scriptPluginAgentToolPreview(event.result),
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -34666,7 +34666,7 @@ private fun ScriptPluginAgentToolEventDialog(
                 if (!workspaceWrite && event.arguments.isNotBlank()) {
                     Text(
                         text = "调用参数",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                     )
@@ -34675,7 +34675,7 @@ private fun ScriptPluginAgentToolEventDialog(
                 if (!workspaceWrite && event.diff.isNotBlank()) {
                     Text(
                         text = "代码差异",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                     )
@@ -34684,7 +34684,7 @@ private fun ScriptPluginAgentToolEventDialog(
                 if (!workspaceWrite && event.result.isNotBlank()) {
                     Text(
                         text = if (event.status == "success") "执行结果" else "执行信息",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                     )
@@ -34699,7 +34699,7 @@ private fun ScriptPluginAgentToolEventDialog(
                 if (!workspaceWrite && event.resultHandle.isNotBlank()) {
                     Text(
                         text = "完整结果已保存（${event.resultLength} 字符）",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                     )
@@ -34769,12 +34769,12 @@ private fun ScriptPluginAgentDiffGroup(stateKey: String, diff: String) {
             Image(
                 imageVector = NavIcons.Expand,
                 contentDescription = if (expanded) "收起代码变更" else "展开代码变更",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation }
             )
             Text(
                 text = "代码变更",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 13.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(start = 7.dp)
@@ -34817,14 +34817,14 @@ private fun ScriptPluginAgentDiffCodeBlock(diff: String) {
     val deletionBackground = if (darkTheme) Color(0xFF3D1C20) else Color(0xFFFFEBE9)
     val hunkText = if (darkTheme) Color(0xFF79C0FF) else Color(0xFF0969DA)
     val hunkBackground = if (darkTheme) Color(0xFF162A42) else Color(0xFFDDF4FF)
-    val neutralText = MiuixTheme.colorScheme.onSurface
-    val headerText = MiuixTheme.colorScheme.onSurfaceVariantSummary
+    val neutralText = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
+    val headerText = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
 
     Column(
         modifier = Modifier.fillMaxWidth()
             .padding(vertical = 6.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(MiuixTheme.colorScheme.surfaceVariant)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
             .horizontalScroll(rememberScrollState())
             .padding(vertical = 6.dp)
     ) {
@@ -34910,7 +34910,7 @@ private fun ScriptPluginAgentMessageMenu(
                 if (message.content.isBlank()) {
                     Text(
                         text = "当前消息没有正文",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                     )
@@ -34935,12 +34935,12 @@ private fun ScriptPluginAgentMessageActionRow(
         Image(
             imageVector = icon,
             contentDescription = null,
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+            colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
             modifier = Modifier.size(22.dp)
         )
         Text(
             text = text,
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontSize = 14.sp,
             modifier = Modifier.padding(start = 14.dp)
         )
@@ -35140,7 +35140,7 @@ private fun ScriptPluginAgentHistoryDrawer(
                 Column {
                     Text(
                         text = "确定删除“${deleteSession.title.ifBlank { "新对话" }}”吗？此操作无法撤销。",
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 14.sp
                     )
                     Row(
@@ -35180,7 +35180,7 @@ private fun ScriptPluginAgentHistoryDrawer(
                 Column {
                     Text(
                         text = actionSession.title.ifBlank { "新对话" },
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 15.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -35248,7 +35248,7 @@ private fun ScriptPluginAgentHistoryDrawer(
             modifier = Modifier
                 .fillMaxWidth(0.84f)
                 .fillMaxHeight()
-                .background(MiuixTheme.colorScheme.background)
+                .background(androidx.compose.material3.MaterialTheme.colorScheme.background)
                 .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
         ) {
             Row(
@@ -35257,7 +35257,7 @@ private fun ScriptPluginAgentHistoryDrawer(
             ) {
                 Text(
                     text = "对话历史",
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f)
@@ -35288,12 +35288,12 @@ private fun ScriptPluginAgentHistoryDrawer(
                     Image(
                         imageVector = NavIcons.Swipe,
                         contentDescription = null,
-                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                        colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
                         text = "左右滑动可编辑或删除（点击不再显示）",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(start = 9.dp)
                     )
@@ -35357,7 +35357,7 @@ private fun ScriptPluginAgentHistoryDrawer(
 @Composable
 private fun ScriptPluginAgentWorkingSpinner(modifier: Modifier = Modifier) {
     val transition = rememberInfiniteTransition(label = "agentHistoryWorking")
-    val spinnerColor = MiuixTheme.colorScheme.primary
+    val spinnerColor = androidx.compose.material3.MaterialTheme.colorScheme.primary
     val rotation by transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
@@ -35434,7 +35434,7 @@ private fun ScriptPluginAgentHistoryItem(
                 Box(
                     modifier = Modifier.fillMaxHeight().sizeIn(minWidth = 82.dp)
                         .background(
-                            if (offsetX > 0f) MiuixTheme.colorScheme.primary.copy(alpha = 0.88f)
+                            if (offsetX > 0f) androidx.compose.material3.MaterialTheme.colorScheme.primary.copy(alpha = 0.88f)
                             else Color(0xFFD93025)
                         ),
                     contentAlignment = Alignment.Center
@@ -35451,9 +35451,9 @@ private fun ScriptPluginAgentHistoryItem(
             modifier = Modifier.fillMaxWidth()
                 .onSizeChanged { itemHeightPx = it.height.toFloat() }
                 .graphicsLayer { translationX = offsetX }
-                .background(MiuixTheme.colorScheme.background)
+                .background(androidx.compose.material3.MaterialTheme.colorScheme.background)
                 .background(
-                    if (selected) MiuixTheme.colorScheme.primary.copy(alpha = 0.13f)
+                    if (selected) androidx.compose.material3.MaterialTheme.colorScheme.primary.copy(alpha = 0.13f)
                     else Color.Transparent
                 )
                 .pointerInput(session.id, enabled) {
@@ -35500,7 +35500,7 @@ private fun ScriptPluginAgentHistoryItem(
             Image(
                 imageVector = NavIcons.Drag,
                 contentDescription = "长按拖动排序",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.size(22.dp)
                     .pointerInput(session.id, enabled, itemHeightPx) {
                         if (!enabled) return@pointerInput
@@ -35548,7 +35548,7 @@ private fun ScriptPluginAgentHistoryItem(
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(
                     text = session.title.ifBlank { "新对话" },
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontSize = 14.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -35557,7 +35557,7 @@ private fun ScriptPluginAgentHistoryItem(
                 if (lastUser.isNotBlank() && lastUser != session.title) {
                     Text(
                         text = lastUser,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -35569,7 +35569,7 @@ private fun ScriptPluginAgentHistoryItem(
                 Image(
                     imageVector = NavIcons.Pin,
                     contentDescription = "已置顶",
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
+                    colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                     modifier = Modifier.padding(start = 6.dp).size(17.dp)
                 )
             }
@@ -35577,7 +35577,7 @@ private fun ScriptPluginAgentHistoryItem(
                 Image(
                     imageVector = NavIcons.Lock,
                     contentDescription = "已锁定",
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                    colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                     modifier = Modifier.padding(start = 6.dp).size(17.dp)
                 )
             }
@@ -35597,16 +35597,16 @@ private fun ScriptPluginAgentHistoryActionRow(
     onClick: () -> Unit
 ) {
     val contentColor = when {
-        !enabled -> MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f)
+        !enabled -> androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
         destructive -> Color(0xFFD93025)
-        else -> MiuixTheme.colorScheme.onSurface
+        else -> androidx.compose.material3.MaterialTheme.colorScheme.onSurface
     }
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (destructive) Color(0xFFD93025).copy(alpha = 0.08f)
-                else MiuixTheme.colorScheme.secondaryVariant
+                else androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer
             )
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 14.dp),
@@ -35652,7 +35652,7 @@ private fun ScriptPluginAgentQuickProfileDialog(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = profile.name,
-                                    color = MiuixTheme.colorScheme.onSurface,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 1,
@@ -35660,7 +35660,7 @@ private fun ScriptPluginAgentQuickProfileDialog(
                                 )
                                 Text(
                                     text = profile.config.model.ifBlank { "未设置模型" },
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 12.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -35669,7 +35669,7 @@ private fun ScriptPluginAgentQuickProfileDialog(
                             if (profile.id == activeProfileId) {
                                 Text(
                                     text = "当前",
-                                    color = MiuixTheme.colorScheme.primary,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                                     fontSize = 12.sp,
                                     modifier = Modifier.padding(start = 12.dp)
                                 )
@@ -35734,7 +35734,7 @@ private fun ScriptPluginAgentQuickOptionsDialog(
                     InsetDivider()
                     Text(
                         text = "MCP 服务器",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                     )
@@ -35750,7 +35750,7 @@ private fun ScriptPluginAgentQuickOptionsDialog(
                 } else {
                     Text(
                         text = "暂无 MCP 服务器，请先在 Agent 配置中添加。",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                         fontSize = 12.sp,
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
                     )
@@ -35774,7 +35774,7 @@ private fun ScriptPluginAgentPendingMessagePanel(
         modifier = Modifier.fillMaxWidth()
             .padding(start = 10.dp, top = 8.dp, end = 10.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
     ) {
         Row(
             modifier = Modifier.fillMaxWidth().clickable { onExpandedChange(!expanded) }
@@ -35783,7 +35783,7 @@ private fun ScriptPluginAgentPendingMessagePanel(
         ) {
             Text(
                 text = "待发送 ${messages.size}",
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.weight(1f)
@@ -35791,7 +35791,7 @@ private fun ScriptPluginAgentPendingMessagePanel(
             Image(
                 imageVector = if (expanded) NavIcons.MoveUp else NavIcons.MoveDown,
                 contentDescription = if (expanded) "收起待发送消息" else "展开待发送消息",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.size(18.dp)
             )
         }
@@ -35809,7 +35809,7 @@ private fun ScriptPluginAgentPendingMessagePanel(
                                     if (message.quotedMessage != null) append("引用 · ")
                                     append(message.content.ifBlank { "${message.attachments.size} 个附件" })
                                 },
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 12.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
@@ -35844,7 +35844,7 @@ private fun ScriptPluginAgentPendingMessageAction(
     Image(
         imageVector = icon,
         contentDescription = description,
-        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+        colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
         modifier = Modifier.padding(start = 4.dp).size(26.dp)
             .clip(RoundedCornerShape(4.dp))
             .clickable(onClick = onClick)
@@ -35863,7 +35863,7 @@ private fun ScriptPluginAgentQuickChoice(
     Row(
         modifier = modifier.height(28.dp)
             .clip(RoundedCornerShape(6.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
             .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -35871,9 +35871,9 @@ private fun ScriptPluginAgentQuickChoice(
         Text(
             text = "$label · $value",
             color = if (enabled) {
-                MiuixTheme.colorScheme.onSurfaceVariantSummary
+                androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
             } else {
-                MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f)
+                androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
             },
             fontSize = 11.sp,
             maxLines = 1,
@@ -35883,7 +35883,7 @@ private fun ScriptPluginAgentQuickChoice(
         Image(
             imageVector = NavIcons.MoveDown,
             contentDescription = null,
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+            colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
             modifier = Modifier.padding(start = 3.dp).size(14.dp)
         )
     }
@@ -35917,11 +35917,11 @@ private fun ScriptPluginAgentComposer(
 ) {
     val canSend = value.isNotBlank() || attachments.isNotEmpty()
     val actionEnabled = enabled && canSend
-    val actionBackground = MiuixTheme.colorScheme.primary
+    val actionBackground = androidx.compose.material3.MaterialTheme.colorScheme.primary
     val actionTint = Color.White
     Column(
         modifier = Modifier.fillMaxWidth()
-            .background(MiuixTheme.colorScheme.background.copy(alpha = 0.96f))
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.background.copy(alpha = 0.96f))
     ) {
         quotedMessage?.let { quoted ->
             ScriptPluginAgentQuotedMessagePreview(
@@ -35960,10 +35960,10 @@ private fun ScriptPluginAgentComposer(
             Image(
                 imageVector = NavIcons.Settings,
                 contentDescription = "快捷选项",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.size(28.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant)
+                    .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                     .clickable(enabled = enabled, onClick = onOpenQuickOptions)
                     .padding(6.dp)
             )
@@ -35977,13 +35977,13 @@ private fun ScriptPluginAgentComposer(
                 attachments.forEach { attachment ->
                     Row(
                         modifier = Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(MiuixTheme.colorScheme.secondaryVariant)
+                            .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                             .padding(start = 8.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = attachment.name,
-                            color = MiuixTheme.colorScheme.onSurface,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                             fontSize = 12.sp,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -35992,7 +35992,7 @@ private fun ScriptPluginAgentComposer(
                         Image(
                             imageVector = NavIcons.Close,
                             contentDescription = "移除附件",
-                            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                            colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                             modifier = Modifier.padding(start = 4.dp).size(18.dp)
                                 .responsiveTap(onClick = { onRemoveAttachment(attachment.path) })
                         )
@@ -36005,14 +36005,14 @@ private fun ScriptPluginAgentComposer(
                 .fillMaxWidth()
                 .padding(start = 10.dp, top = 10.dp, end = 10.dp, bottom = 10.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant)
+                .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                 .padding(start = 8.dp, top = 9.dp, end = 12.dp, bottom = 9.dp),
             verticalAlignment = Alignment.Bottom
         ) {
             Image(
                 imageVector = NavIcons.Attach,
                 contentDescription = "添加附件",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.padding(end = 8.dp, bottom = 1.dp).size(24.dp)
                     .responsiveTap(onClick = onAttach)
             )
@@ -36022,7 +36022,7 @@ private fun ScriptPluginAgentComposer(
                 enabled = enabled,
                 minLines = 1,
                 maxLines = 4,
-                textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
+                textStyle = TextStyle(color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontSize = 14.sp),
                 modifier = Modifier.weight(1f).align(Alignment.Top).heightIn(min = 34.dp),
                 decorationBox = { innerTextField ->
                     Box(
@@ -36032,7 +36032,7 @@ private fun ScriptPluginAgentComposer(
                         if (value.isBlank()) {
                             Text(
                                 text = "输入消息",
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 14.sp
                             )
                         }
@@ -36077,7 +36077,7 @@ private fun ScriptPluginAgentComposer(
 private fun ClickHintTag() {
     Text(
         text = "单击",
-        color = MiuixTheme.colorScheme.primary,
+        color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
         fontSize = 11.sp,
         fontWeight = FontWeight.Medium,
         maxLines = 1,
@@ -36086,7 +36086,7 @@ private fun ClickHintTag() {
         modifier = Modifier
             .defaultMinSize(minWidth = 40.dp)
             .clip(RoundedCornerShape(999.dp))
-            .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.primary.copy(alpha = 0.12f))
             .padding(horizontal = 8.dp, vertical = 2.dp)
     )
 }
@@ -36273,7 +36273,7 @@ fun ScriptPluginSettingsContent(
             if (plugins.isEmpty()) {
                 Text(
                     text = "暂无插件",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 13.sp,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
                 )
@@ -36661,7 +36661,7 @@ fun ScriptPluginManagerPage(
                 item {
                     Text(
                         text = busyText,
-                        color = MiuixTheme.colorScheme.primary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                         fontSize = 13.sp,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)
                     )
@@ -36893,7 +36893,7 @@ private fun ScriptPluginSelectionToolbar(
     ) {
         Text(
             text = if (selectedCount == 0) "未选择插件" else "已选择 $selectedCount 个",
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium,
             modifier = Modifier.weight(1f)
         )
@@ -36947,9 +36947,9 @@ private fun ScriptPluginCompactAction(
     destructive: Boolean = false
 ) {
     val color = when {
-        !enabled -> MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f)
+        !enabled -> androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
         destructive -> Color(0xFFD93025)
-        else -> MiuixTheme.colorScheme.primary
+        else -> androidx.compose.material3.MaterialTheme.colorScheme.primary
     }
     Box(
         modifier = modifier.height(40.dp)
@@ -36970,8 +36970,8 @@ private fun ScriptPluginManagerCommandRow(
     enabled: Boolean,
     onClick: () -> Unit
 ) {
-    val color = if (enabled) MiuixTheme.colorScheme.onSurface else {
-        MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f)
+    val color = if (enabled) androidx.compose.material3.MaterialTheme.colorScheme.onSurface else {
+        androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
     }
     Row(
         modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick)
@@ -36986,7 +36986,7 @@ private fun ScriptPluginManagerCommandRow(
         )
         Column(modifier = Modifier.weight(1f).padding(start = 14.dp)) {
             Text(text = title, color = color, fontWeight = FontWeight.Medium)
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+            Text(text = summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
     }
 }
@@ -37034,7 +37034,7 @@ private fun ScriptPluginManagerRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     text = plugin.displayName ?: plugin.name.ifBlank { plugin.id },
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -37044,7 +37044,7 @@ private fun ScriptPluginManagerRow(
                     Image(
                         imageVector = NavIcons.Pin,
                         contentDescription = "已置顶",
-                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
+                        colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                         modifier = Modifier.padding(start = 6.dp).size(16.dp)
                     )
                 }
@@ -37055,7 +37055,7 @@ private fun ScriptPluginManagerRow(
                     append(" · ").append(plugin.author.ifBlank { "未知作者" })
                     append(" · ").append(plugin.version.ifBlank { "未知版本" })
                 },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -37064,7 +37064,7 @@ private fun ScriptPluginManagerRow(
         Image(
             imageVector = NavIcons.More,
             contentDescription = "管理插件",
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+            colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
             modifier = Modifier.padding(start = 8.dp).size(32.dp)
                 .clip(RoundedCornerShape(8.dp))
                 .clickable {
@@ -37076,7 +37076,7 @@ private fun ScriptPluginManagerRow(
             imageVector = NavIcons.Drag,
             contentDescription = if (dragEnabled) "长按拖动排序" else "搜索时不可排序",
             colorFilter = ColorFilter.tint(
-                MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = if (dragEnabled) 1f else 0.35f)
+                androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (dragEnabled) 1f else 0.35f)
             ),
             modifier = Modifier.padding(start = 4.dp).size(32.dp)
                 .pointerInput(plugin.id, dragEnabled, itemHeightPx) {
@@ -37163,13 +37163,13 @@ private fun ScriptPluginDialogActionRow(
     destructive: Boolean = false,
     onClick: () -> Unit
 ) {
-    val color = if (destructive) Color(0xFFD93025) else MiuixTheme.colorScheme.onSurface
+    val color = if (destructive) Color(0xFFD93025) else androidx.compose.material3.MaterialTheme.colorScheme.onSurface
     Row(
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (destructive) Color(0xFFD93025).copy(alpha = 0.08f)
-                else MiuixTheme.colorScheme.secondaryVariant
+                else androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 18.dp, vertical = 14.dp),
@@ -37202,18 +37202,18 @@ private fun ScriptPluginRenameDialog(
             Column {
                 Text(
                     text = "仅修改展示名称，插件目录和 ID 保持不变",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
                 BasicTextField(
                     value = name,
                     onValueChange = { name = it.take(100) },
                     singleLine = true,
-                    textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 15.sp),
-                    cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                    textStyle = TextStyle(color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontSize = 15.sp),
+                    cursorBrush = SolidColor(androidx.compose.material3.MaterialTheme.colorScheme.primary),
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(MiuixTheme.colorScheme.secondaryVariant)
+                        .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                         .padding(horizontal = 12.dp, vertical = 11.dp)
                 )
                 Row(
@@ -37257,7 +37257,7 @@ private fun ScriptPluginDeleteDialog(
                     } else {
                         "确定删除已选的 ${pluginNames.size} 个插件吗？插件会先停止运行，删除后无法恢复。"
                     },
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontSize = 14.sp
                 )
                 Row(
@@ -37299,7 +37299,7 @@ private fun ScriptPluginImportDialog(
             Column(modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
                 Text(
                     text = "共 ${inspection.plugins.size} 个插件。已有同 ID 插件默认跳过，可单独选择覆盖。",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
                 LazyColumn(
@@ -37318,7 +37318,7 @@ private fun ScriptPluginImportDialog(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = plugin.name.ifBlank { plugin.pluginId },
-                                    color = MiuixTheme.colorScheme.onSurface,
+                                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                                     fontWeight = FontWeight.Medium,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
@@ -37332,7 +37332,7 @@ private fun ScriptPluginImportDialog(
                                     color = if (plugin.conflict && plugin.pluginId in overwriteIds) {
                                         Color(0xFFD93025)
                                     } else {
-                                        MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                        androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
                                     },
                                     fontSize = 12.sp
                                 )
@@ -37466,13 +37466,13 @@ private fun PathSwitchRow(
             ) {
                 Text(
                     text = title,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f, fill = false)
                 )
                 ClickHintTag()
             }
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+            Text(text = summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         Switch(
             checked = checked,
@@ -37515,19 +37515,19 @@ private fun ScriptPluginRow(
             ) {
                 Text(
                     text = title,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f, fill = false)
                 )
                 ClickHintTag()
             }
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+            Text(text = summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         if (showSettings) {
             Image(
                 imageVector = NavIcons.Settings,
                 contentDescription = "插件设置",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier
                     .padding(start = 10.dp, end = 8.dp)
                     .size(22.dp)
@@ -37537,7 +37537,7 @@ private fun ScriptPluginRow(
         Image(
             imageVector = NavIcons.More,
             contentDescription = "管理插件",
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+            colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
             modifier = Modifier
                 .padding(start = if (showSettings) 0.dp else 10.dp, end = 8.dp)
                 .size(22.dp)
@@ -37565,13 +37565,13 @@ private fun ScriptPluginPathDialog(
             Column {
                 Text(
                     text = path,
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontSize = 13.sp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(vertical = 8.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(MiuixTheme.colorScheme.surfaceVariant)
+                        .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
                         .padding(horizontal = 12.dp, vertical = 10.dp)
                 )
                 TextButton(
@@ -37647,19 +37647,19 @@ fun FirstUseAgreementDialog(
                         .heightIn(max = agreementMaxHeight)
                         .verticalScroll(rememberScrollState())
                         .clip(RoundedCornerShape(10.dp))
-                        .background(MiuixTheme.colorScheme.surfaceVariant)
+                        .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
                         .padding(horizontal = 14.dp, vertical = 12.dp)
                 ) {
                     Text(
                         text = agreement,
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 13.sp,
                         lineHeight = 20.sp
                     )
                 }
                 Text(
                     text = "请输入“$acceptedText”确认",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(top = 14.dp)
                 )
@@ -37668,14 +37668,14 @@ fun FirstUseAgreementDialog(
                     onValueChange = { input = it },
                     singleLine = true,
                     textStyle = TextStyle(
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontSize = 15.sp
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(MiuixTheme.colorScheme.secondaryVariant)
+                        .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                         .padding(horizontal = 12.dp, vertical = 11.dp)
                 )
                 Row(
@@ -37749,7 +37749,7 @@ fun ScriptPluginReadmeDialog(
                     if (readme.isBlank()) {
                         Text(
                             text = "暂无说明",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                             fontSize = 13.sp,
                             modifier = Modifier.padding(vertical = 10.dp)
                         )
@@ -37829,7 +37829,7 @@ private fun MarkdownLine(
                 modifier = Modifier.fillMaxWidth()
                     .padding(vertical = 8.dp)
                     .height(1.dp)
-                    .background(MiuixTheme.colorScheme.outline)
+                    .background(androidx.compose.material3.MaterialTheme.colorScheme.outline)
             )
             inlineState
         }
@@ -37841,7 +37841,7 @@ private fun MarkdownLine(
                 text = text,
                 inlineState = inlineState,
                 modifier = Modifier.padding(top = if (level <= 2) 10.dp else 8.dp, bottom = 4.dp),
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontSize = when (level) {
                     1 -> 22.sp
                     2 -> 19.sp
@@ -37858,13 +37858,13 @@ private fun MarkdownLine(
                 Box(
                     modifier = Modifier.padding(end = 8.dp)
                         .size(width = 3.dp, height = 20.dp)
-                        .background(MiuixTheme.colorScheme.primary)
+                        .background(androidx.compose.material3.MaterialTheme.colorScheme.primary)
                 )
                 MarkdownTextResult(
                     context = context,
                     text = trimmed.removePrefix(">").trim(),
                     inlineState = inlineState,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = bodyFontSize,
                     modifier = Modifier.weight(1f)
                 )
@@ -37902,7 +37902,7 @@ private fun MarkdownBullet(
     Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
         Text(
             text = marker,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = fontSize,
             modifier = Modifier.padding(end = 8.dp)
         )
@@ -37923,7 +37923,7 @@ fun CodeBlock(code: String, onCopy: ((String) -> Unit)? = null) {
         modifier = Modifier.fillMaxWidth()
             .padding(vertical = 6.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(MiuixTheme.colorScheme.surfaceVariant)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
     ) {
         if (onCopy != null) {
             Row(
@@ -37932,14 +37932,14 @@ fun CodeBlock(code: String, onCopy: ((String) -> Unit)? = null) {
             ) {
                 Text(
                     text = "代码",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 11.sp,
                     modifier = Modifier.weight(1f)
                 )
                 Image(
                     imageVector = NavIcons.Copy,
                     contentDescription = "复制代码",
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                    colorFilter = ColorFilter.tint(androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant),
                     modifier = Modifier.size(26.dp).clip(RoundedCornerShape(4.dp))
                         .clickable { onCopy(code) }
                         .padding(6.dp)
@@ -37948,7 +37948,7 @@ fun CodeBlock(code: String, onCopy: ((String) -> Unit)? = null) {
         }
         Text(
             text = code,
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontSize = 12.sp,
             fontFamily = FontFamily.Monospace,
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
@@ -37961,7 +37961,7 @@ fun Text(
     context: Context,
     text: String,
     modifier: Modifier = Modifier,
-    color: Color = MiuixTheme.colorScheme.onSurface,
+    color: Color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
     fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
     fontWeight: FontWeight? = null
 ) {
@@ -37974,11 +37974,11 @@ private fun MarkdownTextResult(
     text: String,
     inlineState: MarkdownInlineState,
     modifier: Modifier = Modifier,
-    color: Color = MiuixTheme.colorScheme.onSurface,
+    color: Color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
     fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
     fontWeight: FontWeight? = null
 ): MarkdownInlineState {
-    val primary = MiuixTheme.colorScheme.primary
+    val primary = androidx.compose.material3.MaterialTheme.colorScheme.primary
     val result = remember(text, primary, inlineState.bold) {
         buildMarkdownAnnotatedString(text, primary, inlineState)
     }
@@ -40969,19 +40969,19 @@ internal fun InputRow(
     onValueChange: (String) -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-        Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-        Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+        Text(text = title, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+        Text(text = summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
             textStyle = TextStyle(
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontSize = 14.sp
             ),
             minLines = minLines,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant)
+                .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         )
     }
@@ -41040,7 +41040,7 @@ internal fun ColorPickerRow(
                 ) {
                     Text(
                         text = title,
-                        color = MiuixTheme.colorScheme.onSurface,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.weight(1f, fill = false)
                     )
@@ -41052,7 +41052,7 @@ internal fun ColorPickerRow(
                     } else {
                         "$summary，支持 #RRGGBB / #AARRGGBB"
                     },
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             }
@@ -41067,24 +41067,24 @@ internal fun ColorPickerRow(
                 value = value,
                 onValueChange = { onValueChange(it.take(if (allowGradient) 19 else 9)) },
                 textStyle = TextStyle(
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontSize = 14.sp
                 ),
                 modifier = Modifier.weight(1f)
                     .clip(RoundedCornerShape(10.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant)
+                    .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                     .padding(horizontal = 12.dp, vertical = 10.dp)
             )
             if (onReset != null) {
                 Text(
                     text = "重置",
-                    color = MiuixTheme.colorScheme.primary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier
                         .clip(RoundedCornerShape(10.dp))
                         .clickable(onClick = onReset)
-                        .background(MiuixTheme.colorScheme.secondaryVariant)
+                        .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                         .padding(horizontal = 12.dp, vertical = 10.dp)
                 )
             }
@@ -41135,7 +41135,7 @@ internal fun ColorPickerRow(
                 } else {
                     "可直接输入颜色值，也可以用色盘取色；清空输入框可恢复默认色"
                 },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 8.dp)
             )
@@ -41151,7 +41151,7 @@ private fun ColorSpecChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val borderColor = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.outline.copy(alpha = 0.45f)
+    val borderColor = if (selected) androidx.compose.material3.MaterialTheme.colorScheme.primary else androidx.compose.material3.MaterialTheme.colorScheme.outline.copy(alpha = 0.45f)
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(10.dp))
@@ -41163,10 +41163,10 @@ private fun ColorSpecChip(
     ) {
         ColorPreviewDot(value, size = 24.dp)
         Column {
-            Text(text = label, color = MiuixTheme.colorScheme.onSurface, fontSize = 12.sp)
+            Text(text = label, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontSize = 12.sp)
             Text(
                 text = value.ifEmpty { "未设置" },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 11.sp
             )
         }
@@ -41176,7 +41176,7 @@ private fun ColorSpecChip(
 @Composable
 private fun ColorPreviewDot(value: String, size: Dp = 34.dp) {
     val colorParts = colorSpecParts(value)
-    val startColor = composeColorFromHex(colorParts.first) ?: MiuixTheme.colorScheme.secondaryVariant
+    val startColor = composeColorFromHex(colorParts.first) ?: androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer
     val endColor = composeColorFromHex(colorParts.second)
     val shape = RoundedCornerShape(size / 2)
     val colorBackground = if (endColor != null && endColor != startColor) {
@@ -41189,11 +41189,11 @@ private fun ColorPreviewDot(value: String, size: Dp = 34.dp) {
             .size(size)
             .clip(shape)
             .then(colorBackground)
-            .border(2.dp, MiuixTheme.colorScheme.outline.copy(alpha = 0.45f), shape),
+            .border(2.dp, androidx.compose.material3.MaterialTheme.colorScheme.outline.copy(alpha = 0.45f), shape),
         contentAlignment = Alignment.Center
     ) {
         if (value.isEmpty()) {
-            Text(text = "-", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 15.sp)
+            Text(text = "-", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 15.sp)
         }
     }
 }
@@ -41205,7 +41205,7 @@ private fun PsColorPicker(
     modifier: Modifier = Modifier
 ) {
     val selected = colorPickerSelection(value)
-    val markerColor = MiuixTheme.colorScheme.onSurface
+    val markerColor = androidx.compose.material3.MaterialTheme.colorScheme.onSurface
     val density = LocalDensity.current
     val paletteSize = 228.dp
     val hueBarWidth = 40.dp
@@ -41414,9 +41414,9 @@ private fun VariableInputRow(
         }
     }
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-        Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+        Text(text = title, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
         if (summary.isNotBlank()) {
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+            Text(text = summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         BasicTextField(
             value = fieldValue,
@@ -41425,13 +41425,13 @@ private fun VariableInputRow(
                 onValueChange(it.text)
             },
             textStyle = TextStyle(
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontSize = 14.sp
             ),
             minLines = minLines,
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                 .clip(RoundedCornerShape(10.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant)
+                .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
                 .padding(horizontal = 12.dp, vertical = 10.dp)
         )
         VariableChipRow(
@@ -41866,9 +41866,9 @@ private fun VariableChipRow(
 private fun VariableChip(variable: TemplateVariable, onClick: () -> Unit) {
     var pressed by remember { mutableStateOf(false) }
     val bg = if (pressed) {
-        MiuixTheme.colorScheme.primary.copy(alpha = 0.22f)
+        androidx.compose.material3.MaterialTheme.colorScheme.primary.copy(alpha = 0.22f)
     } else {
-        MiuixTheme.colorScheme.primary.copy(alpha = 0.12f)
+        androidx.compose.material3.MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
     }
     Row(
         modifier = Modifier
@@ -41885,7 +41885,7 @@ private fun VariableChip(variable: TemplateVariable, onClick: () -> Unit) {
     ) {
         Text(
             text = variable.label,
-            color = MiuixTheme.colorScheme.primary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium
         )
@@ -41981,7 +41981,7 @@ private fun TimeOfDayPickerDialog(
                     } else {
                         "请输入有效的时、分、秒"
                     },
-                    color = if (valid) MiuixTheme.colorScheme.onSurfaceVariantSummary else Color(0xFFD93025),
+                    color = if (valid) androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant else Color(0xFFD93025),
                     fontSize = 13.sp,
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
                     textAlign = TextAlign.Center
@@ -42039,7 +42039,7 @@ private fun TimeOfDayNumberField(
     Column(modifier = modifier) {
         Text(
             text = label,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontSize = 12.sp,
             modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
             textAlign = TextAlign.Center
@@ -42053,14 +42053,14 @@ private fun TimeOfDayNumberField(
             },
             singleLine = true,
             textStyle = TextStyle(
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontSize = 20.sp,
                 textAlign = TextAlign.Center
             ),
             modifier = Modifier.fillMaxWidth()
                 .height(48.dp)
                 .clip(RoundedCornerShape(8.dp))
-                .background(MiuixTheme.colorScheme.surfaceVariant)
+                .background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)
                 .padding(horizontal = 8.dp, vertical = 10.dp)
         )
     }
@@ -42162,7 +42162,7 @@ private fun BatchDeleteConfirmDialog(
                         if (names.isNotBlank()) append("\n\n").append(names)
                         if (labels.size > 6) append(" 等")
                     },
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontSize = 14.sp
                 )
                 Row(
@@ -42252,7 +42252,7 @@ private fun ContactPickerScopeRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Medium
             )
             Text(
@@ -42261,7 +42261,7 @@ private fun ContactPickerScopeRow(
                 } else {
                     "已选 $selectedCount / $memberCount $memberUnit"
                 },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )
         }
@@ -42374,7 +42374,7 @@ private fun GroupChatLabelPickerRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = label.name,
-                color = MiuixTheme.colorScheme.onSurface,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Medium
             )
             Text(
@@ -42383,7 +42383,7 @@ private fun GroupChatLabelPickerRow(
                 } else {
                     "已选 $selectedCount / ${label.groupIds.size} 个群聊"
                 },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 fontSize = 12.sp
             )
         }
@@ -42414,14 +42414,14 @@ private fun ContactFilterChip(
         label = "ContactFilterPressScale"
     )
     val background = if (selected) {
-        MiuixTheme.colorScheme.primary.copy(alpha = if (visualPressed) 0.88f else 1f)
+        androidx.compose.material3.MaterialTheme.colorScheme.primary.copy(alpha = if (visualPressed) 0.88f else 1f)
     } else {
-        MiuixTheme.colorScheme.onSurface.copy(alpha = if (visualPressed) 0.18f else 0.06f)
+        androidx.compose.material3.MaterialTheme.colorScheme.onSurface.copy(alpha = if (visualPressed) 0.18f else 0.06f)
     }
     val textColor = if (selected) {
         Color.White
     } else {
-        MiuixTheme.colorScheme.onSurfaceVariantSummary
+        androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
     }
     Box(
         modifier = modifier
@@ -42461,7 +42461,7 @@ private fun PickerSectionHeader(
         Text(
             modifier = Modifier.weight(1f),
             text = text,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
             fontWeight = FontWeight.Medium
         )
     }
@@ -42528,24 +42528,24 @@ private fun MessageBlockLabelListCard(
             Box(
                 modifier = Modifier.size(42.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant),
+                    .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = label.name.take(1).ifEmpty { "签" },
-                    color = MiuixTheme.colorScheme.onSecondaryVariant,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
                     fontWeight = FontWeight.Bold
                 )
             }
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(text = label.name, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+                Text(text = label.name, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
                 Text(
                     text = "${label.contactIds.size} 人",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp
                 )
             }
-            Text(text = "›", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 22.sp)
+            Text(text = "›", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 22.sp)
         }
     }
 }
@@ -42597,8 +42597,8 @@ private fun MessageBlockContactRow(
     ) {
         ContactAvatar(option)
         Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(text = option.label, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+            Text(text = option.label, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text(text = summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         SelectionMark(selected = selected, multiSelect = true)
     }
@@ -42653,7 +42653,7 @@ private fun FavoriteListCard(
             Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
                 Text(
                     text = item.displayTitle(),
-                    color = MiuixTheme.colorScheme.onSurface,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                     fontWeight = FontWeight.Medium,
                     fontSize = 16.sp,
                     maxLines = 2,
@@ -42661,7 +42661,7 @@ private fun FavoriteListCard(
                 )
                 Text(
                     text = item.displaySummary(),
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 12.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -42670,7 +42670,7 @@ private fun FavoriteListCard(
                 if (item.tags.isNotEmpty()) {
                     Text(
                         text = "标签 · ${item.tags.joinToString(" / ")}",
-                        color = MiuixTheme.colorScheme.primary,
+                        color = androidx.compose.material3.MaterialTheme.colorScheme.primary,
                         fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -42708,7 +42708,7 @@ private fun FavoriteMediaThumbnail(
     Box(
         modifier = Modifier.size(56.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant)
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer)
             .then(previewModifier),
         contentAlignment = Alignment.Center
     ) {
@@ -42738,7 +42738,7 @@ private fun FavoriteMediaThumbnail(
         } else {
             Text(
                 text = item.typeLabel().take(1).ifEmpty { "藏" },
-                color = MiuixTheme.colorScheme.onSecondaryVariant,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp
             )
@@ -42850,13 +42850,13 @@ private fun ContactRow(
     ) {
         ContactAvatar(option)
         Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(text = option.label, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text(text = option.label, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
             val summary = buildList {
                 add(option.id)
                 option.labels.takeIf { it.isNotEmpty() }?.let { add(it.joinToString(" / ")) }
                 option.extraSummary.takeIf { it.isNotBlank() }?.let(::add)
             }.joinToString(" · ")
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+            Text(text = summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
         }
         SelectionMark(selected = selected, multiSelect = multiSelect)
     }
@@ -42870,8 +42870,8 @@ private fun ContactAvatar(option: ContactOption) {
         bitmap = loadAvatarBitmap(option.id, option.avatarUrl, option.avatarBackupUrl)
     }
     val image = bitmap
-    val avatarBg = if (image == null && option.group) Color(0xFF2E7DFF) else MiuixTheme.colorScheme.secondaryVariant
-    val avatarTextColor = if (image == null && option.group) Color.White else MiuixTheme.colorScheme.onSecondaryVariant
+    val avatarBg = if (image == null && option.group) Color(0xFF2E7DFF) else androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer
+    val avatarTextColor = if (image == null && option.group) Color.White else androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer
     val avatarShape = if (RoundAvatarSettings.enabled(context)) {
         RoundedCornerShape((42f * RoundAvatarSettings.radiusFactor(context)).dp)
     } else {
@@ -42919,9 +42919,9 @@ private fun OptionChoiceRow(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = item.label, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text(text = item.label, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
             if (item.summary.isNotEmpty()) {
-                Text(text = item.summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+                Text(text = item.summary, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
             }
         }
         SelectionMark(selected = selected, multiSelect = false)
@@ -42966,7 +42966,7 @@ internal fun BottomActionBar(
     RegisterSettingsBackHandler(backAction)
     Row(
         modifier = Modifier.fillMaxWidth()
-            .background(MiuixTheme.colorScheme.background.copy(alpha = 0.92f))
+            .background(androidx.compose.material3.MaterialTheme.colorScheme.background.copy(alpha = 0.92f))
             .padding(start = 12.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
@@ -43036,8 +43036,8 @@ private fun isGestureNavigationMode(context: Context): Boolean {
 
 @Composable
 private fun BottomBarButton(text: String, modifier: Modifier, filled: Boolean, onClick: () -> Unit) {
-    val bg = if (filled) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.secondaryVariant
-    val fg = if (filled) Color.White else MiuixTheme.colorScheme.onSecondaryVariant
+    val bg = if (filled) androidx.compose.material3.MaterialTheme.colorScheme.primary else androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer
+    val fg = if (filled) Color.White else androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer
     Text(
         modifier = modifier.clip(RoundedCornerShape(14.dp))
             .background(bg)
@@ -43174,7 +43174,7 @@ private fun InfoRow(label: String, value: String, onClick: (() -> Unit)? = null)
     ) {
         Text(
             text = label,
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium
         )
         Row(
@@ -43182,11 +43182,11 @@ private fun InfoRow(label: String, value: String, onClick: (() -> Unit)? = null)
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(text = value, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, textAlign = TextAlign.End)
+            Text(text = value, color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.End)
             if (onClick != null) {
                 Text(
                     text = "›",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                     fontSize = 22.sp,
                     modifier = Modifier.padding(start = 6.dp)
                 )
@@ -43205,7 +43205,7 @@ private fun XiaozhiMcpStatusRow(status: XiaozhiMcpStatus) {
     ) {
         Text(
             text = "连接状态",
-            color = MiuixTheme.colorScheme.onSurface,
+            color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium
         )
         Row(
@@ -43221,7 +43221,7 @@ private fun XiaozhiMcpStatusRow(status: XiaozhiMcpStatus) {
             )
             Text(
                 text = status.label,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.End,
                 modifier = Modifier.padding(start = 8.dp)
             )
@@ -43254,7 +43254,7 @@ private fun EmptyText(text: String) {
     Text(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
         text = text,
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center
     )
 }
