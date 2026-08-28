@@ -521,6 +521,8 @@ import androidx.compose.material3.SearchBar as MaterialSearchBar
 import androidx.compose.material3.SearchBarDefaults as MaterialSearchBarDefaults
 import androidx.compose.material3.Icon as MaterialIcon
 import androidx.compose.material3.TextButton as MaterialTextButton
+import androidx.compose.material3.Slider as MaterialSlider
+import androidx.compose.material3.Checkbox as MaterialCheckbox
 
 import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
@@ -10166,7 +10168,7 @@ private fun FloatingShortcutAppearanceMiuixPage(
 }
 
 @Composable
-private fun FloatingShortcutTextSizeSlider(
+private fun FloatingShortcutTextSizeMaterialSlider(
     title: String,
     value: Int,
     onValueChange: (Int) -> Unit
@@ -10177,22 +10179,20 @@ private fun FloatingShortcutTextSizeSlider(
             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium
         )
-        Slider(
+        MaterialSlider(
             value = value.toFloat(),
             onValueChange = { onValueChange(it.toInt()) },
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             valueRange = FloatingShortcutSettings.MIN_LABEL_TEXT_SIZE.toFloat()..
                 FloatingShortcutSettings.MAX_LABEL_TEXT_SIZE.toFloat(),
             steps = FloatingShortcutSettings.MAX_LABEL_TEXT_SIZE -
-                FloatingShortcutSettings.MIN_LABEL_TEXT_SIZE - 1,
-            showKeyPoints = true,
-            keyPoints = listOf(10f, 12f, 14f, 16f, 18f, 20f, 24f)
+                FloatingShortcutSettings.MIN_LABEL_TEXT_SIZE - 1
         )
     }
 }
 
 @Composable
-private fun FloatingShortcutSizeSlider(
+private fun FloatingShortcutSizeMaterialSlider(
     title: String,
     value: Int,
     onValueChange: (Int) -> Unit
@@ -10203,16 +10203,14 @@ private fun FloatingShortcutSizeSlider(
             color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
             fontWeight = FontWeight.Medium
         )
-        Slider(
+        MaterialSlider(
             value = value.toFloat(),
             onValueChange = { onValueChange(it.toInt()) },
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
             valueRange = FloatingShortcutSettings.MIN_BUTTON_SIZE.toFloat()..
                 FloatingShortcutSettings.MAX_BUTTON_SIZE.toFloat(),
             steps = FloatingShortcutSettings.MAX_BUTTON_SIZE -
-                FloatingShortcutSettings.MIN_BUTTON_SIZE - 1,
-            showKeyPoints = true,
-            keyPoints = listOf(36f, 44f, 52f, 60f, 64f)
+                FloatingShortcutSettings.MIN_BUTTON_SIZE - 1
         )
     }
 }
@@ -17427,7 +17425,7 @@ private fun BackgroundBeautyAssetBlock(
                 color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                 fontWeight = FontWeight.Medium
             )
-            Slider(
+            MaterialSlider(
                 value = opacity,
                 onValueChange = { opacity = BackgroundBeautySettings.opacity(it) },
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -17440,9 +17438,7 @@ private fun BackgroundBeautyAssetBlock(
                             BackgroundBeautySettings.opacity(opacity)
                         )
                         .apply()
-                },
-                showKeyPoints = true,
-                keyPoints = listOf(0.1f, 0.25f, 0.5f, 0.75f, 1.0f)
+                }
             )
         }
     }
@@ -17776,7 +17772,7 @@ private fun RoundAvatarMiuixPage(
                                 color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.Medium
                             )
-                            Slider(
+                            MaterialSlider(
                                 value = radiusFactor,
                                 onValueChange = {
                                     radiusFactor = RoundAvatarSettings.normalizeRadiusFactor(it)
@@ -17791,9 +17787,7 @@ private fun RoundAvatarMiuixPage(
                                             RoundAvatarSettings.normalizeRadiusFactor(radiusFactor)
                                         )
                                         .apply()
-                                },
-                                showKeyPoints = true,
-                                keyPoints = listOf(0.1f, 0.2f, 0.3f, 0.4f, 0.5f)
+                                }
                             )
                         }
                     }
@@ -23926,7 +23920,7 @@ private fun TextVoiceMainPage(
                                 color = androidx.compose.material3.MaterialTheme.colorScheme.onSurface,
                                 fontWeight = FontWeight.Medium
                             )
-                            Slider(
+                            MaterialSlider(
                                 value = speechRate,
                                 onValueChange = {
                                     speechRate = TextVoiceSettings.normalizeSpeechRate(it)
@@ -23938,9 +23932,7 @@ private fun TextVoiceMainPage(
                                     sp.edit()
                                         .putFloat(TextVoiceSettings.KEY_SPEECH_RATE, speechRate)
                                         .apply()
-                                },
-                                showKeyPoints = true,
-                                keyPoints = listOf(0.1f, 1.0f, 2.0f, 3.0f)
+                                }
                             )
                         }
                     }
@@ -24841,7 +24833,7 @@ private fun AudioTransformPreviewEditor(
                     )
                 }
             }
-            Slider(
+            MaterialSlider(
                 value = positionMillis.coerceIn(0, durationMillis.coerceAtLeast(0)).toFloat(),
                 onValueChange = { next ->
                     if (enabled && prepared) seekTo(next.toInt())
@@ -24849,8 +24841,7 @@ private fun AudioTransformPreviewEditor(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                     .graphicsLayer(alpha = if (enabled && prepared) 1f else 0.45f),
                 valueRange = 0f..durationMillis.coerceAtLeast(1).toFloat(),
-                steps = 0,
-                showKeyPoints = false
+                steps = 0
             )
             if (clipEnabled && durationMillis > 0) {
                 Text(
@@ -42887,10 +42878,10 @@ private fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
         modifier = Modifier.size(30.dp),
         contentAlignment = Alignment.Center
     ) {
-        Checkbox(
-            modifier = Modifier.size(22.dp),
-            state = if (selected) ToggleableState.On else ToggleableState.Off,
-            onClick = null
+        MaterialCheckbox(
+            checked = selected,
+            onCheckedChange = null,
+            modifier = Modifier.size(22.dp)
         )
     }
 }
