@@ -5675,15 +5675,9 @@ private fun InputHintMiuixPage(
                             template = it
                         }
                         InsetDivider()
-                        inputHintTemplateVariables.forEach { variable ->
-                            val startKey = InputHintSettings.variableColorKey(variable.token, false)
-                            val endKey = InputHintSettings.variableColorKey(variable.token, true)
-                            var startColor by remember { mutableStateOf(sp.getString(startKey, InputHintSettings.DEFAULT_VARIABLE_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_COLOR) }
-                            var endColor by remember { mutableStateOf(sp.getString(endKey, InputHintSettings.DEFAULT_VARIABLE_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_COLOR) }
-                            ColorPickerRow("${variable.label}起始色", "${variable.label}的渐变起始颜色", startColor, onReset = { startColor = InputHintSettings.DEFAULT_VARIABLE_COLOR }) { startColor = it.take(19); sp.edit().putString(startKey, startColor).apply() }
-                            InsetDivider()
-                            ColorPickerRow("${variable.label}结束色", "${variable.label}的渐变结束颜色", endColor, onReset = { endColor = InputHintSettings.DEFAULT_VARIABLE_COLOR }) { endColor = it.take(19); sp.edit().putString(endKey, endColor).apply() }
-                            InsetDivider()
+                        inputHintTemplateVariables.forEachIndexed { index, variable ->
+                            InputHintVariableColorRow(sp, variable)
+                            if (index < inputHintTemplateVariables.lastIndex) InsetDivider()
                         }
                         InfoRow("当前提示", preview.toString())
                     }
@@ -5693,6 +5687,17 @@ private fun InputHintMiuixPage(
     }
 }
 
+@Composable
+private fun InputHintVariableColorRow(sp: android.content.SharedPreferences, variable: TemplateVariable) {
+    val startKey = InputHintSettings.variableColorKey(variable.token, false)
+    val endKey = InputHintSettings.variableColorKey(variable.token, true)
+    var colorSpec by remember { mutableStateOf(composeColorSpec(sp.getString(startKey, InputHintSettings.DEFAULT_VARIABLE_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_COLOR, sp.getString(endKey, InputHintSettings.DEFAULT_VARIABLE_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_COLOR)) }
+    ColorPickerRow(variable.label, "${variable.label}的渐变颜色", colorSpec, onReset = { colorSpec = InputHintSettings.DEFAULT_VARIABLE_COLOR; sp.edit().remove(startKey).remove(endKey).apply() }) { value ->
+        colorSpec = value.take(19)
+        val parts = colorSpecParts(colorSpec)
+        sp.edit().putString(startKey, parts.first).putString(endKey, parts.second.ifEmpty { parts.first }).apply()
+    }
+}
 @Composable
 private fun PatBlockMiuixPage(
     context: Context,
