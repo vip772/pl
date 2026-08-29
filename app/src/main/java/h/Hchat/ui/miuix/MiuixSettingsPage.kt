@@ -5589,6 +5589,8 @@ private fun InputHintMiuixPage(
         )
     }
     var template by remember { mutableStateOf(InputHintSettings.template(sp)) }
+    var variableStartColor by remember { mutableStateOf(sp.getString(InputHintSettings.KEY_VARIABLE_START_COLOR, InputHintSettings.DEFAULT_VARIABLE_START_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_START_COLOR) }
+    var variableEndColor by remember { mutableStateOf(sp.getString(InputHintSettings.KEY_VARIABLE_END_COLOR, InputHintSettings.DEFAULT_VARIABLE_END_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_END_COLOR) }
     var stats by remember { mutableStateOf(InputHintStats()) }
     DisposableEffect(statisticsEnabled) {
         val subscription = if (statisticsEnabled) {
@@ -5602,7 +5604,7 @@ private fun InputHintMiuixPage(
         }
         onDispose { subscription?.unsubscribe() }
     }
-    val preview = InputHintSettings.renderTemplate(template, stats)
+    val preview = InputHintSettings.renderTemplateSpanned(template, stats, variableStartColor, variableEndColor)
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
 
@@ -5619,6 +5621,8 @@ private fun InputHintMiuixPage(
                         .putBoolean(InputHintSettings.KEY_ENABLE, enabled)
                         .putBoolean(InputHintSettings.KEY_STATISTICS_ENABLE, statisticsEnabled)
                         .putString(InputHintSettings.KEY_TEMPLATE, template)
+                        .putString(InputHintSettings.KEY_VARIABLE_START_COLOR, variableStartColor)
+                        .putString(InputHintSettings.KEY_VARIABLE_END_COLOR, variableEndColor)
                         .apply()
                     Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
                 },
@@ -5627,6 +5631,8 @@ private fun InputHintMiuixPage(
                     enabled = InputHintSettings.DEFAULT_ENABLE
                     statisticsEnabled = InputHintSettings.DEFAULT_STATISTICS_ENABLE
                     template = InputHintSettings.DEFAULT_TEMPLATE
+                    variableStartColor = InputHintSettings.DEFAULT_VARIABLE_START_COLOR
+                    variableEndColor = InputHintSettings.DEFAULT_VARIABLE_END_COLOR
                 },
                 middleText = "取消",
                 onMiddleClick = onBack
@@ -5674,6 +5680,16 @@ private fun InputHintMiuixPage(
                         ) {
                             template = it
                         }
+                        InsetDivider()
+                        ColorPickerRow(
+                            "变量起始色", "中文变量替换结果的渐变起始颜色", variableStartColor,
+                            onReset = { variableStartColor = InputHintSettings.DEFAULT_VARIABLE_START_COLOR }
+                        ) { variableStartColor = it.take(19) }
+                        InsetDivider()
+                        ColorPickerRow(
+                            "变量结束色", "中文变量替换结果的渐变结束颜色", variableEndColor,
+                            onReset = { variableEndColor = InputHintSettings.DEFAULT_VARIABLE_END_COLOR }
+                        ) { variableEndColor = it.take(19) }
                         InsetDivider()
                         InfoRow("当前提示", preview)
                     }

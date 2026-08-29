@@ -71,7 +71,9 @@ private class InputHintRuntime(
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == InputHintSettings.KEY_ENABLE ||
             key == InputHintSettings.KEY_TEMPLATE ||
-            key == InputHintSettings.KEY_STATISTICS_ENABLE
+            key == InputHintSettings.KEY_STATISTICS_ENABLE ||
+            key == InputHintSettings.KEY_VARIABLE_START_COLOR ||
+            key == InputHintSettings.KEY_VARIABLE_END_COLOR
         ) {
             refreshAttachedInputs()
         }
@@ -191,7 +193,11 @@ private class InputHintRuntime(
         } else {
             InputHintStats()
         }
-        val renderedHint = InputHintSettings.renderTemplate(InputHintSettings.template(prefs), stats)
+        val renderedHint = InputHintSettings.renderTemplateSpanned(
+            InputHintSettings.template(prefs), stats,
+            prefs.getString(InputHintSettings.KEY_VARIABLE_START_COLOR, InputHintSettings.DEFAULT_VARIABLE_START_COLOR).orEmpty(),
+            prefs.getString(InputHintSettings.KEY_VARIABLE_END_COLOR, InputHintSettings.DEFAULT_VARIABLE_END_COLOR).orEmpty()
+        )
         val currentHint = readHint(input)
         if (binding.appliedHint == null || !TextUtils.equals(currentHint, binding.appliedHint)) {
             binding.originalHint = currentHint
