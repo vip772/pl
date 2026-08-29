@@ -5602,7 +5602,7 @@ private fun InputHintMiuixPage(
         }
         onDispose { subscription?.unsubscribe() }
     }
-    val preview = InputHintSettings.renderTemplate(template, stats)
+    val preview = InputHintSettings.renderTemplateSpanned(template, stats, InputHintSettings.variableColors(sp))
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
 
@@ -5675,7 +5675,11 @@ private fun InputHintMiuixPage(
                             template = it
                         }
                         InsetDivider()
-                        InfoRow("当前提示", preview)
+                        inputHintTemplateVariables.forEachIndexed { index, variable ->
+                            InputHintVariableColorRow(sp, variable)
+                            if (index < inputHintTemplateVariables.lastIndex) InsetDivider()
+                        }
+                        InfoRow("当前提示", preview.toString())
                     }
                 }
             }
@@ -5683,6 +5687,17 @@ private fun InputHintMiuixPage(
     }
 }
 
+@Composable
+private fun InputHintVariableColorRow(sp: android.content.SharedPreferences, variable: TemplateVariable) {
+    val startKey = InputHintSettings.variableColorKey(variable.token, false)
+    val endKey = InputHintSettings.variableColorKey(variable.token, true)
+    var colorSpec by remember { mutableStateOf(composeColorSpec(sp.getString(startKey, InputHintSettings.DEFAULT_VARIABLE_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_COLOR, sp.getString(endKey, InputHintSettings.DEFAULT_VARIABLE_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_COLOR)) }
+    ColorPickerRow(variable.label, "${variable.label}的渐变颜色", colorSpec, onReset = { colorSpec = InputHintSettings.DEFAULT_VARIABLE_COLOR; sp.edit().remove(startKey).remove(endKey).apply() }) { value ->
+        colorSpec = value.take(19)
+        val parts = colorSpecParts(colorSpec)
+        sp.edit().putString(startKey, parts.first).putString(endKey, parts.second.ifEmpty { parts.first }).apply()
+    }
+}
 @Composable
 private fun PatBlockMiuixPage(
     context: Context,
