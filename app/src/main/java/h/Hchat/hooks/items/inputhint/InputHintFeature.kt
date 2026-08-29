@@ -72,7 +72,7 @@ private class InputHintRuntime(
         if (key == InputHintSettings.KEY_ENABLE ||
             key == InputHintSettings.KEY_TEMPLATE ||
             key == InputHintSettings.KEY_STATISTICS_ENABLE ||
-            key.startsWith("input_hint_color_")
+            key?.startsWith("input_hint_color_") == true
         ) {
             refreshAttachedInputs()
         }
