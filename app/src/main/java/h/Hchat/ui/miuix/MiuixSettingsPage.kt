@@ -5691,7 +5691,7 @@ private fun InputHintMiuixPage(
                             onReset = { variableEndColor = InputHintSettings.DEFAULT_VARIABLE_END_COLOR }
                         ) { variableEndColor = it.take(19) }
                         InsetDivider()
-                        InfoRow("当前提示", preview)
+                        InfoRow("当前提示", preview.toString())
                     }
                 }
             }
