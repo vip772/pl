@@ -5681,16 +5681,16 @@ private fun InputHintMiuixPage(
                             template = it
                         }
                         InsetDivider()
-                        ColorPickerRow(
-                            "变量起始色", "中文变量替换结果的渐变起始颜色", variableStartColor,
-                            onReset = { variableStartColor = InputHintSettings.DEFAULT_VARIABLE_START_COLOR }
-                        ) { variableStartColor = it.take(19) }
-                        InsetDivider()
-                        ColorPickerRow(
-                            "变量结束色", "中文变量替换结果的渐变结束颜色", variableEndColor,
-                            onReset = { variableEndColor = InputHintSettings.DEFAULT_VARIABLE_END_COLOR }
-                        ) { variableEndColor = it.take(19) }
-                        InsetDivider()
+                        inputHintTemplateVariables.forEach { variable ->
+                            val startKey = InputHintSettings.variableColorKey(variable.token, false)
+                            val endKey = InputHintSettings.variableColorKey(variable.token, true)
+                            var startColor by remember { mutableStateOf(sp.getString(startKey, InputHintSettings.DEFAULT_VARIABLE_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_COLOR) }
+                            var endColor by remember { mutableStateOf(sp.getString(endKey, InputHintSettings.DEFAULT_VARIABLE_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_COLOR) }
+                            ColorPickerRow("${variable.label}起始色", "${variable.label}的渐变起始颜色", startColor, onReset = { startColor = InputHintSettings.DEFAULT_VARIABLE_COLOR }) { startColor = it.take(19); sp.edit().putString(startKey, startColor).apply() }
+                            InsetDivider()
+                            ColorPickerRow("${variable.label}结束色", "${variable.label}的渐变结束颜色", endColor, onReset = { endColor = InputHintSettings.DEFAULT_VARIABLE_COLOR }) { endColor = it.take(19); sp.edit().putString(endKey, endColor).apply() }
+                            InsetDivider()
+                        }
                         InfoRow("当前提示", preview.toString())
                     }
                 }

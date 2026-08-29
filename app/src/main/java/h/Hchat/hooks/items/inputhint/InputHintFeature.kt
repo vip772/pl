@@ -72,8 +72,7 @@ private class InputHintRuntime(
         if (key == InputHintSettings.KEY_ENABLE ||
             key == InputHintSettings.KEY_TEMPLATE ||
             key == InputHintSettings.KEY_STATISTICS_ENABLE ||
-            key == InputHintSettings.KEY_VARIABLE_START_COLOR ||
-            key == InputHintSettings.KEY_VARIABLE_END_COLOR
+            key.startsWith("input_hint_color_")
         ) {
             refreshAttachedInputs()
         }
@@ -194,9 +193,7 @@ private class InputHintRuntime(
             InputHintStats()
         }
         val renderedHint = InputHintSettings.renderTemplateSpanned(
-            InputHintSettings.template(prefs), stats,
-            prefs.getString(InputHintSettings.KEY_VARIABLE_START_COLOR, InputHintSettings.DEFAULT_VARIABLE_START_COLOR).orEmpty(),
-            prefs.getString(InputHintSettings.KEY_VARIABLE_END_COLOR, InputHintSettings.DEFAULT_VARIABLE_END_COLOR).orEmpty()
+            InputHintSettings.template(prefs), stats, InputHintSettings.variableColors(prefs)
         )
         val currentHint = readHint(input)
         if (binding.appliedHint == null || !TextUtils.equals(currentHint, binding.appliedHint)) {
