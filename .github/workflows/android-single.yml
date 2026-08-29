@@ -133,11 +133,11 @@ jobs:
 
       - name: 还原签名证书
         env:
-          HCAT_KEYSTORE_BASE64: ${{ secrets.HCAT_KEYSTORE_BASE64 }}
+          HCAT_KEYSTORE_BASE64: ${{ secrets.SINGING_KEYSTORE_BASE64 }}
         run: |
           set -e
           if [ -z "$HCAT_KEYSTORE_BASE64" ]; then
-            echo "Missing secret: HCAT_KEYSTORE_BASE64"
+            echo "Missing secret: SINGING_KEYSTORE_BASE64"
             exit 1
           fi
           mkdir -p app/keystore
@@ -146,9 +146,9 @@ jobs:
       - name: 构建当前频道 APK
         env:
           HCAT_APK_NAME: ${{ env.HCAT_APK_NAME }}
-          HCAT_STORE_PASSWORD: ${{ secrets.HCAT_STORE_PASSWORD }}
-          HCAT_KEY_ALIAS: ${{ secrets.HCAT_KEY_ALIAS }}
-          HCAT_KEY_PASSWORD: ${{ secrets.HCAT_KEY_PASSWORD }}
+          HCAT_STORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          HCAT_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          HCAT_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: sh ./gradlew :app:assembleRelease --build-cache --parallel --no-watch-fs -x lintVitalAnalyzeRelease
 
       - name: 上传 APK 产物
