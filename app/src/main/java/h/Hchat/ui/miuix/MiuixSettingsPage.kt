@@ -197,6 +197,10 @@ import h.Hchat.hooks.items.audiotransform.AudioTransformCancelledException
 import h.Hchat.hooks.items.audiotransform.AudioTransformSegmenter
 import h.Hchat.hooks.items.audiotransform.AudioTransformSettings
 import h.Hchat.hooks.items.antirecall.AntiRecallFeature
+import h.Hchat.hooks.items.analysis.AnalysisFeature
+import h.Hchat.hooks.items.analysis.AnalysisRepository
+import h.Hchat.hooks.items.analysis.AnalysisSettings
+import h.Hchat.hooks.items.analysis.AnalysisSnapshot
 import h.Hchat.hooks.items.antirecall.AntiRecallSettings
 import h.Hchat.hooks.items.autoreply.AutoReplyFeature
 import h.Hchat.hooks.items.autoreply.AutoReplyRule
@@ -3061,6 +3065,7 @@ private fun practicalFeatureGroups(
             title = "群组",
             providers = practicalProviders.filterByIds(
                 GroupChatLabelFeature.ID,
+                AnalysisFeature.ID,
                 AtAllNotificationBlockFeature.ID,
                 GroupLeaveMonitorFeature.ID,
                 GroupRenameMonitorFeature.ID
@@ -3779,6 +3784,7 @@ private fun matchedFeatureSubTerms(query: String, provider: FeatureSettingsProvi
 
 private fun featureSubSearchTerms(featureId: String): List<String> {
     return when (featureId) {
+        AnalysisFeature.ID -> listOf("分析", "群聊分析", "消息统计", "成员排行", "时间分布")
         AntiRecallFeature.ID -> listOf(
             "私聊防撤回", "群聊防撤回", "公众号防撤回", "撤回提示", "自定义撤回提示", "发送时间", "撤回时间", "时间格式", "语音防撤回", "图片防撤回", "视频防撤回"
         )
@@ -4485,6 +4491,7 @@ private fun FeatureSettingsPage(
         RealNameTailFeature.ID -> RealNameTailMiuixPage(context, provider, onBack)
         GroupNicknameColorSettings.FEATURE_ID -> GroupNicknameColorMiuixPage(context, provider, onBack)
         MemberTitleFeature.ID -> MemberTitleMiuixPage(context, provider, onBack)
+        AnalysisFeature.ID -> AnalysisSettingsPage(context)
         AntiRecallFeature.ID -> AntiRecallMiuixPage(context, provider, onBack)
         MultiRecallFeature.ID -> MultiRecallMiuixPage(context, provider, onBack)
         MessageForwardFeature.ID -> MessageForwardMiuixPage(context, provider, onBack)
@@ -36115,6 +36122,88 @@ private fun ClickHintTag() {
             .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f))
             .padding(horizontal = 8.dp, vertical = 2.dp)
     )
+}
+
+@Composable
+private fun AnalysisSettingsPage(context: Context) {
+    val prefs = remember { HchatStorage.preferences(context, AnalysisSettings.PREFS_NAME) }
+    var enabled by remember { mutableStateOf(prefs.getBoolean(AnalysisSettings.KEY_ENABLE, false)) }
+    var days by rememberSaveable { mutableStateOf(1) }
+    var snapshot by remember { mutableStateOf<AnalysisSnapshot?>(null) }
+    var error by remember { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    val talker = remember { MiuixSettingsPage.consumeAnalysisTalker().ifBlank { WeChatApis.chatPage()?.currentTalker().orEmpty() } }
+    LaunchedEffect(talker, days, enabled) {
+        if (!enabled || talker.isBlank()) return@LaunchedEffect
+        loading = true
+        withContext(Dispatchers.IO) { AnalysisRepository.load(talker, days) }.fold(
+            onSuccess = { snapshot = it; error = "" },
+            onFailure = { error = it.message ?: "加载失败" }
+        )
+        loading = false
+    }
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        SettingsCard {
+            SwitchRow(enabled, "分析", "在群聊消息长按菜单中显示分析入口，默认关闭") { next ->
+                enabled = next
+                prefs.edit().putBoolean(AnalysisSettings.KEY_ENABLE, next).apply()
+                Toast.makeText(context, "设置已保存，重启微信后生效", Toast.LENGTH_SHORT).show()
+            }
+        }
+        if (enabled) {
+            SettingsCard {
+                ActionRow("统计范围", when(days){1->"今日";7->"最近 7 天";30->"最近 30 天";else->"今日"}) { days = when(days){1->7;7->30;else->1} }
+            }
+            when {
+                talker.isBlank() -> EmptyText("请进入群聊后打开分析")
+                loading -> EmptyText("正在加载分析数据…")
+                error.isNotBlank() -> EmptyText(error)
+                snapshot != null -> AnalysisReportContent(snapshot!!)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AnalysisReportContent(data: AnalysisSnapshot) {
+    SettingsCard {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            MaterialText("群聊概览", style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                MaterialText("消息 ${data.total}")
+                MaterialText("发言成员 ${data.speakerCount}")
+                MaterialText("文本 ${data.textCount}")
+            }
+            MaterialText("图片 ${data.imageCount} · 语音 ${data.voiceCount} · 视频 ${data.videoCount}", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
+    SettingsCard {
+        Column(modifier = Modifier.padding(vertical = 8.dp)) {
+            MaterialText("成员排行", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            data.members.take(20).forEachIndexed { index, member ->
+                Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp)) {
+                    MaterialText("${index + 1}", modifier = Modifier.size(28.dp))
+                    MaterialText(member.name, modifier = Modifier.weight(1f))
+                    MaterialText(member.count.toString(), color = androidx.compose.material3.MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+    }
+    SettingsCard {
+        Column(modifier = Modifier.padding(16.dp)) {
+            MaterialText("活跃时段", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            val max = data.hourly.maxOrNull()?.coerceAtLeast(1) ?: 1
+            data.hourly.forEachIndexed { hour, value ->
+                if (value > 0) Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    MaterialText(String.format(Locale.ROOT, "%02d", hour), modifier = Modifier.size(32.dp))
+                    Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)).background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)) {
+                        Box(Modifier.fillMaxWidth(value.toFloat() / max.toFloat()).height(8.dp).background(androidx.compose.material3.MaterialTheme.colorScheme.primary))
+                    }
+                    MaterialText(value.toString(), modifier = Modifier.padding(start = 8.dp))
+                }
+            }
+        }
+    }
 }
 
 private object ScriptPluginSettingsMiuixContent {
