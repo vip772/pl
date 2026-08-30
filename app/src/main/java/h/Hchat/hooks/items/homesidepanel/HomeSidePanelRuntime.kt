@@ -79,6 +79,17 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 (param.thisObject as? Activity)?.let { attachIfSupported(it) }
             }
         })
+        val dispatchTouch = KavaReflector.findMethod(launcher, "dispatchTouchEvent", MotionEvent::class.java)
+        if (dispatchTouch != null) {
+            HookRegistry.get().hook(dispatchTouch, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val activity = param.thisObject as? Activity ?: return
+                    val session = sessions[activity] ?: return
+                    val event = param.args.firstOrNull() as? MotionEvent ?: return
+                    if (session.onTouch(event)) param.result = true
+                }
+            })
+        }
         if (onDestroy != null) {
             destroyHook = HookRegistry.get().hook(onDestroy, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
