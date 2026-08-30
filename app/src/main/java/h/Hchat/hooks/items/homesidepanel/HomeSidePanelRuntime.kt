@@ -64,6 +64,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     }
     private var launcherHook: XC_MethodHook.Unhook? = null
     private var destroyHook: XC_MethodHook.Unhook? = null
+    private var touchHook: XC_MethodHook.Unhook? = null
 
     fun install() {
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
