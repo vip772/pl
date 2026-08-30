@@ -987,6 +987,14 @@ object MiuixSettingsPage {
     }
 
     @JvmStatic
+    fun showAnalysis(context: Context, talker: String): Boolean {
+        val provider = UIRegistry.get().getAllProviders()
+            .firstOrNull { it.featureId() == AnalysisFeature.ID }
+            ?: return false
+        show(context, DetailPage.Feature(provider), floatingAgent = false)
+        return true
+    }
+    @JvmStatic
     fun showFeature(context: Context, featureId: String): Boolean {
         val provider = UIRegistry.get().getAllProviders()
             .firstOrNull { it.featureId() == featureId }
@@ -36132,7 +36140,7 @@ private fun AnalysisSettingsPage(context: Context) {
     var snapshot by remember { mutableStateOf<AnalysisSnapshot?>(null) }
     var error by remember { mutableStateOf("") }
     var loading by remember { mutableStateOf(false) }
-    val talker = remember { MiuixSettingsPage.consumeAnalysisTalker().ifBlank { WeChatApis.chatPage()?.currentTalker().orEmpty() } }
+    val talker = remember { WeChatApis.chatPage()?.currentTalker().orEmpty() }
     LaunchedEffect(talker, days, enabled) {
         if (!enabled || talker.isBlank()) return@LaunchedEffect
         loading = true
@@ -36168,38 +36176,38 @@ private fun AnalysisSettingsPage(context: Context) {
 private fun AnalysisReportContent(data: AnalysisSnapshot) {
     SettingsCard {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            MaterialText("群聊概览", style = androidx.compose.material3.MaterialTheme.typography.titleLarge)
+            Text("群聊概览", style = TextStyle(fontSize = 22.sp, fontWeight = FontWeight.SemiBold))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                MaterialText("消息 ${data.total}")
-                MaterialText("发言成员 ${data.speakerCount}")
-                MaterialText("文本 ${data.textCount}")
+                Text("消息 ${data.total}")
+                Text("发言成员 ${data.speakerCount}")
+                Text("文本 ${data.textCount}")
             }
-            MaterialText("图片 ${data.imageCount} · 语音 ${data.voiceCount} · 视频 ${data.videoCount}", color = androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("图片 ${data.imageCount} · 语音 ${data.voiceCount} · 视频 ${data.videoCount}", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
         }
     }
     SettingsCard {
         Column(modifier = Modifier.padding(vertical = 8.dp)) {
-            MaterialText("成员排行", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            Text("成员排行", modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium))
             data.members.take(20).forEachIndexed { index, member ->
                 Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 9.dp)) {
-                    MaterialText("${index + 1}", modifier = Modifier.size(28.dp))
-                    MaterialText(member.name, modifier = Modifier.weight(1f))
-                    MaterialText(member.count.toString(), color = androidx.compose.material3.MaterialTheme.colorScheme.primary)
+                    Text("${index + 1}", modifier = Modifier.size(28.dp))
+                    Text(member.name, modifier = Modifier.weight(1f))
+                    Text(member.count.toString(), color = MiuixTheme.colorScheme.primary)
                 }
             }
         }
     }
     SettingsCard {
         Column(modifier = Modifier.padding(16.dp)) {
-            MaterialText("活跃时段", style = androidx.compose.material3.MaterialTheme.typography.titleMedium)
+            Text("活跃时段", style = TextStyle(fontSize = 18.sp, fontWeight = FontWeight.Medium))
             val max = data.hourly.maxOrNull()?.coerceAtLeast(1) ?: 1
             data.hourly.forEachIndexed { hour, value ->
                 if (value > 0) Row(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    MaterialText(String.format(Locale.ROOT, "%02d", hour), modifier = Modifier.size(32.dp))
-                    Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)).background(androidx.compose.material3.MaterialTheme.colorScheme.surfaceVariant)) {
-                        Box(Modifier.fillMaxWidth(value.toFloat() / max.toFloat()).height(8.dp).background(androidx.compose.material3.MaterialTheme.colorScheme.primary))
+                    Text(String.format(Locale.ROOT, "%02d", hour), modifier = Modifier.size(32.dp))
+                    Box(Modifier.weight(1f).height(8.dp).clip(RoundedCornerShape(4.dp)).background(MiuixTheme.colorScheme.secondaryVariant)) {
+                        Box(Modifier.fillMaxWidth(value.toFloat() / max.toFloat()).height(8.dp).background(MiuixTheme.colorScheme.primary))
                     }
-                    MaterialText(value.toString(), modifier = Modifier.padding(start = 8.dp))
+                    Text(value.toString(), modifier = Modifier.padding(start = 8.dp))
                 }
             }
         }
