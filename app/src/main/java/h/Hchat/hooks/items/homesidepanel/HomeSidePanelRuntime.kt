@@ -81,7 +81,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         })
         val dispatchTouch = KavaReflector.findMethod(launcher, "dispatchTouchEvent", MotionEvent::class.java)
         if (dispatchTouch != null) {
-            HookRegistry.get().hook(dispatchTouch, object : XC_MethodHook() {
+            touchHook = HookRegistry.get().hook(dispatchTouch, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val activity = param.thisObject as? Activity ?: return
                     val session = sessions[activity] ?: return
@@ -132,8 +132,10 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         }
         launcherHook?.unhook()
         destroyHook?.unhook()
+        touchHook?.unhook()
         launcherHook = null
         destroyHook = null
+        touchHook = null
     }
 
     private fun detach(activity: Activity) {
@@ -157,6 +159,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private var dragging = false
         private var downX = 0f
         private var lastX = 0f
+        private var touchHook: XC_MethodHook.Unhook? = null
         private val configVersion = mutableStateOf(0)
 
         fun attach() {
@@ -188,7 +191,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 }
             }
             overlay.addView(panel, FrameLayout.LayoutParams(
-                FrameLayout.LayoutParams.MATCH_PARENT,
+                (overlay.width * DRAWER_FRACTION).toInt().coerceAtLeast(1),
                 FrameLayout.LayoutParams.MATCH_PARENT
             ))
             decor.addView(overlay, ViewGroup.LayoutParams(
