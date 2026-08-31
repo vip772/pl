@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.drawable.GradientDrawable
-import android.util.AttributeSet
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -59,15 +58,18 @@ private class FloatingChatHeaderRuntime(
         if (installed) return true
         val clazz = KavaReflector.loadClass(CHATTING_LAYOUT, context.hostClassLoader())
             ?: return fail("未找到聊天布局类: $CHATTING_LAYOUT")
-        val constructor = KavaReflector.findConstructor(clazz, Context::class.java, AttributeSet::class.java)
-            ?: return fail("未找到 ChattingUILayout(Context, AttributeSet) 构造入口")
+        val constructors = KavaReflector.declaredConstructors(clazz).filter { constructor ->
+            constructor.parameterTypes.firstOrNull()?.let { Context::class.java.isAssignableFrom(it) } == true
+        }
         val onLayout = findOnLayout(clazz) ?: return fail("未找到 ChattingUILayout.onLayout 入口")
         return runCatching {
-            HookRegistry.get().hook(constructor, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    (param.thisObject as? View)?.let(::trackLayout)
-                }
-            })
+            constructors.forEach { constructor ->
+                HookRegistry.get().hook(constructor, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        (param.thisObject as? View)?.let(::trackLayout)
+                    }
+                })
+            }
             HookRegistry.get().hook(onLayout, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     (param.thisObject as? View)?.let(::trackLayout)
@@ -152,17 +154,18 @@ private class FloatingChatHeaderRuntime(
             margins?.leftMargin, margins?.topMargin, margins?.rightMargin, margins?.bottomMargin
         )
         val density = header.resources.displayMetrics.density
-        val radius = 18f * density
-        val horizontal = (12f * density).toInt()
-        val vertical = (6f * density).toInt()
-        val color = if (isDark(header)) Color.argb(238, 38, 38, 38) else Color.argb(242, 255, 255, 255)
+        val radius = FloatingChatHeaderSettings.radiusDp(context.hostContext()) * density
+        val horizontal = (FloatingChatHeaderSettings.horizontalMarginDp(context.hostContext()) * density).toInt()
+        val vertical = (FloatingChatHeaderSettings.verticalMarginDp(context.hostContext()) * density).toInt()
+        val alpha = (FloatingChatHeaderSettings.opacity(context.hostContext()) * 255f).toInt()
+        val color = if (isDark(header)) Color.argb(alpha, 38, 38, 38) else Color.argb(alpha, 255, 255, 255)
         header.background = GradientDrawable().apply { cornerRadius = radius; setColor(color) }
         margins?.let {
             it.leftMargin += horizontal; it.rightMargin += horizontal
             it.topMargin += vertical; it.bottomMargin += vertical
             header.layoutParams = it
         }
-        header.elevation = 8f * density
+        header.elevation = FloatingChatHeaderSettings.elevationDp(context.hostContext()) * density
         header.clipToOutline = true
         header.outlineProvider = object : ViewOutlineProvider() {
             override fun getOutline(view: View, outline: Outline) {

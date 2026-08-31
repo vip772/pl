@@ -46,6 +46,7 @@ import h.Hchat.crash.CrashReportSettingsProvider
 import h.Hchat.hooks.api.ui.HchatAgentIconDrawable
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutFeature
 import h.Hchat.hooks.items.floatingheader.FloatingChatHeaderFeature
+import h.Hchat.hooks.items.floatingheader.FloatingChatHeaderSettings
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutGlyph
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutGlyphDrawable
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutGlyphs
@@ -4570,7 +4571,7 @@ private fun FeatureSettingsPage(
         HideChatAvatarFeature.ID -> HideChatAvatarMiuixPage(context, provider, onBack)
         CustomBottomBarFeature.ID -> CustomBottomBarMiuixPage(context, provider, onBack)
         FloatingBottomBarSettings.FEATURE_ID -> FloatingBottomBarMiuixPage(context, provider, onBack)
-        FloatingChatHeaderFeature.ID -> FloatingChatHeaderMiuixPage(provider, onBack)
+        FloatingChatHeaderFeature.ID -> FloatingChatHeaderMiuixPage(context, provider, onBack)
         RoundAvatarFeature.ID -> RoundAvatarMiuixPage(context, provider, onBack)
         CustomFriendAvatarFeature.ID -> CustomFriendAvatarMiuixPage(context, provider, onBack)
         MessageBlockFeature.ID -> MessageBlockMiuixPage(context, provider, onBack)
@@ -40701,9 +40702,16 @@ private fun OptionPickerPage(
 
 @Composable
 private fun FloatingChatHeaderMiuixPage(
+    context: Context,
     provider: FeatureSettingsProvider,
     onBack: () -> Unit
 ) {
+    val sp = remember { HchatStorage.preferences(context, FloatingChatHeaderSettings.PREFS_NAME) }
+    var radius by remember { mutableStateOf(FloatingChatHeaderSettings.radiusDp(context)) }
+    var horizontalMargin by remember { mutableStateOf(FloatingChatHeaderSettings.horizontalMarginDp(context)) }
+    var verticalMargin by remember { mutableStateOf(FloatingChatHeaderSettings.verticalMarginDp(context)) }
+    var elevation by remember { mutableStateOf(FloatingChatHeaderSettings.elevationDp(context)) }
+    var opacity by remember { mutableStateOf(FloatingChatHeaderSettings.opacity(context)) }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
@@ -40720,27 +40728,71 @@ private fun FloatingChatHeaderMiuixPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
-            item { SmallTitle(text = "功能说明") }
+            item { SmallTitle(text = "外观") }
             item {
                 SettingsCard {
-                    Column(
-                        modifier = Modifier.fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp)
-                    ) {
-                        Text(
-                            text = "悬浮卡片样式",
-                            color = MiuixTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Medium
-                        )
-                        Text(
-                            text = "启用后自动为聊天标题栏添加圆角、边距、半透明背景和阴影，并适配深色模式。关闭功能后会恢复原始样式。",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            fontSize = 12.sp
-                        )
+                    FloatingHeaderSlider("圆角", radius, 0f..40f, "dp") {
+                        radius = it
+                        sp.edit().putFloat(FloatingChatHeaderSettings.KEY_RADIUS_DP, it).apply()
+                    }
+                    InsetDivider()
+                    FloatingHeaderSlider("左右边距", horizontalMargin, 0f..32f, "dp") {
+                        horizontalMargin = it
+                        sp.edit().putFloat(FloatingChatHeaderSettings.KEY_HORIZONTAL_MARGIN_DP, it).apply()
+                    }
+                    InsetDivider()
+                    FloatingHeaderSlider("上下间距", verticalMargin, 0f..24f, "dp") {
+                        verticalMargin = it
+                        sp.edit().putFloat(FloatingChatHeaderSettings.KEY_VERTICAL_MARGIN_DP, it).apply()
+                    }
+                    InsetDivider()
+                    FloatingHeaderSlider("阴影高度", elevation, 0f..24f, "dp") {
+                        elevation = it
+                        sp.edit().putFloat(FloatingChatHeaderSettings.KEY_ELEVATION_DP, it).apply()
+                    }
+                    InsetDivider()
+                    FloatingHeaderSlider("背景不透明度", opacity, 0.5f..1f, "%") {
+                        opacity = it
+                        sp.edit().putFloat(FloatingChatHeaderSettings.KEY_OPACITY, it).apply()
                     }
                 }
             }
+            item {
+                Text(
+                    text = "修改后重新进入聊天页面生效。",
+                    modifier = Modifier.padding(horizontal = 28.dp, vertical = 10.dp),
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 12.sp
+                )
+            }
         }
+    }
+}
+
+@Composable
+private fun FloatingHeaderSlider(
+    title: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    unit: String,
+    onValueChange: (Float) -> Unit
+) {
+    val normalized = FloatingChatHeaderSettings.normalize(value, range.start, range.endInclusive)
+    val display = if (unit == "%") "${(normalized * 100).toInt()}%" else "${normalized.toInt()} dp"
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(
+            text = "$title  $display",
+            color = MiuixTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Medium
+        )
+        Slider(
+            value = normalized,
+            onValueChange = {
+                onValueChange(FloatingChatHeaderSettings.normalize(it, range.start, range.endInclusive))
+            },
+            modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+            valueRange = range
+        )
     }
 }
 
