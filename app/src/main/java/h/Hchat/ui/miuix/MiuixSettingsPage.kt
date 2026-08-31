@@ -45,6 +45,7 @@ import h.Hchat.crash.CrashReportSettings
 import h.Hchat.crash.CrashReportSettingsProvider
 import h.Hchat.hooks.api.ui.HchatAgentIconDrawable
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutFeature
+import h.Hchat.hooks.items.floatingheader.FloatingChatHeaderFeature
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutGlyph
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutGlyphDrawable
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutGlyphs
@@ -3098,7 +3099,8 @@ private fun practicalFeatureGroups(
                 RoundAvatarFeature.ID,
                 CustomFriendAvatarFeature.ID,
                 CustomBottomBarFeature.ID,
-                FloatingBottomBarSettings.FEATURE_ID
+                FloatingBottomBarSettings.FEATURE_ID,
+                FloatingChatHeaderFeature.ID
             )
         ),
         FeatureGroupEntry(
@@ -4568,6 +4570,7 @@ private fun FeatureSettingsPage(
         HideChatAvatarFeature.ID -> HideChatAvatarMiuixPage(context, provider, onBack)
         CustomBottomBarFeature.ID -> CustomBottomBarMiuixPage(context, provider, onBack)
         FloatingBottomBarSettings.FEATURE_ID -> FloatingBottomBarMiuixPage(context, provider, onBack)
+        FloatingChatHeaderFeature.ID -> FloatingChatHeaderMiuixPage(provider, onBack)
         RoundAvatarFeature.ID -> RoundAvatarMiuixPage(context, provider, onBack)
         CustomFriendAvatarFeature.ID -> CustomFriendAvatarMiuixPage(context, provider, onBack)
         MessageBlockFeature.ID -> MessageBlockMiuixPage(context, provider, onBack)
@@ -40689,6 +40692,51 @@ private fun OptionPickerPage(
                             }
                         )
                         if (index < request.options.lastIndex) InsetDivider()
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FloatingChatHeaderMiuixPage(
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar("返回", onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "功能说明") }
+            item {
+                SettingsCard {
+                    Column(
+                        modifier = Modifier.fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                    ) {
+                        Text(
+                            text = "悬浮卡片样式",
+                            color = MiuixTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = "启用后自动为聊天标题栏添加圆角、边距、半透明背景和阴影，并适配深色模式。关闭功能后会恢复原始样式。",
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            fontSize = 12.sp
+                        )
                     }
                 }
             }

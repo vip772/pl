@@ -7,5 +7,5 @@ class FloatingChatHeaderSettingsProvider : SimpleFeatureSettingsProvider(
     FloatingChatHeaderFeature.ID,
     "悬浮标题栏",
     "将聊天页面顶部标题栏转换为悬浮卡片样式",
-    FeatureSettingsProvider.CATEGORY_ENHANCE
+    FeatureSettingsProvider.CATEGORY_PRACTICAL
 )
