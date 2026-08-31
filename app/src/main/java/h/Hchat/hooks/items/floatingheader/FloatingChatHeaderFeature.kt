@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
+import android.view.ViewParent
 import android.widget.RelativeLayout
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.hooks.core.BaseFeature
@@ -55,6 +56,8 @@ private class FloatingChatHeaderRuntime(
 
     private val trackedLayouts = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
     private val headerStates = WeakHashMap<View, OriginalState>()
+    private val transparentStates = WeakHashMap<View, android.graphics.drawable.Drawable?>()
+    private val hiddenStates = WeakHashMap<View, Int>()
     private var installed = false
 
     @Synchronized fun install(): Boolean {
@@ -90,6 +93,10 @@ private class FloatingChatHeaderRuntime(
         trackedLayouts.clear()
         headerStates.entries.toList().forEach { (header, state) -> restore(header, state) }
         headerStates.clear()
+        transparentStates.entries.toList().forEach { (view, background) -> view.background = background }
+        transparentStates.clear()
+        hiddenStates.entries.toList().forEach { (view, visibility) -> view.visibility = visibility }
+        hiddenStates.clear()
         installed = false
     }
 
@@ -126,6 +133,7 @@ private class FloatingChatHeaderRuntime(
         val header = findHeader(layout) ?: return
         if (!FloatingChatHeaderSettings.enabled(context.hostContext())) {
             headerStates.remove(header)?.let { restore(header, it) }
+            restoreTransparentLayers()
             return
         }
         if (!headerStates.containsKey(header)) saveAndStyle(header)
@@ -189,33 +197,18 @@ private class FloatingChatHeaderRuntime(
     }
 
     private fun floatHeader(layout: View, header: View) {
+        // 仅在标题栏确实是聊天布局的直接子项时重挂；否则绝不 remove，避免标题栏消失。
         val parent = header.parent as? ViewGroup ?: return
-        if (parent === layout) {
-            val root = layout.parent as? RelativeLayout ?: return
-            val height = header.height.takeIf { it > 0 }
-                ?: header.layoutParams?.height?.takeIf { it > 0 }
-                ?: ViewGroup.LayoutParams.WRAP_CONTENT
-            parent.removeView(header)
-            root.addView(header, RelativeLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                height
-            ).apply { addRule(RelativeLayout.ALIGN_PARENT_TOP) })
-            header.bringToFront()
-        } else {
-            // 窗口级 ActionBarContainer 不能重挂，启用原生 overlay 模式。
-            var ancestor = header.parent
-            while (ancestor != null) {
-                if (ancestor.javaClass.name.contains("ActionBarOverlayLayout")) {
-                    KavaReflector.invoke(
-                        KavaReflector.findMethod(ancestor.javaClass, "setOverlayMode", Boolean::class.javaPrimitiveType!!),
-                        ancestor,
-                        true
-                    )
-                    break
-                }
-                ancestor = ancestor.parent
-            }
-        }
+        if (parent !== layout) return
+        val root = layout.parent as? ViewGroup ?: return
+        if (root === parent || header.parent !== parent) return
+        val lp = header.layoutParams
+        val width = ViewGroup.LayoutParams.MATCH_PARENT
+        val height = header.height.takeIf { it > 0 } ?: lp?.height ?: ViewGroup.LayoutParams.WRAP_CONTENT
+        parent.removeView(header)
+        val floating = ViewGroup.LayoutParams(width, height)
+        root.addView(header, floating)
+        header.bringToFront()
     }
 
     private fun keepContentBelowHeader(layout: View, header: View) {
@@ -233,43 +226,36 @@ private class FloatingChatHeaderRuntime(
     }
 
     private fun makeHeaderLayersTransparent(layout: View, header: View) {
-        // 白条通常不是 ActionBarContainer 的直接子 View，需要递归处理标题栏内部装饰层。
+        // 保存后再透明化，避免开关关闭时无法恢复微信原始背景。
+        fun clear(view: View) {
+            if (!transparentStates.containsKey(view)) transparentStates[view] = view.background
+            view.background = ColorDrawable(Color.TRANSPARENT)
+        }
+        clear(layout)
+        var p: ViewParent? = layout.parent
+        var depth = 0
+        while (p is View && depth++ < 10) {
+            val name = p.javaClass.name
+            if (name.contains("ActionBarOverlayLayout") || name.contains("ActionBarContainer") ||
+                name.contains("ContentFrameLayout") || name.contains("FitWindows")) clear(p)
+            p = p.parent
+        }
+        // 只隐藏明确的分隔线候选，并保存 visibility；不影响标题文字、头像和按钮。
         walkViews(header) { child ->
-            if (child !== header && child.height in 1..dp(header, 6f) &&
-                child.width >= header.width * 0.55f
-            ) {
-                child.background = ColorDrawable(Color.TRANSPARENT)
+            if (child !== header && child.height in 1..dp(header, 3f) &&
+                child.width >= header.width * 0.7f) {
+                if (!hiddenStates.containsKey(child)) hiddenStates[child] = child.visibility
+                clear(child)
                 child.visibility = View.INVISIBLE
             }
         }
+    }
 
-        // 清除标题栏下方、聊天内容上方的原生遮挡容器背景，使卡片外区域透出聊天界面。
-        val layoutGroup = layout as? ViewGroup
-        if (layoutGroup != null) {
-            for (i in 0 until layoutGroup.childCount) {
-                val child = layoutGroup.getChildAt(i)
-                if (child === header) continue
-                val childBottom = child.top + child.height
-                val inHeaderZone = child.top <= header.bottom + dp(header, 24f) &&
-                    childBottom >= header.top
-                if (inHeaderZone && child.width >= layout.width * 0.8f) {
-                    child.background = ColorDrawable(Color.TRANSPARENT)
-                }
-            }
-            layoutGroup.background = ColorDrawable(Color.TRANSPARENT)
-        }
-
-        // 窗口级标题栏需把整个 ActionBarOverlayLayout 父链切为透明，而不是只处理直接父级。
-        var ancestor = header.parent
-        var depth = 0
-        while (ancestor is View && depth++ < 6) {
-            if (ancestor.javaClass.name.contains("ActionBarOverlayLayout") ||
-                ancestor.javaClass.name.contains("ActionBarContainer")
-            ) {
-                ancestor.background = ColorDrawable(Color.TRANSPARENT)
-            }
-            ancestor = ancestor.parent
-        }
+    private fun restoreTransparentLayers() {
+        transparentStates.entries.toList().forEach { (view, background) -> view.background = background }
+        transparentStates.clear()
+        hiddenStates.entries.toList().forEach { (view, visibility) -> view.visibility = visibility }
+        hiddenStates.clear()
     }
 
     private fun walkViews(root: View, action: (View) -> Unit) {
