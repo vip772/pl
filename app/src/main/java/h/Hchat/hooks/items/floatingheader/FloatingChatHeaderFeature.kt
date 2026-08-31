@@ -127,7 +127,7 @@ private class FloatingChatHeaderRuntime(
             return
         }
         if (!headerStates.containsKey(header)) saveAndStyle(header)
-        makeHeaderLayersTransparent(header)
+        makeHeaderLayersTransparent(layout, header)
     }
 
     private fun findHeader(layout: View): View? {
@@ -179,25 +179,52 @@ private class FloatingChatHeaderRuntime(
             }
         }
         header.invalidateOutline()
-        makeHeaderLayersTransparent(header)
     }
 
-    private fun makeHeaderLayersTransparent(header: View) {
-        val group = header as? ViewGroup ?: return
-        for (i in 0 until group.childCount) {
-            val child = group.getChildAt(i)
-            if (child is ViewGroup && child.width >= header.width * 0.8f) {
+    private fun makeHeaderLayersTransparent(layout: View, header: View) {
+        // 白条通常不是 ActionBarContainer 的直接子 View，需要递归处理标题栏内部装饰层。
+        walkViews(header) { child ->
+            if (child !== header && child.height in 1..dp(header, 6f) &&
+                child.width >= header.width * 0.55f
+            ) {
                 child.background = ColorDrawable(Color.TRANSPARENT)
-            }
-            if (child.height in 1..dp(header, 3f) && child.width >= header.width * 0.6f) {
                 child.visibility = View.INVISIBLE
             }
         }
-        (header.parent as? ViewGroup)?.let { parent ->
-            if (parent.javaClass.name.contains("ActionBarOverlayLayout")) {
-                parent.background = ColorDrawable(Color.TRANSPARENT)
+
+        // 清除标题栏下方、聊天内容上方的原生遮挡容器背景，使卡片外区域透出聊天界面。
+        val layoutGroup = layout as? ViewGroup
+        if (layoutGroup != null) {
+            for (i in 0 until layoutGroup.childCount) {
+                val child = layoutGroup.getChildAt(i)
+                if (child === header) continue
+                val childBottom = child.top + child.height
+                val inHeaderZone = child.top <= header.bottom + dp(header, 24f) &&
+                    childBottom >= header.top
+                if (inHeaderZone && child.width >= layout.width * 0.8f) {
+                    child.background = ColorDrawable(Color.TRANSPARENT)
+                }
             }
+            layoutGroup.background = ColorDrawable(Color.TRANSPARENT)
         }
+
+        // 窗口级标题栏需把整个 ActionBarOverlayLayout 父链切为透明，而不是只处理直接父级。
+        var ancestor = header.parent
+        var depth = 0
+        while (ancestor is View && depth++ < 6) {
+            if (ancestor.javaClass.name.contains("ActionBarOverlayLayout") ||
+                ancestor.javaClass.name.contains("ActionBarContainer")
+            ) {
+                ancestor.background = ColorDrawable(Color.TRANSPARENT)
+            }
+            ancestor = ancestor.parent
+        }
+    }
+
+    private fun walkViews(root: View, action: (View) -> Unit) {
+        action(root)
+        val group = root as? ViewGroup ?: return
+        for (i in 0 until group.childCount) walkViews(group.getChildAt(i), action)
     }
 
     private fun dp(view: View, value: Float): Int =
