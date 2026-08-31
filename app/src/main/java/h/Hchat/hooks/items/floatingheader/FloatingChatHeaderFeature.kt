@@ -13,8 +13,6 @@ import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.hooks.core.BaseFeature
 import h.Hchat.hooks.core.FeatureContext
 import h.Hchat.hooks.core.HookRegistry
-import h.Hchat.ui.FeatureSettingsProvider
-import h.Hchat.ui.SimpleFeatureSettingsProvider
 import h.Hchat.utils.KavaReflector
 import java.lang.reflect.Method
 import java.util.WeakHashMap
@@ -26,10 +24,7 @@ class FloatingChatHeaderFeature : BaseFeature() {
     override fun name(): String = "悬浮标题栏"
 
     override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(SimpleFeatureSettingsProvider(
-            ID, name(), "将聊天页面顶部标题栏转换为悬浮卡片样式",
-            FeatureSettingsProvider.CATEGORY_ENHANCE
-        ))
+        registerSettingsProvider(FloatingChatHeaderSettingsProvider())
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
