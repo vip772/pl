@@ -22,6 +22,8 @@ import h.Hchat.hooks.items.fakelocation.FakeLocationFeature
 import h.Hchat.hooks.items.fakescancamera.FakeScanCameraFeature
 import h.Hchat.hooks.items.fakevoiceduration.FakeVoiceDurationFeature
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutFeature
+import h.Hchat.hooks.items.floatingheader.FloatingChatHeaderFeature
+import h.Hchat.hooks.items.floatingheader.FloatingChatHeaderFeature
 import h.Hchat.hooks.items.floatingheader.FloatingChatHeader
 import h.Hchat.hooks.items.forwardlimit.RemoveForwardLimitFeature
 import h.Hchat.hooks.items.gameemoji.GameEmojiFeature
@@ -99,6 +101,8 @@ object FeatureRegistry {
             .register(SettingsFeature())
             .register(WechatApiFeature())
             .register(FloatingShortcutFeature())
+            .register(FloatingChatHeaderFeature())
+            .register(FloatingChatHeaderFeature())
             .register(FloatingChatHeader)
             .register(CustomBottomBarFeature())
             .register(RoundAvatarFeature())
