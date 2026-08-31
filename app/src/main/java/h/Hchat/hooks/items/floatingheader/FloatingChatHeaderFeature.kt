@@ -228,7 +228,7 @@ private class FloatingChatHeaderRuntime(
         val requiredTop = (bottomInLayout - layoutTop + dp(header, 8f)).coerceAtLeast(0)
         if (list.paddingTop < requiredTop) {
             list.setPadding(list.paddingLeft, requiredTop, list.paddingRight, list.paddingBottom)
-            list.clipToPadding = false
+            (list as? ViewGroup)?.clipToPadding = false
         }
     }
 
