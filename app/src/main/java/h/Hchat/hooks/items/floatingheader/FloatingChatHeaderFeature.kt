@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.ViewTreeObserver
+import android.widget.RelativeLayout
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.hooks.core.BaseFeature
 import h.Hchat.hooks.core.FeatureContext
@@ -48,7 +49,8 @@ private class FloatingChatHeaderRuntime(
         val elevation: Float,
         val clipToOutline: Boolean,
         val outlineProvider: ViewOutlineProvider?,
-        val leftMargin: Int?, val topMargin: Int?, val rightMargin: Int?, val bottomMargin: Int?
+        val leftMargin: Int?, val topMargin: Int?, val rightMargin: Int?, val bottomMargin: Int?,
+        val parent: ViewGroup?, val index: Int, val layoutParams: ViewGroup.LayoutParams?
     )
 
     private val trackedLayouts = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
@@ -127,7 +129,9 @@ private class FloatingChatHeaderRuntime(
             return
         }
         if (!headerStates.containsKey(header)) saveAndStyle(header)
+        floatHeader(layout, header)
         makeHeaderLayersTransparent(layout, header)
+        keepContentBelowHeader(layout, header)
     }
 
     private fun findHeader(layout: View): View? {
@@ -157,7 +161,10 @@ private class FloatingChatHeaderRuntime(
         val margins = header.layoutParams as? ViewGroup.MarginLayoutParams
         headerStates[header] = OriginalState(
             header.background, header.elevation, header.clipToOutline, header.outlineProvider,
-            margins?.leftMargin, margins?.topMargin, margins?.rightMargin, margins?.bottomMargin
+            margins?.leftMargin, margins?.topMargin, margins?.rightMargin, margins?.bottomMargin,
+            header.parent as? ViewGroup,
+            (header.parent as? ViewGroup)?.indexOfChild(header) ?: -1,
+            header.layoutParams
         )
         val density = header.resources.displayMetrics.density
         val radius = FloatingChatHeaderSettings.radiusDp(context.hostContext()) * density
@@ -179,6 +186,50 @@ private class FloatingChatHeaderRuntime(
             }
         }
         header.invalidateOutline()
+    }
+
+    private fun floatHeader(layout: View, header: View) {
+        val parent = header.parent as? ViewGroup ?: return
+        if (parent === layout) {
+            val root = layout.parent as? RelativeLayout ?: return
+            val height = header.height.takeIf { it > 0 }
+                ?: header.layoutParams?.height?.takeIf { it > 0 }
+                ?: ViewGroup.LayoutParams.WRAP_CONTENT
+            parent.removeView(header)
+            root.addView(header, RelativeLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                height
+            ).apply { addRule(RelativeLayout.ALIGN_PARENT_TOP) })
+            header.bringToFront()
+        } else {
+            // 窗口级 ActionBarContainer 不能重挂，启用原生 overlay 模式。
+            var ancestor = header.parent
+            while (ancestor != null) {
+                if (ancestor.javaClass.name.contains("ActionBarOverlayLayout")) {
+                    KavaReflector.invoke(
+                        KavaReflector.findMethod(ancestor.javaClass, "setOverlayMode", Boolean::class.javaPrimitiveType!!),
+                        ancestor,
+                        true
+                    )
+                    break
+                }
+                ancestor = ancestor.parent
+            }
+        }
+    }
+
+    private fun keepContentBelowHeader(layout: View, header: View) {
+        val list = findDescendant(layout) { view ->
+            val name = view.javaClass.name
+            name.contains("RecyclerView") || name.contains("ListView")
+        } ?: return
+        val bottomInLayout = IntArray(2).also { header.getLocationInWindow(it) }[1] + header.height
+        val layoutTop = IntArray(2).also { layout.getLocationInWindow(it) }[1]
+        val requiredTop = (bottomInLayout - layoutTop + dp(header, 8f)).coerceAtLeast(0)
+        if (list.paddingTop < requiredTop) {
+            list.setPadding(list.paddingLeft, requiredTop, list.paddingRight, list.paddingBottom)
+            list.clipToPadding = false
+        }
     }
 
     private fun makeHeaderLayersTransparent(layout: View, header: View) {
@@ -231,6 +282,13 @@ private class FloatingChatHeaderRuntime(
         (value * view.resources.displayMetrics.density).toInt()
 
     private fun restore(header: View, state: OriginalState) = runCatching {
+        val originalParent = state.parent
+        val currentParent = header.parent as? ViewGroup
+        if (originalParent != null && currentParent !== originalParent) {
+            currentParent?.removeView(header)
+            val index = state.index.coerceIn(0, originalParent.childCount)
+            originalParent.addView(header, index, state.layoutParams)
+        }
         header.background = state.background
         header.elevation = state.elevation
         header.clipToOutline = state.clipToOutline
