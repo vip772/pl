@@ -3,6 +3,7 @@ package h.Hchat.hooks.items.floatingheader
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.view.View
 import android.view.ViewGroup
@@ -121,7 +122,12 @@ private class FloatingChatHeaderRuntime(
 
     private fun reconcile(layout: View) {
         val header = findHeader(layout) ?: return
+        if (!FloatingChatHeaderSettings.enabled(context.hostContext())) {
+            headerStates.remove(header)?.let { restore(header, it) }
+            return
+        }
         if (!headerStates.containsKey(header)) saveAndStyle(header)
+        makeHeaderLayersTransparent(header)
     }
 
     private fun findHeader(layout: View): View? {
@@ -173,7 +179,29 @@ private class FloatingChatHeaderRuntime(
             }
         }
         header.invalidateOutline()
+        makeHeaderLayersTransparent(header)
     }
+
+    private fun makeHeaderLayersTransparent(header: View) {
+        val group = header as? ViewGroup ?: return
+        for (i in 0 until group.childCount) {
+            val child = group.getChildAt(i)
+            if (child is ViewGroup && child.width >= header.width * 0.8f) {
+                child.background = ColorDrawable(Color.TRANSPARENT)
+            }
+            if (child.height in 1..dp(header, 3f) && child.width >= header.width * 0.6f) {
+                child.visibility = View.INVISIBLE
+            }
+        }
+        (header.parent as? ViewGroup)?.let { parent ->
+            if (parent.javaClass.name.contains("ActionBarOverlayLayout")) {
+                parent.background = ColorDrawable(Color.TRANSPARENT)
+            }
+        }
+    }
+
+    private fun dp(view: View, value: Float): Int =
+        (value * view.resources.displayMetrics.density).toInt()
 
     private fun restore(header: View, state: OriginalState) = runCatching {
         header.background = state.background

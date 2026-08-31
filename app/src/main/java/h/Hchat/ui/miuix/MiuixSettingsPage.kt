@@ -40707,6 +40707,7 @@ private fun FloatingChatHeaderMiuixPage(
     onBack: () -> Unit
 ) {
     val sp = remember { HchatStorage.preferences(context, FloatingChatHeaderSettings.PREFS_NAME) }
+    var enabled by remember { mutableStateOf(FloatingChatHeaderSettings.enabled(context)) }
     var radius by remember { mutableStateOf(FloatingChatHeaderSettings.radiusDp(context)) }
     var horizontalMargin by remember { mutableStateOf(FloatingChatHeaderSettings.horizontalMarginDp(context)) }
     var verticalMargin by remember { mutableStateOf(FloatingChatHeaderSettings.verticalMarginDp(context)) }
@@ -40718,7 +40719,25 @@ private fun FloatingChatHeaderMiuixPage(
         title = provider.title(),
         largeTitle = provider.title(),
         scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存",
+                onPrimaryClick = {
+                    sp.edit()
+                        .putBoolean(FloatingChatHeaderSettings.KEY_ENABLED, enabled)
+                        .putFloat(FloatingChatHeaderSettings.KEY_RADIUS_DP, radius)
+                        .putFloat(FloatingChatHeaderSettings.KEY_HORIZONTAL_MARGIN_DP, horizontalMargin)
+                        .putFloat(FloatingChatHeaderSettings.KEY_VERTICAL_MARGIN_DP, verticalMargin)
+                        .putFloat(FloatingChatHeaderSettings.KEY_ELEVATION_DP, elevation)
+                        .putFloat(FloatingChatHeaderSettings.KEY_OPACITY, opacity)
+                        .apply()
+                    Toast.makeText(context, "已保存，重新进入聊天页面生效", Toast.LENGTH_SHORT).show()
+                    onBack()
+                },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -40728,38 +40747,46 @@ private fun FloatingChatHeaderMiuixPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
-            item { SmallTitle(text = "外观") }
+            item { SmallTitle(text = "功能") }
             item {
                 SettingsCard {
+                    SwitchRow(
+                        checked = enabled,
+                        title = "启用悬浮标题栏",
+                        summary = "默认关闭；开启后下方外观参数生效",
+                        onCheckedChange = { enabled = it }
+                    )
+                }
+            }
+            if (enabled) {
+                item { SmallTitle(text = "外观") }
+                item {
+                    SettingsCard {
                     FloatingHeaderSlider("圆角", radius, 0f..40f, "dp") {
                         radius = it
-                        sp.edit().putFloat(FloatingChatHeaderSettings.KEY_RADIUS_DP, it).apply()
                     }
                     InsetDivider()
                     FloatingHeaderSlider("左右边距", horizontalMargin, 0f..32f, "dp") {
                         horizontalMargin = it
-                        sp.edit().putFloat(FloatingChatHeaderSettings.KEY_HORIZONTAL_MARGIN_DP, it).apply()
                     }
                     InsetDivider()
                     FloatingHeaderSlider("上下间距", verticalMargin, 0f..24f, "dp") {
                         verticalMargin = it
-                        sp.edit().putFloat(FloatingChatHeaderSettings.KEY_VERTICAL_MARGIN_DP, it).apply()
                     }
                     InsetDivider()
                     FloatingHeaderSlider("阴影高度", elevation, 0f..24f, "dp") {
                         elevation = it
-                        sp.edit().putFloat(FloatingChatHeaderSettings.KEY_ELEVATION_DP, it).apply()
                     }
                     InsetDivider()
                     FloatingHeaderSlider("背景不透明度", opacity, 0.5f..1f, "%") {
                         opacity = it
-                        sp.edit().putFloat(FloatingChatHeaderSettings.KEY_OPACITY, it).apply()
+                    }
                     }
                 }
             }
             item {
                 Text(
-                    text = "修改后重新进入聊天页面生效。",
+                    text = "调节参数后点击保存，重新进入聊天页面生效。",
                     modifier = Modifier.padding(horizontal = 28.dp, vertical = 10.dp),
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     fontSize = 12.sp
