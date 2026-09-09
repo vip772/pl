@@ -50,7 +50,10 @@ private class FloatingChatFooterRuntime(private val context: android.content.Con
     }
     fun restore(activity: Activity) { restoreRoot(activity.window.decorView as? ViewGroup) }
     fun restoreAll() { parents.keys.toList().forEach(::restore) }
-    private fun restoreRoot(root: ViewGroup?) { root ?: return; root.findViews { parents.containsKey(it) }.forEach(::restore) }
+    private fun restoreRoot(root: ViewGroup?) {
+        root ?: return
+        root.findViews { parents.containsKey(it) }.forEach { view -> restore(view) }
+    }
     private fun restore(view: View) { val parent = parents.remove(view) ?: return; val old = params.remove(view); (view.parent as? ViewGroup)?.removeView(view); parent.addView(view, old); FloatingChatCardVisuals.restore(view) }
     private fun dp(value: Int) = (value * context.resources.displayMetrics.density).roundToInt()
     private fun find(root: View, predicate: (View) -> Boolean): View? = if (predicate(root)) root else (root as? ViewGroup)?.let { group -> (0 until group.childCount).asSequence().mapNotNull { find(group.getChildAt(it), predicate) }.firstOrNull() }

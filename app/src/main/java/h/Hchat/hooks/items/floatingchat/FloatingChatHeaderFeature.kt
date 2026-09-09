@@ -54,7 +54,10 @@ private class FloatingChatHeaderRuntime(private val context: android.content.Con
     }
     fun restore(activity: Activity) { restoreRoot(activity.window.decorView as? ViewGroup) }
     fun restoreAll() { parents.keys.toList().forEach { restore(it) } }
-    private fun restoreRoot(root: ViewGroup?) { root ?: return; root.findViews { parents.containsKey(it) }.forEach(::restore) }
+    private fun restoreRoot(root: ViewGroup?) {
+        root ?: return
+        root.findViews { parents.containsKey(it) }.forEach { view -> restore(view) }
+    }
     private fun restore(view: View) {
         val parent = parents.remove(view) ?: return
         val old = params.remove(view)
