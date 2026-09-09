@@ -30,11 +30,12 @@ class FloatingChatFooterFeature : BaseFeature() {
     }
     companion object { const val ID = "floating_chat_footer" }
 }
-
 private class FooterRuntime(private val context: FeatureContext) {
     private val hooked = HashSet<Member>()
     private val states = WeakHashMap<View, FooterState>()
     private var installed = false
+    private val footerBottomClass = "com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom"
+
 
     fun install(): Boolean {
         if (installed) return true
@@ -76,33 +77,51 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
 
     private fun apply(footer: View) {
-        if (!isEnabled()) { restore(footer); return }
+        if (!isEnabled()) { restoreAll(footer); return }
         if (!footer.isAttachedToWindow) return
-        val params = footer.layoutParams
+        findAll(footer) { it.javaClass.name == footerBottomClass }.forEach { applyCard(it) }
+    }
+
+    private fun applyCard(view: View) {
+        val params = view.layoutParams
         val marginParams = params as? ViewGroup.MarginLayoutParams
-        val state = states[footer] ?: FooterState(
+        val state = states[view] ?: FooterState(
             params,
             marginParams?.leftMargin,
             marginParams?.rightMargin,
             marginParams?.bottomMargin,
-            footer.paddingLeft,
-            footer.paddingTop,
-            footer.paddingRight,
-            footer.paddingBottom,
-            footer.elevation
-        ).also { states[footer] = it }
+            view.paddingLeft,
+            view.paddingTop,
+            view.paddingRight,
+            view.paddingBottom,
+            view.elevation
+        ).also { states[view] = it }
         if (marginParams != null) {
-            marginParams.leftMargin = (state.leftMargin ?: marginParams.leftMargin) + dp(12)
-            marginParams.rightMargin = (state.rightMargin ?: marginParams.rightMargin) + dp(12)
-            marginParams.bottomMargin = (state.bottomMargin ?: marginParams.bottomMargin) + dp(8)
-            footer.layoutParams = marginParams
+            val left = (state.leftMargin ?: marginParams.leftMargin) + dp(12)
+            val right = (state.rightMargin ?: marginParams.rightMargin) + dp(12)
+            val bottom = (state.bottomMargin ?: marginParams.bottomMargin) + dp(8)
+            if (marginParams.leftMargin != left || marginParams.rightMargin != right || marginParams.bottomMargin != bottom) {
+                marginParams.leftMargin = left
+                marginParams.rightMargin = right
+                marginParams.bottomMargin = bottom
+                view.layoutParams = marginParams
+            }
         }
-        footer.elevation = dp(4).toFloat()
-        FloatingChatCardVisuals.apply(footer, 24)
+        val elevation = dp(4).toFloat()
+        if (view.elevation != elevation) view.elevation = elevation
+        FloatingChatCardVisuals.apply(view, 24)
     }
 
     private fun restore(view: View?) {
         view ?: return
+        restoreAll(view)
+    }
+
+    private fun restoreAll(root: View) {
+        findAll(root) { states.containsKey(it) }.forEach { restoreCard(it) }
+    }
+
+    private fun restoreCard(view: View) {
         val state = states.remove(view) ?: return
         view.layoutParams?.let { params ->
             (params as? ViewGroup.MarginLayoutParams)?.let {
@@ -120,6 +139,15 @@ private class FooterRuntime(private val context: FeatureContext) {
     fun destroy() { states.keys.toList().forEach(::restore) }
     private fun isEnabled() = context.configStore().getGlobalBoolean("${FloatingChatFooterFeature.ID}_enabled", false)
     private fun dp(value: Int) = (value * context.hostContext().resources.displayMetrics.density).roundToInt()
+    private fun findAll(root: View, predicate: (View) -> Boolean): List<View> = buildList {
+        fun walk(view: View) {
+            if (predicate(view)) add(view)
+            (view as? ViewGroup)?.let { group ->
+                for (index in 0 until group.childCount) walk(group.getChildAt(index))
+            }
+        }
+        walk(root)
+    }
     private data class FooterState(
         val params: ViewGroup.LayoutParams?,
         val leftMargin: Int?,

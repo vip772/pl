@@ -58,7 +58,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (!hooked.add(method)) return 1
         return runCatching {
             HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) = runCatching { after(param) }.onFailure { HLog.e("[Hchat:$TAG] 布局更新失败", it) }
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    runCatching { after(param) }
+                        .onFailure { HLog.e("[Hchat:$TAG] 布局更新失败", it) }
+                }
             })
             1
         }.getOrElse { hooked.remove(method); HLog.e("[Hchat:$TAG] Hook 安装失败", it); 0 }
@@ -79,12 +82,18 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 elevation = header.elevation
             ).also { states[header] = it }
             if (marginLp != null) {
-                marginLp.leftMargin = (state.leftMargin ?: marginLp.leftMargin) + dp(12)
-                marginLp.rightMargin = (state.rightMargin ?: marginLp.rightMargin) + dp(12)
-                marginLp.topMargin = (state.topMargin ?: marginLp.topMargin) + dp(4)
-                header.layoutParams = marginLp
+                val left = (state.leftMargin ?: marginLp.leftMargin) + dp(12)
+                val right = (state.rightMargin ?: marginLp.rightMargin) + dp(12)
+                val top = (state.topMargin ?: marginLp.topMargin) + dp(4)
+                if (marginLp.leftMargin != left || marginLp.rightMargin != right || marginLp.topMargin != top) {
+                    marginLp.leftMargin = left
+                    marginLp.rightMargin = right
+                    marginLp.topMargin = top
+                    header.layoutParams = marginLp
+                }
             }
-            header.elevation = dp(4).toFloat()
+            val elevation = dp(4).toFloat()
+            if (header.elevation != elevation) header.elevation = elevation
             FloatingChatCardVisuals.apply(header, 24)
             parent.invalidate()
         }

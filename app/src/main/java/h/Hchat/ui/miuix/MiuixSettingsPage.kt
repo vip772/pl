@@ -9093,7 +9093,7 @@ private fun FloatingChatToggleMiuixPage(
             item { SmallTitle(text = "功能开关") }
             item {
                 SettingsCard {
-                    SwitchRow(store, key, provider.title(), provider.subtitle(), true)
+                    SwitchRow(store, key, provider.title(), provider.subtitle(), false)
                 }
             }
         }
