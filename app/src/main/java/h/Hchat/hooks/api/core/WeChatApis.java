@@ -177,9 +177,6 @@ public final class WeChatApis {
     public static WeChatContactApi contacts() {
         return contactApi;
     }
-    public static WeChatContactApi contact() {
-        return contactApi;
-    }
     public static WeChatMessageStoreApi messageStore() {
         return messageStoreApi;
     }

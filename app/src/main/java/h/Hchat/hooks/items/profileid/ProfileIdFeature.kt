@@ -723,7 +723,7 @@ class ProfileIdFeature : BaseFeature() {
         }
 
         private fun resolveAndFormatCreateTime(profileId: String): String? {
-            val timestamp = runCatching { WeChatApis.contact()?.getContactCreateTime(profileId) ?: 0L }.getOrDefault(0L)
+            val timestamp = runCatching { WeChatApis.contacts()?.getContactCreateTime(profileId) ?: 0L }.getOrDefault(0L)
             if (timestamp <= 0L) return null
             return runCatching {
                 SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp))
