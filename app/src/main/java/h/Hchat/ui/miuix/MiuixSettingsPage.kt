@@ -55,6 +55,8 @@ import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutIconStore
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutItem
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutRuntime
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutSettings
+import h.Hchat.hooks.items.floatingchat.FloatingChatHeaderFeature
+import h.Hchat.hooks.items.floatingchat.FloatingChatFooterFeature
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -3115,7 +3117,9 @@ private fun practicalFeatureGroups(
                 RoundAvatarFeature.ID,
                 CustomFriendAvatarFeature.ID,
                 CustomBottomBarFeature.ID,
-                FloatingBottomBarSettings.FEATURE_ID
+                FloatingBottomBarSettings.FEATURE_ID,
+                FloatingChatHeaderFeature.ID,
+                FloatingChatFooterFeature.ID
             )
         ),
         FeatureGroupEntry(
@@ -4525,6 +4529,8 @@ private fun FeatureSettingsPage(
         SettingsFeature.ID -> SettingsEntryMiuixPage(context, provider, onBack)
         PluginAgentEntryProvider.ID -> PluginAgentEntryMiuixPage(context, provider, onBack)
         FloatingShortcutFeature.ID -> FloatingShortcutMiuixPage(context, provider, onBack)
+        FloatingChatHeaderFeature.ID -> FloatingChatToggleMiuixPage(context, provider, onBack)
+        FloatingChatFooterFeature.ID -> FloatingChatToggleMiuixPage(context, provider, onBack)
         MessageDetailsSettingsProvider.FEATURE_ID -> MessageDetailsConfigPage(
             context = context,
             sp = HchatStorage.preferences(context, HchatExtraSettings.PREFS_NAME),
@@ -9054,6 +9060,40 @@ private fun HchatExtraToggleMiuixPage(
                         summary,
                         defaultValue
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FloatingChatToggleMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val store = remember { HchatStorage.preferences(context, "Hchat_global_config") }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    val key = "${provider.featureId()}_enabled"
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar("返回", onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "功能开关") }
+            item {
+                SettingsCard {
+                    SwitchRow(store, key, provider.title(), provider.subtitle(), true)
                 }
             }
         }
