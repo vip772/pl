@@ -244,8 +244,9 @@ done
 面向插件作者的简明接口文档见 `docs/SCRIPT_PLUGIN_API.md`。该文档用于给用户和插件作者阅读，避免写入项目内部协作规则或逆向细节。
 
 ## 日志规则
-
 LSPosed 只有 `XposedBridge.log(Throwable)` 会按错误日志显示。模块自身的失败、异常、未找到、未命中、不可用等错误日志必须统一使用 `h.Hchat.utils.HLog.e(...)`，不要直接 `XposedBridge.log(String)`。普通状态、抓包内容、用户脚本主动 `log()` 仍可使用普通字符串日志，避免把调试信息全部标红。
+
+Hchat 同时把 `HLog.e(...)` 写入微信私有目录 `Hchat/logs/runtime.log`，文件滚动保留最近内容且有大小上限。设置页 `设置 > 诊断 > 导出运行日志` 会通过系统分享/保存面板导出诊断文本，内容包括模块、微信、Android、设备版本信息、Hchat 运行错误和 `Hchat/crash/last_crash.log`；不会导出聊天数据库、FastKV 配置或媒体文件。该导出功能不能读取 LSPosed 管理器自身的完整日志，涉及 Hook 框架日志时仍需从 LSPosed 导出。
 
 `捕获异常日志` 位于 `娱乐 > 调试`，默认关闭。开启后，模块在用户同意协议后于微信主进程启动期安装异常记录器；运行中开启也会立即补装。Java 捕获器在 `Application.onCreate` 原方法执行前安装，未捕获异常会写入完整线程堆栈；Native 捕获器覆盖 `SIGSEGV`、`SIGABRT`、`SIGBUS`、`SIGILL`、`SIGFPE`、`SIGSYS`，只用无堆分配的信号现场代码保存信号、可读 `si_code`、发送方、线程名、故障地址、关键寄存器、`pc/lr` 所属 so 与文件偏移、可执行内存映射，并在 ARM64 上保存最多 32 层经过可读栈映射校验的 frame-pointer 回溯；`SIGABRT` 不再把无意义的 `siginfo` 联合字段显示为故障地址。记录完成后继续转交微信原处理器，不能阻断系统 tombstone。Android 11 及以上同时读取 `ApplicationExitInfo`：Native 异常补充退出 PID/UID、内存和系统 tombstone，系统明确记录为 `REASON_ANR` 的异常退出则单独生成 ANR 报告并附带系统 ANR trace；ANR 不使用固定时长的主线程看门狗推断，避免把短暂卡顿、调试暂停或系统负载误报为 ANR。记录保存在微信私有目录 `Hchat/crash/`，下次进入稳定 Activity 后用 Miuix 弹窗展示；点击日志区域或“复制日志”会复制完整内容，用户关闭弹窗后归档为 `last_crash.log` 并避免重复弹出，Activity 切换或写盘失败时保留待展示记录。关闭开关会立即取消待展示弹窗并清理尚未归档的 Java、Native、ANR 记录，同时推进退出记录基线，后续重新开启不会补弹关闭期间的旧异常；`last_crash.log` 继续保留。`OutOfMemoryError` 的 `Failed to allocate` 类型不记录、不弹窗。
 

@@ -2,18 +2,23 @@ package h.Hchat.hooks.api.contact
 
 import android.app.Activity
 import android.content.ContextWrapper
+import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Shader
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.graphics.Color
-import android.graphics.LinearGradient
-import android.graphics.Shader
 import de.robv.android.xposed.XC_MethodHook
+import h.Hchat.dexkit.DexMethodCache
+import h.Hchat.hooks.core.FeatureContext
 import h.Hchat.hooks.core.HookRegistry
 import h.Hchat.utils.HLog
 import h.Hchat.utils.KavaReflector
+import org.luckypray.dexkit.query.FindMethod
+import org.luckypray.dexkit.query.matchers.MethodMatcher
+import java.lang.reflect.Method
 import java.util.concurrent.CopyOnWriteArrayList
 
 /** Shared insertion point for rows rendered by NormalProfileHeaderPreference. */
@@ -22,32 +27,67 @@ object WeContactHeaderApi {
         fun getHeaderText(activity: Activity): String?
         fun getHeaderColorSpec(activity: Activity): String? = null
     }
+
     private const val TAG = "Hchat:WeContactHeaderApi"
     private const val ROW_TAG = "Hchat:ContactHeaderRow"
     private const val HEADER_CLASS = "com.tencent.mm.plugin.profile.ui.NormalProfileHeaderPreference"
+    private const val BIND_ANCHOR = "[onBindView] never attach!"
+    private const val CACHE_PREFS = "Hchat_contact_header_method_cache"
+    private const val CACHE_METHOD = "normal_profile_header_bind_v1"
     private val providers = CopyOnWriteArrayList<Provider>()
     @Volatile private var installed = false
 
     @Synchronized
-    fun install(classLoader: ClassLoader) {
-        if (installed) return
-        val clazz = KavaReflector.loadClass(HEADER_CLASS, classLoader) ?: run { HLog.e("[$TAG] 未找到资料页头部类"); return }
-        val method = KavaReflector.findMethodRecursive(clazz, "onBindView", View::class.java)
-            ?: clazz.methods.firstOrNull { method ->
-                method.parameterTypes.size == 1 && View::class.java.isAssignableFrom(method.parameterTypes[0]) && method.returnType == Void.TYPE
-            }
-            ?: run { HLog.e("[$TAG] 未找到资料页头部绑定方法"); return }
-        HookRegistry.get().hook(method, object : XC_MethodHook() {
-            override fun afterHookedMethod(param: MethodHookParam) {
-                runCatching { bind(param.thisObject as? View.OnLongClickListener, param.args.firstOrNull() as? View) }
-                    .onFailure { HLog.e("[$TAG] 注入资料页头部失败", it) }
-            }
-        })
-        installed = true
+    fun install(context: FeatureContext): Boolean {
+        if (installed) return true
+        val method = locateBindMethod(context) ?: run {
+            HLog.e("[$TAG] 未找到资料页头部绑定方法")
+            return false
+        }
+        return runCatching {
+            HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    runCatching { bind(param.thisObject as? View.OnLongClickListener, param.args.firstOrNull() as? View) }
+                        .onFailure { HLog.e("[$TAG] 注入资料页头部失败", it) }
+                }
+            })
+            installed = true
+            true
+        }.onFailure { HLog.e("[$TAG] 安装资料页头部 Hook 失败", it) }.getOrDefault(false)
     }
 
     fun addProvider(provider: Provider) { providers.addIfAbsent(provider) }
     fun removeProvider(provider: Provider) { providers.remove(provider) }
+
+    private fun locateBindMethod(context: FeatureContext): Method? {
+        val prefs = DexMethodCache.prefs(context.hostContext(), CACHE_PREFS)
+        val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
+        DexMethodCache.load(prefs, runtimeKey, context.hostClassLoader(), CACHE_METHOD)
+            ?.takeIf(::isBindMethod)?.let { return it }
+        val found = runCatching {
+            context.dexKitBridge().findMethod(
+                FindMethod().apply {
+                    matcher(MethodMatcher().apply {
+                        declaredClass(HEADER_CLASS)
+                        paramTypes(View::class.java)
+                        returnType("void")
+                        usingStrings(listOf(BIND_ANCHOR))
+                    })
+                }
+            ).asSequence()
+                .mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
+                .firstOrNull(::isBindMethod)
+        }.onFailure { HLog.e("[$TAG] DexKit 定位资料页头部绑定方法失败", it) }.getOrNull()
+        if (found == null) DexMethodCache.clear(prefs, runtimeKey, CACHE_METHOD)
+        else DexMethodCache.save(prefs, runtimeKey, CACHE_METHOD, found)
+        return found
+    }
+
+    private fun isBindMethod(method: Method): Boolean =
+        method.declaringClass.name == HEADER_CLASS &&
+            method.returnType == Void.TYPE &&
+            method.parameterTypes.size == 1 &&
+            View::class.java.isAssignableFrom(method.parameterTypes[0])
 
     private fun bind(header: View.OnLongClickListener?, root: View?) {
         if (header == null || root == null) return
@@ -57,7 +97,9 @@ object WeContactHeaderApi {
         var context = root.context
         while (context is ContextWrapper && context !is Activity) context = context.baseContext
         val activity = context as? Activity ?: return
-        val templates = findViews(viewRoot) { it is TextView && listenerInfoLongClick(it) === header }.filterIsInstance<TextView>()
+        val templates = findViews(viewRoot) {
+            it is TextView && listenerInfoLongClick(it) === header
+        }.filterIsInstance<TextView>()
         val parent = templates.map { it.parent }.distinct().singleOrNull() as? LinearLayout ?: return
         if (parent.orientation != LinearLayout.VERTICAL) return
         val template = templates.firstOrNull() ?: return
@@ -65,34 +107,58 @@ object WeContactHeaderApi {
         providers.forEach { provider ->
             val text = provider.getHeaderText(activity) ?: return@forEach
             val row = TextView(template.context).apply {
-                id = View.generateViewId(); tag = ROW_TAG
+                id = View.generateViewId()
+                tag = ROW_TAG
                 layoutParams = LinearLayout.LayoutParams(template.layoutParams as LinearLayout.LayoutParams)
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, template.textSize); setTextColor(template.textColors)
-                typeface = template.typeface; gravity = template.gravity; includeFontPadding = template.includeFontPadding
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, template.textSize)
+                setTextColor(template.textColors)
+                typeface = template.typeface
+                gravity = template.gravity
+                includeFontPadding = template.includeFontPadding
                 textDirection = template.textDirection
                 setPaddingRelative(template.paddingStart, template.paddingTop, template.paddingEnd, template.paddingBottom)
-                setLineSpacing(template.lineSpacingExtra, template.lineSpacingMultiplier); this.text = text
+                setLineSpacing(template.lineSpacingExtra, template.lineSpacingMultiplier)
+                this.text = text
                 applyColorSpec(this, provider.getHeaderColorSpec(activity))
                 if (touch != null) setOnTouchListener(touch)
-                setOnLongClickListener { val ownId = id; try { id = template.id; header.onLongClick(this) } finally { id = ownId } }
+                setOnLongClickListener {
+                    val ownId = id
+                    try {
+                        id = template.id
+                        header.onLongClick(this)
+                    } finally {
+                        id = ownId
+                    }
+                }
             }
             parent.addView(row)
         }
     }
 
     private fun applyColorSpec(view: TextView, raw: String?) {
-        val parts = raw.orEmpty().split(',').mapNotNull { runCatching { Color.parseColor(it.trim()) }.getOrNull() }.take(2)
+        val parts = raw.orEmpty().split(',')
+            .mapNotNull { runCatching { Color.parseColor(it.trim()) }.getOrNull() }
+            .take(2)
         if (parts.isEmpty()) return
         val end = parts.getOrElse(1) { parts[0] }
-        view.paint.shader = if (parts[0] == end) null else LinearGradient(0f, 0f, 1000f, 0f, parts[0], end, Shader.TileMode.CLAMP)
+        view.paint.shader = if (parts[0] == end) null else
+            LinearGradient(0f, 0f, 1000f, 0f, parts[0], end, Shader.TileMode.CLAMP)
         if (parts[0] == end) view.setTextColor(parts[0])
     }
+
     private fun listenerInfo(view: View): Any? = KavaReflector.readField(view, "mListenerInfo")
-    private fun listenerInfoLongClick(view: View): Any? = listenerInfo(view)?.let { KavaReflector.readField(it, "mOnLongClickListener") }
-    private fun listenerInfoTouch(view: View): View.OnTouchListener? = listenerInfo(view)?.let { KavaReflector.readField(it, "mOnTouchListener") as? View.OnTouchListener }
+    private fun listenerInfoLongClick(view: View): Any? =
+        listenerInfo(view)?.let { KavaReflector.readField(it, "mOnLongClickListener") }
+    private fun listenerInfoTouch(view: View): View.OnTouchListener? =
+        listenerInfo(view)?.let { KavaReflector.readField(it, "mOnTouchListener") as? View.OnTouchListener }
+
     private fun findViews(root: ViewGroup, predicate: (View) -> Boolean): List<View> {
         val result = ArrayList<View>()
-        fun walk(view: View) { if (predicate(view)) result += view; if (view is ViewGroup) for (i in 0 until view.childCount) walk(view.getChildAt(i)) }
-        walk(root); return result
+        fun walk(view: View) {
+            if (predicate(view)) result += view
+            if (view is ViewGroup) for (i in 0 until view.childCount) walk(view.getChildAt(i))
+        }
+        walk(root)
+        return result
     }
 }

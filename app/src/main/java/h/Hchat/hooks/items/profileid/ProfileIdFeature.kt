@@ -38,7 +38,8 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        WeContactHeaderApi.install(context.hostClassLoader())
+        h.Hchat.utils.HLog.initialize(context.hostContext())
+        WeContactHeaderApi.install(context)
         WeContactHeaderApi.addProvider(this)
         ProfileAddTimeFeature.installProvider(context.hostContext())
         install(context.hostContext(), context.hostClassLoader())

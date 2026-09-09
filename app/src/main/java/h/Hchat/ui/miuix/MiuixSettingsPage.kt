@@ -43,6 +43,7 @@ import h.Hchat.R
 import h.Hchat.crash.CrashReportRuntime
 import h.Hchat.crash.CrashReportSettings
 import h.Hchat.crash.CrashReportSettingsProvider
+import h.Hchat.utils.RuntimeLogStore
 import h.Hchat.hooks.api.ui.HchatAgentIconDrawable
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutFeature
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutGlyph
@@ -2979,6 +2980,21 @@ private fun MainSettingsPage(
                         }
                         item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "关于") }
                         item { AboutCard() }
+                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "诊断") }
+                        item {
+                            SettingsCard {
+                                ActionRow("导出运行日志", "包含 Hchat 错误、崩溃记录和版本环境信息") {
+                                    val report = RuntimeLogStore.buildDiagnosticReport(context)
+                                    val share = Intent(Intent.ACTION_SEND).apply {
+                                        type = "text/plain"
+                                        putExtra(Intent.EXTRA_SUBJECT, "Hchat 运行日志")
+                                        putExtra(Intent.EXTRA_TEXT, report)
+                                    }
+                                    runCatching { context.startActivity(Intent.createChooser(share, "导出 Hchat 运行日志")) }
+                                        .onFailure { Toast.makeText(context, "无法打开导出界面", Toast.LENGTH_SHORT).show() }
+                                }
+                            }
+                        }
                         item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "配置") }
                         item {
                             ConfigBackupCard(
@@ -9399,7 +9415,11 @@ private fun ProfileIdMiuixPage(
     provider: FeatureSettingsProvider,
     onBack: () -> Unit
 ) {
-    val sp = remember { HchatStorage.preferences(context, ProfileIdSettings.PREFS_NAME) }
+    val idSp = remember { HchatStorage.preferences(context, ProfileIdSettings.PREFS_NAME) }
+    val addTimeSp = remember { HchatStorage.preferences(context, ProfileAddTimeSettings.PREFS_NAME) }
+    var addTimeColor by remember {
+        mutableStateOf(addTimeSp.getString(ProfileAddTimeSettings.KEY_COLOR, ProfileAddTimeSettings.DEFAULT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_COLOR)
+    }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
 
@@ -9422,14 +9442,20 @@ private fun ProfileIdMiuixPage(
             item { SmallTitle(text = "资料页") }
             item {
                 SettingsCard {
-                    SwitchRow(sp, ProfileIdSettings.KEY_ENABLE, "显示微信 ID", "在资料页头部显示可点击复制的 ID", ProfileIdSettings.DEFAULT_ENABLE)
+                    SwitchRow(idSp, ProfileIdSettings.KEY_ENABLE, "显示微信 ID", "在资料页头部显示可点击复制的 ID", ProfileIdSettings.DEFAULT_ENABLE)
                     InsetDivider()
-                    SwitchRow(sp, ProfileAddTimeSettings.KEY_ENABLE, "显示添加时间", "格式：yyyy-MM-dd HH:mm:ss", ProfileAddTimeSettings.DEFAULT_ENABLE)
+                    SwitchRow(addTimeSp, ProfileAddTimeSettings.KEY_ENABLE, "显示添加时间", "格式：yyyy-MM-dd HH:mm:ss", ProfileAddTimeSettings.DEFAULT_ENABLE)
                 }
             }
             item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "添加时间颜色") }
             item { SettingsCard {
-                ColorPickerRow("添加时间渐变颜色", "支持单色或左右渐变", sp.getString(ProfileAddTimeSettings.KEY_COLOR, ProfileAddTimeSettings.DEFAULT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_COLOR, onReset = { sp.edit().remove(ProfileAddTimeSettings.KEY_COLOR).apply() }) { value -> sp.edit().putString(ProfileAddTimeSettings.KEY_COLOR, ProfileAddTimeSettings.cleanColorSpec(value)).apply() }
+                ColorPickerRow("添加时间渐变颜色", "支持单色或左右渐变", addTimeColor, onReset = {
+                    addTimeColor = ProfileAddTimeSettings.DEFAULT_COLOR
+                    addTimeSp.edit().remove(ProfileAddTimeSettings.KEY_COLOR).apply()
+                }) { value ->
+                    addTimeColor = ProfileAddTimeSettings.cleanColorSpec(value)
+                    addTimeSp.edit().putString(ProfileAddTimeSettings.KEY_COLOR, addTimeColor).apply()
+                }
             } }
         }
     }
