@@ -31,7 +31,8 @@ import h.Hchat.utils.KavaReflector
 import h.Hchat.hooks.api.contact.WeContactHeaderApi
 class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
     override fun featureId(): String = ID
-    override fun name(): String = "显示微信 ID"
+    override fun name(): String = "资料页显示"
+    override fun isEnabled(context: FeatureContext): Boolean = isEnabled(context.hostContext())
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(ProfileIdSettingsProvider())
     }
@@ -44,7 +45,8 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
     }
 
     override fun getHeaderText(activity: Activity): String? {
-        if (!isEnabled(activity)) return null
+        val idPrefs = HchatStorage.preferences(activity, ProfileIdSettings.PREFS_NAME)
+        if (!idPrefs.getBoolean(ProfileIdSettings.KEY_ENABLE, ProfileIdSettings.DEFAULT_ENABLE)) return null
         val profileId = resolveProfileId(activity, ProfileKind.CONTACT) ?: return null
         return "$LABEL：$profileId"
     }
@@ -78,11 +80,19 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
         @Volatile
         private var installed = false
 
+        private fun isIdEnabled(context: Context?): Boolean {
+            if (context == null) return false
+            return HchatStorage.preferences(context, ProfileIdSettings.PREFS_NAME)
+                .getBoolean(ProfileIdSettings.KEY_ENABLE, ProfileIdSettings.DEFAULT_ENABLE)
+        }
+
         @JvmStatic
         fun isEnabled(context: Context?): Boolean {
             if (context == null) return false
-            val sp = HchatStorage.preferences(context, ProfileIdSettings.PREFS_NAME)
-            return sp.getBoolean(ProfileIdSettings.KEY_ENABLE, ProfileIdSettings.DEFAULT_ENABLE)
+            val idPrefs = HchatStorage.preferences(context, ProfileIdSettings.PREFS_NAME)
+            val addTimePrefs = HchatStorage.preferences(context, ProfileAddTimeSettings.PREFS_NAME)
+            return idPrefs.getBoolean(ProfileIdSettings.KEY_ENABLE, ProfileIdSettings.DEFAULT_ENABLE) ||
+                addTimePrefs.getBoolean(ProfileAddTimeSettings.KEY_ENABLE, ProfileAddTimeSettings.DEFAULT_ENABLE)
         }
 
         @JvmStatic
@@ -137,7 +147,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
         }
 
         private fun injectChatroomProfileId(context: Context, activity: Activity?) {
-            if (activity == null || !isEnabled(context)) return
+            if (activity == null || !isIdEnabled(context)) return
             val profileId = resolveProfileId(activity, ProfileKind.CHATROOM) ?: return
             activity.window?.decorView?.post {
                 injectChatroomPreferenceId(activity, profileId)

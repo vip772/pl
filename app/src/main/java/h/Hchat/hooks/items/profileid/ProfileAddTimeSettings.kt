@@ -3,15 +3,13 @@ package h.Hchat.hooks.items.profileid
 object ProfileAddTimeSettings {
     const val PREFS_NAME = "Hchat_profile_add_time_config"
     const val KEY_ENABLE = "profile_add_time_enable"
-    const val KEY_LEFT_LIGHT_COLOR = "profile_add_time_left_light"
-    const val KEY_RIGHT_LIGHT_COLOR = "profile_add_time_right_light"
-    const val KEY_LEFT_DARK_COLOR = "profile_add_time_left_dark"
-    const val KEY_RIGHT_DARK_COLOR = "profile_add_time_right_dark"
+    const val KEY_COLOR = "profile_add_time_color"
     const val DEFAULT_ENABLE = false
     const val DEFAULT_LEFT_LIGHT_COLOR = "#FF000000"
     const val DEFAULT_RIGHT_LIGHT_COLOR = "#FF000000"
     const val DEFAULT_LEFT_DARK_COLOR = "#FFFFFFFF"
     const val DEFAULT_RIGHT_DARK_COLOR = "#FFFFFFFF"
+    const val DEFAULT_COLOR = "#FF000000,#FF000000"
 
     fun cleanColorSpec(value: String?): String {
         val parts = value.orEmpty().split(',').mapNotNull { cleanColor(it).takeIf(String::isNotEmpty) }.take(2)

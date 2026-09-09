@@ -33,7 +33,10 @@ object WeContactHeaderApi {
         if (installed) return
         val clazz = KavaReflector.loadClass(HEADER_CLASS, classLoader) ?: run { HLog.e("[$TAG] 未找到资料页头部类"); return }
         val method = KavaReflector.findMethodRecursive(clazz, "onBindView", View::class.java)
-            ?: run { HLog.e("[$TAG] 未找到 onBindView"); return }
+            ?: clazz.methods.firstOrNull { method ->
+                method.parameterTypes.size == 1 && View::class.java.isAssignableFrom(method.parameterTypes[0]) && method.returnType == Void.TYPE
+            }
+            ?: run { HLog.e("[$TAG] 未找到资料页头部绑定方法"); return }
         HookRegistry.get().hook(method, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 runCatching { bind(param.thisObject as? View.OnLongClickListener, param.args.firstOrNull() as? View) }
@@ -47,7 +50,7 @@ object WeContactHeaderApi {
     fun removeProvider(provider: Provider) { providers.remove(provider) }
 
     private fun bind(header: View.OnLongClickListener?, root: View?) {
-        if (header == null || root == null || root.tag == null) return
+        if (header == null || root == null) return
         val viewRoot = root as? ViewGroup ?: return
         findViews(viewRoot) { it.tag == ROW_TAG }.forEach { (it.parent as? ViewGroup)?.removeView(it) }
         if (providers.isEmpty()) return

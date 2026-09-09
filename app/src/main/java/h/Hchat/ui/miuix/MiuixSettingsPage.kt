@@ -378,7 +378,6 @@ import h.Hchat.hooks.items.patblock.PatBlockFeature
 import h.Hchat.hooks.items.patblock.PatBlockSettings
 import h.Hchat.hooks.items.profileid.ProfileIdFeature
 import h.Hchat.hooks.items.profileid.ProfileIdSettings
-// ProfileAddTimeFeature is configured inside ProfileIdMiuixPage.
 import h.Hchat.hooks.items.profileid.ProfileAddTimeSettings
 import h.Hchat.hooks.items.protobuf.ProtobufPacketFeature
 import h.Hchat.hooks.items.protobuf.ProtobufPacketRuntime
@@ -9430,13 +9429,7 @@ private fun ProfileIdMiuixPage(
             }
             item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "添加时间颜色") }
             item { SettingsCard {
-                ColorPickerRow("左侧浅色", "浅色模式", sp.getString(ProfileAddTimeSettings.KEY_LEFT_LIGHT_COLOR, ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR, onReset = { sp.edit().remove(ProfileAddTimeSettings.KEY_LEFT_LIGHT_COLOR).apply() }) { value -> sp.edit().putString(ProfileAddTimeSettings.KEY_LEFT_LIGHT_COLOR, ProfileAddTimeSettings.cleanColorSpec(value)).apply() }
-                InsetDivider()
-                ColorPickerRow("右侧浅色", "浅色模式", sp.getString(ProfileAddTimeSettings.KEY_RIGHT_LIGHT_COLOR, ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR, onReset = { sp.edit().remove(ProfileAddTimeSettings.KEY_RIGHT_LIGHT_COLOR).apply() }) { value -> sp.edit().putString(ProfileAddTimeSettings.KEY_RIGHT_LIGHT_COLOR, ProfileAddTimeSettings.cleanColorSpec(value)).apply() }
-                InsetDivider()
-                ColorPickerRow("左侧深色", "深色模式", sp.getString(ProfileAddTimeSettings.KEY_LEFT_DARK_COLOR, ProfileAddTimeSettings.DEFAULT_LEFT_DARK_COLOR) ?: ProfileAddTimeSettings.DEFAULT_LEFT_DARK_COLOR, onReset = { sp.edit().remove(ProfileAddTimeSettings.KEY_LEFT_DARK_COLOR).apply() }) { value -> sp.edit().putString(ProfileAddTimeSettings.KEY_LEFT_DARK_COLOR, ProfileAddTimeSettings.cleanColorSpec(value)).apply() }
-                InsetDivider()
-                ColorPickerRow("右侧深色", "深色模式", sp.getString(ProfileAddTimeSettings.KEY_RIGHT_DARK_COLOR, ProfileAddTimeSettings.DEFAULT_RIGHT_DARK_COLOR) ?: ProfileAddTimeSettings.DEFAULT_RIGHT_DARK_COLOR, onReset = { sp.edit().remove(ProfileAddTimeSettings.KEY_RIGHT_DARK_COLOR).apply() }) { value -> sp.edit().putString(ProfileAddTimeSettings.KEY_RIGHT_DARK_COLOR, ProfileAddTimeSettings.cleanColorSpec(value)).apply() }
+                ColorPickerRow("添加时间渐变颜色", "支持单色或左右渐变", sp.getString(ProfileAddTimeSettings.KEY_COLOR, ProfileAddTimeSettings.DEFAULT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_COLOR, onReset = { sp.edit().remove(ProfileAddTimeSettings.KEY_COLOR).apply() }) { value -> sp.edit().putString(ProfileAddTimeSettings.KEY_COLOR, ProfileAddTimeSettings.cleanColorSpec(value)).apply() }
             } }
         }
     }
@@ -9448,6 +9441,9 @@ private fun ProfileAddTimeMiuixPage(
     provider: FeatureSettingsProvider,
     onBack: () -> Unit
 ) {
+    ProfileIdMiuixPage(context, provider, onBack)
+    return
+/*
     val sp = remember { HchatStorage.preferences(context, ProfileAddTimeSettings.PREFS_NAME) }
     var leftLight by remember { mutableStateOf(sp.getString(ProfileAddTimeSettings.KEY_LEFT_LIGHT_COLOR, ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR) }
     var rightLight by remember { mutableStateOf(sp.getString(ProfileAddTimeSettings.KEY_RIGHT_LIGHT_COLOR, ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR) }
@@ -9480,8 +9476,7 @@ private fun ProfileAddTimeMiuixPage(
             } }
         }
     }
-}
-
+}*/
 @Composable
 private fun HideChatMenuMiuixPage(
     context: Context,
