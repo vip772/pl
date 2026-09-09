@@ -20,6 +20,11 @@ import de.robv.android.xposed.XposedBridge
 import h.Hchat.hooks.core.BaseFeature
 import h.Hchat.hooks.core.FeatureContext
 import h.Hchat.hooks.core.HookRegistry
+import h.Hchat.hooks.api.core.WeChatApis
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
 import h.Hchat.utils.WeChatIdRules
 import h.Hchat.preferences.HchatStorage
 import h.Hchat.utils.KavaReflector
@@ -27,7 +32,7 @@ import h.Hchat.utils.KavaReflector
 class ProfileIdFeature : BaseFeature() {
     override fun featureId(): String = ID
 
-    override fun name(): String = "资料页显示ID"
+    override fun name(): String = "资料页显示"
 
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(ProfileIdSettingsProvider())
@@ -55,7 +60,9 @@ class ProfileIdFeature : BaseFeature() {
             "see_room_member",
             "room_name"
         )
-        private const val LABEL = "ID"
+        private const val LABEL = "微信 ID"
+        private const val CREATE_TIME_LABEL = "添加时间"
+        private const val CREATE_TIME_LABEL = "添加时间"
 
         @Volatile
         private var installed = false
@@ -162,13 +169,27 @@ class ProfileIdFeature : BaseFeature() {
 
         private fun injectProfileIdNow(activity: Activity, profileId: String, kind: ProfileKind) {
             val decor = activity.window?.decorView as? ViewGroup ?: return
+            val createTimeText = resolveAndFormatCreateTime(profileId)
             val existing = findInjectedRow(decor)
             if (existing != null) {
-                bindRow(existing, activity, profileId)
+                bindRow(existing, activity, profileId, createTimeText)
                 return
             }
+            if (kind == ProfileKind.CONTACT) {
+                val profileInfoContainer = findContactProfileInfoContainer(decor)
+                if (profileInfoContainer != null) {
+                    profileInfoContainer.addView(
+                        createContactProfileIdView(activity, profileId, createTimeText),
+                        ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.WRAP_CONTENT
+                        )
+                    )
+                    return
+                }
+            }
             val container = findInsertionContainer(decor) ?: return
-            val row = createRow(activity, profileId)
+            val row = createRow(activity, profileId, createTimeText)
             val index = insertionIndex(container, kind)
             container.addView(row, index.coerceIn(0, container.childCount), row.layoutParams)
         }
@@ -276,7 +297,7 @@ class ProfileIdFeature : BaseFeature() {
             profileId: String,
             titleGetter: java.lang.reflect.Method? = null
         ) {
-            val title = "$LABEL: $profileId"
+            val title = "$LABEL：$profileId"
             KavaReflector.writeField(preference, "h", title)
             KavaReflector.writeField(preference, "m", "")
             val titleSetters = titleGetter?.let { findTitleSetters(preference, it) }.orEmpty()
@@ -307,9 +328,9 @@ class ProfileIdFeature : BaseFeature() {
         private fun bindRenderedChatroomRow(activity: Activity, profileId: String, attempt: Int = 0) {
             val decor = activity.window?.decorView as? ViewGroup ?: return
             decor.postDelayed({
-                val title = "$LABEL: $profileId"
+                val title = "$LABEL：$profileId"
                 val titleView = findTextView(decor) { it == title } ?: findTextView(decor) {
-                    it.startsWith("$LABEL: ") && it.contains(profileId)
+                    it.startsWith("$LABEL：") && it.contains(profileId)
                 }
                 if (titleView != null) {
                     bindRenderedClickTargets(titleView, activity, profileId)
@@ -462,6 +483,47 @@ class ProfileIdFeature : BaseFeature() {
             return null
         }
 
+        private fun findContactProfileInfoContainer(root: ViewGroup): ViewGroup? {
+            val candidates = ArrayList<ViewGroup>()
+            collectContactProfileInfoContainers(root, candidates, 0)
+            return candidates.maxByOrNull { group ->
+                val text = textOf(group)
+                var score = 0
+                if (text.contains("昵称")) score += 20
+                if (text.contains("微信号")) score += 30
+                if (text.contains("地区")) score += 20
+                if (group is LinearLayout && group.orientation == LinearLayout.VERTICAL) score += 15
+                score - viewDepth(group)
+            }
+        }
+        private fun collectContactProfileInfoContainers(
+            group: ViewGroup,
+            out: MutableList<ViewGroup>,
+            depth: Int
+        ) {
+            if (depth > 10) return
+            val text = textOf(group)
+            if (text.contains("微信号") &&
+                (text.contains("昵称") || text.contains("地区")) &&
+                group !is AbsListView &&
+                group !is ScrollView &&
+                !group.javaClass.name.contains("RecyclerView")
+            ) {
+                out += group
+            }
+            forEachChild(group) { child ->
+                if (child is ViewGroup) collectContactProfileInfoContainers(child, out, depth + 1)
+            }
+        }
+        private fun viewDepth(view: View): Int {
+            var depth = 0
+            var current = view.parent
+            while (current is View) {
+                depth++
+                current = current.parent
+            }
+            return depth
+        }
         private fun findInsertionContainer(root: ViewGroup): ViewGroup? {
             val candidates = ArrayList<ViewGroup>()
             collectLinearContainers(root, candidates)
@@ -557,7 +619,26 @@ class ProfileIdFeature : BaseFeature() {
             return builder.toString()
         }
 
-        private fun createRow(activity: Activity, profileId: String): LinearLayout {
+        private fun createContactProfileIdView(activity: Activity, profileId: String, createTimeText: String?): TextView {
+            return TextView(activity).apply {
+                tag = INJECTED_VALUE_TAG + profileId
+                text = buildProfileText(profileId, createTimeText)
+                textSize = 16f
+                includeFontPadding = true
+                maxLines = 2
+                setTextColor(
+                    themeColor(
+                        activity,
+                        android.R.attr.textColorSecondary,
+                        fallbackSecondaryTextColor(activity)
+                    )
+                )
+                setPadding(0, dp(activity, 6f), 0, 0)
+                setOnClickListener { copyProfileId(activity, profileId) }
+                isClickable = true
+            }
+        }
+        private fun createRow(activity: Activity, profileId: String, createTimeText: String?): LinearLayout {
             val row = LinearLayout(activity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -582,11 +663,11 @@ class ProfileIdFeature : BaseFeature() {
             }
             row.addView(text)
             row.addView(arrow)
-            bindRow(row, activity, profileId)
+            bindRow(row, activity, profileId, createTimeText)
             return row
         }
 
-        private fun bindRow(row: View, activity: Activity, profileId: String) {
+        private fun bindRow(row: View, activity: Activity, profileId: String, createTimeText: String? = resolveAndFormatCreateTime(profileId)) {
             row.tag = INJECTED_VALUE_TAG + profileId
             applyRowTheme(row, activity)
             val textView = if (row is ViewGroup) {
@@ -594,7 +675,7 @@ class ProfileIdFeature : BaseFeature() {
             } else {
                 null
             }
-            textView?.text = "$LABEL: $profileId"
+            textView?.text = buildProfileText(profileId, createTimeText)
             row.setOnClickListener {
                 copyProfileId(activity, profileId)
             }
@@ -639,6 +720,19 @@ class ProfileIdFeature : BaseFeature() {
         private fun isNightMode(context: Context): Boolean {
             return (context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
                 Configuration.UI_MODE_NIGHT_YES
+        }
+
+        private fun resolveAndFormatCreateTime(profileId: String): String? {
+            val timestamp = runCatching { WeChatApis.contact()?.getContactCreateTime(profileId) ?: 0L }.getOrDefault(0L)
+            if (timestamp <= 0L) return null
+            return runCatching {
+                SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(timestamp))
+            }.getOrNull()
+        }
+        private fun buildProfileText(profileId: String, createTimeText: String?): String {
+            val idText = "$LABEL：$profileId"
+            return if (createTimeText.isNullOrBlank()) idText else "$idText
+$CREATE_TIME_LABEL：$createTimeText"
         }
 
         private fun copyProfileId(activity: Activity, profileId: String) {

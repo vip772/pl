@@ -305,6 +305,29 @@ public final class WeChatContactApi {
         return member;
     }
 
+    /** Returns the persisted contact/chatroom creation time in milliseconds, or zero. */
+    public long getContactCreateTime(String wxId) {
+        if (TextUtils.isEmpty(wxId) || databaseApi == null || !databaseApi.isAvailable()) return 0L;
+        try {
+            String column;
+            if (hasColumn("rcontact", "createTime")) column = "createTime";
+            else if (hasColumn("rcontact", "talkerAddTime")) column = "talkerAddTime";
+            else return 0L;
+            List<Map<String, Object>> rows = databaseApi.query(
+                    "SELECT " + quoteColumn(column) + " AS contactCreateTime FROM rcontact WHERE username=? LIMIT 1",
+                    new String[]{wxId});
+            if (rows.isEmpty()) return 0L;
+            long timestamp = longValue(rows.get(0).get("contactCreateTime"));
+            if (timestamp <= 0L) return 0L;
+            if (timestamp < 100_000_000_000L) timestamp *= 1000L;
+            long now = System.currentTimeMillis();
+            if (timestamp < 1_230_768_000_000L || timestamp > now + 86_400_000L) return 0L;
+            return timestamp;
+        } catch (Throwable ignored) {
+            return 0L;
+        }
+    }
+
     public WeChatContact getContact(String wxId) {
         if (TextUtils.isEmpty(wxId)) return null;
         List<Map<String, Object>> rows = databaseApi.query(
@@ -1441,6 +1464,13 @@ public final class WeChatContactApi {
     private byte[] blob(Map<String, Object> row, String key) {
         Object value = row != null ? row.get(key) : null;
         return value instanceof byte[] ? (byte[]) value : null;
+    }
+
+    private long longValue(Object value) {
+        if (value instanceof Number) return ((Number) value).longValue();
+        if (value == null) return 0L;
+        try { return Long.parseLong(String.valueOf(value)); }
+        catch (Throwable ignored) { return 0L; }
     }
 
     private int intValue(Map<String, Object> row, String key) {

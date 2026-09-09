@@ -5,7 +5,7 @@ import h.Hchat.ui.SimpleFeatureSettingsProvider
 
 class ProfileIdSettingsProvider : SimpleFeatureSettingsProvider(
     ProfileIdFeature.ID,
-    "资料页显示ID",
+    "资料页显示",
     "在好友和群聊资料页显示可复制的微信 ID",
     FeatureSettingsProvider.CATEGORY_PRACTICAL
 )

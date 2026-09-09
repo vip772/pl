@@ -3921,7 +3921,7 @@ private fun featureSubSearchTerms(featureId: String): List<String> {
             "菜单名称颜色", "菜单名称大小", "菜单文字",
             "微信页面", "扫一扫", "朋友圈", "视频号", "收藏", "钱包"
         )
-        ProfileIdFeature.ID -> listOf("显示ID", "好友ID", "群聊ID", "wxid", "复制ID", "资料页ID")
+        ProfileIdFeature.ID -> listOf("资料页显示", "显示ID", "好友ID", "群聊ID", "wxid", "复制ID", "资料页ID")
         QuickContactEditFeature.ID -> listOf("快捷设置备注和标签", "好友备注", "好友标签", "新建标签", "会话长按菜单", "朋友圈头像")
         QuickMomentsFeature.ID -> listOf("快捷查看朋友圈", "朋友圈", "会话长按菜单", "个人朋友圈", "聊天分组", "自己", "企业微信联系人")
         QuickTerminateFeature.ID -> listOf("快捷终止", "结束微信", "终止微信", "加号菜单", "关闭微信")
