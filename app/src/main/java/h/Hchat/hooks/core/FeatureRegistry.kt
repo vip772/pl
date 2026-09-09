@@ -112,7 +112,6 @@ object FeatureRegistry {
             .register(MultiRecallFeature())
             .register(DisableHotUpdateFeature())
             .register(ProfileIdFeature())
-            .register(ProfileAddTimeFeature())
             .register(HideChatMenuFeature())
             .register(QuickContactEditFeature())
             .register(QuickGroupChatLabelFeature())

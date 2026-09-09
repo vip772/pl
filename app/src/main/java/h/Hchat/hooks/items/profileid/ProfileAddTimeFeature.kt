@@ -15,10 +15,16 @@ import java.util.Locale
 class ProfileAddTimeFeature : BaseFeature(), WeContactHeaderApi.Provider {
     override fun featureId() = ID
     override fun name() = "显示添加时间"
-    override fun onFeatureInit(context: FeatureContext) { registerSettingsProvider(ProfileAddTimeSettingsProvider()) }
-    override fun onFeatureInstall(context: FeatureContext) {
-        WeContactHeaderApi.install(context.hostClassLoader())
-        WeContactHeaderApi.addProvider(this)
+    override fun onFeatureInit(context: FeatureContext) = Unit
+    override fun onFeatureInstall(context: FeatureContext) = Unit
+
+    companion object {
+        private val provider = ProfileAddTimeFeature()
+        fun installProvider(context: android.content.Context) {
+            WeContactHeaderApi.addProvider(provider)
+        }
+        fun removeProvider() { WeContactHeaderApi.removeProvider(provider) }
+        const val ID = "profile_add_time"
     }
     override fun getHeaderText(activity: Activity): String? {
         val id = resolveId(activity) ?: return null
@@ -42,9 +48,4 @@ class ProfileAddTimeFeature : BaseFeature(), WeContactHeaderApi.Provider {
         return "$start,$end"
     }
 
-    override fun onFeatureDestroy(context: FeatureContext) {
-        WeContactHeaderApi.removeProvider(this)
-    }
-
-    companion object { const val ID = "profile_add_time" }
 }

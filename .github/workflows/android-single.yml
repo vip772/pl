@@ -1,6 +1,10 @@
 name: 安卓单频道构建
 
 on:
+  push:
+    branches:
+      - dev
+      - alt-entry
   workflow_dispatch:
 
 permissions:

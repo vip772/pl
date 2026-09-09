@@ -39,6 +39,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
     override fun onFeatureInstall(context: FeatureContext) {
         WeContactHeaderApi.install(context.hostClassLoader())
         WeContactHeaderApi.addProvider(this)
+        ProfileAddTimeFeature.installProvider(context.hostContext())
         install(context.hostContext(), context.hostClassLoader())
     }
 
@@ -50,6 +51,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
 
     override fun onFeatureDestroy(context: FeatureContext) {
         WeContactHeaderApi.removeProvider(this)
+        ProfileAddTimeFeature.removeProvider()
     }
 
     companion object {
