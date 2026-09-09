@@ -9436,48 +9436,6 @@ private fun ProfileIdMiuixPage(
 }
 
 @Composable
-private fun ProfileAddTimeMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    ProfileIdMiuixPage(context, provider, onBack)
-    return
-/*
-    val sp = remember { HchatStorage.preferences(context, ProfileAddTimeSettings.PREFS_NAME) }
-    var leftLight by remember { mutableStateOf(sp.getString(ProfileAddTimeSettings.KEY_LEFT_LIGHT_COLOR, ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR) }
-    var rightLight by remember { mutableStateOf(sp.getString(ProfileAddTimeSettings.KEY_RIGHT_LIGHT_COLOR, ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR) }
-    var leftDark by remember { mutableStateOf(sp.getString(ProfileAddTimeSettings.KEY_LEFT_DARK_COLOR, ProfileAddTimeSettings.DEFAULT_LEFT_DARK_COLOR) ?: ProfileAddTimeSettings.DEFAULT_LEFT_DARK_COLOR) }
-    var rightDark by remember { mutableStateOf(sp.getString(ProfileAddTimeSettings.KEY_RIGHT_DARK_COLOR, ProfileAddTimeSettings.DEFAULT_RIGHT_DARK_COLOR) ?: ProfileAddTimeSettings.DEFAULT_RIGHT_DARK_COLOR) }
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(title = provider.title(), largeTitle = provider.title(), scrollBehavior = scrollBehavior, bottomBar = {
-        BottomActionBar("保存设置", {
-            sp.edit()
-                .putString(ProfileAddTimeSettings.KEY_LEFT_LIGHT_COLOR, ProfileAddTimeSettings.cleanColorSpec(leftLight).ifEmpty { ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR })
-                .putString(ProfileAddTimeSettings.KEY_RIGHT_LIGHT_COLOR, ProfileAddTimeSettings.cleanColorSpec(rightLight).ifEmpty { ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR })
-                .putString(ProfileAddTimeSettings.KEY_LEFT_DARK_COLOR, ProfileAddTimeSettings.cleanColorSpec(leftDark).ifEmpty { ProfileAddTimeSettings.DEFAULT_LEFT_DARK_COLOR })
-                .putString(ProfileAddTimeSettings.KEY_RIGHT_DARK_COLOR, ProfileAddTimeSettings.cleanColorSpec(rightDark).ifEmpty { ProfileAddTimeSettings.DEFAULT_RIGHT_DARK_COLOR })
-                .apply()
-            onBack()
-        }, "返回", onBack)
-    }) { padding ->
-        LazyColumn(modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection), contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)) {
-            item { SmallTitle(text = "资料页") }
-            item { SettingsCard { SwitchRow(sp, ProfileAddTimeSettings.KEY_ENABLE, "显示添加时间", "显示格式：yyyy-MM-dd HH:mm:ss", ProfileAddTimeSettings.DEFAULT_ENABLE) } }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "颜色") }
-            item { SettingsCard {
-                ColorPickerRow("左侧浅色", "浅色模式", leftLight, onReset = { leftLight = ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR }) { leftLight = it.take(19) }
-                InsetDivider()
-                ColorPickerRow("右侧浅色", "浅色模式", rightLight, onReset = { rightLight = ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR }) { rightLight = it.take(19) }
-                InsetDivider()
-                ColorPickerRow("左侧深色", "深色模式", leftDark, onReset = { leftDark = ProfileAddTimeSettings.DEFAULT_LEFT_DARK_COLOR }) { leftDark = it.take(19) }
-                InsetDivider()
-                ColorPickerRow("右侧深色", "深色模式", rightDark, onReset = { rightDark = ProfileAddTimeSettings.DEFAULT_RIGHT_DARK_COLOR }) { rightDark = it.take(19) }
-            } }
-        }
-    }
-}*/
-@Composable
 private fun HideChatMenuMiuixPage(
     context: Context,
     provider: FeatureSettingsProvider,
@@ -36160,7 +36118,7 @@ private fun ClickHintTag() {
     )
 }
 
-private object ScriptPluginSettingsMiuixContent {
+object ScriptPluginSettingsMiuixContent {
 
 @Composable
 fun ScriptPluginSettingsContent(
@@ -40769,7 +40727,7 @@ private fun UnsupportedFeaturePage(provider: FeatureSettingsProvider, onBack: ()
 }
 
 @Composable
-internal fun PageScaffold(
+public fun PageScaffold(
     title: String,
     largeTitle: String,
     scrollBehavior: ScrollBehavior,
@@ -40843,7 +40801,7 @@ internal fun PageScaffold(
 }
 
 @Composable
-internal fun SettingsCard(
+public fun SettingsCard(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
@@ -40856,7 +40814,7 @@ internal fun SettingsCard(
 }
 
 @Composable
-internal fun SwitchRow(
+public fun SwitchRow(
     sp: SharedPreferences,
     key: String,
     title: String,
@@ -40888,7 +40846,7 @@ internal fun SwitchRow(
 }
 
 @Composable
-internal fun SwitchRow(
+public fun SwitchRow(
     checked: Boolean,
     title: String,
     summary: String,
@@ -40968,7 +40926,7 @@ private fun PopupOptionRow(
 }
 
 @Composable
-internal fun InputRow(
+public fun InputRow(
     title: String,
     summary: String,
     value: String,
@@ -41018,7 +40976,7 @@ private fun PopupChoiceRow(
 }
 
 @Composable
-internal fun ColorPickerRow(
+public fun ColorPickerRow(
     title: String,
     summary: String,
     value: String,
@@ -42475,7 +42433,7 @@ private fun PickerSectionHeader(
 }
 
 @Composable
-internal fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
+public fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
     SelectRow(title = title, summary = summary, onClick = onClick)
 }
 
@@ -42944,7 +42902,7 @@ private fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
 }
 
 @Composable
-internal fun BottomActionBar(
+public fun BottomActionBar(
     primaryText: String,
     onPrimaryClick: () -> Unit,
     secondaryText: String? = null,
@@ -43261,7 +43219,7 @@ private fun EmptyText(text: String) {
 }
 
 @Composable
-internal fun InsetDivider(start: Dp = 16.dp) {
+public fun InsetDivider(start: Dp = 16.dp) {
     Box(
         modifier = Modifier
             .padding(start = start)
@@ -43271,7 +43229,7 @@ internal fun InsetDivider(start: Dp = 16.dp) {
     )
 }
 
-private class EmbeddedComposeOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner,
+class EmbeddedComposeOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner,
     NavigationEventDispatcherOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)
