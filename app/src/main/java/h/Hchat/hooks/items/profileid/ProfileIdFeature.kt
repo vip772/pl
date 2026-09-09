@@ -62,7 +62,6 @@ class ProfileIdFeature : BaseFeature() {
         )
         private const val LABEL = "微信 ID"
         private const val CREATE_TIME_LABEL = "添加时间"
-        private const val CREATE_TIME_LABEL = "添加时间"
 
         @Volatile
         private var installed = false
@@ -731,8 +730,7 @@ class ProfileIdFeature : BaseFeature() {
         }
         private fun buildProfileText(profileId: String, createTimeText: String?): String {
             val idText = "$LABEL：$profileId"
-            return if (createTimeText.isNullOrBlank()) idText else "$idText
-$CREATE_TIME_LABEL：$createTimeText"
+            return if (createTimeText.isNullOrBlank()) idText else "$idText\n$CREATE_TIME_LABEL：$createTimeText"
         }
 
         private fun copyProfileId(activity: Activity, profileId: String) {
