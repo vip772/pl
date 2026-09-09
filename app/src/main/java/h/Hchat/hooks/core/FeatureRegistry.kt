@@ -64,6 +64,7 @@ import h.Hchat.hooks.items.payment.fakebalance.FakeWalletBalanceFeature
 import h.Hchat.hooks.items.payment.transfer.AutoTransferFeature
 import h.Hchat.hooks.items.patblock.PatBlockFeature
 import h.Hchat.hooks.items.profileid.ProfileIdFeature
+import h.Hchat.hooks.items.profileid.ProfileAddTimeFeature
 import h.Hchat.hooks.items.protobuf.ProtobufPacketFeature
 import h.Hchat.hooks.items.quoteclear.QuoteDeleteClearFeature
 import h.Hchat.hooks.items.quickcontactedit.QuickContactEditFeature
@@ -111,6 +112,7 @@ object FeatureRegistry {
             .register(MultiRecallFeature())
             .register(DisableHotUpdateFeature())
             .register(ProfileIdFeature())
+            .register(ProfileAddTimeFeature())
             .register(HideChatMenuFeature())
             .register(QuickContactEditFeature())
             .register(QuickGroupChatLabelFeature())

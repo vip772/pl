@@ -378,6 +378,8 @@ import h.Hchat.hooks.items.patblock.PatBlockFeature
 import h.Hchat.hooks.items.patblock.PatBlockSettings
 import h.Hchat.hooks.items.profileid.ProfileIdFeature
 import h.Hchat.hooks.items.profileid.ProfileIdSettings
+import h.Hchat.hooks.items.profileid.ProfileAddTimeFeature
+import h.Hchat.hooks.items.profileid.ProfileAddTimeSettings
 import h.Hchat.hooks.items.protobuf.ProtobufPacketFeature
 import h.Hchat.hooks.items.protobuf.ProtobufPacketRuntime
 import h.Hchat.hooks.items.protobuf.ProtobufPacketSettings
@@ -3921,7 +3923,8 @@ private fun featureSubSearchTerms(featureId: String): List<String> {
             "菜单名称颜色", "菜单名称大小", "菜单文字",
             "微信页面", "扫一扫", "朋友圈", "视频号", "收藏", "钱包"
         )
-        ProfileIdFeature.ID -> listOf("资料页显示", "显示ID", "好友ID", "群聊ID", "wxid", "复制ID", "资料页ID")
+        ProfileIdFeature.ID -> listOf("显示微信 ID", "资料页显示", "显示ID", "好友ID", "群聊ID", "wxid", "复制ID", "资料页ID")
+        ProfileAddTimeFeature.ID -> listOf("显示添加时间", "添加时间", "好友添加时间", "yyyy-MM-dd HH:mm:ss", "渐变颜色")
         QuickContactEditFeature.ID -> listOf("快捷设置备注和标签", "好友备注", "好友标签", "新建标签", "会话长按菜单", "朋友圈头像")
         QuickMomentsFeature.ID -> listOf("快捷查看朋友圈", "朋友圈", "会话长按菜单", "个人朋友圈", "聊天分组", "自己", "企业微信联系人")
         QuickTerminateFeature.ID -> listOf("快捷终止", "结束微信", "终止微信", "加号菜单", "关闭微信")
@@ -4493,6 +4496,7 @@ private fun FeatureSettingsPage(
         CallRingtoneBlockFeature.ID -> CallRingtoneBlockMiuixPage(context, provider, onBack)
         DisableHotUpdateFeature.ID -> DisableHotUpdateMiuixPage(context, provider, onBack)
         ProfileIdFeature.ID -> ProfileIdMiuixPage(context, provider, onBack)
+        ProfileAddTimeFeature.ID -> ProfileAddTimeMiuixPage(context, provider, onBack)
         QuickContactEditFeature.ID -> QuickContactEditMiuixPage(context, provider, onBack)
         QuickGroupChatLabelFeature.ID -> QuickGroupChatLabelMiuixPage(context, provider, onBack)
         QuickMomentsFeature.ID -> QuickMomentsMiuixPage(context, provider, onBack)
@@ -9430,6 +9434,46 @@ private fun ProfileIdMiuixPage(
                     )
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun ProfileAddTimeMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, ProfileAddTimeSettings.PREFS_NAME) }
+    var leftLight by remember { mutableStateOf(sp.getString(ProfileAddTimeSettings.KEY_LEFT_LIGHT_COLOR, ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR) }
+    var rightLight by remember { mutableStateOf(sp.getString(ProfileAddTimeSettings.KEY_RIGHT_LIGHT_COLOR, ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR) }
+    var leftDark by remember { mutableStateOf(sp.getString(ProfileAddTimeSettings.KEY_LEFT_DARK_COLOR, ProfileAddTimeSettings.DEFAULT_LEFT_DARK_COLOR) ?: ProfileAddTimeSettings.DEFAULT_LEFT_DARK_COLOR) }
+    var rightDark by remember { mutableStateOf(sp.getString(ProfileAddTimeSettings.KEY_RIGHT_DARK_COLOR, ProfileAddTimeSettings.DEFAULT_RIGHT_DARK_COLOR) ?: ProfileAddTimeSettings.DEFAULT_RIGHT_DARK_COLOR) }
+    val scrollBehavior = MiuixScrollBehavior()
+    PageScaffold(title = provider.title(), largeTitle = provider.title(), scrollBehavior = scrollBehavior, bottomBar = {
+        BottomActionBar("保存设置", {
+            sp.edit()
+                .putString(ProfileAddTimeSettings.KEY_LEFT_LIGHT_COLOR, ProfileAddTimeSettings.cleanColorSpec(leftLight).ifEmpty { ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR })
+                .putString(ProfileAddTimeSettings.KEY_RIGHT_LIGHT_COLOR, ProfileAddTimeSettings.cleanColorSpec(rightLight).ifEmpty { ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR })
+                .putString(ProfileAddTimeSettings.KEY_LEFT_DARK_COLOR, ProfileAddTimeSettings.cleanColorSpec(leftDark).ifEmpty { ProfileAddTimeSettings.DEFAULT_LEFT_DARK_COLOR })
+                .putString(ProfileAddTimeSettings.KEY_RIGHT_DARK_COLOR, ProfileAddTimeSettings.cleanColorSpec(rightDark).ifEmpty { ProfileAddTimeSettings.DEFAULT_RIGHT_DARK_COLOR })
+                .apply()
+            onBack()
+        }, "返回", onBack)
+    }) { padding ->
+        LazyColumn(modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection), contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)) {
+            item { SmallTitle(text = "资料页") }
+            item { SettingsCard { SwitchRow(sp, ProfileAddTimeSettings.KEY_ENABLE, "显示添加时间", "显示格式：yyyy-MM-dd HH:mm:ss", ProfileAddTimeSettings.DEFAULT_ENABLE) } }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "颜色") }
+            item { SettingsCard {
+                ColorPickerRow("左侧浅色", "浅色模式", leftLight, onReset = { leftLight = ProfileAddTimeSettings.DEFAULT_LEFT_LIGHT_COLOR }) { leftLight = it.take(19) }
+                InsetDivider()
+                ColorPickerRow("右侧浅色", "浅色模式", rightLight, onReset = { rightLight = ProfileAddTimeSettings.DEFAULT_RIGHT_LIGHT_COLOR }) { rightLight = it.take(19) }
+                InsetDivider()
+                ColorPickerRow("左侧深色", "深色模式", leftDark, onReset = { leftDark = ProfileAddTimeSettings.DEFAULT_LEFT_DARK_COLOR }) { leftDark = it.take(19) }
+                InsetDivider()
+                ColorPickerRow("右侧深色", "深色模式", rightDark, onReset = { rightDark = ProfileAddTimeSettings.DEFAULT_RIGHT_DARK_COLOR }) { rightDark = it.take(19) }
+            } }
         }
     }
 }

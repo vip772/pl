@@ -28,18 +28,28 @@ import java.util.Locale
 import h.Hchat.utils.WeChatIdRules
 import h.Hchat.preferences.HchatStorage
 import h.Hchat.utils.KavaReflector
-
-class ProfileIdFeature : BaseFeature() {
+import h.Hchat.hooks.api.contact.WeContactHeaderApi
+class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
     override fun featureId(): String = ID
-
-    override fun name(): String = "资料页显示"
-
+    override fun name(): String = "显示微信 ID"
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(ProfileIdSettingsProvider())
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
+        WeContactHeaderApi.install(context.hostClassLoader())
+        WeContactHeaderApi.addProvider(this)
         install(context.hostContext(), context.hostClassLoader())
+    }
+
+    override fun getHeaderText(activity: Activity): String? {
+        if (!isEnabled(activity)) return null
+        val profileId = resolveProfileId(activity, ProfileKind.CONTACT) ?: return null
+        return "$LABEL：$profileId"
+    }
+
+    override fun onFeatureDestroy(context: FeatureContext) {
+        WeContactHeaderApi.removeProvider(this)
     }
 
     companion object {
@@ -90,9 +100,8 @@ class ProfileIdFeature : BaseFeature() {
                 h.Hchat.utils.HLog.e("$TAG 未找到好友资料页类")
                 return
             }
-            hookAfter(clazz, "initView") { param ->
-                injectProfileId(context, param.thisObject as? Activity, ProfileKind.CONTACT)
-            }
+            // ContactInfoUI's header is handled by WeContactHeaderApi.
+            // Keep this hook intentionally empty for compatibility with old class loading.
         }
 
         private fun hookChatroomProfile(context: Context, classLoader: ClassLoader) {
