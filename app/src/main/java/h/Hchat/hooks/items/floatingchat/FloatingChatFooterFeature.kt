@@ -51,24 +51,25 @@ private class FooterRuntime(private val context: FeatureContext) {
             HLog.e("[Hchat:$TAG] 功能未生效: 未找到目标类 $targetClass")
             return false
         }
+        if (!View::class.java.isAssignableFrom(clazz)) {
+            HLog.e("[Hchat:$TAG] 功能未生效: 目标类不是 View: $targetClass")
+            return false
+        }
         var count = 0
         KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let { method ->
-            count += hook(method) { param ->
-                val footer = param.thisObject as? View ?: return@hook
+            count += hook(method, clazz) { footer ->
                 reportCallbackOnce(method, footer)
                 footer.postOnAnimation { apply(footer) }
             }
         }
         KavaReflector.findMethodRecursive(clazz, "onDetachedFromWindow")?.let { method ->
-            count += hook(method) { param ->
-                val footer = param.thisObject as? View
-                if (footer != null) reportCallbackOnce(method, footer)
+            count += hook(method, clazz) { footer ->
+                reportCallbackOnce(method, footer)
                 restore(footer)
             }
         }
         KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { method ->
-            count += hook(method) { param ->
-                val footer = param.thisObject as? View ?: return@hook
+            count += hook(method, clazz) { footer ->
                 reportCallbackOnce(method, footer)
                 footer.postOnAnimation { apply(footer) }
             }
@@ -78,18 +79,25 @@ private class FooterRuntime(private val context: FeatureContext) {
         return installed
     }
 
-    private fun hook(method: Member, after: (XC_MethodHook.MethodHookParam) -> Unit): Int {
-        if (!hooked.add(method)) return 1
+    private fun hook(targetMethod: Member, targetClass: Class<*>, after: (View) -> Unit): Int {
+        if (!hooked.add(targetMethod)) return 1
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            HLog.i(
+                "[Hchat:$TAG] 诊断: 安装入口 method=${targetMethod.name} " +
+                    "declaringClass=${targetMethod.declaringClass.name} targetClass=${targetClass.name}"
+            )
+            HookRegistry.get().hook(targetMethod, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    runCatching { after(param) }.onFailure { HLog.e("[Hchat:$TAG] 输入框布局更新失败", it) }
+                    val receiver = param.thisObject
+                    if (!targetClass.isInstance(receiver)) return
+                    val footer = receiver as? View ?: return
+                    runCatching { after(footer) }
+                        .onFailure { HLog.e("[Hchat:$TAG] 输入框布局更新失败", it) }
                 }
             })
             1
-        }.getOrElse { hooked.remove(method); HLog.e("[Hchat:$TAG] Hook 安装失败", it); 0 }
+        }.getOrElse { hooked.remove(targetMethod); HLog.e("[Hchat:$TAG] Hook 安装失败", it); 0 }
     }
-
     private fun reportCallbackOnce(method: Member, footer: View) {
         val methodName = method.name
         if (!reportedCallbacks.add(methodName)) return
