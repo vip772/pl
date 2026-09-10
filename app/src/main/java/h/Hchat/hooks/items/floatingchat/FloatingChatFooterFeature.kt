@@ -166,6 +166,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             ?: panel?.height?.takeIf { it > 0 }
             ?: return
         val state = states[footer] ?: FooterState(
+            backgroundLayers = backgroundLayers(footer),
             leftMargin = marginParams.leftMargin,
             rightMargin = marginParams.rightMargin,
             topMargin = marginParams.topMargin,
@@ -173,8 +174,12 @@ private class FooterRuntime(private val context: FeatureContext) {
             elevation = footer.elevation,
             outlineProvider = footer.outlineProvider,
             clipToOutline = footer.clipToOutline
-        ).also { states[footer] = it }
+        ).also {
+            states[footer] = it
+            it.backgroundLayers.forEach(FloatingChatCardVisuals::makeTransparent)
+        }
 
+        state.backgroundLayers.forEach(FloatingChatCardVisuals::ensureTransparent)
         val side = dp(SIDE_MARGIN_DP)
         val gap = dp(BOTTOM_GAP_DP)
         val targetBottom = -panelHeight + gap
@@ -229,6 +234,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         footer.outlineProvider = state.outlineProvider
         footer.clipToOutline = state.clipToOutline
         FloatingChatCardVisuals.restore(footer)
+        state.backgroundLayers.asReversed().forEach(FloatingChatCardVisuals::restoreTransparent)
         footer.invalidateOutline()
     }
 
@@ -253,7 +259,16 @@ private class FooterRuntime(private val context: FeatureContext) {
         return null
     }
 
+    private fun backgroundLayers(card: View): List<View> = buildList {
+        var current = card.parent as? View
+        while (current != null && current.javaClass.name != CHATTING_LAYOUT_CLASS) {
+            add(current)
+            current = current.parent as? View
+        }
+    }
+
     private data class FooterState(
+        val backgroundLayers: List<View>,
         val leftMargin: Int,
         val rightMargin: Int,
         val topMargin: Int,
@@ -274,6 +289,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val TAG = "悬浮输入框"
         private const val FOOTER_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChatFooter"
         private const val FOOTER_BOTTOM_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom"
+        private const val CHATTING_LAYOUT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout"
         private const val CACHE_REFRESH_BOTTOM_HEIGHT = "refresh_bottom_height"
         private const val REFRESH_LOG_TAG = "MicroMsg.ChatFooter"
         private const val REFRESH_LOG_ANCHOR = "[refreshBottomHeight] keyborPx:%d"

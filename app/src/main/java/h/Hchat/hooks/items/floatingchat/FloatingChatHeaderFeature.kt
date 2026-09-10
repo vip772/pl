@@ -1,8 +1,10 @@
 package h.Hchat.hooks.items.floatingchat
 
+import android.graphics.Outline
 import android.graphics.Rect
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.hooks.core.BaseFeature
 import h.Hchat.hooks.core.DexInstallScheduler
@@ -78,13 +80,18 @@ private class HeaderRuntime(private val context: FeatureContext) {
             val lp = header.layoutParams
             val marginLp = lp as? ViewGroup.MarginLayoutParams
             val state = states[header] ?: HeaderState(
-                parent = parent,
-                params = lp,
+                backgroundLayers = backgroundLayers(header, layout),
                 leftMargin = marginLp?.leftMargin,
                 rightMargin = marginLp?.rightMargin,
                 topMargin = marginLp?.topMargin,
-                elevation = header.elevation
-            ).also { states[header] = it }
+                elevation = header.elevation,
+                outlineProvider = header.outlineProvider,
+                clipToOutline = header.clipToOutline
+            ).also {
+                states[header] = it
+                it.backgroundLayers.forEach(FloatingChatCardVisuals::makeTransparent)
+            }
+            state.backgroundLayers.forEach(FloatingChatCardVisuals::ensureTransparent)
             if (marginLp != null) {
                 val left = (state.leftMargin ?: marginLp.leftMargin) + dp(12)
                 val right = (state.rightMargin ?: marginLp.rightMargin) + dp(12)
@@ -98,7 +105,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
             }
             val elevation = dp(4).toFloat()
             if (header.elevation != elevation) header.elevation = elevation
+            header.outlineProvider = FloatingHeaderOutlineProvider
+            header.clipToOutline = true
             FloatingChatCardVisuals.apply(header, 24)
+            header.invalidateOutline()
             parent.invalidate()
         }
     }
@@ -117,7 +127,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
             view.layoutParams = params
         }
         view.elevation = state.elevation
+        view.outlineProvider = state.outlineProvider
+        view.clipToOutline = state.clipToOutline
         FloatingChatCardVisuals.restore(view)
+        state.backgroundLayers.asReversed().forEach(FloatingChatCardVisuals::restoreTransparent)
+        view.invalidateOutline()
     }
     fun destroy() { states.keys.toList().forEach(::restoreView) }
     private fun isEnabled() = context.configStore().getGlobalBoolean("${FloatingChatHeaderFeature.ID}_enabled", false)
@@ -130,13 +144,34 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
         walk(root)
     }
+    private fun backgroundLayers(card: View, boundary: View): List<View> = buildList {
+        var current = card.parent as? View
+        while (current != null && current !== boundary) {
+            add(current)
+            current = current.parent as? View
+        }
+    }
     private data class HeaderState(
-        val parent: ViewGroup,
-        val params: ViewGroup.LayoutParams?,
+        val backgroundLayers: List<View>,
         val leftMargin: Int?,
         val rightMargin: Int?,
         val topMargin: Int?,
-        val elevation: Float = 0f
+        val elevation: Float = 0f,
+        val outlineProvider: ViewOutlineProvider?,
+        val clipToOutline: Boolean
     )
+    private object FloatingHeaderOutlineProvider : ViewOutlineProvider() {
+        override fun getOutline(view: View, outline: Outline) {
+            outline.setRoundRect(
+                0,
+                0,
+                view.width,
+                view.height.coerceAtLeast(1),
+                dpStatic(view, 24)
+            )
+        }
+        private fun dpStatic(view: View, value: Int): Float =
+            value * view.resources.displayMetrics.density
+    }
     companion object { private const val TAG = "悬浮标题栏" }
 }
