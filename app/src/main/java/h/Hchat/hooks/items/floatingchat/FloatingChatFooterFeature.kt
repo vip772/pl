@@ -33,6 +33,12 @@ class FloatingChatFooterFeature : BaseFeature() {
 private class FooterRuntime(private val context: FeatureContext) {
     private val hooked = HashSet<Member>()
     private val states = WeakHashMap<View, FooterState>()
+    private val reportedCallbacks = HashSet<String>()
+    private var applyReported = false
+    private var scanReported = false
+    private var targetReported = false
+    private var appliedReported = false
+    private var verifyScheduled = false
     private var installed = false
     private val footerBottomClass = "com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom"
 
@@ -46,18 +52,24 @@ private class FooterRuntime(private val context: FeatureContext) {
             return false
         }
         var count = 0
-        KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let {
-            count += hook(it) { param ->
+        KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let { method ->
+            count += hook(method) { param ->
                 val footer = param.thisObject as? View ?: return@hook
+                reportCallbackOnce(method, footer)
                 footer.postOnAnimation { apply(footer) }
             }
         }
-        KavaReflector.findMethodRecursive(clazz, "onDetachedFromWindow")?.let {
-            count += hook(it) { param -> restore(param.thisObject as? View) }
+        KavaReflector.findMethodRecursive(clazz, "onDetachedFromWindow")?.let { method ->
+            count += hook(method) { param ->
+                val footer = param.thisObject as? View
+                if (footer != null) reportCallbackOnce(method, footer)
+                restore(footer)
+            }
         }
-        KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let {
-            count += hook(it) { param ->
+        KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { method ->
+            count += hook(method) { param ->
                 val footer = param.thisObject as? View ?: return@hook
+                reportCallbackOnce(method, footer)
                 footer.postOnAnimation { apply(footer) }
             }
         }
@@ -78,15 +90,49 @@ private class FooterRuntime(private val context: FeatureContext) {
         }.getOrElse { hooked.remove(method); HLog.e("[Hchat:$TAG] Hook 安装失败", it); 0 }
     }
 
-    private fun apply(footer: View) {
-        if (!isEnabled()) { restoreAll(footer); return }
-        if (!footer.isAttachedToWindow) return
-        findAll(footer) { it.javaClass.name == footerBottomClass }.forEach { applyCard(it) }
+    private fun reportCallbackOnce(method: Member, footer: View) {
+        val methodName = method.name
+        if (!reportedCallbacks.add(methodName)) return
+        HLog.i(
+            "[Hchat:$TAG] 诊断: Hook 回调首次命中 method=$methodName " +
+                "instance=${footer.javaClass.name}"
+        )
     }
-
+    private fun apply(footer: View) {
+        val enabled = isEnabled()
+        val attached = footer.isAttachedToWindow
+        if (!applyReported) {
+            applyReported = true
+            HLog.i("[Hchat:$TAG] 诊断: 首次执行布局处理 enabled=$enabled attached=$attached")
+        }
+        if (!enabled) { restoreAll(footer); return }
+        if (!attached) return
+        val allViews = findAll(footer) { true }
+        val targets = allViews.filter { it.javaClass.name == footerBottomClass }
+        if (!scanReported) {
+            scanReported = true
+            HLog.i(
+                "[Hchat:$TAG] 诊断: View 扫描完成 root=${footer.javaClass.name} " +
+                    "viewCount=${allViews.size} target=$footerBottomClass targetCount=${targets.size}"
+            )
+        }
+        targets.forEach { applyCard(it) }
+    }
     private fun applyCard(view: View) {
         val params = view.layoutParams
         val marginParams = params as? ViewGroup.MarginLayoutParams
+        val parent = view.parent as? ViewGroup
+        if (!targetReported) {
+            targetReported = true
+            HLog.i(
+                "[Hchat:$TAG] 诊断: 目标 View 首次命中 class=${view.javaClass.name} " +
+                    "parent=${parent?.javaClass?.name ?: "<none>"} " +
+                    "layoutParams=${params?.javaClass?.name ?: "<none>"} " +
+                    "size=${view.width}x${view.height} visibility=${view.visibility} " +
+                    "background=${view.background?.javaClass?.name ?: "<none>"} " +
+                    "clipChildren=${parent?.clipChildren} clipToPadding=${parent?.clipToPadding}"
+            )
+        }
         val state = states[view] ?: FooterState(
             params,
             marginParams?.leftMargin,
@@ -98,6 +144,10 @@ private class FooterRuntime(private val context: FeatureContext) {
             view.paddingBottom,
             view.elevation
         ).also { states[view] = it }
+        val beforeLeft = marginParams?.leftMargin
+        val beforeRight = marginParams?.rightMargin
+        val beforeBottom = marginParams?.bottomMargin
+        val beforeElevation = view.elevation
         if (marginParams != null) {
             val left = (state.leftMargin ?: marginParams.leftMargin) + dp(12)
             val right = (state.rightMargin ?: marginParams.rightMargin) + dp(12)
@@ -112,6 +162,40 @@ private class FooterRuntime(private val context: FeatureContext) {
         val elevation = dp(4).toFloat()
         if (view.elevation != elevation) view.elevation = elevation
         FloatingChatCardVisuals.apply(view, 24)
+        if (!appliedReported) {
+            appliedReported = true
+            val appliedMargins = view.layoutParams as? ViewGroup.MarginLayoutParams
+            HLog.i(
+                "[Hchat:$TAG] 诊断: 样式首次应用 " +
+                    "margin=$beforeLeft,$beforeRight,$beforeBottom->" +
+                    "${appliedMargins?.leftMargin},${appliedMargins?.rightMargin},${appliedMargins?.bottomMargin} " +
+                    "elevation=$beforeElevation->${view.elevation} " +
+                    "backgroundAfter=${view.background?.javaClass?.name ?: "<none>"}"
+            )
+        }
+        scheduleVerification(view)
+    }
+    private fun scheduleVerification(view: View) {
+        if (verifyScheduled) return
+        verifyScheduled = true
+        val expected = view.layoutParams as? ViewGroup.MarginLayoutParams
+        val expectedLeft = expected?.leftMargin
+        val expectedRight = expected?.rightMargin
+        val expectedBottom = expected?.bottomMargin
+        val expectedElevation = view.elevation
+        val expectedBackground = view.background
+        view.postOnAnimation {
+            val current = view.layoutParams as? ViewGroup.MarginLayoutParams
+            val marginsKept = current?.leftMargin == expectedLeft &&
+                current?.rightMargin == expectedRight &&
+                current?.bottomMargin == expectedBottom
+            HLog.i(
+                "[Hchat:$TAG] 诊断: 下一帧复查 attached=${view.isAttachedToWindow} " +
+                    "size=${view.width}x${view.height} marginsKept=$marginsKept " +
+                    "elevationKept=${view.elevation == expectedElevation} " +
+                    "backgroundKept=${view.background === expectedBackground}"
+            )
+        }
     }
 
     private fun restore(view: View?) {
