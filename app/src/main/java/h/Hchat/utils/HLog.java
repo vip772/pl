@@ -12,6 +12,16 @@ public final class HLog {
     public static void initialize(android.content.Context context) {
         RuntimeLogStore.initialize(context);
     }
+    public static void d(String message) {
+        RuntimeLogStore.append("DEBUG", message, null);
+    }
+    public static void i(String message) {
+        RuntimeLogStore.append("INFO", message, null);
+    }
+    public static void w(String message) {
+        RuntimeLogStore.append("WARN", message, null);
+        XposedBridge.log("[Hchat][WARN] " + message);
+    }
     public static void e(String message) {
         RuntimeLogStore.append("ERROR", message, null);
         XposedBridge.log(new RuntimeException(message));

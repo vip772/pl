@@ -115,6 +115,7 @@ object DexInstallScheduler {
             } finally {
                 if (ok) {
                     state.installed.set(true)
+                    HLog.i("$TAG 功能生效: ${state.label} key=$key")
                 }
                 state.running.set(false)
             }
@@ -140,7 +141,7 @@ object DexInstallScheduler {
         val index = state.retryIndex.getAndIncrement()
         if (index >= MAX_RETRY_ATTEMPTS) {
             state.retryScheduled.set(false)
-            HLog.e("$TAG ${state.label} 多次安装失败，停止本轮重试")
+            HLog.e("$TAG ${state.label} 多次安装失败，停止本轮重试 key=$key")
             return
         }
         mainHandler.postDelayed({

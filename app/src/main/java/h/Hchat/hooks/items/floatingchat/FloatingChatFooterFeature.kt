@@ -39,10 +39,12 @@ private class FooterRuntime(private val context: FeatureContext) {
 
     fun install(): Boolean {
         if (installed) return true
-        val clazz = KavaReflector.loadClass(
-            "com.tencent.mm.pluginsdk.ui.chat.ChatFooter",
-            context.hostClassLoader()
-        ) ?: return false
+        val targetClass = "com.tencent.mm.pluginsdk.ui.chat.ChatFooter"
+        val clazz = KavaReflector.loadClass(targetClass, context.hostClassLoader())
+        if (clazz == null) {
+            HLog.e("[Hchat:$TAG] 功能未生效: 未找到目标类 $targetClass")
+            return false
+        }
         var count = 0
         KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let {
             count += hook(it) { param ->
@@ -60,7 +62,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             }
         }
         installed = count > 0
-        if (!installed) HLog.e("[Hchat:$TAG] 未找到 ChatFooter 生命周期方法")
+        if (!installed) HLog.e("[Hchat:$TAG] 功能未生效: 未找到 ChatFooter 生命周期方法")
         return installed
     }
 

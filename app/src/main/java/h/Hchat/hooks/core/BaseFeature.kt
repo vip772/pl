@@ -119,6 +119,15 @@ abstract class BaseFeature : Feature {
         return context?.configStore()?.getString(featureId(), key, defValue) ?: defValue
     }
 
+    protected fun logEffective(message: String = "功能生效") {
+        HLog.i("[Hchat:${featureId()}] $message")
+    }
+
+    protected fun logIneffective(reason: String, throwable: Throwable? = null) {
+        if (throwable == null) HLog.w("[Hchat:${featureId()}] 功能未生效: $reason")
+        else HLog.e("[Hchat:${featureId()}] 功能未生效: $reason", throwable)
+    }
+
     protected fun logError(message: String, throwable: Throwable?) {
         HLog.e(
             "[Hchat:${featureId()}] $message" +

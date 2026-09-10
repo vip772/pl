@@ -43,7 +43,6 @@ import h.Hchat.R
 import h.Hchat.crash.CrashReportRuntime
 import h.Hchat.crash.CrashReportSettings
 import h.Hchat.crash.CrashReportSettingsProvider
-import h.Hchat.utils.RuntimeLogStore
 import h.Hchat.hooks.api.ui.HchatAgentIconDrawable
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutFeature
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutGlyph
@@ -1214,6 +1213,7 @@ object MiuixSettingsPage {
                                     onOpenScriptPluginAgent = { detailPage.value = DetailPage.ScriptPluginAgent() },
                                     onOpenScriptPluginMarket = { detailPage.value = DetailPage.ScriptPluginMarket() },
                                     onOpenScriptPluginManager = { detailPage.value = DetailPage.ScriptPluginManager() },
+                                    onOpenRuntimeLog = { detailPage.value = DetailPage.RuntimeLog },
                                     onConfigImported = { configVersion.value += 1 }
                                 )
                             } else if (targetPage is DetailPage.Search) {
@@ -1279,6 +1279,11 @@ object MiuixSettingsPage {
                                 ScriptPluginSettingsMiuixContent.ScriptPluginManagerPage(
                                     context = activity,
                                     onBack = { detailPage.value = previousDetailPage(targetPage) }
+                                )
+                            } else if (targetPage is DetailPage.RuntimeLog) {
+                                RuntimeLogMiuixPage(
+                                    activity = activity,
+                                    onBack = { detailPage.value = null }
                                 )
                             }
                         }
@@ -2842,6 +2847,7 @@ private fun MainSettingsPage(
     onOpenScriptPluginAgent: () -> Unit,
     onOpenScriptPluginMarket: () -> Unit,
     onOpenScriptPluginManager: () -> Unit,
+    onOpenRuntimeLog: () -> Unit,
     onConfigImported: () -> Unit
 ) {
     val uiPrefs = remember(configVersion) { HchatStorage.preferences(context, UI_PREFS_NAME) }
@@ -2985,15 +2991,8 @@ private fun MainSettingsPage(
                         item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "诊断") }
                         item {
                             SettingsCard {
-                                ActionRow("导出运行日志", "包含 Hchat 错误、崩溃记录和版本环境信息") {
-                                    val report = RuntimeLogStore.buildDiagnosticReport(context)
-                                    val share = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_SUBJECT, "Hchat 运行日志")
-                                        putExtra(Intent.EXTRA_TEXT, report)
-                                    }
-                                    runCatching { context.startActivity(Intent.createChooser(share, "导出 Hchat 运行日志")) }
-                                        .onFailure { Toast.makeText(context, "无法打开导出界面", Toast.LENGTH_SHORT).show() }
+                                ActionRow("运行日志", "查看功能是否生效及未生效原因") {
+                                    onOpenRuntimeLog()
                                 }
                             }
                         }
@@ -3692,6 +3691,7 @@ private data class TemplateVariable(
 
 private sealed class DetailPage {
     object Search : DetailPage()
+    object RuntimeLog : DetailPage()
     data class FeatureGroup(val group: FeatureGroupEntry) : DetailPage()
     data class Feature(
         val provider: FeatureSettingsProvider,
@@ -3706,6 +3706,7 @@ private sealed class DetailPage {
 private fun detailPageDepth(page: DetailPage?): Int = when (page) {
     null -> 0
     is DetailPage.Search -> 1
+    is DetailPage.RuntimeLog -> 1
     is DetailPage.FeatureGroup -> 1
     is DetailPage.Feature -> 2
     is DetailPage.ScriptPluginAgent -> if (page.parentFeature == null) 1 else 3
@@ -3716,6 +3717,7 @@ private fun detailPageDepth(page: DetailPage?): Int = when (page) {
 private fun previousDetailPage(page: DetailPage?): DetailPage? = when (page) {
     null -> null
     is DetailPage.Search -> null
+    is DetailPage.RuntimeLog -> null
     is DetailPage.FeatureGroup -> null
     is DetailPage.Feature -> when {
         page.returnToSearch -> DetailPage.Search

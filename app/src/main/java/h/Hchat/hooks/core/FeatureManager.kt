@@ -25,16 +25,20 @@ class FeatureManager {
     fun installedFeatures(): List<Feature> = Collections.unmodifiableList(installedFeatures)
 
     fun installAll(context: FeatureContext) {
+        HLog.i("[Hchat:FeatureManager] 开始加载功能，总数=${features.size}")
         val termsAccepted = TermsGate.isAccepted(context.configStore())
         val initializedFeatures = ArrayList<Feature>()
         for (feature in features) {
             val displayName = safeName(feature)
             if (!termsAccepted && feature.featureId() != SettingsFeature.ID) {
+                HLog.i("[Hchat:FeatureManager] 跳过功能（未同意协议）: $displayName")
                 continue
             }
             try {
+                HLog.i("[Hchat:FeatureManager] 初始化功能: $displayName (${feature.featureId()})")
                 feature.onInit(context)
                 initializedFeatures.add(feature)
+                HLog.i("[Hchat:FeatureManager] 功能初始化完成: $displayName")
             } catch (e: Throwable) {
                 HLog.e("$TAG onInit 失败: $displayName, error=$e", e)
             }
@@ -44,6 +48,7 @@ class FeatureManager {
             val displayName = safeName(feature)
             try {
                 if (!feature.isEnabled(context)) {
+                    HLog.i("[Hchat:FeatureManager] 功能未启用，跳过安装: $displayName")
                     continue
                 }
             } catch (e: Throwable) {
@@ -53,6 +58,7 @@ class FeatureManager {
             try {
                 feature.install(context)
                 installedFeatures.add(feature)
+                HLog.i("[Hchat:FeatureManager] 功能安装流程完成: $displayName (${feature.featureId()})")
                 try {
                     context.eventBus().post(Events.FeatureInstalled(displayName))
                 } catch (_: Throwable) {
@@ -68,6 +74,7 @@ class FeatureManager {
         for (feature in installedFeatures) {
             if (featureId != null && featureId != feature.featureId()) continue
             try {
+                HLog.i("[Hchat:FeatureManager] 配置变化: ${safeName(feature)} key=${key ?: "<all>"}")
                 feature.onConfigChanged(context, key)
             } catch (e: Throwable) {
                 HLog.e("$TAG onConfigChanged 异常: ${safeName(feature)}, error=$e", e)
@@ -79,7 +86,9 @@ class FeatureManager {
         for (i in installedFeatures.size - 1 downTo 0) {
             val feature = installedFeatures[i]
             try {
+                HLog.i("[Hchat:FeatureManager] 卸载功能: ${safeName(feature)} (${feature.featureId()})")
                 feature.onDestroy(context)
+                HLog.i("[Hchat:FeatureManager] 功能卸载完成: ${safeName(feature)}")
             } catch (e: Throwable) {
                 HLog.e("$TAG onDestroy 异常: ${safeName(feature)}, error=$e", e)
             }

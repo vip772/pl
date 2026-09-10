@@ -41,7 +41,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
 
     fun install(): Boolean {
         if (installed) return true
-        val clazz = KavaReflector.loadClass(layoutClass, context.hostClassLoader()) ?: return false
+        val clazz = KavaReflector.loadClass(layoutClass, context.hostClassLoader())
+        if (clazz == null) {
+            HLog.e("[Hchat:$TAG] 功能未生效: 未找到目标类 $layoutClass")
+            return false
+        }
         var count = 0
         KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let {
             count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let { layout -> layout.postOnAnimation { apply(layout) } } }
@@ -50,7 +54,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let { layout -> layout.postOnAnimation { apply(layout) } } }
         }
         installed = count > 0
-        if (!installed) HLog.e("[Hchat:$TAG] 未找到 ChattingUILayout 生命周期方法")
+        if (!installed) HLog.e("[Hchat:$TAG] 功能未生效: 未找到 ChattingUILayout 生命周期方法")
         return installed
     }
 

@@ -27,6 +27,24 @@ object RuntimeLogStore {
     }
 
     @JvmStatic
+    fun log(level: String, message: String) {
+        append(level, message, null)
+    }
+    @JvmStatic
+    fun clearRuntimeLog(context: Context? = applicationContext) {
+        val appContext = context?.applicationContext ?: context ?: return
+        runCatching {
+            synchronized(lock) {
+                runtimeLogFile(appContext).delete()
+            }
+        }
+    }
+    @JvmStatic
+    fun readRuntimeLog(context: Context? = applicationContext): String {
+        val appContext = context?.applicationContext ?: context ?: return ""
+        return synchronized(lock) { readLimited(runtimeLogFile(appContext)) }
+    }
+    @JvmStatic
     fun append(level: String, message: String, throwable: Throwable?) {
         val context = applicationContext ?: return
         val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())
