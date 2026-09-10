@@ -1,15 +1,21 @@
 package h.Hchat.hooks.items.floatingchat
 
+import android.graphics.Outline
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import de.robv.android.xposed.XC_MethodHook
+import h.Hchat.dexkit.DexMethodCache
 import h.Hchat.hooks.core.BaseFeature
 import h.Hchat.hooks.core.DexInstallScheduler
 import h.Hchat.hooks.core.FeatureContext
 import h.Hchat.hooks.core.HookRegistry
 import h.Hchat.utils.HLog
 import h.Hchat.utils.KavaReflector
+import org.luckypray.dexkit.query.FindMethod
+import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Member
+import java.lang.reflect.Method
 import java.util.WeakHashMap
 import kotlin.math.roundToInt
 
@@ -33,225 +39,248 @@ class FloatingChatFooterFeature : BaseFeature() {
 private class FooterRuntime(private val context: FeatureContext) {
     private val hooked = HashSet<Member>()
     private val states = WeakHashMap<View, FooterState>()
-    private val reportedCallbacks = HashSet<String>()
-    private var applyReported = false
-    private var scanReported = false
-    private var targetReported = false
+    private val methodPrefs = DexMethodCache.prefs(
+        context.hostContext(),
+        "Hchat_floating_chat_footer_method_cache"
+    )
     private var appliedReported = false
-    private var verifyScheduled = false
     private var installed = false
-    private val footerBottomClass = "com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom"
 
-
+    @Synchronized
     fun install(): Boolean {
         if (installed) return true
-        val targetClass = "com.tencent.mm.pluginsdk.ui.chat.ChatFooter"
-        val clazz = KavaReflector.loadClass(targetClass, context.hostClassLoader())
-        if (clazz == null) {
-            HLog.e("[Hchat:$TAG] 功能未生效: 未找到目标类 $targetClass")
+        val footerClass = KavaReflector.loadClass(FOOTER_CLASS, context.hostClassLoader())
+        if (footerClass == null) {
+            HLog.e("[Hchat:$TAG] 功能未生效: 未找到目标类 $FOOTER_CLASS")
             return false
         }
-        if (!View::class.java.isAssignableFrom(clazz)) {
-            HLog.e("[Hchat:$TAG] 功能未生效: 目标类不是 View: $targetClass")
+        if (!View::class.java.isAssignableFrom(footerClass)) {
+            HLog.e("[Hchat:$TAG] 功能未生效: 目标类不是 View: $FOOTER_CLASS")
             return false
         }
+
         var count = 0
-        KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let { method ->
-            count += hook(method, clazz) { footer ->
-                reportCallbackOnce(method, footer)
+        KavaReflector.findDeclaredMethod(footerClass, "onAttachedToWindow")?.let { method ->
+            count += hookFooter(method, footerClass) { footer ->
                 footer.postOnAnimation { apply(footer) }
             }
         }
-        KavaReflector.findMethodRecursive(clazz, "onDetachedFromWindow")?.let { method ->
-            count += hook(method, clazz) { footer ->
-                reportCallbackOnce(method, footer)
-                restore(footer)
-            }
+        KavaReflector.findDeclaredMethod(footerClass, "onDetachedFromWindow")?.let { method ->
+            count += hookFooter(method, footerClass) { footer -> restore(footer) }
         }
-        KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { method ->
-            count += hook(method, clazz) { footer ->
-                reportCallbackOnce(method, footer)
-                footer.postOnAnimation { apply(footer) }
-            }
+        locateRefreshBottomHeight(footerClass)?.let { method ->
+            count += hookFooter(method, footerClass) { footer -> apply(footer) }
         }
-        installed = count > 0
-        if (!installed) HLog.e("[Hchat:$TAG] 功能未生效: 未找到 ChatFooter 生命周期方法")
+
+        installed = count >= REQUIRED_HOOK_COUNT
+        if (!installed) {
+            HLog.e(
+                "[Hchat:$TAG] 功能未生效: 入口不完整 count=$count/$REQUIRED_HOOK_COUNT " +
+                    "target=$FOOTER_CLASS"
+            )
+        }
         return installed
     }
 
-    private fun hook(targetMethod: Member, targetClass: Class<*>, after: (View) -> Unit): Int {
+    private fun locateRefreshBottomHeight(footerClass: Class<*>): Method? {
+        val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
+        DexMethodCache.load(
+            methodPrefs,
+            runtimeKey,
+            context.hostClassLoader(),
+            CACHE_REFRESH_BOTTOM_HEIGHT
+        )?.takeIf { isRefreshBottomHeight(it, footerClass) }?.let { return it }
+
+        val candidates = runCatching {
+            context.dexKitBridge().findMethod(
+                FindMethod().apply {
+                    matcher(
+                        MethodMatcher().apply {
+                            usingEqStrings(REFRESH_LOG_TAG, REFRESH_LOG_ANCHOR)
+                        }
+                    )
+                }
+            ).mapNotNull { data ->
+                runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+            }.filter { isRefreshBottomHeight(it, footerClass) }
+                .distinctBy { it.toGenericString() }
+        }.getOrElse {
+            HLog.e("[Hchat:$TAG] 定位底部高度刷新入口失败", it)
+            emptyList()
+        }
+
+        val method = candidates.singleOrNull()
+        if (method != null) {
+            DexMethodCache.save(methodPrefs, runtimeKey, CACHE_REFRESH_BOTTOM_HEIGHT, method)
+            HLog.i("[Hchat:$TAG] 已定位底部高度刷新入口: ${method.toGenericString()}")
+        } else {
+            DexMethodCache.clear(methodPrefs, runtimeKey, CACHE_REFRESH_BOTTOM_HEIGHT)
+            HLog.e(
+                "[Hchat:$TAG] 功能未生效: 底部高度刷新入口候选数量=${candidates.size} " +
+                    "methods=${candidates.joinToString { it.toGenericString() }}"
+            )
+        }
+        return method
+    }
+
+    private fun isRefreshBottomHeight(method: Method, footerClass: Class<*>): Boolean {
+        return method.declaringClass == footerClass &&
+            !KavaReflector.isStatic(method) &&
+            method.returnType == Void.TYPE &&
+            method.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
+    }
+
+    private fun hookFooter(
+        targetMethod: Member,
+        footerClass: Class<*>,
+        after: (View) -> Unit
+    ): Int {
         if (!hooked.add(targetMethod)) return 1
         return runCatching {
-            HLog.i(
-                "[Hchat:$TAG] 诊断: 安装入口 method=${targetMethod.name} " +
-                    "declaringClass=${targetMethod.declaringClass.name} targetClass=${targetClass.name}"
-            )
             HookRegistry.get().hook(targetMethod, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val receiver = param.thisObject
-                    if (!targetClass.isInstance(receiver)) return
+                    if (!footerClass.isInstance(receiver)) return
                     val footer = receiver as? View ?: return
                     runCatching { after(footer) }
-                        .onFailure { HLog.e("[Hchat:$TAG] 输入框布局更新失败", it) }
+                        .onFailure { HLog.e("[Hchat:$TAG] 输入区布局更新失败", it) }
                 }
             })
             1
-        }.getOrElse { hooked.remove(targetMethod); HLog.e("[Hchat:$TAG] Hook 安装失败", it); 0 }
+        }.getOrElse {
+            hooked.remove(targetMethod)
+            HLog.e("[Hchat:$TAG] Hook 安装失败: ${targetMethod.name}", it)
+            0
+        }
     }
-    private fun reportCallbackOnce(method: Member, footer: View) {
-        val methodName = method.name
-        if (!reportedCallbacks.add(methodName)) return
-        HLog.i(
-            "[Hchat:$TAG] 诊断: Hook 回调首次命中 method=$methodName " +
-                "instance=${footer.javaClass.name}"
-        )
-    }
+
     private fun apply(footer: View) {
-        val enabled = isEnabled()
-        val attached = footer.isAttachedToWindow
-        if (!applyReported) {
-            applyReported = true
-            HLog.i("[Hchat:$TAG] 诊断: 首次执行布局处理 enabled=$enabled attached=$attached")
+        if (!isEnabled()) {
+            restore(footer)
+            return
         }
-        if (!enabled) { restoreAll(footer); return }
-        if (!attached) return
-        val allViews = findAll(footer) { true }
-        val targets = allViews.filter { it.javaClass.name == footerBottomClass }
-        if (!scanReported) {
-            scanReported = true
-            HLog.i(
-                "[Hchat:$TAG] 诊断: View 扫描完成 root=${footer.javaClass.name} " +
-                    "viewCount=${allViews.size} target=$footerBottomClass targetCount=${targets.size}"
-            )
+        if (!footer.isAttachedToWindow) return
+        val marginParams = footer.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS }
+        val panelHeight = panel?.layoutParams?.height?.takeIf { it > 0 }
+            ?: panel?.height?.takeIf { it > 0 }
+            ?: return
+        val state = states[footer] ?: FooterState(
+            leftMargin = marginParams.leftMargin,
+            rightMargin = marginParams.rightMargin,
+            topMargin = marginParams.topMargin,
+            bottomMargin = marginParams.bottomMargin,
+            elevation = footer.elevation,
+            outlineProvider = footer.outlineProvider,
+            clipToOutline = footer.clipToOutline
+        ).also { states[footer] = it }
+
+        val side = dp(SIDE_MARGIN_DP)
+        val gap = dp(BOTTOM_GAP_DP)
+        val targetBottom = -panelHeight + gap
+        var layoutChanged = false
+        if (marginParams.leftMargin != side) {
+            marginParams.leftMargin = side
+            layoutChanged = true
         }
-        targets.forEach { applyCard(it) }
-    }
-    private fun applyCard(view: View) {
-        val params = view.layoutParams
-        val marginParams = params as? ViewGroup.MarginLayoutParams
-        val parent = view.parent as? ViewGroup
-        if (!targetReported) {
-            targetReported = true
-            HLog.i(
-                "[Hchat:$TAG] 诊断: 目标 View 首次命中 class=${view.javaClass.name} " +
-                    "parent=${parent?.javaClass?.name ?: "<none>"} " +
-                    "layoutParams=${params?.javaClass?.name ?: "<none>"} " +
-                    "size=${view.width}x${view.height} visibility=${view.visibility} " +
-                    "background=${view.background?.javaClass?.name ?: "<none>"} " +
-                    "clipChildren=${parent?.clipChildren} clipToPadding=${parent?.clipToPadding}"
-            )
+        if (marginParams.rightMargin != side) {
+            marginParams.rightMargin = side
+            layoutChanged = true
         }
-        val state = states[view] ?: FooterState(
-            params,
-            marginParams?.leftMargin,
-            marginParams?.rightMargin,
-            marginParams?.bottomMargin,
-            view.paddingLeft,
-            view.paddingTop,
-            view.paddingRight,
-            view.paddingBottom,
-            view.elevation
-        ).also { states[view] = it }
-        val beforeLeft = marginParams?.leftMargin
-        val beforeRight = marginParams?.rightMargin
-        val beforeBottom = marginParams?.bottomMargin
-        val beforeElevation = view.elevation
-        if (marginParams != null) {
-            val left = (state.leftMargin ?: marginParams.leftMargin) + dp(12)
-            val right = (state.rightMargin ?: marginParams.rightMargin) + dp(12)
-            val bottom = (state.bottomMargin ?: marginParams.bottomMargin) + dp(8)
-            if (marginParams.leftMargin != left || marginParams.rightMargin != right || marginParams.bottomMargin != bottom) {
-                marginParams.leftMargin = left
-                marginParams.rightMargin = right
-                marginParams.bottomMargin = bottom
-                view.layoutParams = marginParams
-            }
+        if (marginParams.topMargin != state.topMargin) {
+            marginParams.topMargin = state.topMargin
+            layoutChanged = true
         }
-        val elevation = dp(4).toFloat()
-        if (view.elevation != elevation) view.elevation = elevation
-        FloatingChatCardVisuals.apply(view, 24)
-        if (!appliedReported) {
+        if (marginParams.bottomMargin != targetBottom) {
+            marginParams.bottomMargin = targetBottom
+            layoutChanged = true
+        }
+        if (layoutChanged) footer.layoutParams = marginParams
+
+        footer.outlineProvider = FloatingFooterOutlineProvider
+        footer.clipToOutline = true
+        footer.elevation = dp(ELEVATION_DP).toFloat()
+        FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP)
+        footer.invalidateOutline()
+
+        if (!appliedReported && footer.width > 0 && footer.height > 0) {
             appliedReported = true
-            val appliedMargins = view.layoutParams as? ViewGroup.MarginLayoutParams
             HLog.i(
-                "[Hchat:$TAG] 诊断: 样式首次应用 " +
-                    "margin=$beforeLeft,$beforeRight,$beforeBottom->" +
-                    "${appliedMargins?.leftMargin},${appliedMargins?.rightMargin},${appliedMargins?.bottomMargin} " +
-                    "elevation=$beforeElevation->${view.elevation} " +
-                    "backgroundAfter=${view.background?.javaClass?.name ?: "<none>"}"
-            )
-        }
-        scheduleVerification(view)
-    }
-    private fun scheduleVerification(view: View) {
-        if (verifyScheduled) return
-        verifyScheduled = true
-        val expected = view.layoutParams as? ViewGroup.MarginLayoutParams
-        val expectedLeft = expected?.leftMargin
-        val expectedRight = expected?.rightMargin
-        val expectedBottom = expected?.bottomMargin
-        val expectedElevation = view.elevation
-        val expectedBackground = view.background
-        view.postOnAnimation {
-            val current = view.layoutParams as? ViewGroup.MarginLayoutParams
-            val marginsKept = current?.leftMargin == expectedLeft &&
-                current?.rightMargin == expectedRight &&
-                current?.bottomMargin == expectedBottom
-            HLog.i(
-                "[Hchat:$TAG] 诊断: 下一帧复查 attached=${view.isAttachedToWindow} " +
-                    "size=${view.width}x${view.height} marginsKept=$marginsKept " +
-                    "elevationKept=${view.elevation == expectedElevation} " +
-                    "backgroundKept=${view.background === expectedBackground}"
+                "[Hchat:$TAG] 功能实际生效: root=${footer.javaClass.name} " +
+                    "size=${footer.width}x${footer.height} panelHeight=$panelHeight " +
+                    "margin=${marginParams.leftMargin},${marginParams.rightMargin}," +
+                    "${marginParams.bottomMargin}"
             )
         }
     }
 
-    private fun restore(view: View?) {
-        view ?: return
-        restoreAll(view)
-    }
-
-    private fun restoreAll(root: View) {
-        findAll(root) { states.containsKey(it) }.forEach { restoreCard(it) }
-    }
-
-    private fun restoreCard(view: View) {
-        val state = states.remove(view) ?: return
-        view.layoutParams?.let { params ->
-            (params as? ViewGroup.MarginLayoutParams)?.let {
-                state.leftMargin?.let { value -> it.leftMargin = value }
-                state.rightMargin?.let { value -> it.rightMargin = value }
-                state.bottomMargin?.let { value -> it.bottomMargin = value }
-            }
-            view.layoutParams = params
+    private fun restore(footer: View?) {
+        footer ?: return
+        val state = states.remove(footer) ?: return
+        val params = footer.layoutParams as? ViewGroup.MarginLayoutParams
+        if (params != null) {
+            params.leftMargin = state.leftMargin
+            params.rightMargin = state.rightMargin
+            params.topMargin = state.topMargin
+            params.bottomMargin = state.bottomMargin
+            footer.layoutParams = params
         }
-        view.setPadding(state.paddingLeft, state.paddingTop, state.paddingRight, state.paddingBottom)
-        view.elevation = state.elevation
-        FloatingChatCardVisuals.restore(view)
+        footer.elevation = state.elevation
+        footer.outlineProvider = state.outlineProvider
+        footer.clipToOutline = state.clipToOutline
+        FloatingChatCardVisuals.restore(footer)
+        footer.invalidateOutline()
     }
 
-    fun destroy() { states.keys.toList().forEach(::restore) }
-    private fun isEnabled() = context.configStore().getGlobalBoolean("${FloatingChatFooterFeature.ID}_enabled", false)
-    private fun dp(value: Int) = (value * context.hostContext().resources.displayMetrics.density).roundToInt()
-    private fun findAll(root: View, predicate: (View) -> Boolean): List<View> = buildList {
-        fun walk(view: View) {
-            if (predicate(view)) add(view)
-            (view as? ViewGroup)?.let { group ->
-                for (index in 0 until group.childCount) walk(group.getChildAt(index))
-            }
-        }
-        walk(root)
+    fun destroy() {
+        states.keys.toList().forEach(::restore)
     }
-    private data class FooterState(
-        val params: ViewGroup.LayoutParams?,
-        val leftMargin: Int?,
-        val rightMargin: Int?,
-        val bottomMargin: Int?,
-        val paddingLeft: Int,
-        val paddingTop: Int,
-        val paddingRight: Int,
-        val paddingBottom: Int,
-        val elevation: Float
+
+    private fun isEnabled(): Boolean = context.configStore().getGlobalBoolean(
+        "${FloatingChatFooterFeature.ID}_enabled",
+        false
     )
-    companion object { private const val TAG = "悬浮输入框" }
+
+    private fun dp(value: Int): Int =
+        (value * context.hostContext().resources.displayMetrics.density).roundToInt()
+
+    private fun find(root: View, predicate: (View) -> Boolean): View? {
+        if (predicate(root)) return root
+        val group = root as? ViewGroup ?: return null
+        for (index in 0 until group.childCount) {
+            find(group.getChildAt(index), predicate)?.let { return it }
+        }
+        return null
+    }
+
+    private data class FooterState(
+        val leftMargin: Int,
+        val rightMargin: Int,
+        val topMargin: Int,
+        val bottomMargin: Int,
+        val elevation: Float,
+        val outlineProvider: ViewOutlineProvider?,
+        val clipToOutline: Boolean
+    )
+
+    private object FloatingFooterOutlineProvider : ViewOutlineProvider() {
+        override fun getOutline(view: View, outline: Outline) {
+            val radius = CORNER_RADIUS_DP * view.resources.displayMetrics.density
+            outline.setRoundRect(0, 0, view.width, view.height.coerceAtLeast(1), radius)
+        }
+    }
+
+    companion object {
+        private const val TAG = "悬浮输入框"
+        private const val FOOTER_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChatFooter"
+        private const val FOOTER_BOTTOM_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom"
+        private const val CACHE_REFRESH_BOTTOM_HEIGHT = "refresh_bottom_height"
+        private const val REFRESH_LOG_TAG = "MicroMsg.ChatFooter"
+        private const val REFRESH_LOG_ANCHOR = "[refreshBottomHeight] keyborPx:%d"
+        private const val SIDE_MARGIN_DP = 12
+        private const val BOTTOM_GAP_DP = 8
+        private const val ELEVATION_DP = 4
+        private const val CORNER_RADIUS_DP = 24
+        private const val REQUIRED_HOOK_COUNT = 3
+    }
 }
