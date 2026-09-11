@@ -557,6 +557,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val REFRESH_LOG_TAG = "MicroMsg.ChatFooter"
         private const val REFRESH_LOG_ANCHOR = "[refreshBottomHeight] keyborPx:%d"
         private const val SWITCH_LOG_ANCHOR = "switchPanel: %s, %s"
+        private const val PANEL_STATE_NONE = 0
         private const val PANEL_STATE_SMILEY = 2
         private const val PANEL_STATE_APP = 3
         private const val SIDE_MARGIN_DP = 12
