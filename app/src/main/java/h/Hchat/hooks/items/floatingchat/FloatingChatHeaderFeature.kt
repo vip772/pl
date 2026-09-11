@@ -64,6 +64,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val diagnosedTipsGroups = WeakHashMap<View, Boolean>()
     private val tipsCardStates = WeakHashMap<View, TipsCardState>()
     private val tipsDimStates = WeakHashMap<View, TipsDimState>()
+    private val tipsGroupElevations = WeakHashMap<View, Float>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
     private val windowFocusListeners = WeakHashMap<ViewGroup, android.view.ViewTreeObserver.OnWindowFocusChangeListener>()
     private var reparentFailureReported = false
@@ -367,6 +368,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
             group.layoutParams = lp
         }
         suppressTipsGroupDim(group)
+        if (!tipsGroupElevations.containsKey(group)) tipsGroupElevations[group] = group.elevation
+        group.elevation = 0f
         styleTipsCardBody(group)
         group.bringToFront()
         if (diagnosedTipsGroups.put(group, true) == null) {
@@ -397,12 +400,25 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private fun styleTipsCardBody(group: View) {
         val body = find(group) { it !== group && it is RelativeLayout } ?: return
         if (!tipsCardStates.containsKey(body)) {
-            tipsCardStates[body] = TipsCardState(body.elevation, body.outlineProvider, body.clipToOutline)
+            tipsCardStates[body] = TipsCardState(
+                body.elevation,
+                body.outlineProvider,
+                body.clipToOutline,
+                body.paddingLeft,
+                body.paddingTop,
+                body.paddingRight,
+                body.paddingBottom
+            )
         }
         FloatingChatCardVisuals.apply(body, CARD_CORNER_RADIUS_DP)
         body.outlineProvider = FloatingTipsCardOutlineProvider
         body.clipToOutline = true
-        body.elevation = dp(ELEVATION_DP).toFloat()
+        body.elevation = 0f
+        val original = tipsCardStates[body]
+        if (original != null && original.paddingTop != original.paddingBottom) {
+            val vertical = (original.paddingTop + original.paddingBottom) / 2
+            body.setPadding(original.paddingLeft, vertical, original.paddingRight, vertical)
+        }
         body.invalidateOutline()
     }
 
@@ -632,6 +648,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             view.elevation = state.elevation
             view.outlineProvider = state.outlineProvider
             view.clipToOutline = state.clipToOutline
+            view.setPadding(state.paddingLeft, state.paddingTop, state.paddingRight, state.paddingBottom)
             FloatingChatCardVisuals.restore(view)
             view.invalidateOutline()
         }
@@ -642,6 +659,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
             view.background = state.background
         }
         tipsDimStates.clear()
+        tipsGroupElevations.forEach { (view, elevation) -> view.elevation = elevation }
+        tipsGroupElevations.clear()
         tipsAttachListeners.forEach { (view, listener) -> view.removeOnAttachStateChangeListener(listener) }
         tipsLayoutListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
         tipsAttachListeners.clear()
@@ -760,7 +779,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private data class TipsCardState(
         val elevation: Float,
         val outlineProvider: ViewOutlineProvider?,
-        val clipToOutline: Boolean
+        val clipToOutline: Boolean,
+        val paddingLeft: Int,
+        val paddingTop: Int,
+        val paddingRight: Int,
+        val paddingBottom: Int
     )
 
     private data class TipsDimState(

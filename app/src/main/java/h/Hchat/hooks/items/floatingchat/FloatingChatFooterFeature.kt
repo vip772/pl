@@ -47,6 +47,8 @@ private class FooterRuntime(private val context: FeatureContext) {
     private val newMessageMargins = WeakHashMap<View, Int>()
     private val diagnosedFooters = WeakHashMap<View, Boolean>()
     private val preDrawListeners = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
+    private val panelOriginalHeights = WeakHashMap<View, Int>()
+    private val panelBodyOriginalHeights = WeakHashMap<View, Int>()
     private val methodPrefs = DexMethodCache.prefs(
         context.hostContext(),
         "Hchat_floating_chat_footer_method_cache"
@@ -287,7 +289,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         return runCatching {
             HookRegistry.get().hook(targetMethod, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!isEnabled() || !isPanelState(panelState)) return
+                    if (!isEnabled()) return
                     val scrollLayout = param.thisObject as? ViewGroup ?: return
                     val footer = (0 until scrollLayout.childCount)
                         .asSequence()
@@ -295,7 +297,13 @@ private class FooterRuntime(private val context: FeatureContext) {
                         .firstOrNull { it.javaClass.name == FOOTER_CLASS }
                         ?: return
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
-                    if (panel.visibility == View.VISIBLE) param.args[0] = 0
+                    val requestedY = param.args.firstOrNull() as? Int ?: return
+                    val state = states[footer]
+                    val abnormalLift = !isPanelState(panelState) &&
+                        state?.baseInputHeight?.takeIf { it > 0 }?.let { requestedY >= it } == true
+                    if ((isPanelState(panelState) && panel.visibility == View.VISIBLE) || abnormalLift) {
+                        param.args[0] = 0
+                    }
                 }
             })
             1
@@ -346,6 +354,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
                     panelState = state
                     panel.visibility = if (isPanelState(state)) View.VISIBLE else View.GONE
+                    if (isPanelState(state)) applyCompactPanelHeight(footer, panel)
                     runCatching {
                         apply(footer)
                     }
@@ -398,6 +407,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         }
         val state = states[footer] ?: createState(footer, panel, marginParams) ?: return
         if (!state.reparented && !reparentPanel(state)) return
+        if (isPanelState(panelState)) applyCompactPanelHeight(footer, state.panel)
         val measuredInputHeight = visibleHeightExcludingPanel(state.panel)
         if (measuredInputHeight <= 0) return
         if (state.baseInputHeight <= 0 && !isPanelState(panelState)) state.baseInputHeight = measuredInputHeight
@@ -548,6 +558,56 @@ private class FooterRuntime(private val context: FeatureContext) {
         }
     }
 
+    private fun applyCompactPanelHeight(footer: View, panel: View) {
+        val lp = panel.layoutParams ?: return
+        val natural = panelOriginalHeights[panel]
+            ?: panel.height.takeIf { it > 0 }
+            ?: lp.height.takeIf { it > 0 }
+            ?: return
+        if (!panelOriginalHeights.containsKey(panel)) panelOriginalHeights[panel] = natural
+        val hostHeight = (footer.parent as? View)?.height?.takeIf { it > 0 }
+            ?: footer.resources.displayMetrics.heightPixels
+        val target = minOf(
+            natural,
+            dp(MAX_PANEL_HEIGHT_DP),
+            (hostHeight * MAX_PANEL_HEIGHT_RATIO).roundToInt()
+        ).coerceAtLeast(dp(MIN_PANEL_HEIGHT_DP))
+        if (lp.height != target) {
+            lp.height = target
+            panel.layoutParams = lp
+        }
+        val group = panel as? ViewGroup ?: return
+        for (index in 0 until group.childCount) {
+            val child = group.getChildAt(index)
+            val childLp = child.layoutParams ?: continue
+            if (childLp.height != natural) continue
+            panelBodyOriginalHeights.getOrPut(child) { childLp.height }
+            if (childLp.height != target) {
+                childLp.height = target
+                child.layoutParams = childLp
+            }
+        }
+    }
+
+    private fun restorePanelHeight(panel: View) {
+        val group = panel as? ViewGroup
+        if (group != null) {
+            for (index in 0 until group.childCount) {
+                val child = group.getChildAt(index)
+                val height = panelBodyOriginalHeights.remove(child) ?: continue
+                child.layoutParams?.let { lp ->
+                    lp.height = height
+                    child.layoutParams = lp
+                }
+            }
+        }
+        val height = panelOriginalHeights.remove(panel) ?: return
+        panel.layoutParams?.let { lp ->
+            lp.height = height
+            panel.layoutParams = lp
+        }
+    }
+
     private fun visibleHeightExcludingPanel(panel: View): Int {
         val root = panel.parent as? ViewGroup ?: return 0
         var total = 0
@@ -670,6 +730,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         }
         val state = states.remove(footer) ?: return
         runCatching {
+            restorePanelHeight(state.panel)
             state.chatRecycler?.let { recycler ->
                 state.recyclerPaddingBottom?.let { bottom ->
                     recycler.setPadding(
@@ -721,6 +782,20 @@ private class FooterRuntime(private val context: FeatureContext) {
             view.layoutParams = lp
         }
         newMessageMargins.clear()
+        panelBodyOriginalHeights.forEach { (view, height) ->
+            view.layoutParams?.let { lp ->
+                lp.height = height
+                view.layoutParams = lp
+            }
+        }
+        panelBodyOriginalHeights.clear()
+        panelOriginalHeights.forEach { (view, height) ->
+            view.layoutParams?.let { lp ->
+                lp.height = height
+                view.layoutParams = lp
+            }
+        }
+        panelOriginalHeights.clear()
     }
 
     private fun isPanelState(state: Int): Boolean =
@@ -804,6 +879,9 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val SCROLL_LOG_TAG = "MicroMsg.ChattingScrollLayout"
         private const val SCROLL_LOG_ANCHOR =
             "scrollContentTo: y:%s, targetScroll:%s, alwaysScroll:%s"
+        private const val MAX_PANEL_HEIGHT_DP = 260
+        private const val MIN_PANEL_HEIGHT_DP = 180
+        private const val MAX_PANEL_HEIGHT_RATIO = 0.30f
         private const val PANEL_STATE_NONE = 0
         private const val PANEL_STATE_SMILEY = 2
         private const val PANEL_STATE_APP = 3
