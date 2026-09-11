@@ -118,6 +118,9 @@ private class HomeTextColorRuntime(
     @Volatile private var contactsInstalled = false
     @Volatile private var preferenceInstalled = false
     @Volatile private var layoutInflaterInstalled = false
+    @Volatile private var layoutInflaterSearchAttempted = false
+    @Volatile private var layoutInflaterFailureReported = false
+    @Volatile private var layoutInflaterUnavailable = false
     @Volatile private var recyclerInstalled = false
     @Volatile private var recyclerPayloadInstalled = false
     @Volatile private var destroyed = false
@@ -177,10 +180,12 @@ private class HomeTextColorRuntime(
                 RowKind.PREFERENCE
             )
         }
-        if (!layoutInflaterInstalled) {
-            layoutInflaterInstalled = installLayoutInflaterHook(
-                locateLayoutInflaterFactory(runtimeKey, allowDexSearch)
-            )
+        if (!layoutInflaterInstalled && !layoutInflaterUnavailable) {
+            val layoutMethod = locateLayoutInflaterFactory(runtimeKey, allowDexSearch)
+            layoutInflaterInstalled = installLayoutInflaterHook(layoutMethod)
+            if (allowDexSearch && layoutMethod == null && layoutInflaterSearchAttempted) {
+                layoutInflaterUnavailable = true
+            }
         }
         if (!recyclerInstalled) {
             recyclerInstalled = installRecyclerAdapterHook(
@@ -203,7 +208,7 @@ private class HomeTextColorRuntime(
             )
         }
         return conversationInstalled && contactsInstalled && preferenceInstalled &&
-            layoutInflaterInstalled &&
+            (layoutInflaterInstalled || layoutInflaterUnavailable) &&
             recyclerInstalled && recyclerPayloadInstalled
     }
 
@@ -542,7 +547,8 @@ private class HomeTextColorRuntime(
             CACHE_LAYOUT_INFLATER_FACTORY
         )?.takeIf(::isLayoutInflaterFactoryMethod)?.let { return it }
         DexMethodCache.clear(methodPrefs, runtimeKey, CACHE_LAYOUT_INFLATER_FACTORY)
-        if (!allowDexSearch) return null
+        if (!allowDexSearch || layoutInflaterSearchAttempted) return null
+        layoutInflaterSearchAttempted = true
 
         val candidates = runCatching {
             context.dexKitBridge().findMethod(
@@ -570,10 +576,11 @@ private class HomeTextColorRuntime(
         val method = candidates.singleOrNull()
         if (method != null) {
             DexMethodCache.save(methodPrefs, runtimeKey, CACHE_LAYOUT_INFLATER_FACTORY, method)
-        } else {
+        } else if (!layoutInflaterFailureReported) {
+            layoutInflaterFailureReported = true
             HLog.e(
                 "$TAG 未找到唯一微信布局创建入口: count=${candidates.size} " +
-                    "methods=${candidates.joinToString(transform = ::methodDescriptor)}"
+                    "methods=${candidates.joinToString(transform = ::methodDescriptor)}; 本次运行不再重复搜索"
             )
         }
         return method
