@@ -69,7 +69,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val tipsRecyclerRules = WeakHashMap<View, IntArray>()
     private val tipsRecyclerBackgrounds = WeakHashMap<View, Drawable?>()
     private val tipsContentBackgrounds = WeakHashMap<View, Drawable?>()
-    private val scheduledLayouts = WeakHashMap<ViewGroup, Boolean>()
+    private val layoutTrackers = WeakHashMap<ViewGroup, HeaderLayoutTracker>()
+    private val tipsCardBottoms = WeakHashMap<ViewGroup, Int>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
     private val decorStatusBarStates = WeakHashMap<View, DecorStatusBarState>()
     private val windowFocusListeners = WeakHashMap<ViewGroup, android.view.ViewTreeObserver.OnWindowFocusChangeListener>()
@@ -98,7 +99,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
         KavaReflector.findMethodRecursive(clazz, "onDetachedFromWindow")?.let {
             count += hook(it) { param ->
-                (param.thisObject as? ViewGroup)?.let(::removeWindowFocusTracking)
+                (param.thisObject as? ViewGroup)?.let { layout ->
+                    removeWindowFocusTracking(layout)
+                    disposeLayoutTracker(layout)
+                }
             }
         }
         KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let {
@@ -185,11 +189,26 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun scheduleApply(layout: ViewGroup) {
-        if (scheduledLayouts.put(layout, true) != null) return
-        layout.postOnAnimation {
-            scheduledLayouts.remove(layout)
-            if (layout.isAttachedToWindow && layout.isShown) apply(layout)
+        val tracker = layoutTrackers.getOrPut(layout) { HeaderLayoutTracker() }
+        if (tracker.preDraw != null || !layout.isAttachedToWindow) return
+        val observer = layout.viewTreeObserver
+        val listener = object : android.view.ViewTreeObserver.OnPreDrawListener {
+            override fun onPreDraw(): Boolean {
+                if (observer.isAlive) observer.removeOnPreDrawListener(this)
+                if (tracker.preDraw === this) tracker.preDraw = null
+                if (layout.isAttachedToWindow && layout.isShown) apply(layout)
+                return true
+            }
         }
+        tracker.preDraw = listener
+        observer.addOnPreDrawListener(listener)
+    }
+
+    private fun disposeLayoutTracker(layout: ViewGroup) {
+        layoutTrackers.remove(layout)?.preDraw?.let { listener ->
+            runCatching { layout.viewTreeObserver.removeOnPreDrawListener(listener) }
+        }
+        tipsCardBottoms.remove(layout)
     }
 
     private fun apply(sourceLayout: ViewGroup) {
@@ -224,6 +243,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             header.layoutParams = marginLp
         }
         applyHeaderZoneCards(layout, header)
+        tipsCardBottoms.remove(layout)
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
         diagnoseHeaderLayout(layout, header)
@@ -376,6 +396,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val baseTop = groupLocation[1] - group.translationY.roundToInt() + base.roundToInt()
         val targetTop = headerLocation[1] + header.height + dp(CARD_GAP_DP)
         group.translationY = base + targetTop - baseTop
+        val layoutGroup = layout as? ViewGroup
+        if (layoutGroup != null) {
+            val layoutLocation = IntArray(2).also(layoutGroup::getLocationOnScreen)
+            tipsCardBottoms[layoutGroup] = targetTop - layoutLocation[1] + group.height
+        }
         val lp = group.layoutParams as? ViewGroup.MarginLayoutParams
         val side = dp(SIDE_MARGIN_DP)
         if (lp != null && (lp.leftMargin != side || lp.rightMargin != side)) {
@@ -534,11 +559,16 @@ private class HeaderRuntime(private val context: FeatureContext) {
             FloatingChatCardVisuals.apply(child, CARD_CORNER_RADIUS_DP)
             nextTop += child.height + gap
         }
+        val layoutGroup = layout as? ViewGroup
+        val layoutLocation = IntArray(2).also(layout::getLocationOnScreen)
+        val tipsBottomInContent = layoutGroup?.let { tipsCardBottoms[it] }
+            ?.let { it + layoutLocation[1] - contentLocation[1] + gap }
         for (index in 0 until content.childCount) {
             val child = content.getChildAt(index)
             if (!isTopNewMessageChip(child)) continue
-            placeContentView(child, content, nextTop)
-            nextTop += child.height + gap
+            val chipTop = maxOf(nextTop, tipsBottomInContent ?: 0)
+            placeContentView(child, content, chipTop)
+            nextTop = chipTop + child.height + gap
         }
     }
 
@@ -751,7 +781,13 @@ private class HeaderRuntime(private val context: FeatureContext) {
         tipsRecyclerBackgrounds.clear()
         tipsContentBackgrounds.forEach { (view, background) -> view.background = background }
         tipsContentBackgrounds.clear()
-        scheduledLayouts.clear()
+        layoutTrackers.forEach { (layout, tracker) ->
+            tracker.preDraw?.let { listener ->
+                runCatching { layout.viewTreeObserver.removeOnPreDrawListener(listener) }
+            }
+        }
+        layoutTrackers.clear()
+        tipsCardBottoms.clear()
         tipsAttachListeners.forEach { (view, listener) -> view.removeOnAttachStateChangeListener(listener) }
         tipsLayoutListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
         tipsAttachListeners.clear()
@@ -879,6 +915,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
             is ViewGroup.MarginLayoutParams -> ViewGroup.MarginLayoutParams(params)
             else -> ViewGroup.LayoutParams(params)
         }
+    private class HeaderLayoutTracker(
+        var preDraw: android.view.ViewTreeObserver.OnPreDrawListener? = null
+    )
+
     private data class DecorStatusBarState(
         val background: Drawable?,
         val alpha: Float
