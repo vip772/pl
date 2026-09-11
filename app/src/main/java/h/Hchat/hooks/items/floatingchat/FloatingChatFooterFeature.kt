@@ -46,6 +46,7 @@ private class FooterRuntime(private val context: FeatureContext) {
     )
     private var appliedReported = false
     private var structureFailureReported = false
+    private var panelState = PANEL_STATE_NONE
     private var installed = false
 
     @Synchronized
@@ -186,11 +187,10 @@ private class FooterRuntime(private val context: FeatureContext) {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (!isEnabled() || !footerClass.isInstance(param.thisObject)) return
                     val state = param.args.firstOrNull() as? Int ?: return
+                    panelState = state
                     val footer = param.thisObject as? View ?: return
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
-                    if (state != PANEL_STATE_SMILEY && state != PANEL_STATE_APP) {
-                        panel.visibility = View.GONE
-                    }
+                    if (!isPanelState(state)) panel.visibility = View.GONE
                 }
 
                 override fun afterHookedMethod(param: MethodHookParam) {
@@ -198,12 +198,12 @@ private class FooterRuntime(private val context: FeatureContext) {
                     val state = param.args.firstOrNull() as? Int ?: return
                     val footer = param.thisObject as? View ?: return
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
-                    panel.visibility = if (state == PANEL_STATE_SMILEY || state == PANEL_STATE_APP) {
-                        View.VISIBLE
-                    } else {
-                        View.GONE
+                    panelState = state
+                    panel.visibility = if (isPanelState(state)) View.VISIBLE else View.GONE
+                    runCatching {
+                        apply(footer)
+                        if (isPanelState(state)) neutralizeHostTranslation(footer)
                     }
-                    runCatching { apply(footer) }
                         .onFailure { HLog.e("[Hchat:$TAG] 面板状态更新失败", it) }
                 }
             })
@@ -284,6 +284,9 @@ private class FooterRuntime(private val context: FeatureContext) {
         FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP)
         footer.invalidateOutline()
         applyChatListPadding(footer, inputHeight + gap, state)
+        if (isPanelState(panelState) && state.panel.visibility == View.VISIBLE) {
+            neutralizeHostTranslation(footer)
+        }
 
         if (!appliedReported && footer.width > 0) {
             appliedReported = true
@@ -474,6 +477,14 @@ private class FooterRuntime(private val context: FeatureContext) {
 
     fun destroy() {
         states.keys.toList().forEach(::restore)
+    }
+
+    private fun isPanelState(state: Int): Boolean =
+        state == PANEL_STATE_SMILEY || state == PANEL_STATE_APP
+
+    private fun neutralizeHostTranslation(footer: View) {
+        val host = footer.parent as? View ?: return
+        if (host.translationY != 0f) host.translationY = 0f
     }
 
     private fun isEnabled(): Boolean = context.configStore().getGlobalBoolean(

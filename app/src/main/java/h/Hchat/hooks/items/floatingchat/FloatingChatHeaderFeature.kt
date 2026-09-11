@@ -87,11 +87,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val state = states[header] ?: createState(header) ?: return
         if (!state.reparented && !reparentHeader(layout, header, state)) return
         val marginLp = header.layoutParams as? ViewGroup.MarginLayoutParams ?: return
-        val originalMargins = state.originalLayoutParams as? ViewGroup.MarginLayoutParams
         val side = dp(SIDE_MARGIN_DP)
-        val left = (originalMargins?.leftMargin ?: 0) + side
-        val right = (originalMargins?.rightMargin ?: 0) + side
-        val top = (originalMargins?.topMargin ?: 0) + dp(TOP_GAP_DP)
+        val left = side
+        val right = side
+        val top = dp(TOP_GAP_DP)
         if (marginLp.leftMargin != left || marginLp.rightMargin != right || marginLp.topMargin != top) {
             marginLp.leftMargin = left
             marginLp.rightMargin = right
@@ -143,10 +142,14 @@ private class HeaderRuntime(private val context: FeatureContext) {
             return false
         }
         return runCatching {
-            val height = header.layoutParams?.height ?: ViewGroup.LayoutParams.WRAP_CONTENT
+            val original = header.layoutParams
+            val height = original?.height ?: ViewGroup.LayoutParams.WRAP_CONTENT
             layout.removeView(header)
             val params = RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
             params.addRule(RelativeLayout.ALIGN_PARENT_TOP)
+            params.leftMargin = 0
+            params.rightMargin = 0
+            params.topMargin = 0
             root.addView(header, params)
             state.reparented = true
             HLog.i("[Hchat:$TAG] 标题栏结构重排完成: root=${root.javaClass.name}")
