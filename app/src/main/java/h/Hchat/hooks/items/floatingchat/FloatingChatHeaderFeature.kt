@@ -67,6 +67,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val tipsGroupElevations = WeakHashMap<View, Float>()
     private val tipsRecyclerMargins = WeakHashMap<View, IntArray>()
     private val tipsRecyclerRules = WeakHashMap<View, IntArray>()
+    private val tipsRecyclerBackgrounds = WeakHashMap<View, Drawable?>()
     private val scheduledLayouts = WeakHashMap<ViewGroup, Boolean>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
     private val decorStatusBarStates = WeakHashMap<View, DecorStatusBarState>()
@@ -431,6 +432,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val recycler = find(group) { it.javaClass.name == TIPS_RECYCLER_CLASS }
         val recyclerLp = recycler?.layoutParams as? RelativeLayout.LayoutParams
         if (recycler != null && recyclerLp != null) {
+            if (!tipsRecyclerBackgrounds.containsKey(recycler)) {
+                tipsRecyclerBackgrounds[recycler] = recycler.background
+            }
+            recycler.background = null
             if (!tipsRecyclerMargins.containsKey(recycler)) {
                 tipsRecyclerRules[recycler] = recyclerLp.rules.copyOf()
             }
@@ -719,6 +724,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
             view.layoutParams = lp
         }
         tipsRecyclerRules.clear()
+        tipsRecyclerBackgrounds.forEach { (view, background) -> view.background = background }
+        tipsRecyclerBackgrounds.clear()
         scheduledLayouts.clear()
         tipsAttachListeners.forEach { (view, listener) -> view.removeOnAttachStateChangeListener(listener) }
         tipsLayoutListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
