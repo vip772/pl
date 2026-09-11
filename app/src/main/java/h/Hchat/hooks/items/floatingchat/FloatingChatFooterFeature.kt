@@ -49,8 +49,6 @@ private class FooterRuntime(private val context: FeatureContext) {
     private val preDrawListeners = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
     private val panelOriginalHeights = WeakHashMap<View, Int>()
     private val panelBodyOriginalHeights = WeakHashMap<View, Int>()
-    private val imeListeners = WeakHashMap<View, ViewTreeObserver.OnGlobalLayoutListener>()
-    private val imeBaseTranslations = WeakHashMap<View, Float>()
     private val methodPrefs = DexMethodCache.prefs(
         context.hostContext(),
         "Hchat_floating_chat_footer_method_cache"
@@ -76,9 +74,7 @@ private class FooterRuntime(private val context: FeatureContext) {
 
         var count = 0
         KavaReflector.findDeclaredMethod(footerClass, "onAttachedToWindow")?.let { method ->
-            count += hookFooter(method, footerClass) { footer ->
-                footer.postOnAnimation { apply(footer) }
-            }
+            count += hookFooter(method, footerClass, ::apply)
         }
         KavaReflector.findDeclaredMethod(footerClass, "onDetachedFromWindow")?.let { method ->
             count += hookFooter(method, footerClass) { footer -> restore(footer) }
@@ -299,14 +295,12 @@ private class FooterRuntime(private val context: FeatureContext) {
                         .firstOrNull { it.javaClass.name == FOOTER_CLASS }
                         ?: return
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
-                    val requestedY = param.args.firstOrNull() as? Int ?: return
-                    val state = states[footer]
-                    val baseHeight = state?.baseInputHeight?.takeIf { it > 0 }
-                        ?: visibleHeightExcludingPanel(panel).takeIf { it > 0 }
-                    val abnormalLift = !isPanelState(panelState) &&
-                        baseHeight?.let { requestedY >= it } == true
-                    if ((isPanelState(panelState) && panel.visibility == View.VISIBLE) || abnormalLift) {
-                        param.args[0] = 0
+                    val imeHeight = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+                        scrollLayout.rootWindowInsets
+                            ?.getInsets(android.view.WindowInsets.Type.ime())?.bottom ?: 0
+                    } else 0
+                    if (panel.visibility == View.VISIBLE) {
+                        param.args[0] = imeHeight
                     }
                 }
             })
@@ -413,12 +407,15 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (!state.reparented && !reparentPanel(state)) return
         if (isPanelState(panelState)) applyCompactPanelHeight(footer, state.panel)
         val measuredInputHeight = visibleHeightExcludingPanel(state.panel)
-        if (measuredInputHeight <= 0) return
-        if (state.baseInputHeight <= 0 && !isPanelState(panelState)) state.baseInputHeight = measuredInputHeight
+        val stableInputHeight = measuredInputHeight.takeIf { it > 0 }
+            ?: state.baseInputHeight.takeIf { it > 0 }
+            ?: footer.height.takeIf { it > 0 }
+            ?: return
+        if (state.baseInputHeight <= 0 && !isPanelState(panelState)) state.baseInputHeight = stableInputHeight
         val inputHeight = if (isPanelState(panelState)) {
-            measuredInputHeight
+            stableInputHeight
         } else {
-            state.baseInputHeight.takeIf { it > 0 } ?: measuredInputHeight
+            state.baseInputHeight.takeIf { it > 0 } ?: stableInputHeight
         }
 
         val side = dp(SIDE_MARGIN_DP)
@@ -441,7 +438,10 @@ private class FooterRuntime(private val context: FeatureContext) {
             marginParams.bottomMargin = gap
             layoutChanged = true
         }
-        if (layoutChanged) footer.layoutParams = marginParams
+        if (layoutChanged) {
+            footer.layoutParams = marginParams
+            footer.requestLayout()
+        }
 
         footer.outlineProvider = FloatingFooterOutlineProvider
         footer.clipToOutline = true
@@ -450,7 +450,6 @@ private class FooterRuntime(private val context: FeatureContext) {
         footer.invalidateOutline()
         applyChatListPadding(footer, inputHeight + gap, state)
         ensurePreDrawTracking(footer)
-        ensureImeTracking(footer)
 
         if (!appliedReported && footer.width > 0) {
             appliedReported = true
@@ -619,7 +618,12 @@ private class FooterRuntime(private val context: FeatureContext) {
         var total = 0
         for (index in 0 until root.childCount) {
             val child = root.getChildAt(index)
-            if (child !== panel && child.visibility != View.GONE) total += child.height
+            if (child !== panel && child.visibility != View.GONE) {
+                total += child.height.takeIf { it > 0 }
+                    ?: child.measuredHeight.takeIf { it > 0 }
+                    ?: child.layoutParams?.height?.takeIf { it > 0 }
+                    ?: 0
+            }
         }
         return total
     }
@@ -650,24 +654,6 @@ private class FooterRuntime(private val context: FeatureContext) {
         }
         preDrawListeners[footer] = listener
         footer.viewTreeObserver.addOnPreDrawListener(listener)
-    }
-
-    private fun ensureImeTracking(footer: View) {
-        if (imeListeners[footer] != null) return
-        imeBaseTranslations[footer] = footer.translationY
-        val listener = ViewTreeObserver.OnGlobalLayoutListener {
-            if (!isEnabled() || !footer.isAttachedToWindow) return@OnGlobalLayoutListener
-            val visible = android.graphics.Rect()
-            footer.rootView.getWindowVisibleDisplayFrame(visible)
-            val hidden = footer.rootView.height - visible.bottom
-            val keyboard = hidden > dp(160)
-            val base = imeBaseTranslations[footer] ?: 0f
-            footer.translationY = if (keyboard) {
-                base - (hidden - dp(BOTTOM_GAP_DP)).coerceAtLeast(0)
-            } else base
-        }
-        imeListeners[footer] = listener
-        footer.viewTreeObserver.addOnGlobalLayoutListener(listener)
     }
 
     private fun liftNewMessageBubble(footer: View) {
@@ -752,10 +738,6 @@ private class FooterRuntime(private val context: FeatureContext) {
         preDrawListeners.remove(footer)?.let { listener ->
             runCatching { footer.viewTreeObserver.removeOnPreDrawListener(listener) }
         }
-        imeListeners.remove(footer)?.let { listener ->
-            runCatching { footer.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
-        }
-        imeBaseTranslations.remove(footer)?.let { footer.translationY = it }
         val state = states.remove(footer) ?: return
         runCatching {
             restorePanelHeight(state.panel)

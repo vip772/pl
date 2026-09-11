@@ -68,6 +68,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val tipsRecyclerMargins = WeakHashMap<View, IntArray>()
     private val tipsRecyclerRules = WeakHashMap<View, IntArray>()
     private val tipsRecyclerBackgrounds = WeakHashMap<View, Drawable?>()
+    private val tipsContentBackgrounds = WeakHashMap<View, Drawable?>()
     private val scheduledLayouts = WeakHashMap<ViewGroup, Boolean>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
     private val decorStatusBarStates = WeakHashMap<View, DecorStatusBarState>()
@@ -436,6 +437,12 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 tipsRecyclerBackgrounds[recycler] = recycler.background
             }
             recycler.background = null
+            val recyclerGroup = recycler as? ViewGroup
+            if (recyclerGroup != null) {
+                for (index in 0 until recyclerGroup.childCount) {
+                    clearTipsItemBackground(recyclerGroup.getChildAt(index))
+                }
+            }
             if (!tipsRecyclerMargins.containsKey(recycler)) {
                 tipsRecyclerRules[recycler] = recyclerLp.rules.copyOf()
             }
@@ -467,6 +474,22 @@ private class HeaderRuntime(private val context: FeatureContext) {
             body.setPadding(original.paddingLeft, vertical, original.paddingRight, vertical)
         }
         body.invalidateOutline()
+    }
+
+    private fun clearTipsItemBackground(item: View) {
+        if (item.background != null && !tipsContentBackgrounds.containsKey(item)) {
+            tipsContentBackgrounds[item] = item.background
+            item.background = null
+        }
+        val group = item as? ViewGroup ?: return
+        for (index in 0 until group.childCount) {
+            val child = group.getChildAt(index)
+            if (child is TextView || child.javaClass.name == WE_IMAGE_VIEW_CLASS) continue
+            if (child.background != null && !tipsContentBackgrounds.containsKey(child)) {
+                tipsContentBackgrounds[child] = child.background
+                child.background = null
+            }
+        }
     }
 
     private fun findVisibleChatContent(layout: View, header: View): ViewGroup? {
@@ -726,6 +749,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
         tipsRecyclerRules.clear()
         tipsRecyclerBackgrounds.forEach { (view, background) -> view.background = background }
         tipsRecyclerBackgrounds.clear()
+        tipsContentBackgrounds.forEach { (view, background) -> view.background = background }
+        tipsContentBackgrounds.clear()
         scheduledLayouts.clear()
         tipsAttachListeners.forEach { (view, listener) -> view.removeOnAttachStateChangeListener(listener) }
         tipsLayoutListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
