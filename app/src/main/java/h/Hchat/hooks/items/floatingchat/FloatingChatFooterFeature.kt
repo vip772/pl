@@ -5,6 +5,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.RelativeLayout
 import android.widget.TextView
@@ -45,6 +46,7 @@ private class FooterRuntime(private val context: FeatureContext) {
     private val states = WeakHashMap<View, FooterState>()
     private val newMessageMargins = WeakHashMap<View, Int>()
     private val diagnosedFooters = WeakHashMap<View, Boolean>()
+    private val preDrawListeners = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
     private val methodPrefs = DexMethodCache.prefs(
         context.hostContext(),
         "Hchat_floating_chat_footer_method_cache"
@@ -427,6 +429,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP)
         footer.invalidateOutline()
         applyChatListPadding(footer, inputHeight + gap, state)
+        ensurePreDrawTracking(footer)
 
         if (!appliedReported && footer.width > 0) {
             appliedReported = true
@@ -562,6 +565,16 @@ private class FooterRuntime(private val context: FeatureContext) {
         liftNewMessageBubble(footer)
     }
 
+    private fun ensurePreDrawTracking(footer: View) {
+        if (preDrawListeners[footer] != null) return
+        val listener = ViewTreeObserver.OnPreDrawListener {
+            if (isEnabled() && footer.isAttachedToWindow) liftNewMessageBubble(footer)
+            true
+        }
+        preDrawListeners[footer] = listener
+        footer.viewTreeObserver.addOnPreDrawListener(listener)
+    }
+
     private fun liftNewMessageBubble(footer: View) {
         val content = find(footer.rootView) {
             it.javaClass.name == CHATTING_CONTENT_CLASS
@@ -641,6 +654,9 @@ private class FooterRuntime(private val context: FeatureContext) {
 
     private fun restore(footer: View?) {
         footer ?: return
+        preDrawListeners.remove(footer)?.let { listener ->
+            runCatching { footer.viewTreeObserver.removeOnPreDrawListener(listener) }
+        }
         val state = states.remove(footer) ?: return
         runCatching {
             state.chatRecycler?.let { recycler ->

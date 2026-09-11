@@ -12,7 +12,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowInsets
+import android.widget.FrameLayout
+import android.widget.LinearLayout
 import android.widget.RelativeLayout
+import android.widget.TextView
 
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.hooks.core.BaseFeature
@@ -54,6 +57,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val contentCardTranslations = WeakHashMap<View, Float>()
     private val diagnosedLayouts = WeakHashMap<View, Boolean>()
     private val diagnosedWrappers = WeakHashMap<View, Boolean>()
+    private val originalLayoutPaddingTops = WeakHashMap<View, Int>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
     private var reparentFailureReported = false
     private var installed = false
@@ -98,6 +102,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             return
         }
         applyTopTransparency(layout)
+        consumeStatusBarPadding(layout)
         val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow }
             ?: find(layout) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
             ?: find(layout.rootView) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
@@ -257,7 +262,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         for (index in 0 until content.childCount) {
             val child = content.getChildAt(index)
             if (child.visibility != View.VISIBLE || child.height <= 0 || !isFloatingContentCard(child, content)) continue
-            val lp = child.layoutParams as? ViewGroup.MarginLayoutParams ?: continue
             val baseTranslation = contentCardTranslations.getOrPut(child) { child.translationY }
             val currentTop = child.top + baseTranslation.roundToInt()
             val delta = nextTop - currentTop
@@ -265,6 +269,39 @@ private class HeaderRuntime(private val context: FeatureContext) {
             FloatingChatCardVisuals.apply(child, CARD_CORNER_RADIUS_DP)
             nextTop += child.height + gap
         }
+        for (index in 0 until content.childCount) {
+            val child = content.getChildAt(index)
+            if (!isTopNewMessageChip(child)) continue
+            placeContentView(child, content, nextTop)
+            nextTop += child.height + gap
+        }
+    }
+
+    private fun placeContentView(view: View, content: View, targetTop: Int) {
+        val contentLocation = IntArray(2).also(content::getLocationOnScreen)
+        val viewLocation = IntArray(2).also(view::getLocationOnScreen)
+        val baseTranslation = contentCardTranslations.getOrPut(view) { view.translationY }
+        val currentTop = viewLocation[1] - contentLocation[1] - view.translationY.roundToInt() +
+            baseTranslation.roundToInt()
+        view.translationY = baseTranslation + targetTop - currentTop
+    }
+
+    private fun isTopNewMessageChip(view: View): Boolean {
+        if (view.visibility != View.VISIBLE || !isNewMessageChip(view)) return false
+        val lp = view.layoutParams as? FrameLayout.LayoutParams ?: return false
+        return lp.gravity and android.view.Gravity.VERTICAL_GRAVITY_MASK == android.view.Gravity.TOP
+    }
+
+    private fun isNewMessageChip(view: View): Boolean {
+        val group = view as? LinearLayout ?: return false
+        var hasText = false
+        var hasIcon = false
+        for (index in 0 until group.childCount) {
+            val child = group.getChildAt(index)
+            if (child is TextView) hasText = true
+            if (child.javaClass.name == WE_IMAGE_VIEW_CLASS) hasIcon = true
+        }
+        return hasText && hasIcon
     }
 
     private fun isFloatingContentCard(view: View, content: ViewGroup): Boolean {
@@ -272,14 +309,18 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (find(view) { it.javaClass.name == CHATTING_SCROLL_LAYOUT_CLASS } != null) return false
         if (view.javaClass.name == "android.view.ViewStub") return false
         if (view.height >= content.height / 2 || view.width <= 0 || view.height <= 0) return false
+        if (isNewMessageChip(view)) return false
         val name = view.javaClass.name
-        return name == TIPS_BAR_GROUP_CLASS ||
-            name.contains("Tips", true) ||
-            name.contains("Notice", true) ||
-            name.contains("File", true)
+        if (name == TIPS_BAR_GROUP_CLASS || name.contains("Tips", true) ||
+            name.contains("Notice", true) || name.contains("File", true)
+        ) return true
+        val lp = view.layoutParams as? FrameLayout.LayoutParams ?: return false
+        val vertical = lp.gravity and android.view.Gravity.VERTICAL_GRAVITY_MASK
+        return lp.height == ViewGroup.LayoutParams.WRAP_CONTENT || vertical == android.view.Gravity.TOP
     }
 
     private fun diagnoseHeaderLayout(layout: View, header: View) {
+        if (layout.width <= 0 || layout.height <= 0 || header.width <= 0 || header.height <= 0) return
         if (diagnosedLayouts.put(layout, true) != null) return
         val content = find(layout) { it.javaClass.name == CHATTING_CONTENT_CLASS } as? ViewGroup
         val headerLoc = IntArray(2).also(header::getLocationOnScreen)
@@ -360,6 +401,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun restore(layout: ViewGroup) {
+        originalLayoutPaddingTops.remove(layout)?.let { top ->
+            layout.setPadding(layout.paddingLeft, top, layout.paddingRight, layout.paddingBottom)
+        }
         headersByLayout.remove(layout)?.let(::restoreView)
         headerZoneStates.remove(layout)?.originalMargins?.forEach { (view, margins) ->
             val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
@@ -400,6 +444,20 @@ private class HeaderRuntime(private val context: FeatureContext) {
         contentCardTranslations.clear()
         restoreWindowStates()
     }
+    private fun consumeStatusBarPadding(layout: View) {
+        val inset = statusBarInset(layout)
+        if (inset <= 0 || layout.paddingTop < inset) return
+        if (!originalLayoutPaddingTops.containsKey(layout)) {
+            originalLayoutPaddingTops[layout] = layout.paddingTop
+        }
+        layout.setPadding(
+            layout.paddingLeft,
+            (layout.paddingTop - inset).coerceAtLeast(0),
+            layout.paddingRight,
+            layout.paddingBottom
+        )
+    }
+
     private fun applyTopTransparency(layout: View) {
         val activity = layout.context.activityOrNull() ?: return
         val state = windowStates.getOrPut(activity) {
@@ -517,6 +575,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         private const val EDGE_TO_EDGE_WRAPPER_CLASS = "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout"
         private const val CHATTING_CONTENT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingContent"
         private const val TIPS_BAR_GROUP_CLASS = "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup"
+        private const val WE_IMAGE_VIEW_CLASS = "com.tencent.mm.ui.widget.imageview.WeImageView"
         private const val CHATTING_SCROLL_LAYOUT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingScrollLayout"
         private const val ELEVATION_DP = 4
         private const val CORNER_RADIUS_DP = 24
