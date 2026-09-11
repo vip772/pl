@@ -1,10 +1,13 @@
 package h.Hchat.hooks.items.floatingchat
 
 import android.graphics.Outline
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.widget.FrameLayout
 import android.widget.RelativeLayout
+import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.dexkit.DexMethodCache
 import h.Hchat.hooks.core.BaseFeature
@@ -40,6 +43,7 @@ class FloatingChatFooterFeature : BaseFeature() {
 private class FooterRuntime(private val context: FeatureContext) {
     private val hooked = HashSet<Member>()
     private val states = WeakHashMap<View, FooterState>()
+    private val newMessageMargins = WeakHashMap<View, Int>()
     private val methodPrefs = DexMethodCache.prefs(
         context.hostContext(),
         "Hchat_floating_chat_footer_method_cache"
@@ -546,11 +550,53 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (state.recyclerPaddingBottom == null) state.recyclerPaddingBottom = recycler.paddingBottom
         val base = state.recyclerPaddingBottom ?: return
         val target = base + extra
-        if (recycler.paddingBottom == target) return
+        if (recycler.paddingBottom == target) {
+            liftNewMessageBubble(footer)
+            return
+        }
         val wasAtBottom = !recycler.canScrollVertically(1)
         val old = recycler.paddingBottom
         recycler.setPadding(recycler.paddingLeft, recycler.paddingTop, recycler.paddingRight, target)
         if (wasAtBottom && target > old) recycler.scrollBy(0, target - old)
+        liftNewMessageBubble(footer)
+    }
+
+    private fun liftNewMessageBubble(footer: View) {
+        val scrollLayout = footer.parent as? ViewGroup ?: return
+        for (index in 0 until scrollLayout.childCount) {
+            val sibling = scrollLayout.getChildAt(index) as? ViewGroup ?: continue
+            if (sibling === footer) continue
+            for (childIndex in 0 until sibling.childCount) {
+                val candidate = sibling.getChildAt(childIndex)
+                if (!isNewMessageBubble(candidate)) continue
+                val lp = candidate.layoutParams as? FrameLayout.LayoutParams ?: continue
+                if (lp.gravity and Gravity.VERTICAL_GRAVITY_MASK != Gravity.BOTTOM) continue
+                val footerLocation = IntArray(2).also(footer::getLocationOnScreen)
+                val parentLocation = IntArray(2).also(sibling::getLocationOnScreen)
+                val overlap = (sibling.height - (footerLocation[1] - parentLocation[1])).coerceAtLeast(0)
+                val target = maxOf(lp.bottomMargin, overlap + dp(8))
+                if (!newMessageMargins.containsKey(candidate)) newMessageMargins[candidate] = lp.bottomMargin
+                if (lp.bottomMargin != target) {
+                    lp.bottomMargin = target
+                    candidate.layoutParams = lp
+                }
+                return
+            }
+        }
+    }
+
+    private fun isNewMessageBubble(view: View): Boolean {
+        val group = view as? ViewGroup ?: return false
+        val linear = group as? android.widget.LinearLayout ?: return false
+        if (linear.gravity and Gravity.VERTICAL_GRAVITY_MASK != Gravity.CENTER_VERTICAL) return false
+        var hasText = false
+        var hasIcon = false
+        for (index in 0 until group.childCount) {
+            val child = group.getChildAt(index)
+            if (child is TextView) hasText = true
+            if (child.javaClass.name == "com.tencent.mm.ui.widget.imageview.WeImageView") hasIcon = true
+        }
+        return hasText && hasIcon
     }
 
     private fun findChatRecycler(footer: View): View? {
@@ -612,6 +658,12 @@ private class FooterRuntime(private val context: FeatureContext) {
 
     fun destroy() {
         states.keys.toList().forEach(::restore)
+        newMessageMargins.forEach { (view, margin) ->
+            val lp = view.layoutParams as? FrameLayout.LayoutParams ?: return@forEach
+            lp.bottomMargin = margin
+            view.layoutParams = lp
+        }
+        newMessageMargins.clear()
     }
 
     private fun isPanelState(state: Int): Boolean =

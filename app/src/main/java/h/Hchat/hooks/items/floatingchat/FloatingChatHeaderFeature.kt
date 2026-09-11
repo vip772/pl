@@ -6,10 +6,13 @@ import android.content.ContextWrapper
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Rect
+import android.graphics.drawable.Drawable
+
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.widget.RelativeLayout
+
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.hooks.core.BaseFeature
 import h.Hchat.hooks.core.DexInstallScheduler
@@ -43,6 +46,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val hooked = HashSet<Member>()
     private val states = WeakHashMap<View, HeaderState>()
     private val headersByLayout = WeakHashMap<View, View>()
+    private val headerZoneStates = WeakHashMap<View, HeaderZoneState>()
+    private val wrapperStates = WeakHashMap<View, WrapperState>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
     private var reparentFailureReported = false
     private var installed = false
@@ -103,6 +108,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
             marginLp.topMargin = top
             header.layoutParams = marginLp
         }
+        applyHeaderZoneCards(layout, header)
+        clearStatusBarWrapper(layout)
         val elevation = dp(ELEVATION_DP).toFloat()
         if (header.elevation != elevation) header.elevation = elevation
         header.outlineProvider = FloatingHeaderOutlineProvider
@@ -169,8 +176,81 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
     }
 
+    private fun applyHeaderZoneCards(layout: ViewGroup, header: View) {
+        val hostIndex = (0 until layout.childCount).firstOrNull { index ->
+            find(layout.getChildAt(index)) { view ->
+                view.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChattingScrollLayout"
+            } != null
+        } ?: return
+        val density = layout.resources.displayMetrics.density
+        val side = (SIDE_MARGIN_DP * density).roundToInt()
+        val gap = (CARD_GAP_DP * density).roundToInt()
+        val state = headerZoneStates.getOrPut(layout) { HeaderZoneState() }
+        var first = true
+        for (index in 0 until hostIndex) {
+            val child = layout.getChildAt(index)
+            if (child === header || child.visibility != View.VISIBLE) continue
+            val lp = child.layoutParams as? ViewGroup.MarginLayoutParams ?: continue
+            if (!state.originalMargins.containsKey(child)) {
+                state.originalMargins[child] = intArrayOf(lp.leftMargin, lp.topMargin, lp.rightMargin, lp.bottomMargin)
+            }
+            val top = if (first) header.height + dp(TOP_GAP_DP) + gap else gap
+            first = false
+            if (lp.leftMargin != side || lp.rightMargin != side || lp.topMargin != top) {
+                lp.leftMargin = side
+                lp.rightMargin = side
+                lp.topMargin = top
+                child.layoutParams = lp
+            }
+            FloatingChatCardVisuals.apply(child, CARD_CORNER_RADIUS_DP)
+        }
+    }
+
+    private fun clearStatusBarWrapper(layout: View) {
+        var current: View? = layout
+        while (current != null) {
+            if (current.javaClass.name == EDGE_TO_EDGE_WRAPPER_CLASS) {
+                val state = wrapperStates.getOrPut(current) {
+                    WrapperState(current.background, current.paddingLeft, current.paddingTop, current.paddingRight, current.paddingBottom)
+                }
+                current.setBackgroundColor(Color.TRANSPARENT)
+                runCatching {
+                    current.javaClass.methods.firstOrNull {
+                        it.name == "setStatusBarBackgroundColor" && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
+                    }?.invoke(current, Color.TRANSPARENT)
+                }
+                state.applied = true
+                return
+            }
+            current = current.parent as? View
+        }
+    }
+
+    private fun restoreWrappers() {
+        wrapperStates.forEach { (view, state) ->
+            if (!state.applied) return@forEach
+            view.background = state.background
+            view.setPadding(state.left, state.top, state.right, state.bottom)
+            runCatching {
+                view.javaClass.methods.firstOrNull {
+                    it.name == "setStatusBarBackgroundColor" && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
+                }?.invoke(view, state.backgroundColor)
+            }
+        }
+        wrapperStates.clear()
+    }
+
     private fun restore(layout: ViewGroup) {
         headersByLayout.remove(layout)?.let(::restoreView)
+        headerZoneStates.remove(layout)?.originalMargins?.forEach { (view, margins) ->
+            val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
+            lp.leftMargin = margins[0]
+            lp.topMargin = margins[1]
+            lp.rightMargin = margins[2]
+            lp.bottomMargin = margins[3]
+            view.layoutParams = lp
+            FloatingChatCardVisuals.restore(view)
+        }
     }
     private fun restoreView(view: View) {
         val state = states.remove(view) ?: return
@@ -194,7 +274,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
     fun destroy() {
         states.keys.toList().forEach(::restoreView)
+        headerZoneStates.keys.toList().forEach { layout -> restore(layout as? ViewGroup ?: return@forEach) }
         headersByLayout.clear()
+        restoreWrappers()
         restoreWindowStates()
     }
     private fun applyTopTransparency(layout: View) {
@@ -249,6 +331,20 @@ private class HeaderRuntime(private val context: FeatureContext) {
         var applied: Boolean = false
     )
 
+    private data class HeaderZoneState(
+        val originalMargins: MutableMap<View, IntArray> = WeakHashMap()
+    )
+
+    private data class WrapperState(
+        val background: Drawable?,
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int,
+        val backgroundColor: Int = (background as? android.graphics.drawable.ColorDrawable)?.color ?: Color.TRANSPARENT,
+        var applied: Boolean = false
+    )
+
     private data class HeaderState(
         val originalParent: ViewGroup,
         val originalIndex: Int,
@@ -278,6 +374,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         private const val SIDE_MARGIN_DP = 12
         private const val TOP_GAP_DP = 4
+        private const val CARD_GAP_DP = 8
+        private const val CARD_CORNER_RADIUS_DP = 24
+        private const val EDGE_TO_EDGE_WRAPPER_CLASS = "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout"
         private const val ELEVATION_DP = 4
         private const val CORNER_RADIUS_DP = 24
     }
