@@ -12,7 +12,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
 import android.view.WindowInsets
-import android.widget.FrameLayout
 import android.widget.RelativeLayout
 
 import de.robv.android.xposed.XC_MethodHook
@@ -53,6 +52,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val wrapperStates = WeakHashMap<View, WrapperState>()
     private val windowOverlayStates = WeakHashMap<View, Boolean>()
     private val contentCardTranslations = WeakHashMap<View, Float>()
+    private val diagnosedLayouts = WeakHashMap<View, Boolean>()
+    private val diagnosedWrappers = WeakHashMap<View, Boolean>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
     private var reparentFailureReported = false
     private var installed = false
@@ -122,6 +123,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
         applyHeaderZoneCards(layout, header)
         applyContentZoneCards(layout, header)
+        diagnoseHeaderLayout(layout, header)
         clearStatusBarWrapper(layout)
         val elevation = dp(ELEVATION_DP).toFloat()
         if (header.elevation != elevation) header.elevation = elevation
@@ -254,7 +256,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         var nextTop = targetTop
         for (index in 0 until content.childCount) {
             val child = content.getChildAt(index)
-            if (child.visibility != View.VISIBLE || child.height <= 0 || !isFloatingContentCard(child)) continue
+            if (child.visibility != View.VISIBLE || child.height <= 0 || !isFloatingContentCard(child, content)) continue
             val lp = child.layoutParams as? ViewGroup.MarginLayoutParams ?: continue
             val baseTranslation = contentCardTranslations.getOrPut(child) { child.translationY }
             val currentTop = child.top + baseTranslation.roundToInt()
@@ -265,14 +267,42 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
     }
 
-    private fun isFloatingContentCard(view: View): Boolean {
+    private fun isFloatingContentCard(view: View, content: ViewGroup): Boolean {
         if (view.javaClass.name == CHATTING_SCROLL_LAYOUT_CLASS) return false
         if (find(view) { it.javaClass.name == CHATTING_SCROLL_LAYOUT_CLASS } != null) return false
         if (view.javaClass.name == "android.view.ViewStub") return false
-        if (view is FrameLayout && view.width > 0 && view.height > 0) return true
-        return view.javaClass.name.contains("Tips", true) ||
-            view.javaClass.name.contains("Notice", true) ||
-            view.javaClass.name.contains("File", true)
+        if (view.height >= content.height / 2 || view.width <= 0 || view.height <= 0) return false
+        val name = view.javaClass.name
+        return name == TIPS_BAR_GROUP_CLASS ||
+            name.contains("Tips", true) ||
+            name.contains("Notice", true) ||
+            name.contains("File", true)
+    }
+
+    private fun diagnoseHeaderLayout(layout: View, header: View) {
+        if (diagnosedLayouts.put(layout, true) != null) return
+        val content = find(layout) { it.javaClass.name == CHATTING_CONTENT_CLASS } as? ViewGroup
+        val headerLoc = IntArray(2).also(header::getLocationOnScreen)
+        val children = if (content == null) {
+            "ChattingContent=missing"
+        } else {
+            (0 until content.childCount).joinToString(" | ") { index ->
+                val child = content.getChildAt(index)
+                val lp = child.layoutParams
+                val loc = IntArray(2).also(child::getLocationOnScreen)
+                "#$index ${child.javaClass.name} size=${child.width}x${child.height} " +
+                    "screen=${loc[0]},${loc[1]} vis=${child.visibility} " +
+                    "lp=${lp?.javaClass?.name}:${lp?.width}x${lp?.height} " +
+                    "translation=${child.translationX},${child.translationY}"
+            }
+        }
+        HLog.i(
+            "[Hchat:$TAG] 布局诊断: layout=${layout.javaClass.name} size=${layout.width}x${layout.height} " +
+                "padding=${layout.paddingLeft},${layout.paddingTop},${layout.paddingRight},${layout.paddingBottom} " +
+                "statusInset=${statusBarInset(layout)} header=${header.javaClass.name} " +
+                "headerScreen=${headerLoc[0]},${headerLoc[1]} headerSize=${header.width}x${header.height} " +
+                "windowBar=${isWindowBar(header, layout)} children=[$children]"
+        )
     }
 
     private fun clearStatusBarWrapper(layout: View) {
@@ -300,6 +330,15 @@ private class HeaderRuntime(private val context: FeatureContext) {
                     current.requestApplyInsets()
                 }
                 state.applied = true
+                if (diagnosedWrappers.put(current, true) == null) {
+                    HLog.i(
+                        "[Hchat:$TAG] 状态栏诊断: wrapper=${current.javaClass.name} " +
+                            "padding=${current.paddingLeft},${current.paddingTop},${current.paddingRight},${current.paddingBottom} " +
+                            "strategyMethod=${findMethod(current.javaClass, "setStatusBarStrategy", 1) != null} " +
+                            "colorMethod=${findMethod(current.javaClass, "setStatusBarColor", 1) != null} " +
+                            "backgroundColorMethod=${findMethod(current.javaClass, "setStatusBarBackgroundColor", 1) != null}"
+                    )
+                }
                 return
             }
             current = current.parent as? View
@@ -477,6 +516,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         private const val CARD_CORNER_RADIUS_DP = 24
         private const val EDGE_TO_EDGE_WRAPPER_CLASS = "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout"
         private const val CHATTING_CONTENT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingContent"
+        private const val TIPS_BAR_GROUP_CLASS = "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup"
         private const val CHATTING_SCROLL_LAYOUT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingScrollLayout"
         private const val ELEVATION_DP = 4
         private const val CORNER_RADIUS_DP = 24
