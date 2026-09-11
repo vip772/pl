@@ -98,6 +98,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             count += hook(it) { param ->
                 (param.thisObject as? ViewGroup)?.let(::removeWindowFocusTracking)
             }
+        }
         KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let {
             count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let(::scheduleApply) }
         }
