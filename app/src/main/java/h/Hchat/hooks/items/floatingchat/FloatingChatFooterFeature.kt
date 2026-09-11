@@ -77,7 +77,9 @@ private class FooterRuntime(private val context: FeatureContext) {
         locateSwitchPanel(footerClass)?.let { method ->
             count += hookPanelState(method, footerClass)
         }
-
+        locateScrollContentTo()?.let { method ->
+            count += hookScrollContent(method)
+        }
         installed = count >= REQUIRED_HOOK_COUNT
         if (!installed) {
             HLog.e(
@@ -160,6 +162,76 @@ private class FooterRuntime(private val context: FeatureContext) {
         return method
     }
 
+    private fun locateScrollContentTo(): Method? {
+        val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
+        DexMethodCache.load(
+            methodPrefs,
+            runtimeKey,
+            context.hostClassLoader(),
+            CACHE_SCROLL_CONTENT_TO
+        )?.takeIf(::isScrollContentTo)?.let { return it }
+        val candidates = runCatching {
+            context.dexKitBridge().findMethod(
+                FindMethod().apply {
+                    matcher(MethodMatcher().apply {
+                        usingEqStrings(SCROLL_LOG_TAG, SCROLL_LOG_ANCHOR)
+                    })
+                }
+            ).mapNotNull { data ->
+                runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+            }.filter(::isScrollContentTo).distinctBy { it.toGenericString() }
+        }.getOrElse {
+            HLog.e("[Hchat:$TAG] 定位会话滚动入口失败", it)
+            emptyList()
+        }
+        val method = candidates.singleOrNull()
+        if (method != null) {
+            DexMethodCache.save(methodPrefs, runtimeKey, CACHE_SCROLL_CONTENT_TO, method)
+            HLog.i("[Hchat:$TAG] 已定位会话滚动入口: ${method.toGenericString()}")
+        } else {
+            DexMethodCache.clear(methodPrefs, runtimeKey, CACHE_SCROLL_CONTENT_TO)
+            HLog.e("[Hchat:$TAG] 功能未生效: 会话滚动入口候选数量=${candidates.size}")
+        }
+        return method
+    }
+
+    private fun isScrollContentTo(method: Method): Boolean =
+        method.declaringClass.name == CHATTING_SCROLL_LAYOUT_CLASS &&
+            !KavaReflector.isStatic(method) &&
+            method.returnType == Void.TYPE &&
+            method.parameterTypes.contentEquals(
+                arrayOf(
+                    Int::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType,
+                    Int::class.javaPrimitiveType
+                )
+            )
+
+    private fun hookScrollContent(targetMethod: Member): Int {
+        if (!hooked.add(targetMethod)) return 1
+        return runCatching {
+            HookRegistry.get().hook(targetMethod, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!isEnabled() || !isPanelState(panelState)) return
+                    val scrollLayout = param.thisObject as? ViewGroup ?: return
+                    val footer = (0 until scrollLayout.childCount)
+                        .asSequence()
+                        .map(scrollLayout::getChildAt)
+                        .firstOrNull { it.javaClass.name == FOOTER_CLASS }
+                        ?: return
+                    val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
+                    if (panel.visibility == View.VISIBLE) param.args[0] = 0
+                }
+            })
+            1
+        }.getOrElse {
+            hooked.remove(targetMethod)
+            HLog.e("[Hchat:$TAG] 会话滚动 Hook 安装失败", it)
+            0
+        }
+    }
+
     private fun isSwitchPanel(method: Method, footerClass: Class<*>): Boolean {
         return method.declaringClass == footerClass &&
             !KavaReflector.isStatic(method) &&
@@ -202,7 +274,6 @@ private class FooterRuntime(private val context: FeatureContext) {
                     panel.visibility = if (isPanelState(state)) View.VISIBLE else View.GONE
                     runCatching {
                         apply(footer)
-                        if (isPanelState(state)) neutralizeHostTranslation(footer)
                     }
                         .onFailure { HLog.e("[Hchat:$TAG] 面板状态更新失败", it) }
                 }
@@ -284,9 +355,6 @@ private class FooterRuntime(private val context: FeatureContext) {
         FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP)
         footer.invalidateOutline()
         applyChatListPadding(footer, inputHeight + gap, state)
-        if (isPanelState(panelState) && state.panel.visibility == View.VISIBLE) {
-            neutralizeHostTranslation(footer)
-        }
 
         if (!appliedReported && footer.width > 0) {
             appliedReported = true
@@ -482,11 +550,6 @@ private class FooterRuntime(private val context: FeatureContext) {
     private fun isPanelState(state: Int): Boolean =
         state == PANEL_STATE_SMILEY || state == PANEL_STATE_APP
 
-    private fun neutralizeHostTranslation(footer: View) {
-        val host = footer.parent as? View ?: return
-        if (host.translationY != 0f) host.translationY = 0f
-    }
-
     private fun isEnabled(): Boolean = context.configStore().getGlobalBoolean(
         "${FloatingChatFooterFeature.ID}_enabled",
         false
@@ -554,9 +617,13 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val CHATTING_RECYCLER_CLASS = "com.tencent.mm.pluginsdk.ui.tools.ChattingRecyclerView"
         private const val CACHE_REFRESH_BOTTOM_HEIGHT = "refresh_bottom_height"
         private const val CACHE_SWITCH_PANEL = "switch_panel"
+        private const val CACHE_SCROLL_CONTENT_TO = "scroll_content_to"
         private const val REFRESH_LOG_TAG = "MicroMsg.ChatFooter"
         private const val REFRESH_LOG_ANCHOR = "[refreshBottomHeight] keyborPx:%d"
         private const val SWITCH_LOG_ANCHOR = "switchPanel: %s, %s"
+        private const val SCROLL_LOG_TAG = "MicroMsg.ChattingScrollLayout"
+        private const val SCROLL_LOG_ANCHOR =
+            "scrollContentTo: y:%s, targetScroll:%s, alwaysScroll:%s"
         private const val PANEL_STATE_NONE = 0
         private const val PANEL_STATE_SMILEY = 2
         private const val PANEL_STATE_APP = 3
@@ -564,6 +631,6 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val BOTTOM_GAP_DP = 8
         private const val ELEVATION_DP = 4
         private const val CORNER_RADIUS_DP = 24
-        private const val REQUIRED_HOOK_COUNT = 4
+        private const val REQUIRED_HOOK_COUNT = 5
     }
 }

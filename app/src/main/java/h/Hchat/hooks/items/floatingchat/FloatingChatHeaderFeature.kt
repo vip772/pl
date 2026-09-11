@@ -90,7 +90,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val side = dp(SIDE_MARGIN_DP)
         val left = side
         val right = side
-        val top = dp(TOP_GAP_DP)
+        val top = state.topOffset + dp(TOP_GAP_DP)
         if (marginLp.leftMargin != left || marginLp.rightMargin != right || marginLp.topMargin != top) {
             marginLp.leftMargin = left
             marginLp.rightMargin = right
@@ -144,6 +144,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
         return runCatching {
             val original = header.layoutParams
             val height = original?.height ?: ViewGroup.LayoutParams.WRAP_CONTENT
+            val rootLocation = IntArray(2).also(root::getLocationOnScreen)
+            val layoutLocation = IntArray(2).also(layout::getLocationOnScreen)
+            state.topOffset = layoutLocation[1] + layout.paddingTop - rootLocation[1]
             layout.removeView(header)
             val params = RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
             params.addRule(RelativeLayout.ALIGN_PARENT_TOP)
@@ -203,6 +206,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val elevation: Float = 0f,
         val outlineProvider: ViewOutlineProvider?,
         val clipToOutline: Boolean,
+        var topOffset: Int = 0,
         var reparented: Boolean = false
     )
     private object FloatingHeaderOutlineProvider : ViewOutlineProvider() {
