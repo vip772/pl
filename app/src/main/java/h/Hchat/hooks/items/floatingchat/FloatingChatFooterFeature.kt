@@ -398,8 +398,14 @@ private class FooterRuntime(private val context: FeatureContext) {
         }
         val state = states[footer] ?: createState(footer, panel, marginParams) ?: return
         if (!state.reparented && !reparentPanel(state)) return
-        val inputHeight = visibleHeightExcludingPanel(state.panel)
-        if (inputHeight <= 0) return
+        val measuredInputHeight = visibleHeightExcludingPanel(state.panel)
+        if (measuredInputHeight <= 0) return
+        if (state.baseInputHeight <= 0 && !isPanelState(panelState)) state.baseInputHeight = measuredInputHeight
+        val inputHeight = if (isPanelState(panelState)) {
+            measuredInputHeight
+        } else {
+            state.baseInputHeight.takeIf { it > 0 } ?: measuredInputHeight
+        }
 
         val side = dp(SIDE_MARGIN_DP)
         val gap = dp(BOTTOM_GAP_DP)
@@ -475,7 +481,12 @@ private class FooterRuntime(private val context: FeatureContext) {
             bottomMargin = marginParams.bottomMargin,
             elevation = footer.elevation,
             outlineProvider = footer.outlineProvider,
-            clipToOutline = footer.clipToOutline
+            clipToOutline = footer.clipToOutline,
+            baseInputHeight = (0 until inputColumn.childCount)
+                .asSequence()
+                .map(inputColumn::getChildAt)
+                .filter { it !== panel && it.visibility != View.GONE }
+                .sumOf { it.height }
         ).also { states[footer] = it }
     }
 
@@ -762,7 +773,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         val changedRules: MutableMap<View, IntArray> = LinkedHashMap(),
         var reparented: Boolean = false,
         var chatRecycler: View? = null,
-        var recyclerPaddingBottom: Int? = null
+        var recyclerPaddingBottom: Int? = null,
+        var baseInputHeight: Int = 0
     )
 
     private object FloatingFooterOutlineProvider : ViewOutlineProvider() {

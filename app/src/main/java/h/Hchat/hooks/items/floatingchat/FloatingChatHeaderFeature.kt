@@ -58,7 +58,13 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val diagnosedLayouts = WeakHashMap<View, Boolean>()
     private val diagnosedWrappers = WeakHashMap<View, Boolean>()
     private val originalLayoutPaddingTops = WeakHashMap<View, Int>()
+    private val tipsGroups = WeakHashMap<View, View>()
+    private val tipsAttachListeners = WeakHashMap<View, View.OnAttachStateChangeListener>()
+    private val tipsLayoutListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
+    private val diagnosedTipsGroups = WeakHashMap<View, Boolean>()
+    private val tipsOriginalElevations = WeakHashMap<View, Float>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
+    private val windowFocusListeners = WeakHashMap<ViewGroup, android.view.ViewTreeObserver.OnWindowFocusChangeListener>()
     private var reparentFailureReported = false
     private var installed = false
     private val headerClass = "androidx.appcompat.widget.ActionBarContainer"
@@ -72,15 +78,90 @@ private class HeaderRuntime(private val context: FeatureContext) {
             return false
         }
         var count = 0
+        KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let {
+            count += hook(it) { param ->
+                (param.thisObject as? ViewGroup)?.let { layout ->
+                    layout.post { apply(layout) }
+                    layout.postOnAnimation { apply(layout) }
+                    layout.postDelayed({
+                        if (layout.isAttachedToWindow && layout.isShown) apply(layout)
+                    }, WINDOW_INIT_REAPPLY_DELAY_MS)
+                }
+            }
+        }
+        KavaReflector.findMethodRecursive(clazz, "onDetachedFromWindow")?.let {
+            count += hook(it) { param ->
+                (param.thisObject as? ViewGroup)?.let(::removeWindowFocusTracking)
+            }
+        }
         KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let {
             count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let { layout -> layout.postOnAnimation { apply(layout) } } }
         }
         KavaReflector.findMethodRecursive(clazz, "fitSystemWindows", Rect::class.java)?.let {
             count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let { layout -> layout.postOnAnimation { apply(layout) } } }
         }
+        installTipsGroupTracking()?.let { count += it }
         installed = count > 0
         if (!installed) HLog.e("[Hchat:$TAG] 功能未生效: 未找到 ChattingUILayout 生命周期方法")
         return installed
+    }
+
+    private fun installTipsGroupTracking(): Int? {
+        val clazz = KavaReflector.loadClass(TIPS_BAR_GROUP_CLASS, context.hostClassLoader()) ?: return null
+        val constructors = clazz.declaredConstructors.filter { ctor ->
+            ctor.parameterTypes.firstOrNull() == Context::class.java
+        }
+        if (constructors.isEmpty()) return null
+        var count = 0
+        constructors.forEach { constructor ->
+            count += hook(constructor) { param ->
+                val group = param.thisObject as? View ?: return@hook
+                ensureTipsAttachListener(group)
+            }
+        }
+        return count
+    }
+
+    private fun ensureTipsAttachListener(group: View) {
+        if (tipsAttachListeners[group] != null) return
+        val listener = object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) {
+                val sourceLayout = findAncestorLayout(view) ?: visibleChatLayoutFromRoot(view) ?: return
+                val layout = visibleChatLayout(sourceLayout) ?: return
+                tipsGroups[layout] = view
+                layout.postOnAnimation { apply(layout) }
+            }
+            override fun onViewDetachedFromWindow(view: View) {
+                tipsGroups.entries.removeAll { it.value === view }
+            }
+        }
+        tipsAttachListeners[group] = listener
+        group.addOnAttachStateChangeListener(listener)
+        val layoutListener = View.OnLayoutChangeListener { view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (left == oldLeft && top == oldTop && right == oldRight && bottom == oldBottom) return@OnLayoutChangeListener
+            val sourceLayout = findAncestorLayout(view) ?: visibleChatLayoutFromRoot(view) ?: return@OnLayoutChangeListener
+            val layout = visibleChatLayout(sourceLayout) ?: return@OnLayoutChangeListener
+            tipsGroups[layout] = view
+            layout.postOnAnimation { apply(layout) }
+        }
+        tipsLayoutListeners[group] = layoutListener
+        group.addOnLayoutChangeListener(layoutListener)
+        if (group.isAttachedToWindow) listener.onViewAttachedToWindow(group)
+    }
+
+    private fun findAncestorLayout(view: View): ViewGroup? {
+        var current = view.parent as? View
+        while (current != null) {
+            if (current.javaClass.name == layoutClass && current is ViewGroup) return current
+            current = current.parent as? View
+        }
+        return null
+    }
+
+    private fun visibleChatLayoutFromRoot(view: View): ViewGroup? {
+        val root = view.rootView
+        val source = find(root) { it.javaClass.name == layoutClass } as? ViewGroup ?: return null
+        return visibleChatLayout(source)
     }
 
     private fun hook(method: Member, after: (XC_MethodHook.MethodHookParam) -> Unit): Int {
@@ -103,6 +184,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             return
         }
         val layout = visibleChatLayout(sourceLayout) ?: return
+        ensureWindowFocusTracking(layout)
         applyTopTransparency(layout)
         consumeStatusBarPadding(layout)
         val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow }
@@ -125,6 +207,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             header.layoutParams = marginLp
         }
         applyHeaderZoneCards(layout, header)
+        applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
         diagnoseHeaderLayout(layout, header)
         clearStatusBarWrapper(layout)
@@ -262,6 +345,39 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
     }
 
+    private fun applyTrackedTipsGroup(layout: View, header: View) {
+        val group = tipsGroups[layout]?.takeIf { it.isAttachedToWindow && it.visibility == View.VISIBLE }
+            ?: tipsGroups.entries.firstOrNull { (_, view) ->
+                view.isAttachedToWindow && view.visibility == View.VISIBLE &&
+                    findAncestorLayout(view) === layout
+            }?.value
+            ?: return
+        val headerLocation = IntArray(2).also(header::getLocationOnScreen)
+        val groupLocation = IntArray(2).also(group::getLocationOnScreen)
+        val base = contentCardTranslations.getOrPut(group) { group.translationY }
+        val baseTop = groupLocation[1] - group.translationY.roundToInt() + base.roundToInt()
+        val targetTop = headerLocation[1] + header.height + dp(CARD_GAP_DP)
+        group.translationY = base + targetTop - baseTop
+        val lp = group.layoutParams as? ViewGroup.MarginLayoutParams
+        val side = dp(SIDE_MARGIN_DP)
+        if (lp != null && (lp.leftMargin != side || lp.rightMargin != side)) {
+            lp.leftMargin = side
+            lp.rightMargin = side
+            group.layoutParams = lp
+        }
+        FloatingChatCardVisuals.apply(group, CARD_CORNER_RADIUS_DP)
+        if (!tipsOriginalElevations.containsKey(group)) tipsOriginalElevations[group] = group.elevation
+        group.elevation = dp(ELEVATION_DP).toFloat()
+        group.bringToFront()
+        if (diagnosedTipsGroups.put(group, true) == null) {
+            HLog.i(
+                "[Hchat:$TAG] 公告卡定位: class=${group.javaClass.name} " +
+                    "from=${groupLocation[0]},${groupLocation[1]} targetTop=$targetTop " +
+                    "size=${group.width}x${group.height} parent=${group.parent?.javaClass?.name}"
+            )
+        }
+    }
+
     private fun findVisibleChatContent(layout: View, header: View): ViewGroup? {
         val headerLocation = IntArray(2).also(header::getLocationOnScreen)
         val screenWidth = layout.resources.displayMetrics.widthPixels
@@ -341,6 +457,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
 
     private fun isFloatingContentCard(view: View, content: ViewGroup): Boolean {
         if (view.javaClass.name == CHATTING_SCROLL_LAYOUT_CLASS) return false
+        if (view.javaClass.name == TIPS_BAR_GROUP_CLASS && tipsGroups.containsValue(view)) return false
         if (find(view) { it.javaClass.name == CHATTING_SCROLL_LAYOUT_CLASS } != null) return false
         if (view.javaClass.name == "android.view.ViewStub") return false
         if (view.height >= content.height / 2 || view.width <= 0 || view.height <= 0) return false
@@ -477,6 +594,18 @@ private class HeaderRuntime(private val context: FeatureContext) {
         restoreWrappers()
         contentCardTranslations.forEach { (view, translation) -> view.translationY = translation }
         contentCardTranslations.clear()
+        tipsOriginalElevations.forEach { (view, elevation) ->
+            view.elevation = elevation
+            FloatingChatCardVisuals.restore(view)
+        }
+        tipsOriginalElevations.clear()
+        tipsAttachListeners.forEach { (view, listener) -> view.removeOnAttachStateChangeListener(listener) }
+        tipsLayoutListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
+        tipsAttachListeners.clear()
+        tipsLayoutListeners.clear()
+        tipsGroups.clear()
+        diagnosedTipsGroups.clear()
+        windowFocusListeners.keys.toList().forEach(::removeWindowFocusTracking)
         restoreWindowStates()
     }
     private fun consumeStatusBarPadding(layout: View) {
@@ -491,6 +620,25 @@ private class HeaderRuntime(private val context: FeatureContext) {
             layout.paddingRight,
             layout.paddingBottom
         )
+    }
+
+    private fun ensureWindowFocusTracking(layout: ViewGroup) {
+        if (windowFocusListeners[layout] != null) return
+        val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+            if (!hasFocus || !layout.isAttachedToWindow || !isEnabled()) return@OnWindowFocusChangeListener
+            layout.postOnAnimation { apply(layout) }
+        }
+        windowFocusListeners[layout] = listener
+        layout.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+    }
+
+    private fun removeWindowFocusTracking(layout: ViewGroup) {
+        val listener = windowFocusListeners.remove(layout) ?: return
+        runCatching {
+            if (layout.viewTreeObserver.isAlive) {
+                layout.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
+            }
+        }
     }
 
     private fun applyTopTransparency(layout: View) {
@@ -605,6 +753,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         private const val SIDE_MARGIN_DP = 12
         private const val TOP_GAP_DP = 4
+        private const val WINDOW_INIT_REAPPLY_DELAY_MS = 100L
         private const val CARD_GAP_DP = 8
         private const val CARD_CORNER_RADIUS_DP = 24
         private const val EDGE_TO_EDGE_WRAPPER_CLASS = "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout"
