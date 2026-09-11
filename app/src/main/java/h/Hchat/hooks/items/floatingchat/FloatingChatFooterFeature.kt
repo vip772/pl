@@ -879,7 +879,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val SCROLL_LOG_TAG = "MicroMsg.ChattingScrollLayout"
         private const val SCROLL_LOG_ANCHOR =
             "scrollContentTo: y:%s, targetScroll:%s, alwaysScroll:%s"
-        private const val MAX_PANEL_HEIGHT_DP = 260
+        private const val MAX_PANEL_HEIGHT_DP = 265
         private const val MIN_PANEL_HEIGHT_DP = 180
         private const val MAX_PANEL_HEIGHT_RATIO = 0.30f
         private const val PANEL_STATE_NONE = 0

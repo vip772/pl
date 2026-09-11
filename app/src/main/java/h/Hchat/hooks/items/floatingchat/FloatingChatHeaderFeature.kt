@@ -65,7 +65,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val tipsCardStates = WeakHashMap<View, TipsCardState>()
     private val tipsDimStates = WeakHashMap<View, TipsDimState>()
     private val tipsGroupElevations = WeakHashMap<View, Float>()
+    private val tipsRecyclerMargins = WeakHashMap<View, IntArray>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
+    private val decorStatusBarStates = WeakHashMap<View, DecorStatusBarState>()
     private val windowFocusListeners = WeakHashMap<ViewGroup, android.view.ViewTreeObserver.OnWindowFocusChangeListener>()
     private var reparentFailureReported = false
     private var installed = false
@@ -83,11 +85,12 @@ private class HeaderRuntime(private val context: FeatureContext) {
         KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let {
             count += hook(it) { param ->
                 (param.thisObject as? ViewGroup)?.let { layout ->
-                    layout.post { apply(layout) }
-                    layout.postOnAnimation { apply(layout) }
-                    layout.postDelayed({
+                    applyTopTransparency(layout)
+                    clearDecorStatusBarBackground(layout.rootView)
+                    clearStatusBarWrapper(layout)
+                    layout.postOnAnimation {
                         if (layout.isAttachedToWindow && layout.isShown) apply(layout)
-                    }, WINDOW_INIT_REAPPLY_DELAY_MS)
+                    }
                 }
             }
         }
@@ -188,6 +191,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val layout = visibleChatLayout(sourceLayout) ?: return
         ensureWindowFocusTracking(layout)
         applyTopTransparency(layout)
+        clearDecorStatusBarBackground(layout.rootView)
         clearStatusBarWrapper(layout)
         consumeStatusBarPadding(layout)
         val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow }
@@ -348,10 +352,12 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun applyTrackedTipsGroup(layout: View, header: View) {
-        val group = tipsGroups[layout]?.takeIf { it.isAttachedToWindow && it.visibility == View.VISIBLE }
+        val group = tipsGroups[layout]?.takeIf {
+            it.isAttachedToWindow && it.visibility == View.VISIBLE && it.width > 0 && it.height > 0
+        }
             ?: tipsGroups.entries.firstOrNull { (_, view) ->
                 view.isAttachedToWindow && view.visibility == View.VISIBLE &&
-                    findAncestorLayout(view) === layout
+                    view.width > 0 && view.height > 0 && findAncestorLayout(view) === layout
             }?.value
             ?: return
         val headerLocation = IntArray(2).also(header::getLocationOnScreen)
@@ -414,6 +420,25 @@ private class HeaderRuntime(private val context: FeatureContext) {
         body.outlineProvider = FloatingTipsCardOutlineProvider
         body.clipToOutline = true
         body.elevation = 0f
+        val recycler = find(group) { it.javaClass.name == TIPS_RECYCLER_CLASS }
+        val recyclerLp = recycler?.layoutParams as? ViewGroup.MarginLayoutParams
+        if (recycler != null && recyclerLp != null) {
+            if (!tipsRecyclerMargins.containsKey(recycler)) {
+                tipsRecyclerMargins[recycler] = intArrayOf(
+                    recyclerLp.leftMargin,
+                    recyclerLp.topMargin,
+                    recyclerLp.rightMargin,
+                    recyclerLp.bottomMargin
+                )
+            }
+            val originalMargins = tipsRecyclerMargins[recycler]
+            if (originalMargins != null && originalMargins[1] != originalMargins[3]) {
+                val vertical = (originalMargins[1] + originalMargins[3]) / 2
+                recyclerLp.topMargin = vertical
+                recyclerLp.bottomMargin = vertical
+                recycler.layoutParams = recyclerLp
+            }
+        }
         val original = tipsCardStates[body]
         if (original != null && original.paddingTop != original.paddingBottom) {
             val vertical = (original.paddingTop + original.paddingBottom) / 2
@@ -661,6 +686,15 @@ private class HeaderRuntime(private val context: FeatureContext) {
         tipsDimStates.clear()
         tipsGroupElevations.forEach { (view, elevation) -> view.elevation = elevation }
         tipsGroupElevations.clear()
+        tipsRecyclerMargins.forEach { (view, margins) ->
+            val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
+            lp.leftMargin = margins[0]
+            lp.topMargin = margins[1]
+            lp.rightMargin = margins[2]
+            lp.bottomMargin = margins[3]
+            view.layoutParams = lp
+        }
+        tipsRecyclerMargins.clear()
         tipsAttachListeners.forEach { (view, listener) -> view.removeOnAttachStateChangeListener(listener) }
         tipsLayoutListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
         tipsAttachListeners.clear()
@@ -689,6 +723,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
             if (!hasFocus || !layout.isAttachedToWindow || !isEnabled()) return@OnWindowFocusChangeListener
             applyTopTransparency(layout)
+            clearDecorStatusBarBackground(layout.rootView)
             clearStatusBarWrapper(layout)
             layout.postOnAnimation { apply(layout) }
         }
@@ -717,7 +752,19 @@ private class HeaderRuntime(private val context: FeatureContext) {
         window.decorView.systemUiVisibility =
             window.decorView.systemUiVisibility or TOP_IMMERSIVE_FLAGS
         window.statusBarColor = Color.TRANSPARENT
+        clearDecorStatusBarBackground(window.decorView)
         state.applied = true
+    }
+
+    private fun clearDecorStatusBarBackground(decor: View) {
+        val id = decor.resources.getIdentifier("statusBarBackground", "id", "android")
+        if (id == 0) return
+        val statusView = decor.findViewById<View>(id) ?: return
+        if (!decorStatusBarStates.containsKey(statusView)) {
+            decorStatusBarStates[statusView] = DecorStatusBarState(statusView.background, statusView.alpha)
+        }
+        statusView.setBackgroundColor(Color.TRANSPARENT)
+        statusView.alpha = 0f
     }
 
     private fun restoreWindowStates() {
@@ -732,6 +779,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
             }
         }
         windowStates.clear()
+        decorStatusBarStates.forEach { (view, state) ->
+            view.background = state.background
+            view.alpha = state.alpha
+        }
+        decorStatusBarStates.clear()
     }
 
     private fun Context.activityOrNull(): Activity? {
@@ -770,6 +822,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
             is ViewGroup.MarginLayoutParams -> ViewGroup.MarginLayoutParams(params)
             else -> ViewGroup.LayoutParams(params)
         }
+    private data class DecorStatusBarState(
+        val background: Drawable?,
+        val alpha: Float
+    )
+
     private data class WindowState(
         val systemUiVisibility: Int,
         val statusBarColor: Int,
@@ -847,12 +904,12 @@ private class HeaderRuntime(private val context: FeatureContext) {
             View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         private const val SIDE_MARGIN_DP = 12
         private const val TOP_GAP_DP = 4
-        private const val WINDOW_INIT_REAPPLY_DELAY_MS = 100L
         private const val CARD_GAP_DP = 8
         private const val CARD_CORNER_RADIUS_DP = 24
         private const val EDGE_TO_EDGE_WRAPPER_CLASS = "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout"
         private const val CHATTING_CONTENT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingContent"
         private const val TIPS_BAR_GROUP_CLASS = "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup"
+        private const val TIPS_RECYCLER_CLASS = "com.tencent.mm.view.recyclerview.MaxHeightWxRecyclerView"
         private const val WE_IMAGE_VIEW_CLASS = "com.tencent.mm.ui.widget.imageview.WeImageView"
         private const val CHATTING_SCROLL_LAYOUT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingScrollLayout"
         private const val ELEVATION_DP = 4
