@@ -562,27 +562,30 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
 
     private fun liftNewMessageBubble(footer: View) {
-        val scrollLayout = footer.parent as? ViewGroup ?: return
-        for (index in 0 until scrollLayout.childCount) {
-            val sibling = scrollLayout.getChildAt(index) as? ViewGroup ?: continue
-            if (sibling === footer) continue
-            for (childIndex in 0 until sibling.childCount) {
-                val candidate = sibling.getChildAt(childIndex)
-                if (!isNewMessageBubble(candidate)) continue
-                val lp = candidate.layoutParams as? FrameLayout.LayoutParams ?: continue
-                if (lp.gravity and Gravity.VERTICAL_GRAVITY_MASK != Gravity.BOTTOM) continue
-                val footerLocation = IntArray(2).also(footer::getLocationOnScreen)
-                val parentLocation = IntArray(2).also(sibling::getLocationOnScreen)
-                val overlap = (sibling.height - (footerLocation[1] - parentLocation[1])).coerceAtLeast(0)
-                val target = maxOf(lp.bottomMargin, overlap + dp(8))
-                if (!newMessageMargins.containsKey(candidate)) newMessageMargins[candidate] = lp.bottomMargin
-                if (lp.bottomMargin != target) {
-                    lp.bottomMargin = target
-                    candidate.layoutParams = lp
-                }
-                return
+        val content = find(footer.rootView) {
+            it.javaClass.name == CHATTING_CONTENT_CLASS
+        } as? ViewGroup ?: return
+        for (index in 0 until content.childCount) {
+            val candidate = content.getChildAt(index)
+            if (!isNewMessageBubble(candidate)) continue
+            val lp = candidate.layoutParams as? FrameLayout.LayoutParams ?: continue
+            if (lp.gravity and Gravity.VERTICAL_GRAVITY_MASK != Gravity.BOTTOM) continue
+            val footerLocation = IntArray(2).also(footer::getLocationOnScreen)
+            val contentLocation = IntArray(2).also(content::getLocationOnScreen)
+            val cardTop = footerLocation[1] - contentLocation[1]
+            val overlap = (content.height - cardTop).coerceAtLeast(0)
+            val target = maxOf(originalNewMessageMargin(candidate), overlap + dp(8))
+            if (lp.bottomMargin != target) {
+                lp.bottomMargin = target
+                candidate.layoutParams = lp
             }
+            return
         }
+    }
+
+    private fun originalNewMessageMargin(view: View): Int {
+        val lp = view.layoutParams as? FrameLayout.LayoutParams ?: return 0
+        return newMessageMargins.getOrPut(view) { lp.bottomMargin }
     }
 
     private fun isNewMessageBubble(view: View): Boolean {
@@ -731,6 +734,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val FOOTER_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChatFooter"
         private const val FOOTER_BOTTOM_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom"
         private const val CHATTING_SCROLL_LAYOUT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingScrollLayout"
+        private const val CHATTING_CONTENT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingContent"
         private const val CHATTING_LIST_CLASS = "com.tencent.mm.ui.chatting.view.MMChattingListView"
         private const val SCROLL_RECYCLER_CLASS = "com.tencent.mm.pluginsdk.ui.tools.ScrollControlRecyclerView"
         private const val CHATTING_RECYCLER_CLASS = "com.tencent.mm.pluginsdk.ui.tools.ChattingRecyclerView"
