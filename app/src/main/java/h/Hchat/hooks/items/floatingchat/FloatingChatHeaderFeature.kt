@@ -96,11 +96,13 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }.getOrElse { hooked.remove(method); HLog.e("[Hchat:$TAG] Hook 安装失败", it); 0 }
     }
 
-    private fun apply(layout: ViewGroup) {
+    private fun apply(sourceLayout: ViewGroup) {
         if (!isEnabled()) {
-            restore(layout)
+            restore(sourceLayout)
+            visibleChatLayout(sourceLayout)?.takeIf { it !== sourceLayout }?.let(::restore)
             return
         }
+        val layout = visibleChatLayout(sourceLayout) ?: return
         applyTopTransparency(layout)
         consumeStatusBarPadding(layout)
         val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow }
@@ -115,11 +117,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val side = dp(SIDE_MARGIN_DP)
         val left = side
         val right = side
-        val top = if (isWindowBar(header, layout)) {
-            statusBarInset(layout) + dp(TOP_GAP_DP)
-        } else {
-            state.topOffset + dp(TOP_GAP_DP)
-        }
+        val top = statusBarInset(layout) + dp(TOP_GAP_DP)
         if (marginLp.leftMargin != left || marginLp.rightMargin != right || marginLp.topMargin != top) {
             marginLp.leftMargin = left
             marginLp.rightMargin = right
@@ -138,6 +136,19 @@ private class HeaderRuntime(private val context: FeatureContext) {
         header.bringToFront()
         header.invalidateOutline()
         (header.parent as? View)?.invalidate()
+    }
+
+    private fun visibleChatLayout(source: ViewGroup): ViewGroup? {
+        val screenWidth = source.resources.displayMetrics.widthPixels
+        val candidates = ArrayList<ViewGroup>()
+        collect(source.rootView) { view ->
+            if (view.javaClass.name == layoutClass && view is ViewGroup) candidates += view
+        }
+        return candidates.firstOrNull { layout ->
+            if (!layout.isShown || layout.width <= 0 || layout.height <= 0) return@firstOrNull false
+            val location = IntArray(2).also(layout::getLocationOnScreen)
+            location[0] < screenWidth && location[0] + layout.width > 0
+        }
     }
 
     private fun isWindowBar(header: View, layout: View): Boolean {
@@ -251,8 +262,32 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
     }
 
+    private fun findVisibleChatContent(layout: View, header: View): ViewGroup? {
+        val headerLocation = IntArray(2).also(header::getLocationOnScreen)
+        val screenWidth = layout.resources.displayMetrics.widthPixels
+        val root = layout.rootView
+        val candidates = ArrayList<ViewGroup>()
+        collect(root) { view ->
+            if (view.javaClass.name == CHATTING_CONTENT_CLASS && view is ViewGroup) candidates += view
+        }
+        return candidates.firstOrNull { content ->
+            if (!content.isShown || content.width <= 0 || content.height <= 0) return@firstOrNull false
+            val location = IntArray(2).also(content::getLocationOnScreen)
+            val overlapsHeader = location[0] < headerLocation[0] + header.width &&
+                location[0] + content.width > headerLocation[0]
+            val onScreen = location[0] < screenWidth && location[0] + content.width > 0
+            overlapsHeader && onScreen
+        }
+    }
+
+    private fun collect(root: View, visitor: (View) -> Unit) {
+        visitor(root)
+        val group = root as? ViewGroup ?: return
+        for (index in 0 until group.childCount) collect(group.getChildAt(index), visitor)
+    }
+
     private fun applyContentZoneCards(layout: View, header: View) {
-        val content = find(layout) { it.javaClass.name == CHATTING_CONTENT_CLASS } as? ViewGroup ?: return
+        val content = findVisibleChatContent(layout, header) ?: return
         val density = layout.resources.displayMetrics.density
         val gap = (CARD_GAP_DP * density).roundToInt()
         val contentLocation = IntArray(2).also(content::getLocationOnScreen)
