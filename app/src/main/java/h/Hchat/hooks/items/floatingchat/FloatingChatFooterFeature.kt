@@ -47,6 +47,7 @@ private class FooterRuntime(private val context: FeatureContext) {
     private var appliedReported = false
     private var structureFailureReported = false
     private var panelState = PANEL_STATE_NONE
+    private var switchPanelMethod: Method? = null
     private var installed = false
 
     @Synchronized
@@ -75,7 +76,11 @@ private class FooterRuntime(private val context: FeatureContext) {
             count += hookFooter(method, footerClass) { footer -> apply(footer) }
         }
         locateSwitchPanel(footerClass)?.let { method ->
+            switchPanelMethod = method
             count += hookPanelState(method, footerClass)
+        }
+        locateEnterKeyboardState(footerClass)?.let { method ->
+            count += hookEnterKeyboardState(method, footerClass)
         }
         locateScrollContentTo()?.let { method ->
             count += hookScrollContent(method)
@@ -160,6 +165,68 @@ private class FooterRuntime(private val context: FeatureContext) {
             HLog.e("[Hchat:$TAG] 功能未生效: 面板状态入口候选数量=${candidates.size}")
         }
         return method
+    }
+
+    private fun locateEnterKeyboardState(footerClass: Class<*>): Method? {
+        val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
+        DexMethodCache.load(
+            methodPrefs,
+            runtimeKey,
+            context.hostClassLoader(),
+            CACHE_ENTER_KEYBOARD_STATE
+        )?.takeIf { isEnterKeyboardState(it, footerClass) }?.let { return it }
+        val candidates = runCatching {
+            context.dexKitBridge().findMethod(
+                FindMethod().apply {
+                    matcher(MethodMatcher().apply {
+                        usingEqStrings(REFRESH_LOG_TAG, ENTER_KEYBOARD_LOG_ANCHOR)
+                    })
+                }
+            ).mapNotNull { data ->
+                runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+            }.filter { isEnterKeyboardState(it, footerClass) }
+                .distinctBy { it.toGenericString() }
+        }.getOrElse {
+            HLog.e("[Hchat:$TAG] 定位键盘状态入口失败", it)
+            emptyList()
+        }
+        val method = candidates.singleOrNull()
+        if (method != null) {
+            DexMethodCache.save(methodPrefs, runtimeKey, CACHE_ENTER_KEYBOARD_STATE, method)
+            HLog.i("[Hchat:$TAG] 已定位键盘状态入口: ${method.toGenericString()}")
+        } else {
+            DexMethodCache.clear(methodPrefs, runtimeKey, CACHE_ENTER_KEYBOARD_STATE)
+            HLog.e("[Hchat:$TAG] 功能未生效: 键盘状态入口候选数量=${candidates.size}")
+        }
+        return method
+    }
+
+    private fun isEnterKeyboardState(method: Method, footerClass: Class<*>): Boolean =
+        method.declaringClass == footerClass &&
+            !KavaReflector.isStatic(method) &&
+            method.returnType == Void.TYPE &&
+            method.parameterTypes.isEmpty()
+
+    private fun hookEnterKeyboardState(targetMethod: Member, footerClass: Class<*>): Int {
+        if (!hooked.add(targetMethod)) return 1
+        return runCatching {
+            HookRegistry.get().hook(targetMethod, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!isEnabled() || !footerClass.isInstance(param.thisObject)) return
+                    val footer = param.thisObject as? View ?: return
+                    val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
+                    if (!isPanelState(panelState) || panel.visibility != View.VISIBLE) return
+                    val switchMethod = switchPanelMethod ?: return
+                    switchMethod.invoke(footer, PANEL_STATE_NONE, true, -1)
+                    param.result = null
+                }
+            })
+            1
+        }.getOrElse {
+            hooked.remove(targetMethod)
+            HLog.e("[Hchat:$TAG] 键盘状态 Hook 安装失败", it)
+            0
+        }
     }
 
     private fun locateScrollContentTo(): Method? {
@@ -618,9 +685,11 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val CACHE_REFRESH_BOTTOM_HEIGHT = "refresh_bottom_height"
         private const val CACHE_SWITCH_PANEL = "switch_panel"
         private const val CACHE_SCROLL_CONTENT_TO = "scroll_content_to"
+        private const val CACHE_ENTER_KEYBOARD_STATE = "enter_keyboard_state"
         private const val REFRESH_LOG_TAG = "MicroMsg.ChatFooter"
         private const val REFRESH_LOG_ANCHOR = "[refreshBottomHeight] keyborPx:%d"
         private const val SWITCH_LOG_ANCHOR = "switchPanel: %s, %s"
+        private const val ENTER_KEYBOARD_LOG_ANCHOR = "isScrolling!! pass this event!"
         private const val SCROLL_LOG_TAG = "MicroMsg.ChattingScrollLayout"
         private const val SCROLL_LOG_ANCHOR =
             "scrollContentTo: y:%s, targetScroll:%s, alwaysScroll:%s"
@@ -631,6 +700,6 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val BOTTOM_GAP_DP = 8
         private const val ELEVATION_DP = 4
         private const val CORNER_RADIUS_DP = 24
-        private const val REQUIRED_HOOK_COUNT = 5
+        private const val REQUIRED_HOOK_COUNT = 6
     }
 }

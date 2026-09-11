@@ -1,5 +1,9 @@
 package h.Hchat.hooks.items.floatingchat
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Rect
 import android.view.View
@@ -39,6 +43,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val hooked = HashSet<Member>()
     private val states = WeakHashMap<View, HeaderState>()
     private val headersByLayout = WeakHashMap<View, View>()
+    private val windowStates = WeakHashMap<Activity, WindowState>()
     private var reparentFailureReported = false
     private var installed = false
     private val headerClass = "androidx.appcompat.widget.ActionBarContainer"
@@ -81,6 +86,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             restore(layout)
             return
         }
+        applyTopTransparency(layout)
         val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow }
             ?: find(layout) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
             ?: return
@@ -189,7 +195,45 @@ private class HeaderRuntime(private val context: FeatureContext) {
     fun destroy() {
         states.keys.toList().forEach(::restoreView)
         headersByLayout.clear()
+        restoreWindowStates()
     }
+    private fun applyTopTransparency(layout: View) {
+        val activity = layout.context.activityOrNull() ?: return
+        val state = windowStates.getOrPut(activity) {
+            val window = activity.window
+            WindowState(window.decorView.systemUiVisibility, window.statusBarColor)
+        }
+        val window = activity.window
+        window.decorView.systemUiVisibility =
+            window.decorView.systemUiVisibility or TOP_IMMERSIVE_FLAGS
+        window.statusBarColor = Color.TRANSPARENT
+        state.applied = true
+    }
+
+    private fun restoreWindowStates() {
+        windowStates.forEach { (activity, state) ->
+            if (!state.applied) return@forEach
+            val window = activity.window
+            window.decorView.systemUiVisibility =
+                (window.decorView.systemUiVisibility and TOP_IMMERSIVE_FLAGS.inv()) or
+                    (state.systemUiVisibility and TOP_IMMERSIVE_FLAGS)
+            if (window.statusBarColor == Color.TRANSPARENT) {
+                window.statusBarColor = state.statusBarColor
+            }
+        }
+        windowStates.clear()
+    }
+
+    private fun Context.activityOrNull(): Activity? {
+        var current: Context? = this
+        val visited = HashSet<Context>()
+        while (current != null && visited.add(current)) {
+            if (current is Activity) return current
+            current = (current as? ContextWrapper)?.baseContext
+        }
+        return null
+    }
+
     private fun isEnabled() = context.configStore().getGlobalBoolean("${FloatingChatHeaderFeature.ID}_enabled", false)
     private fun dp(value: Int) = (value * context.hostContext().resources.displayMetrics.density).roundToInt()
     private fun find(root: View, predicate: (View) -> Boolean): View? = if (predicate(root)) root else (root as? ViewGroup)?.let { group -> (0 until group.childCount).asSequence().mapNotNull { find(group.getChildAt(it), predicate) }.firstOrNull() }
@@ -199,6 +243,12 @@ private class HeaderRuntime(private val context: FeatureContext) {
             is ViewGroup.MarginLayoutParams -> ViewGroup.MarginLayoutParams(params)
             else -> ViewGroup.LayoutParams(params)
         }
+    private data class WindowState(
+        val systemUiVisibility: Int,
+        val statusBarColor: Int,
+        var applied: Boolean = false
+    )
+
     private data class HeaderState(
         val originalParent: ViewGroup,
         val originalIndex: Int,
@@ -224,6 +274,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
     companion object {
         private const val TAG = "悬浮标题栏"
+        private const val TOP_IMMERSIVE_FLAGS =
+            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         private const val SIDE_MARGIN_DP = 12
         private const val TOP_GAP_DP = 4
         private const val ELEVATION_DP = 4
