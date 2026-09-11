@@ -66,6 +66,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val tipsDimStates = WeakHashMap<View, TipsDimState>()
     private val tipsGroupElevations = WeakHashMap<View, Float>()
     private val tipsRecyclerMargins = WeakHashMap<View, IntArray>()
+    private val tipsRecyclerRules = WeakHashMap<View, IntArray>()
+    private val scheduledLayouts = WeakHashMap<ViewGroup, Boolean>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
     private val decorStatusBarStates = WeakHashMap<View, DecorStatusBarState>()
     private val windowFocusListeners = WeakHashMap<ViewGroup, android.view.ViewTreeObserver.OnWindowFocusChangeListener>()
@@ -88,9 +90,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
                     applyTopTransparency(layout)
                     clearDecorStatusBarBackground(layout.rootView)
                     clearStatusBarWrapper(layout)
-                    layout.postOnAnimation {
-                        if (layout.isAttachedToWindow && layout.isShown) apply(layout)
-                    }
+                    scheduleApply(layout)
                 }
             }
         }
@@ -98,12 +98,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
             count += hook(it) { param ->
                 (param.thisObject as? ViewGroup)?.let(::removeWindowFocusTracking)
             }
-        }
         KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let {
-            count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let { layout -> layout.postOnAnimation { apply(layout) } } }
+            count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let(::scheduleApply) }
         }
         KavaReflector.findMethodRecursive(clazz, "fitSystemWindows", Rect::class.java)?.let {
-            count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let { layout -> layout.postOnAnimation { apply(layout) } } }
+            count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let(::scheduleApply) }
         }
         installTipsGroupTracking()?.let { count += it }
         installed = count > 0
@@ -134,7 +133,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 val sourceLayout = findAncestorLayout(view) ?: visibleChatLayoutFromRoot(view) ?: return
                 val layout = visibleChatLayout(sourceLayout) ?: return
                 tipsGroups[layout] = view
-                layout.postOnAnimation { apply(layout) }
+                scheduleApply(layout)
             }
             override fun onViewDetachedFromWindow(view: View) {
                 tipsGroups.entries.removeAll { it.value === view }
@@ -147,7 +146,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             val sourceLayout = findAncestorLayout(view) ?: visibleChatLayoutFromRoot(view) ?: return@OnLayoutChangeListener
             val layout = visibleChatLayout(sourceLayout) ?: return@OnLayoutChangeListener
             tipsGroups[layout] = view
-            layout.postOnAnimation { apply(layout) }
+            scheduleApply(layout)
         }
         tipsLayoutListeners[group] = layoutListener
         group.addOnLayoutChangeListener(layoutListener)
@@ -180,6 +179,14 @@ private class HeaderRuntime(private val context: FeatureContext) {
             })
             1
         }.getOrElse { hooked.remove(method); HLog.e("[Hchat:$TAG] Hook 安装失败", it); 0 }
+    }
+
+    private fun scheduleApply(layout: ViewGroup) {
+        if (scheduledLayouts.put(layout, true) != null) return
+        layout.postOnAnimation {
+            scheduledLayouts.remove(layout)
+            if (layout.isAttachedToWindow && layout.isShown) apply(layout)
+        }
     }
 
     private fun apply(sourceLayout: ViewGroup) {
@@ -421,8 +428,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
         body.clipToOutline = true
         body.elevation = 0f
         val recycler = find(group) { it.javaClass.name == TIPS_RECYCLER_CLASS }
-        val recyclerLp = recycler?.layoutParams as? ViewGroup.MarginLayoutParams
+        val recyclerLp = recycler?.layoutParams as? RelativeLayout.LayoutParams
         if (recycler != null && recyclerLp != null) {
+            if (!tipsRecyclerMargins.containsKey(recycler)) {
+                tipsRecyclerRules[recycler] = recyclerLp.rules.copyOf()
+            }
             if (!tipsRecyclerMargins.containsKey(recycler)) {
                 tipsRecyclerMargins[recycler] = intArrayOf(
                     recyclerLp.leftMargin,
@@ -430,6 +440,12 @@ private class HeaderRuntime(private val context: FeatureContext) {
                     recyclerLp.rightMargin,
                     recyclerLp.bottomMargin
                 )
+            }
+            val rules = tipsRecyclerRules[recycler]
+            if (rules != null) {
+                for (verb in recyclerLp.rules.indices) recyclerLp.removeRule(verb)
+                recyclerLp.addRule(RelativeLayout.CENTER_VERTICAL)
+                recycler.layoutParams = recyclerLp
             }
             val originalMargins = tipsRecyclerMargins[recycler]
             if (originalMargins != null && originalMargins[1] != originalMargins[3]) {
@@ -695,6 +711,14 @@ private class HeaderRuntime(private val context: FeatureContext) {
             view.layoutParams = lp
         }
         tipsRecyclerMargins.clear()
+        tipsRecyclerRules.forEach { (view, rules) ->
+            val lp = view.layoutParams as? RelativeLayout.LayoutParams ?: return@forEach
+            for (verb in lp.rules.indices) lp.removeRule(verb)
+            rules.forEachIndexed { verb, anchor -> if (anchor != 0) lp.addRule(verb, anchor) }
+            view.layoutParams = lp
+        }
+        tipsRecyclerRules.clear()
+        scheduledLayouts.clear()
         tipsAttachListeners.forEach { (view, listener) -> view.removeOnAttachStateChangeListener(listener) }
         tipsLayoutListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
         tipsAttachListeners.clear()

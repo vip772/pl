@@ -299,8 +299,10 @@ private class FooterRuntime(private val context: FeatureContext) {
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
                     val requestedY = param.args.firstOrNull() as? Int ?: return
                     val state = states[footer]
+                    val baseHeight = state?.baseInputHeight?.takeIf { it > 0 }
+                        ?: visibleHeightExcludingPanel(panel).takeIf { it > 0 }
                     val abnormalLift = !isPanelState(panelState) &&
-                        state?.baseInputHeight?.takeIf { it > 0 }?.let { requestedY >= it } == true
+                        baseHeight?.let { requestedY >= it } == true
                     if ((isPanelState(panelState) && panel.visibility == View.VISIBLE) || abnormalLift) {
                         param.args[0] = 0
                     }
@@ -563,7 +565,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         val natural = panelOriginalHeights[panel]
             ?: panel.height.takeIf { it > 0 }
             ?: lp.height.takeIf { it > 0 }
-            ?: return
+            ?: dp(MAX_PANEL_HEIGHT_DP)
+            .also { panelOriginalHeights[panel] = it }
         if (!panelOriginalHeights.containsKey(panel)) panelOriginalHeights[panel] = natural
         val hostHeight = (footer.parent as? View)?.height?.takeIf { it > 0 }
             ?: footer.resources.displayMetrics.heightPixels
