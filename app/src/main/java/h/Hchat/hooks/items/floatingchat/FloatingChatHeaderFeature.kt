@@ -5,6 +5,7 @@ import android.graphics.Rect
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.widget.RelativeLayout
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.hooks.core.BaseFeature
 import h.Hchat.hooks.core.DexInstallScheduler
@@ -37,6 +38,8 @@ class FloatingChatHeaderFeature : BaseFeature() {
 private class HeaderRuntime(private val context: FeatureContext) {
     private val hooked = HashSet<Member>()
     private val states = WeakHashMap<View, HeaderState>()
+    private val headersByLayout = WeakHashMap<View, View>()
+    private var reparentFailureReported = false
     private var installed = false
     private val headerClass = "androidx.appcompat.widget.ActionBarContainer"
     private val layoutClass = "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout"
@@ -74,91 +77,130 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun apply(layout: ViewGroup) {
-        if (!isEnabled()) { restore(layout); return }
-        find(layout) { it.javaClass.name == headerClass }?.let { header ->
-            val parent = header.parent as? ViewGroup ?: return
-            val lp = header.layoutParams
-            val marginLp = lp as? ViewGroup.MarginLayoutParams
-            val state = states[header] ?: HeaderState(
-                backgroundLayers = backgroundLayers(header, layout),
-                leftMargin = marginLp?.leftMargin,
-                rightMargin = marginLp?.rightMargin,
-                topMargin = marginLp?.topMargin,
-                elevation = header.elevation,
-                outlineProvider = header.outlineProvider,
-                clipToOutline = header.clipToOutline
-            ).also {
-                states[header] = it
-                it.backgroundLayers.forEach(FloatingChatCardVisuals::makeTransparent)
+        if (!isEnabled()) {
+            restore(layout)
+            return
+        }
+        val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow }
+            ?: find(layout) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
+            ?: return
+        val state = states[header] ?: createState(header) ?: return
+        if (!state.reparented && !reparentHeader(layout, header, state)) return
+        val marginLp = header.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+        val originalMargins = state.originalLayoutParams as? ViewGroup.MarginLayoutParams
+        val side = dp(SIDE_MARGIN_DP)
+        val left = (originalMargins?.leftMargin ?: 0) + side
+        val right = (originalMargins?.rightMargin ?: 0) + side
+        val top = (originalMargins?.topMargin ?: 0) + dp(TOP_GAP_DP)
+        if (marginLp.leftMargin != left || marginLp.rightMargin != right || marginLp.topMargin != top) {
+            marginLp.leftMargin = left
+            marginLp.rightMargin = right
+            marginLp.topMargin = top
+            header.layoutParams = marginLp
+        }
+        val elevation = dp(ELEVATION_DP).toFloat()
+        if (header.elevation != elevation) header.elevation = elevation
+        header.outlineProvider = FloatingHeaderOutlineProvider
+        header.clipToOutline = true
+        FloatingChatCardVisuals.apply(header, CORNER_RADIUS_DP)
+        header.bringToFront()
+        header.invalidateOutline()
+        (header.parent as? View)?.invalidate()
+    }
+
+    private fun createState(header: View): HeaderState? {
+        val parent = header.parent as? ViewGroup ?: return null
+        val index = parent.indexOfChild(header)
+        if (index < 0) return null
+        val params = header.layoutParams ?: return null
+        return HeaderState(
+            originalParent = parent,
+            originalIndex = index,
+            originalLayoutParams = copyLayoutParams(params),
+            elevation = header.elevation,
+            outlineProvider = header.outlineProvider,
+            clipToOutline = header.clipToOutline
+        ).also { states[header] = it }
+    }
+
+    private fun reparentHeader(layout: ViewGroup, header: View, state: HeaderState): Boolean {
+        if (header.parent !== layout) {
+            if (!reparentFailureReported) {
+                reparentFailureReported = true
+                HLog.e(
+                    "[Hchat:$TAG] 标题栏未重排: parent=${header.parent?.javaClass?.name} " +
+                        "layout=${layout.javaClass.name}"
+                )
             }
-            state.backgroundLayers.forEach(FloatingChatCardVisuals::ensureTransparent)
-            if (marginLp != null) {
-                val left = (state.leftMargin ?: marginLp.leftMargin) + dp(12)
-                val right = (state.rightMargin ?: marginLp.rightMargin) + dp(12)
-                val top = (state.topMargin ?: marginLp.topMargin) + dp(4)
-                if (marginLp.leftMargin != left || marginLp.rightMargin != right || marginLp.topMargin != top) {
-                    marginLp.leftMargin = left
-                    marginLp.rightMargin = right
-                    marginLp.topMargin = top
-                    header.layoutParams = marginLp
-                }
+            return false
+        }
+        val root = layout.parent as? RelativeLayout
+        if (root == null) {
+            if (!reparentFailureReported) {
+                reparentFailureReported = true
+                HLog.e("[Hchat:$TAG] 标题栏未重排: 外层不是 RelativeLayout")
             }
-            val elevation = dp(4).toFloat()
-            if (header.elevation != elevation) header.elevation = elevation
-            header.outlineProvider = FloatingHeaderOutlineProvider
-            header.clipToOutline = true
-            FloatingChatCardVisuals.apply(header, 24)
-            header.invalidateOutline()
-            parent.invalidate()
+            return false
+        }
+        return runCatching {
+            val height = header.layoutParams?.height ?: ViewGroup.LayoutParams.WRAP_CONTENT
+            layout.removeView(header)
+            val params = RelativeLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height)
+            params.addRule(RelativeLayout.ALIGN_PARENT_TOP)
+            root.addView(header, params)
+            state.reparented = true
+            HLog.i("[Hchat:$TAG] 标题栏结构重排完成: root=${root.javaClass.name}")
+            true
+        }.getOrElse {
+            HLog.e("[Hchat:$TAG] 标题栏结构重排失败", it)
+            false
         }
     }
 
     private fun restore(layout: ViewGroup) {
-        findAll(layout) { states.containsKey(it) }.forEach { restoreView(it) }
+        headersByLayout.remove(layout)?.let(::restoreView)
     }
     private fun restoreView(view: View) {
         val state = states.remove(view) ?: return
-        view.layoutParams?.let { params ->
-            (params as? ViewGroup.MarginLayoutParams)?.let {
-                state.leftMargin?.let { value -> it.leftMargin = value }
-                state.rightMargin?.let { value -> it.rightMargin = value }
-                state.topMargin?.let { value -> it.topMargin = value }
+        runCatching {
+            if (state.reparented) {
+                (view.parent as? ViewGroup)?.removeView(view)
+                state.originalParent.addView(
+                    view,
+                    state.originalIndex.coerceAtMost(state.originalParent.childCount),
+                    copyLayoutParams(state.originalLayoutParams)
+                )
+            } else {
+                view.layoutParams = copyLayoutParams(state.originalLayoutParams)
             }
-            view.layoutParams = params
-        }
-        view.elevation = state.elevation
-        view.outlineProvider = state.outlineProvider
-        view.clipToOutline = state.clipToOutline
-        FloatingChatCardVisuals.restore(view)
-        state.backgroundLayers.asReversed().forEach(FloatingChatCardVisuals::restoreTransparent)
-        view.invalidateOutline()
+            view.elevation = state.elevation
+            view.outlineProvider = state.outlineProvider
+            view.clipToOutline = state.clipToOutline
+            FloatingChatCardVisuals.restore(view)
+            view.invalidateOutline()
+        }.onFailure { HLog.e("[Hchat:$TAG] 恢复微信标题栏结构失败", it) }
     }
-    fun destroy() { states.keys.toList().forEach(::restoreView) }
+    fun destroy() {
+        states.keys.toList().forEach(::restoreView)
+        headersByLayout.clear()
+    }
     private fun isEnabled() = context.configStore().getGlobalBoolean("${FloatingChatHeaderFeature.ID}_enabled", false)
     private fun dp(value: Int) = (value * context.hostContext().resources.displayMetrics.density).roundToInt()
     private fun find(root: View, predicate: (View) -> Boolean): View? = if (predicate(root)) root else (root as? ViewGroup)?.let { group -> (0 until group.childCount).asSequence().mapNotNull { find(group.getChildAt(it), predicate) }.firstOrNull() }
-    private fun findAll(root: View, predicate: (View) -> Boolean): List<View> = buildList {
-        fun walk(view: View) {
-            if (predicate(view)) add(view)
-            (view as? ViewGroup)?.let { group -> for (index in 0 until group.childCount) walk(group.getChildAt(index)) }
+    private fun copyLayoutParams(params: ViewGroup.LayoutParams): ViewGroup.LayoutParams =
+        when (params) {
+            is RelativeLayout.LayoutParams -> RelativeLayout.LayoutParams(params)
+            is ViewGroup.MarginLayoutParams -> ViewGroup.MarginLayoutParams(params)
+            else -> ViewGroup.LayoutParams(params)
         }
-        walk(root)
-    }
-    private fun backgroundLayers(card: View, boundary: View): List<View> = buildList {
-        var current = card.parent as? View
-        while (current != null && current !== boundary) {
-            add(current)
-            current = current.parent as? View
-        }
-    }
     private data class HeaderState(
-        val backgroundLayers: List<View>,
-        val leftMargin: Int?,
-        val rightMargin: Int?,
-        val topMargin: Int?,
+        val originalParent: ViewGroup,
+        val originalIndex: Int,
+        val originalLayoutParams: ViewGroup.LayoutParams,
         val elevation: Float = 0f,
         val outlineProvider: ViewOutlineProvider?,
-        val clipToOutline: Boolean
+        val clipToOutline: Boolean,
+        var reparented: Boolean = false
     )
     private object FloatingHeaderOutlineProvider : ViewOutlineProvider() {
         override fun getOutline(view: View, outline: Outline) {
@@ -173,5 +215,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
         private fun dpStatic(view: View, value: Int): Float =
             value * view.resources.displayMetrics.density
     }
-    companion object { private const val TAG = "悬浮标题栏" }
+    companion object {
+        private const val TAG = "悬浮标题栏"
+        private const val SIDE_MARGIN_DP = 12
+        private const val TOP_GAP_DP = 4
+        private const val ELEVATION_DP = 4
+        private const val CORNER_RADIUS_DP = 24
+    }
 }

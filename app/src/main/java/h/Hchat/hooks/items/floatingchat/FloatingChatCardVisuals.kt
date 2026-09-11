@@ -13,8 +13,6 @@ object FloatingChatCardVisuals {
     private const val DARK_STROKE_COLOR = 0x24FFFFFF
 
     private val originals = WeakHashMap<View, android.graphics.drawable.Drawable?>()
-    private val transparentOriginals = WeakHashMap<View, android.graphics.drawable.Drawable?>()
-    private val transparentReferences = WeakHashMap<View, Int>()
     private val applied = WeakHashMap<View, GradientDrawable>()
 
     fun apply(view: View, radiusDp: Int) {
@@ -30,30 +28,6 @@ object FloatingChatCardVisuals {
             drawable.setStroke(0, 0)
         }
         view.background = drawable
-    }
-
-    fun makeTransparent(view: View) {
-        val references = transparentReferences[view] ?: 0
-        if (references == 0) transparentOriginals[view] = view.background
-        transparentReferences[view] = references + 1
-        if (view.background != null) view.background = null
-    }
-
-    fun ensureTransparent(view: View) {
-        if ((transparentReferences[view] ?: 0) > 0 && view.background != null) {
-            view.background = null
-        }
-    }
-
-    fun restoreTransparent(view: View) {
-        val references = transparentReferences[view] ?: return
-        if (references > 1) {
-            transparentReferences[view] = references - 1
-            return
-        }
-        transparentReferences.remove(view)
-        if (!transparentOriginals.containsKey(view)) return
-        view.background = transparentOriginals.remove(view)
     }
 
     private fun Context.isDarkMode(): Boolean =
