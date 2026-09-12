@@ -478,7 +478,13 @@ private class SwipeQuoteAdapter(
                     val event = param.args?.getOrNull(0) as? MotionEvent ?: return
                     if (!isEnabled()) return
                     val hit = findRecyclerTarget(view, event.x, event.y)
-                    if (handleTouch(view, event, hit, recyclerStates)) {
+                    if (handleTouch(
+                            view,
+                            event,
+                            hit,
+                            recyclerStates,
+                            methodName == "onInterceptTouchEvent"
+                        )) {
                         param.result = true
                     }
                 }
@@ -510,7 +516,8 @@ private class SwipeQuoteAdapter(
         view: View,
         event: MotionEvent,
         hit: QuoteHit?,
-        stateMap: MutableMap<View, TouchState>
+        stateMap: MutableMap<View, TouchState>,
+        fromIntercept: Boolean
     ): Boolean {
         val state = stateMap.getOrPut(view) { TouchState() }
         if (event.actionMasked == MotionEvent.ACTION_MOVE &&
@@ -521,6 +528,12 @@ private class SwipeQuoteAdapter(
         }
         state.lastEventTime = event.eventTime
         state.lastAction = event.actionMasked
+        // The intercept callback participates in gesture takeover, but the
+        // touch callback owns the terminal event. Handling UP/CANCEL here
+        // would clear the state before RecyclerView dispatches it to itself.
+        if (fromIntercept &&
+            (event.actionMasked == MotionEvent.ACTION_UP || event.actionMasked == MotionEvent.ACTION_CANCEL)
+        ) return state.dragging
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 resetSwipeVisual(state)
@@ -553,6 +566,7 @@ private class SwipeQuoteAdapter(
                     val quoteHorizontalEnough = abs(dx) > dp(6f) && abs(dx) > abs(dy) * 1.15f
                     val repeatHorizontalEnough = abs(dx) > dp(18f) && abs(dx) > abs(dy) * 1.35f
                     val direction = when {
+                        // rawX follows the physical screen direction: negative is left, positive is right.
                         quoteHorizontalEnough && dx < 0f && quoteEnabled -> SwipeDirection.LEFT_QUOTE
                         repeatHorizontalEnough && dx > 0f && repeatEnabled -> SwipeDirection.RIGHT_REPEAT
                         else -> SwipeDirection.NONE
