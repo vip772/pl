@@ -51,7 +51,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val headersByLayout = WeakHashMap<View, View>()
     private val headerZoneStates = WeakHashMap<View, HeaderZoneState>()
     private val windowOverlayStates = WeakHashMap<View, Boolean>()
+    private val statusWrapperBackgrounds = WeakHashMap<View, Drawable?>()
     private val contentCardTranslations = WeakHashMap<View, Float>()
+
     private val diagnosedLayouts = WeakHashMap<View, Boolean>()
     private val tipsGroups = WeakHashMap<View, View>()
     private val tipsAttachListeners = WeakHashMap<View, View.OnAttachStateChangeListener>()
@@ -211,6 +213,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             ?: find(layout.rootView) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
             ?: return
         val state = states[header] ?: createState(header) ?: return
+        applyChatStatusWrapper(layout)
         if (isWindowBar(header, layout)) {
             enableWindowOverlay(header)
         } else if (!state.reparented && !reparentHeader(layout, header, state)) return
@@ -598,6 +601,41 @@ private class HeaderRuntime(private val context: FeatureContext) {
         return lp.height == ViewGroup.LayoutParams.WRAP_CONTENT || vertical == android.view.Gravity.TOP
     }
 
+    private fun applyChatStatusWrapper(layout: ViewGroup) {
+        var current: View? = layout
+        var wrapper: View? = null
+        while (current != null) {
+            if (current.javaClass.name == STATUS_WRAPPER_CLASS) {
+                wrapper = current
+                break
+            }
+            current = current.parent as? View
+        }
+        if (wrapper == null) return
+        if (!statusWrapperBackgrounds.containsKey(wrapper)) {
+            statusWrapperBackgrounds[wrapper] = wrapper.background
+            wrapper.background = null
+            HLog.i(
+                "[Hchat:$TAG] 聊天状态区透明: wrapper=${wrapper.javaClass.name} " +
+                    "parent=${wrapper.parent?.javaClass?.name} backgroundSaved=true"
+            )
+        } else if (wrapper.background != null) {
+            wrapper.background = null
+        }
+    }
+
+    private fun restoreChatStatusWrapper(layout: ViewGroup) {
+        val wrapper = statusWrapperBackgrounds.keys.firstOrNull { saved ->
+            var current: View? = layout
+            while (current != null) {
+                if (current === saved) return@firstOrNull true
+                current = current.parent as? View
+            }
+            false
+        } ?: return
+        wrapper.background = statusWrapperBackgrounds.remove(wrapper)
+    }
+
     private fun diagnoseHeaderLayout(layout: View, header: View) {
         if (layout.width <= 0 || layout.height <= 0 || header.width <= 0 || header.height <= 0) return
         if (diagnosedLayouts.put(layout, true) != null) return
@@ -626,6 +664,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun restore(layout: ViewGroup) {
+        restoreChatStatusWrapper(layout)
         headersByLayout.remove(layout)?.let(::restoreView)
         headerZoneStates.remove(layout)?.originalMargins?.forEach { (view, margins) ->
             val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
@@ -660,6 +699,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     fun destroy() {
         states.keys.toList().forEach(::restoreView)
         headerZoneStates.keys.toList().forEach { layout -> restore(layout as? ViewGroup ?: return@forEach) }
+        statusWrapperBackgrounds.entries.toList().forEach { (view, background) -> view.background = background }
+        statusWrapperBackgrounds.clear()
         headersByLayout.clear()
         contentCardTranslations.forEach { (view, translation) -> view.translationY = translation }
         contentCardTranslations.clear()
@@ -794,6 +835,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         private const val CARD_GAP_DP = 8
         private const val CARD_CORNER_RADIUS_DP = 24
         private const val CHATTING_CONTENT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingContent"
+        private const val STATUS_WRAPPER_CLASS = "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout"
         private const val TIPS_BAR_GROUP_CLASS = "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup"
         private const val TIPS_RECYCLER_CLASS = "com.tencent.mm.view.recyclerview.MaxHeightWxRecyclerView"
         private const val WE_IMAGE_VIEW_CLASS = "com.tencent.mm.ui.widget.imageview.WeImageView"
