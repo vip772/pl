@@ -1,8 +1,6 @@
 package h.Hchat.hooks.items.floatingchat
 
-import android.app.Activity
 import android.content.Context
-import android.content.ContextWrapper
 import android.graphics.Color
 import android.graphics.Outline
 import android.graphics.Rect
@@ -52,12 +50,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val states = WeakHashMap<View, HeaderState>()
     private val headersByLayout = WeakHashMap<View, View>()
     private val headerZoneStates = WeakHashMap<View, HeaderZoneState>()
-    private val wrapperStates = WeakHashMap<View, WrapperState>()
     private val windowOverlayStates = WeakHashMap<View, Boolean>()
     private val contentCardTranslations = WeakHashMap<View, Float>()
     private val diagnosedLayouts = WeakHashMap<View, Boolean>()
-    private val diagnosedWrappers = WeakHashMap<View, Boolean>()
-    private val originalLayoutPaddingTops = WeakHashMap<View, Int>()
     private val tipsGroups = WeakHashMap<View, View>()
     private val tipsAttachListeners = WeakHashMap<View, View.OnAttachStateChangeListener>()
     private val tipsLayoutListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
@@ -71,10 +66,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val tipsContentBackgrounds = WeakHashMap<View, Drawable?>()
     private val layoutTrackers = WeakHashMap<ViewGroup, HeaderLayoutTracker>()
     private val tipsCardBottoms = WeakHashMap<ViewGroup, Int>()
-    private val windowStates = WeakHashMap<Activity, WindowState>()
-    private val decorStatusBarStates = WeakHashMap<View, DecorStatusBarState>()
-    private val layoutActivities = WeakHashMap<ViewGroup, Activity>()
-    private val windowFocusListeners = WeakHashMap<ViewGroup, android.view.ViewTreeObserver.OnWindowFocusChangeListener>()
     private var reparentFailureReported = false
     private var installed = false
     private val headerClass = "androidx.appcompat.widget.ActionBarContainer"
@@ -91,9 +82,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let {
             count += hook(it) { param ->
                 (param.thisObject as? ViewGroup)?.let { layout ->
-                    applyTopTransparency(layout)
-                    clearDecorStatusBarBackground(layout.rootView)
-                    clearStatusBarWrapper(layout)
                     scheduleApply(layout)
                 }
             }
@@ -101,9 +89,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         KavaReflector.findMethodRecursive(clazz, "onDetachedFromWindow")?.let {
             count += hook(it) { param ->
                 (param.thisObject as? ViewGroup)?.let { layout ->
-                    removeWindowFocusTracking(layout)
                     disposeLayoutTracker(layout)
-                    releaseWindowForLayout(layout)
                 }
             }
         }
@@ -219,15 +205,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             visibleChatLayout(sourceLayout)?.takeIf { it !== sourceLayout }?.let(::restore)
             return
         }
-        val layout = visibleChatLayout(sourceLayout) ?: run {
-            releaseWindowForLayout(sourceLayout)
-            return
-        }
-        ensureWindowFocusTracking(layout)
-        applyTopTransparency(layout)
-        clearDecorStatusBarBackground(layout.rootView)
-        clearStatusBarWrapper(layout)
-        consumeStatusBarPadding(layout)
+        val layout = visibleChatLayout(sourceLayout) ?: return
         val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow }
             ?: find(layout) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
             ?: find(layout.rootView) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
@@ -647,70 +625,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         )
     }
 
-    private fun clearStatusBarWrapper(layout: View) {
-        var current: View? = layout
-        var wrapper: View? = null
-        while (current != null) {
-            if (current.javaClass.name == EDGE_TO_EDGE_WRAPPER_CLASS) {
-                wrapper = current
-                break
-            }
-            current = current.parent as? View
-        }
-        if (wrapper == null) {
-            wrapper = find(layout.rootView) { it.javaClass.name == EDGE_TO_EDGE_WRAPPER_CLASS }
-        }
-        val target = wrapper ?: return
-        val state = wrapperStates.getOrPut(target) {
-            WrapperState(target.background, target.paddingLeft, target.paddingTop, target.paddingRight, target.paddingBottom)
-        }
-        target.setBackgroundColor(Color.TRANSPARENT)
-        runCatching {
-            val setter = findMethod(target.javaClass, "setStatusBarStrategy", 1)
-            val strategy = setter?.parameterTypes?.singleOrNull()?.enumConstants
-                ?.firstOrNull { (it as Enum<*>).name == "ALWAYS_HIDE" }
-            if (setter != null && strategy != null) setter.invoke(target, strategy)
-            findMethod(target.javaClass, "setStatusBarColor", 1)
-                ?.takeIf { it.parameterTypes[0] == Int::class.javaPrimitiveType }
-                ?.invoke(target, Color.TRANSPARENT)
-            findMethod(target.javaClass, "setStatusBarBackgroundColor", 1)
-                ?.takeIf { it.parameterTypes[0] == Int::class.javaPrimitiveType }
-                ?.invoke(target, Color.TRANSPARENT)
-            if (target.paddingTop != 0) {
-                target.setPadding(target.paddingLeft, 0, target.paddingRight, target.paddingBottom)
-            }
-            target.requestApplyInsets()
-        }
-        state.applied = true
-        if (diagnosedWrappers.put(target, true) == null) {
-            HLog.i(
-                "[Hchat:$TAG] 状态栏诊断: wrapper=${target.javaClass.name} " +
-                    "padding=${target.paddingLeft},${target.paddingTop},${target.paddingRight},${target.paddingBottom} " +
-                    "strategyMethod=${findMethod(target.javaClass, "setStatusBarStrategy", 1) != null} " +
-                    "colorMethod=${findMethod(target.javaClass, "setStatusBarColor", 1) != null} " +
-                    "backgroundColorMethod=${findMethod(target.javaClass, "setStatusBarBackgroundColor", 1) != null}"
-            )
-        }
-    }
-
-    private fun restoreWrappers() {
-        wrapperStates.forEach { (view, state) ->
-            if (!state.applied) return@forEach
-            view.background = state.background
-            view.setPadding(state.left, state.top, state.right, state.bottom)
-            runCatching {
-                view.javaClass.methods.firstOrNull {
-                    it.name == "setStatusBarBackgroundColor" && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
-                }?.invoke(view, state.backgroundColor)
-            }
-        }
-        wrapperStates.clear()
-    }
-
     private fun restore(layout: ViewGroup) {
-        originalLayoutPaddingTops.remove(layout)?.let { top ->
-            layout.setPadding(layout.paddingLeft, top, layout.paddingRight, layout.paddingBottom)
-        }
         headersByLayout.remove(layout)?.let(::restoreView)
         headerZoneStates.remove(layout)?.originalMargins?.forEach { (view, margins) ->
             val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
@@ -746,7 +661,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         states.keys.toList().forEach(::restoreView)
         headerZoneStates.keys.toList().forEach { layout -> restore(layout as? ViewGroup ?: return@forEach) }
         headersByLayout.clear()
-        restoreWrappers()
         contentCardTranslations.forEach { (view, translation) -> view.translationY = translation }
         contentCardTranslations.clear()
         tipsCardStates.forEach { (view, state) ->
@@ -799,138 +713,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         tipsLayoutListeners.clear()
         tipsGroups.clear()
         diagnosedTipsGroups.clear()
-        windowFocusListeners.keys.toList().forEach(::removeWindowFocusTracking)
-        restoreWindowStates()
     }
-    private fun consumeStatusBarPadding(layout: View) {
-        val inset = statusBarInset(layout)
-        if (inset <= 0 || layout.paddingTop < inset) return
-        if (!originalLayoutPaddingTops.containsKey(layout)) {
-            originalLayoutPaddingTops[layout] = layout.paddingTop
-        }
-        layout.setPadding(
-            layout.paddingLeft,
-            (layout.paddingTop - inset).coerceAtLeast(0),
-            layout.paddingRight,
-            layout.paddingBottom
-        )
-    }
-
-    private fun ensureWindowFocusTracking(layout: ViewGroup) {
-        if (windowFocusListeners[layout] != null) return
-        val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
-            if (!hasFocus || !layout.isAttachedToWindow || !isEnabled()) return@OnWindowFocusChangeListener
-            if (visibleChatLayout(layout) !== layout) {
-                releaseWindowForLayout(layout)
-                return@OnWindowFocusChangeListener
-            }
-            applyTopTransparency(layout)
-            clearDecorStatusBarBackground(layout.rootView)
-            clearStatusBarWrapper(layout)
-            layout.postOnAnimation { apply(layout) }
-        }
-        windowFocusListeners[layout] = listener
-        layout.viewTreeObserver.addOnWindowFocusChangeListener(listener)
-    }
-
-    private fun removeWindowFocusTracking(layout: ViewGroup) {
-        val listener = windowFocusListeners.remove(layout) ?: return
-        runCatching {
-            if (layout.viewTreeObserver.isAlive) {
-                layout.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
-            }
-        }
-    }
-
-    private fun applyTopTransparency(layout: View) {
-        val activity = layout.context.activityOrNull()
-            ?: layout.rootView.context.activityOrNull()
-            ?: return
-        layoutActivities[layout as? ViewGroup ?: return] = activity
-        val state = windowStates.getOrPut(activity) {
-            val window = activity.window
-            WindowState(window.decorView.systemUiVisibility, window.statusBarColor)
-        }
-        val window = activity.window
-        window.decorView.systemUiVisibility =
-            window.decorView.systemUiVisibility or TOP_IMMERSIVE_FLAGS
-        window.statusBarColor = Color.TRANSPARENT
-        clearDecorStatusBarBackground(window.decorView)
-        state.applied = true
-    }
-
-    private fun clearDecorStatusBarBackground(decor: View) {
-        val id = decor.resources.getIdentifier("statusBarBackground", "id", "android")
-        if (id == 0) return
-        val statusView = decor.findViewById<View>(id) ?: return
-        if (!decorStatusBarStates.containsKey(statusView)) {
-            decorStatusBarStates[statusView] = DecorStatusBarState(statusView.background, statusView.alpha)
-        }
-        statusView.setBackgroundColor(Color.TRANSPARENT)
-        statusView.alpha = 0f
-    }
-
-    private fun releaseWindowForLayout(layout: ViewGroup) {
-        val activity = layoutActivities.remove(layout) ?: return
-        val hasVisibleChat = layoutActivities.any { (other, owner) ->
-            owner === activity && other !== layout && other.isAttachedToWindow && visibleChatLayout(other) === other
-        }
-        if (!hasVisibleChat) restoreWindowState(activity)
-    }
-
-    private fun restoreWindowState(activity: Activity) {
-        val state = windowStates.remove(activity) ?: return
-        val window = activity.window
-        if (state.applied) {
-            window.decorView.systemUiVisibility =
-                (window.decorView.systemUiVisibility and TOP_IMMERSIVE_FLAGS.inv()) or
-                    (state.systemUiVisibility and TOP_IMMERSIVE_FLAGS)
-            if (window.statusBarColor == Color.TRANSPARENT) {
-                window.statusBarColor = state.statusBarColor
-            }
-        }
-        val decor = window.decorView
-        decorStatusBarStates.entries.toList().forEach { (view, decorState) ->
-            if (view.rootView === decor) {
-                view.background = decorState.background
-                view.alpha = decorState.alpha
-                decorStatusBarStates.remove(view)
-            }
-        }
-    }
-
-    private fun restoreWindowStates() {
-        windowStates.keys.toList().forEach(::restoreWindowState)
-        layoutActivities.clear()
-        decorStatusBarStates.forEach { (view, state) ->
-            view.background = state.background
-            view.alpha = state.alpha
-        }
-        decorStatusBarStates.clear()
-    }
-
-    private fun Context.activityOrNull(): Activity? {
-        var current: Context? = this
-        val visited = HashSet<Context>()
-        while (current != null && visited.add(current)) {
-            if (current is Activity) return current
-            current = (current as? ContextWrapper)?.baseContext
-        }
-        return null
-    }
-
-    private fun findMethod(type: Class<*>, name: String, parameterCount: Int): Method? {
-        var current: Class<*>? = type
-        while (current != null) {
-            current.declaredMethods.firstOrNull { it.name == name && it.parameterTypes.size == parameterCount }?.let {
-                it.isAccessible = true
-                return it
-            }
-            current = current.superclass
-        }
-        return null
-    }
-
     private fun statusBarInset(layout: View): Int {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return 0
         return layout.rootWindowInsets?.getInsets(WindowInsets.Type.statusBars())?.top ?: 0
@@ -947,17 +730,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
     private class HeaderLayoutTracker(
         var preDraw: android.view.ViewTreeObserver.OnPreDrawListener? = null
-    )
-
-    private data class DecorStatusBarState(
-        val background: Drawable?,
-        val alpha: Float
-    )
-
-    private data class WindowState(
-        val systemUiVisibility: Int,
-        val statusBarColor: Int,
-        var applied: Boolean = false
     )
 
     private data class TipsCardState(
@@ -978,16 +750,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
 
     private data class HeaderZoneState(
         val originalMargins: MutableMap<View, IntArray> = WeakHashMap()
-    )
-
-    private data class WrapperState(
-        val background: Drawable?,
-        val left: Int,
-        val top: Int,
-        val right: Int,
-        val bottom: Int,
-        val backgroundColor: Int = (background as? android.graphics.drawable.ColorDrawable)?.color ?: Color.TRANSPARENT,
-        var applied: Boolean = false
     )
 
     private data class HeaderState(
@@ -1027,13 +789,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
     companion object {
         private const val TAG = "悬浮标题栏"
-        private const val TOP_IMMERSIVE_FLAGS =
-            View.SYSTEM_UI_FLAG_LAYOUT_STABLE or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
         private const val SIDE_MARGIN_DP = 12
         private const val TOP_GAP_DP = 4
         private const val CARD_GAP_DP = 8
         private const val CARD_CORNER_RADIUS_DP = 24
-        private const val EDGE_TO_EDGE_WRAPPER_CLASS = "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout"
         private const val CHATTING_CONTENT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingContent"
         private const val TIPS_BAR_GROUP_CLASS = "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup"
         private const val TIPS_RECYCLER_CLASS = "com.tencent.mm.view.recyclerview.MaxHeightWxRecyclerView"
