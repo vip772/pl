@@ -540,2924 +540,99 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.random.Random
 
-internal val pluginMarketBeijingTimeFormatter: DateTimeFormatter =
-    DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss", Locale.CHINA)
-        .withZone(ZoneId.of("Asia/Shanghai"))
-
-internal fun formatPluginMarketTime(value: String): String {
-    val source = value.trim()
-    if (source.isEmpty()) return "时间未知"
-    val instant = runCatching { Instant.parse(source) }
-        .recoverCatching { OffsetDateTime.parse(source, DateTimeFormatter.ISO_DATE_TIME).toInstant() }
-        .recoverCatching {
-            LocalDateTime.parse(source, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                .toInstant(ZoneOffset.UTC)
-        }
-        .getOrNull()
-        ?: return source
-    return pluginMarketBeijingTimeFormatter.format(instant)
-}
-
-internal object ScriptPluginAgentUi {
-
-internal data class ScriptPluginAgentPendingWrite(
-    val messageIndex: Int,
-    val draft: ScriptPluginAgentDraft,
-    val diff: String,
-    val isNewPlugin: Boolean,
-    val confirmsCreation: Boolean,
-    val risky: Boolean
-)
-
-internal data class ScriptPluginAgentPendingDelete(
-    val messageIndex: Int,
-    val pluginId: String,
-    val pluginName: String
-)
-
-internal data class ScriptPluginAgentPendingWorkspaceChange(
-    val messageIndex: Int,
-    val change: ScriptPluginAgentWorkspaceChange,
-    val isNewPlugin: Boolean,
-    val hasDeletedPaths: Boolean,
-    val risky: Boolean,
-    val applyError: String = ""
-)
-
-internal class ScriptPluginAgentWorkspaceToolApproval(
-    val confirmation: ScriptPluginAgentWorkspaceToolConfirmation
-) {
-    private val decision = AtomicReference<ScriptPluginAgentWorkspaceWriteDecision?>(null)
-    private val latch = CountDownLatch(1)
-
-    fun resolve(value: ScriptPluginAgentWorkspaceWriteDecision) {
-        if (decision.compareAndSet(null, value)) latch.countDown()
-    }
-
-    fun await(cancellation: ScriptPluginAgentCancellation): ScriptPluginAgentWorkspaceWriteDecision {
-        while (!latch.await(200L, TimeUnit.MILLISECONDS)) cancellation.throwIfCancelled()
-        cancellation.throwIfCancelled()
-        return decision.get() ?: ScriptPluginAgentWorkspaceWriteDecision.CANCEL
-    }
-}
-
-internal data class ScriptPluginAgentPendingMessage(
-    val id: Long,
-    val content: String,
-    val attachments: List<ScriptPluginAgentAttachment>,
-    val quotedMessage: ScriptPluginAgentQuotedMessage?
-)
-
-internal data class ScriptPluginAgentRenderedMessage(
-    val sourceIndex: Int,
-    val message: ScriptPluginAgentChatMessage
-)
-
-internal class ScriptPluginAgentSessionRuntimeState(session: ScriptPluginAgentSession) {
-    val id = session.id
-    val title = mutableStateOf(session.title)
-    val createdAt = mutableStateOf(session.createdAt)
-    val messages = mutableStateOf(session.messages)
-    val draft = mutableStateOf(session.draft)
-    val targetPluginId = mutableStateOf(session.targetPluginId)
-    val workspaceSessionId = mutableStateOf(session.id)
-    val conversationSummary = mutableStateOf(session.conversationSummary)
-    val nativeToolHistory = mutableStateOf(session.nativeToolHistory)
-    val protocolTranscript = mutableStateOf(session.protocolTranscript)
-    val compactedMessageCount = mutableStateOf(session.compactedMessageCount)
-    val pinned = mutableStateOf(session.pinned)
-    val locked = mutableStateOf(session.locked)
-    val sortOrder = mutableStateOf(session.sortOrder)
-    val resumeState = mutableStateOf(session.resumeState)
-    val messageInput = mutableStateOf("")
-    val pendingAttachments = mutableStateOf<List<ScriptPluginAgentAttachment>>(emptyList())
-    val pendingQuotedMessage = mutableStateOf<ScriptPluginAgentQuotedMessage?>(null)
-    val pendingMessages = mutableStateOf<List<ScriptPluginAgentPendingMessage>>(emptyList())
-    val pendingMessagesExpanded = mutableStateOf(true)
-    val nextPendingMessageId = mutableStateOf(1L)
-    val generating = mutableStateOf(false)
-    val generationStartedAt = mutableStateOf(0L)
-    val generationHasVisibleReply = mutableStateOf(false)
-    val contextCompacting = mutableStateOf(false)
-    val contextCompactionStartedAt = mutableStateOf(0L)
-    val applyingFileOperation = mutableStateOf(false)
-    val pendingWrite = mutableStateOf<ScriptPluginAgentPendingWrite?>(null)
-    val pendingDelete = mutableStateOf<ScriptPluginAgentPendingDelete?>(null)
-    val pendingWorkspaceChange = mutableStateOf<ScriptPluginAgentPendingWorkspaceChange?>(null)
-    val pendingToolApproval = mutableStateOf<ScriptPluginAgentWorkspaceToolApproval?>(null)
-    val showPendingWorkspaceDialog = mutableStateOf(false)
-    val showPendingWriteDialog = mutableStateOf(false)
-    val showPendingDeleteDialog = mutableStateOf(false)
-    val showToolApprovalDialog = mutableStateOf(false)
-    val activeGenerationId = mutableStateOf("")
-    val activeAssistantIndex = mutableStateOf(-1)
-    val activeCancellation = mutableStateOf<ScriptPluginAgentCancellation?>(null)
-    private val lastSnapshotAt = AtomicLong(session.updatedAt)
-    private val checkpointSeq = AtomicLong(session.checkpointSeq)
-
-    fun snapshot(updatedAt: Long = nextSnapshotAt()): ScriptPluginAgentSession {
-        val workspaceBelongsToSession = workspaceSessionId.value == id
-        return ScriptPluginAgentSession(
-            id = id,
-            title = title.value,
-            createdAt = createdAt.value,
-            updatedAt = updatedAt,
-            messages = messages.value,
-            draft = draft.value.takeIf { workspaceBelongsToSession },
-            targetPluginId = targetPluginId.value.takeIf { workspaceBelongsToSession }.orEmpty(),
-            conversationSummary = conversationSummary.value,
-            nativeToolHistory = nativeToolHistory.value,
-            protocolTranscript = protocolTranscript.value,
-            compactedMessageCount = compactedMessageCount.value.coerceIn(0, messages.value.size),
-            pinned = pinned.value,
-            locked = locked.value,
-            sortOrder = sortOrder.value,
-            resumeState = resumeState.value,
-            checkpointSeq = checkpointSeq.incrementAndGet()
-        )
-    }
-
-    private fun nextSnapshotAt(): Long {
-        return lastSnapshotAt.updateAndGet { previous ->
-            maxOf(System.currentTimeMillis(), previous + 1L)
-        }
-    }
-
-    fun isBusy(): Boolean {
-        return isWorking() ||
-            pendingToolApproval.value != null || pendingWorkspaceChange.value != null ||
-            pendingWrite.value != null || pendingDelete.value != null
-    }
-
-    fun isWorking(): Boolean {
-        return generating.value || contextCompacting.value || applyingFileOperation.value
-    }
-}
-
-internal class ScriptPluginAgentSessionCheckpointSaver(
-    context: Context,
-    private val state: ScriptPluginAgentSessionRuntimeState
-) {
-    private val appContext = context.applicationContext ?: context
-    private val handler = Handler(Looper.getMainLooper())
-    private var scheduled = false
-    private var lastQueuedAt = 0L
-    private val saveRunnable = Runnable {
-        scheduled = false
-        persist()
-    }
-
-    fun schedule(force: Boolean = false) {
-        val now = SystemClock.uptimeMillis()
-        if (force || now - lastQueuedAt >= 600L) {
-            handler.removeCallbacks(saveRunnable)
-            scheduled = false
-            persist()
-            return
-        }
-        if (!scheduled) {
-            scheduled = true
-            handler.postDelayed(saveRunnable, (600L - (now - lastQueuedAt)).coerceAtLeast(1L))
-        }
-    }
-
-    private fun persist() {
-        if (!ScriptPluginAgentSessionStore.hasConversation(state.messages.value)) return
-        lastQueuedAt = SystemClock.uptimeMillis()
-        ScriptPluginAgentSessionStore.saveAsync(appContext, state.snapshot())
-    }
-}
-
-internal object ScriptPluginAgentRuntime {
-    private val sessions = java.util.concurrent.ConcurrentHashMap<String, ScriptPluginAgentSessionRuntimeState>()
-
-    @Volatile
-    private var resumeSessionId: String? = null
-
-    fun createSession(): ScriptPluginAgentSessionRuntimeState {
-        return stateFor(ScriptPluginAgentSessionStore.newSession())
-    }
-
-    fun stateFor(session: ScriptPluginAgentSession): ScriptPluginAgentSessionRuntimeState {
-        return sessions.computeIfAbsent(session.id) { ScriptPluginAgentSessionRuntimeState(session) }
-    }
-
-    fun consumeResumeSession(context: Context): ScriptPluginAgentSessionRuntimeState? {
-        val id = resumeSessionId
-        resumeSessionId = null
-        if (id != null) {
-            return sessions[id] ?: ScriptPluginAgentSessionStore.load(context, id)?.let(::stateFor)
-        }
-        val interrupted = ScriptPluginAgentSessionStore.list(context).firstOrNull { session ->
-            val checkpoint = session.resumeState?.takeIf { it.autoOpen } ?: return@firstOrNull false
-            session.messages.any { message ->
-                message.turnId == checkpoint.turnId &&
-                    (message.status == "interrupted" || message.status == "error" ||
-                        message.toolEvents.any { it.status == "interrupted" })
-            }
-        }
-        return interrupted?.let(::stateFor)
-    }
-
-    fun resumeOnNextEntry(sessionId: String) {
-        resumeSessionId = sessionId
-    }
-
-    fun snapshots(): List<ScriptPluginAgentSession> {
-        return sessions.values
-            .map { it.snapshot() }
-            .filter { ScriptPluginAgentSessionStore.hasConversation(it.messages) }
-    }
-
-    fun isBusy(sessionId: String): Boolean {
-        return sessions[sessionId]?.isBusy() == true
-    }
-
-    fun workingSessionIds(): Set<String> {
-        return sessions.values
-            .filter { it.isWorking() }
-            .mapTo(LinkedHashSet()) { it.id }
-    }
-
-    fun updateMetadata(session: ScriptPluginAgentSession) {
-        sessions[session.id]?.let { state ->
-            state.title.value = session.title
-            state.pinned.value = session.pinned
-            state.locked.value = session.locked
-            state.sortOrder.value = session.sortOrder
-        }
-    }
-
-    fun remove(sessionId: String) {
-        sessions.remove(sessionId)
-        if (resumeSessionId == sessionId) resumeSessionId = null
-    }
-}
-
 @Composable
-fun ScriptPluginAgentWorkspacePage(
-    context: Context,
+internal fun ScheduledTaskMainPage(
+    provider: FeatureSettingsProvider,
+    enabled: Boolean,
+    tasks: List<ScheduledTaskItem>,
+    listState: LazyListState,
     onBack: () -> Unit,
-    onExitHandlerChanged: ((() -> Unit)?) -> Unit
+    onEnabledChange: (Boolean) -> Unit,
+    onAdd: () -> Unit,
+    onEdit: (ScheduledTaskItem) -> Unit
 ) {
-    val initialSessionState = remember(context) {
-        ScriptPluginAgentRuntime.consumeResumeSession(context) ?: ScriptPluginAgentRuntime.createSession()
-    }
-    var activeSessionState by remember { mutableStateOf(initialSessionState) }
-    val renderedSessionState = activeSessionState
-    val activeSessionId = renderedSessionState.id
-    var sessionTitle by renderedSessionState.title
-    var sessionMessages by renderedSessionState.messages
-    var sessionDraft by renderedSessionState.draft
-    var targetPluginId by renderedSessionState.targetPluginId
-    var workspaceSessionId by renderedSessionState.workspaceSessionId
-    var conversationSummary by renderedSessionState.conversationSummary
-    var nativeToolHistory by renderedSessionState.nativeToolHistory
-    var protocolTranscript by renderedSessionState.protocolTranscript
-    var compactedMessageCount by renderedSessionState.compactedMessageCount
-    var sessionPinned by renderedSessionState.pinned
-    var sessionLocked by renderedSessionState.locked
-    var sessionSortOrder by renderedSessionState.sortOrder
-    var resumeState by renderedSessionState.resumeState
-    var messageInput by renderedSessionState.messageInput
-    var pendingAttachments by renderedSessionState.pendingAttachments
-    var pendingQuotedMessage by renderedSessionState.pendingQuotedMessage
-    var pendingMessages by renderedSessionState.pendingMessages
-    var pendingMessagesExpanded by renderedSessionState.pendingMessagesExpanded
-    var nextPendingMessageId by renderedSessionState.nextPendingMessageId
-    val initialProfile = remember(context) { ScriptPluginAgentSettings.loadActiveProfile(context) }
-    val savedConfig = initialProfile.config
-    var activeProfileId by remember { mutableStateOf(initialProfile.id) }
-    var activeProfileName by remember { mutableStateOf(initialProfile.name) }
-    var apiBase by remember { mutableStateOf(savedConfig.apiBaseUrl) }
-    var endpointMode by remember { mutableStateOf(savedConfig.endpointMode) }
-    var apiKey by remember { mutableStateOf(savedConfig.apiKey) }
-    var model by remember { mutableStateOf(savedConfig.model) }
-    var mcpServers by remember { mutableStateOf(savedConfig.mcpServers) }
-    var autoCompactEnabled by remember { mutableStateOf(savedConfig.autoCompactEnabled) }
-    var webSearchEnabled by remember { mutableStateOf(savedConfig.webSearchEnabled) }
-    var workspaceWriteApprovalMode by remember { mutableStateOf(savedConfig.workspaceWriteApprovalMode) }
-    var promptCacheMode by remember { mutableStateOf(savedConfig.promptCacheMode) }
-    var compactTokenThreshold by remember { mutableStateOf(savedConfig.compactTokenThreshold.toString()) }
-    var showHistory by remember { mutableStateOf(false) }
-    var showConfig by remember { mutableStateOf(false) }
-    var showModelPicker by remember { mutableStateOf(false) }
-    var showQuickProfilePicker by remember { mutableStateOf(false) }
-    var showQuickOptions by remember { mutableStateOf(false) }
-    var generating by renderedSessionState.generating
-    var generationStartedAt by renderedSessionState.generationStartedAt
-    var generationHasVisibleReply by renderedSessionState.generationHasVisibleReply
-    var contextCompacting by renderedSessionState.contextCompacting
-    var contextCompactionStartedAt by renderedSessionState.contextCompactionStartedAt
-    var applyingFileOperation by renderedSessionState.applyingFileOperation
-    var pendingWrite by renderedSessionState.pendingWrite
-    var pendingDelete by renderedSessionState.pendingDelete
-    var pendingWorkspaceChange by renderedSessionState.pendingWorkspaceChange
-    var pendingToolApproval by renderedSessionState.pendingToolApproval
-    var showPendingWorkspaceDialog by renderedSessionState.showPendingWorkspaceDialog
-    var showPendingWriteDialog by renderedSessionState.showPendingWriteDialog
-    var showPendingDeleteDialog by renderedSessionState.showPendingDeleteDialog
-    var showToolApprovalDialog by renderedSessionState.showToolApprovalDialog
-    var testingConnection by remember { mutableStateOf(false) }
-    var activeGenerationId by renderedSessionState.activeGenerationId
-    var activeAssistantIndex by renderedSessionState.activeAssistantIndex
-    var activeCancellation by renderedSessionState.activeCancellation
-    var historyVersion by remember { mutableStateOf(0) }
-    var profileVersion by remember { mutableStateOf(0) }
-    val sessions = remember(historyVersion, showHistory) {
-        if (showHistory) ScriptPluginAgentSessionStore.list(context) else emptyList()
-    }
-    val profiles = remember(profileVersion) { ScriptPluginAgentSettings.loadProfiles(context) }
-    val checkpointSaver = remember(renderedSessionState) {
-        ScriptPluginAgentSessionCheckpointSaver(context, renderedSessionState)
-    }
-    val exitPrepared = remember { AtomicBoolean(false) }
-
-    fun hasPendingConfirmation(): Boolean {
-        return pendingToolApproval != null ||
-            pendingWorkspaceChange != null ||
-            pendingWrite != null ||
-            pendingDelete != null
-    }
-
-    fun showPendingConfirmation(): Boolean {
-        when {
-            pendingToolApproval != null -> showToolApprovalDialog = true
-            pendingWorkspaceChange != null -> showPendingWorkspaceDialog = true
-            pendingWrite != null -> showPendingWriteDialog = true
-            pendingDelete != null -> showPendingDeleteDialog = true
-            else -> return false
-        }
-        return true
-    }
-
-    fun saveCurrentSession() {
-        if (!ScriptPluginAgentSessionStore.hasConversation(sessionMessages)) {
-            val emptySessionId = activeSessionId
-            ScriptPluginAgentRuntime.remove(emptySessionId)
-            Thread({
-                runCatching {
-                    ScriptPluginAgentSessionStore.discardEmptySession(context, emptySessionId)
-                }.onFailure { error ->
-                    h.Hchat.utils.HLog.e(
-                        "[Hchat:ScriptAgent] 清理空会话失败: $emptySessionId",
-                        error
-                    )
-                }
-            }, "Hchat-Agent-Empty-Session-Delete").start()
-            return
-        }
-        ScriptPluginAgentSessionStore.revive(activeSessionId)
-        ScriptPluginAgentSessionStore.saveAsync(context, renderedSessionState.snapshot())
-        historyVersion++
-    }
-
-    fun openSession(session: ScriptPluginAgentSession, saveCurrent: Boolean = true) {
-        if (saveCurrent) {
-            if (!generating) {
-                resumeState = resumeState?.copy(autoOpen = false, updatedAt = System.currentTimeMillis())
-            }
-            saveCurrentSession()
-        }
-        activeSessionState = ScriptPluginAgentRuntime.stateFor(session)
-        showConfig = false
-        showModelPicker = false
-        showQuickProfilePicker = false
-        showQuickOptions = false
-        showHistory = false
-    }
-
-    fun newSession(saveCurrent: Boolean = true) {
-        if (saveCurrent) {
-            if (!generating) {
-                resumeState = resumeState?.copy(autoOpen = false, updatedAt = System.currentTimeMillis())
-            }
-            saveCurrentSession()
-        }
-        activeSessionState = ScriptPluginAgentRuntime.createSession()
-        showConfig = false
-        showModelPicker = false
-        showQuickProfilePicker = false
-        showQuickOptions = false
-        showHistory = false
-    }
-
-    fun currentConfig(): ScriptPluginAgentConfig {
-        return ScriptPluginAgentConfig(
-            apiBaseUrl = ScriptPluginAgentSettings.normalizedApiAddress(apiBase, endpointMode),
-            apiPath = "",
-            apiKey = apiKey.trim(),
-            model = model.trim(),
-            mcpServers = mcpServers,
-            autoCompactEnabled = autoCompactEnabled,
-            compactTokenThreshold = compactTokenThreshold.toIntOrNull()
-                ?.coerceIn(2_000, 1_000_000)
-                ?: ScriptPluginAgentSettings.DEFAULT_COMPACT_TOKEN_THRESHOLD,
-            webSearchEnabled = webSearchEnabled,
-            workspaceWriteApprovalMode = workspaceWriteApprovalMode,
-            promptCacheMode = promptCacheMode,
-            endpointMode = endpointMode
-        )
-    }
-
-    fun endpointError(config: ScriptPluginAgentConfig): String {
-        if (ScriptPluginAgentSettings.isValidRequestUrl(config)) return ""
-        return if (config.endpointMode == ScriptPluginAgentSettings.ENDPOINT_MODE_CUSTOM_URL) {
-            "请填写完整的 HTTP(S) 请求链接"
-        } else {
-            "API 地址无效"
-        }
-    }
-
-    fun applyProfile(profile: ScriptPluginAgentProfile) {
-        activeProfileId = profile.id
-        activeProfileName = profile.name
-        apiBase = profile.config.apiBaseUrl
-        endpointMode = profile.config.endpointMode
-        apiKey = profile.config.apiKey
-        model = profile.config.model
-        mcpServers = profile.config.mcpServers
-        autoCompactEnabled = profile.config.autoCompactEnabled
-        webSearchEnabled = profile.config.webSearchEnabled
-        workspaceWriteApprovalMode = profile.config.workspaceWriteApprovalMode
-        promptCacheMode = profile.config.promptCacheMode
-        compactTokenThreshold = profile.config.compactTokenThreshold.toString()
-    }
-
-    fun selectAttachments() {
-        if (applyingFileOperation) return
-        val activity = context as? Activity
-        if (activity == null) {
-            Toast.makeText(context, "当前页面无法打开文件选择器", Toast.LENGTH_SHORT).show()
-            return
-        }
-        ScriptPluginAgentAttachmentPickerBridge.launch(
-            activity,
-            ScriptPluginAgentSessionStore.attachmentDir(context, activeSessionId)
-        ) { selected ->
-            val retained = (pendingAttachments + selected)
-                .distinctBy { it.sourceUri.ifBlank { it.path } }
-                .take(12)
-            val retainedPaths = retained.mapTo(HashSet()) { it.path }
-            ScriptPluginAgentSessionStore.cleanupAttachments(
-                context,
-                selected.filterNot { it.path in retainedPaths }
-            )
-            pendingAttachments = retained
-        }
-    }
-
-    fun cancelGeneration() {
-        val cancellation = activeCancellation ?: return
-        val cancelledTurnId = activeGenerationId
-        pendingToolApproval?.resolve(ScriptPluginAgentWorkspaceWriteDecision.CANCEL)
-        pendingToolApproval = null
-        showToolApprovalDialog = false
-        cancellation.cancel()
-        resumeState = resumeState?.copy(autoOpen = false, updatedAt = System.currentTimeMillis())
-        val indices = if (activeAssistantIndex in sessionMessages.indices) {
-            setOf(activeAssistantIndex)
-        } else {
-            sessionMessages.indices.filter { sessionMessages[it].turnId == activeGenerationId }.toSet()
-        }
-        if (indices.isNotEmpty()) {
-            val interruptedAt = System.currentTimeMillis()
-            sessionMessages = sessionMessages.toMutableList().also { messages ->
-                indices.forEach { index ->
-                    val current = messages[index]
-                    messages[index] = current.copy(
-                        status = "interrupted",
-                        completedAt = interruptedAt,
-                        progress = mergeScriptPluginAgentProgress(current.progress, "已中断"),
-                        toolEvents = current.toolEvents.map { event ->
-                            if (event.status == "running" || event.status == "queued") {
-                                event.copy(
-                                    status = "interrupted",
-                                    progress = "已中断",
-                                    finishedAt = interruptedAt
-                                )
-                            } else {
-                                event
-                            }
-                        }
-                    )
-                }
-            }
-            nativeToolHistory = ScriptPluginAgentToolResultStore.rebuildNativeToolHistory(
-                context,
-                ScriptPluginAgentContext.modelMessagesForTurn(
-                    sessionMessages.drop(compactedMessageCount.coerceIn(0, sessionMessages.size)),
-                    cancelledTurnId
-                )
-            )
-        }
-        checkpointSaver.schedule(force = true)
-        activeCancellation = null
-        activeGenerationId = ""
-        activeAssistantIndex = -1
-        generating = false
-        contextCompacting = false
-        contextCompactionStartedAt = 0L
-        generationStartedAt = 0L
-        generationHasVisibleReply = false
-    }
-
-    fun recordFileOperation(messageIndex: Int, progress: String) {
-        val current = sessionMessages.getOrNull(messageIndex) ?: return
-        sessionMessages = sessionMessages.toMutableList().also {
-            it[messageIndex] = current.copy(
-                progress = mergeScriptPluginAgentProgress(current.progress, progress),
-                status = "complete"
-            )
-        }
-        saveCurrentSession()
-    }
-
-    fun appendWorkspaceStatusMessage(
-        messageIndex: Int,
-        content: String,
-        progress: String = "",
-        draftSnapshot: ScriptPluginAgentDraft? = null,
-        clearsDraft: Boolean = false
-    ) {
-        val source = sessionMessages.getOrNull(messageIndex) ?: return
-        val now = System.currentTimeMillis()
-        sessionMessages = sessionMessages + ScriptPluginAgentChatMessage(
-            role = "assistant",
-            content = content,
-            turnId = source.turnId,
-            parentMessageId = source.id,
-            phase = "workspace_status",
-            progress = progress,
-            status = "complete",
-            draftSnapshot = draftSnapshot,
-            clearsDraft = clearsDraft,
-            createdAt = now,
-            completedAt = now
-        )
-        saveCurrentSession()
-    }
-
-    fun applyWorkspaceChange(messageIndex: Int, change: ScriptPluginAgentWorkspaceChange) {
-        if (applyingFileOperation) return
-        applyingFileOperation = true
-        recordFileOperation(
-            messageIndex,
-            if (change.deletePlugin) "正在删除插件: ${change.pluginId}" else "正在提交插件工作区变更"
-        )
-        Thread({
-            val result = ScriptPluginAgentWorkspaceTools.apply(context, change)
-            Handler(Looper.getMainLooper()).post {
-                applyingFileOperation = false
-                result.onSuccess {
-                    resumeState = null
-                    val nextDraft = change.draft
-                    val clearsCurrentDraft = change.deletePlugin &&
-                        (sessionDraft?.pluginId.equals(change.pluginId, ignoreCase = true) ||
-                            targetPluginId.equals(change.pluginId, ignoreCase = true))
-                    if (clearsCurrentDraft) {
-                        sessionDraft = null
-                        targetPluginId = ""
-                    } else if (nextDraft != null) {
-                        sessionDraft = nextDraft
-                        targetPluginId = nextDraft.pluginId
-                    }
-                    appendWorkspaceStatusMessage(
-                        messageIndex = messageIndex,
-                        content = when {
-                            change.deletePlugin -> "插件已删除。"
-                            change.existed -> "插件修改已提交到真实插件目录。"
-                            else -> "插件已创建并写入真实插件目录。"
-                        },
-                        progress = when {
-                            change.deletePlugin -> "已删除插件: ${change.pluginId}"
-                            change.existed -> "已更新插件: ${change.pluginId}"
-                            else -> "已创建插件: ${change.pluginId}"
-                        },
-                        draftSnapshot = sessionDraft,
-                        clearsDraft = clearsCurrentDraft
-                    )
-                    Toast.makeText(
-                        context,
-                        when {
-                            change.deletePlugin -> "插件已删除"
-                            change.existed -> "插件已更新，当前为禁用状态"
-                            else -> "插件已创建，当前为禁用状态"
-                        },
-                        Toast.LENGTH_LONG
-                    ).show()
-                }.onFailure { error ->
-                    val reason = error.message ?: "未知错误"
-                    pendingWorkspaceChange = ScriptPluginAgentPendingWorkspaceChange(
-                        messageIndex = messageIndex,
-                        change = change,
-                        isNewPlugin = !change.existed,
-                        hasDeletedPaths = change.deletePlugin || change.deletedPaths.isNotEmpty(),
-                        risky = change.warnings.any { it.risky },
-                        applyError = reason
-                    )
-                    showPendingWorkspaceDialog = true
-                    appendWorkspaceStatusMessage(
-                        messageIndex = messageIndex,
-                        content = "插件修改尚未提交：$reason",
-                        progress = "提交失败，暂存变更已保留，可直接重试"
-                    )
-                    Toast.makeText(context, "$reason\n暂存修改已保留，可直接重试", Toast.LENGTH_LONG).show()
-                }
-            }
-        }, "Hchat-Script-Agent-Workspace-Apply").start()
-    }
-
-    fun prepareWorkspaceChange(
-        messageIndex: Int,
-        change: ScriptPluginAgentWorkspaceChange,
-        requireConfirmation: Boolean
-    ) {
-        appendWorkspaceStatusMessage(
-            messageIndex = messageIndex,
-            content = if (change.deletePlugin) {
-                "插件删除操作已暂存，尚未提交。"
-            } else {
-                "插件修改已暂存，尚未写入真实插件目录。"
-            }
-        )
-        if (!requireConfirmation) {
-            applyWorkspaceChange(messageIndex, change)
-            return
-        }
-        val isNewPlugin = !change.existed
-        val hasDeletedPaths = change.deletePlugin || change.deletedPaths.isNotEmpty()
-        val risky = change.warnings.any { it.risky }
-        pendingWorkspaceChange = ScriptPluginAgentPendingWorkspaceChange(
-            messageIndex = messageIndex,
-            change = change,
-            isNewPlugin = isNewPlugin,
-            hasDeletedPaths = hasDeletedPaths,
-            risky = risky
-        )
-        showPendingWorkspaceDialog = true
-        recordFileOperation(
-            messageIndex,
-            when {
-                change.deletePlugin -> "等待确认删除插件"
-                isNewPlugin && risky -> "等待确认创建插件和高风险代码"
-                isNewPlugin -> "等待确认创建插件"
-                hasDeletedPaths && risky -> "等待确认删除路径和高风险代码"
-                hasDeletedPaths -> "等待确认删除插件路径"
-                risky -> "等待确认高风险修改"
-                else -> "等待确认插件修改"
-            }
-        )
-    }
-
-    fun writeAgentDraft(messageIndex: Int, draft: ScriptPluginAgentDraft, isNewPlugin: Boolean) {
-        if (applyingFileOperation) return
-        applyingFileOperation = true
-        recordFileOperation(messageIndex, if (isNewPlugin) "正在创建插件" else "正在写入插件修改")
-        Thread({
-            val result = ScriptPluginAgentWriter.save(context, draft, overwrite = !isNewPlugin)
-            Handler(Looper.getMainLooper()).post {
-                applyingFileOperation = false
-                result.onSuccess {
-                    resumeState = null
-                    sessionDraft = draft
-                    targetPluginId = draft.pluginId
-                    val current = sessionMessages.getOrNull(messageIndex)
-                    if (current != null) {
-                        sessionMessages = sessionMessages.toMutableList().also { messages ->
-                            messages[messageIndex] = current.copy(
-                                progress = mergeScriptPluginAgentProgress(
-                                    current.progress,
-                                    if (isNewPlugin) "已创建插件: ${draft.pluginId}" else "已更新插件: ${draft.pluginId}"
-                                ),
-                                status = "complete",
-                                draftSnapshot = draft,
-                                clearsDraft = false
-                            )
-                        }
-                    }
-                    saveCurrentSession()
-                    Toast.makeText(
-                        context,
-                        if (isNewPlugin) "插件已创建，当前为禁用状态" else "插件已更新，当前为禁用状态",
-                        Toast.LENGTH_LONG
-                    ).show()
-                }.onFailure { error ->
-                    recordFileOperation(messageIndex, "写入失败: ${error.message ?: "未知错误"}")
-                    Toast.makeText(context, error.message ?: "写入插件失败", Toast.LENGTH_LONG).show()
-                }
-            }
-        }, "Hchat-Script-Agent-Write").start()
-    }
-
-    fun prepareAgentDraft(
-        messageIndex: Int,
-        draft: ScriptPluginAgentDraft,
-        modifyingExisting: Boolean,
-        requireConfirmation: Boolean
-    ) {
-        val validation = ScriptPluginAgentValidator.validate(draft)
-        if (!validation.canSave) {
-            val errors = validation.errors.joinToString("；") { it.message }
-            recordFileOperation(messageIndex, "静态检查未通过，未写入: $errors")
-            Toast.makeText(context, errors, Toast.LENGTH_LONG).show()
-            return
-        }
-        val isNewPlugin = !File(ScriptPluginRuntime.scriptDir(context), draft.pluginId).exists()
-        val confirmsCreation = isNewPlugin || !modifyingExisting
-        val risky = validation.warnings.any { it.risky }
-        if (!requireConfirmation) {
-            writeAgentDraft(messageIndex, draft, isNewPlugin)
-            return
-        }
-        pendingWrite = ScriptPluginAgentPendingWrite(
-            messageIndex = messageIndex,
-            draft = draft,
-            diff = sessionMessages.getOrNull(messageIndex)?.diff.orEmpty(),
-            isNewPlugin = isNewPlugin,
-            confirmsCreation = confirmsCreation,
-            risky = risky
-        )
-        showPendingWriteDialog = true
-        recordFileOperation(
-            messageIndex,
-            when {
-                isNewPlugin && risky -> "等待确认创建插件和高风险代码"
-                confirmsCreation && risky -> "等待确认替换同名插件和高风险代码"
-                isNewPlugin -> "等待确认创建插件"
-                confirmsCreation -> "等待确认替换同名插件"
-                risky -> "等待确认高风险代码"
-                else -> "等待确认插件修改"
-            }
-        )
-    }
-
-    fun deleteAgentPlugin(messageIndex: Int, pluginId: String) {
-        if (applyingFileOperation) return
-        applyingFileOperation = true
-        recordFileOperation(messageIndex, "正在删除插件: $pluginId")
-        Thread({
-            val result = ScriptPluginAgentWriter.delete(context, pluginId)
-            Handler(Looper.getMainLooper()).post {
-                applyingFileOperation = false
-                result.onSuccess {
-                    resumeState = null
-                    val clearsCurrentDraft = sessionDraft?.pluginId.equals(pluginId, ignoreCase = true) ||
-                        targetPluginId.equals(pluginId, ignoreCase = true)
-                    if (clearsCurrentDraft) {
-                        sessionDraft = null
-                        targetPluginId = ""
-                    }
-                    val current = sessionMessages.getOrNull(messageIndex)
-                    if (current != null) {
-                        sessionMessages = sessionMessages.toMutableList().also { messages ->
-                            messages[messageIndex] = current.copy(
-                                progress = mergeScriptPluginAgentProgress(current.progress, "已删除插件: $pluginId"),
-                                status = "complete",
-                                draftSnapshot = sessionDraft,
-                                clearsDraft = clearsCurrentDraft
-                            )
-                        }
-                    }
-                    saveCurrentSession()
-                    Toast.makeText(context, "插件已删除", Toast.LENGTH_LONG).show()
-                }.onFailure { error ->
-                    recordFileOperation(messageIndex, "删除失败: ${error.message ?: "未知错误"}")
-                    Toast.makeText(context, error.message ?: "删除插件失败", Toast.LENGTH_LONG).show()
-                }
-            }
-        }, "Hchat-Script-Agent-Delete").start()
-    }
-
-    fun preparePluginDelete(messageIndex: Int, requestedId: String, requireConfirmation: Boolean) {
-        val plugin = ScriptPluginRuntime.listPlugins(context).firstOrNull {
-            it.id.equals(requestedId.trim(), ignoreCase = true)
-        }
-        if (plugin == null) {
-            recordFileOperation(messageIndex, "未找到插件目录，未执行删除")
-            Toast.makeText(context, "未找到要删除的插件", Toast.LENGTH_LONG).show()
-            return
-        }
-        if (!requireConfirmation) {
-            deleteAgentPlugin(messageIndex, plugin.id)
-            return
-        }
-        pendingDelete = ScriptPluginAgentPendingDelete(
-            messageIndex = messageIndex,
-            pluginId = plugin.id,
-            pluginName = plugin.displayName ?: plugin.name
-        )
-        showPendingDeleteDialog = true
-        recordFileOperation(messageIndex, "等待确认删除插件: ${plugin.id}")
-    }
-
-    fun discardResumeWorkspace(state: ScriptPluginAgentResumeState? = resumeState) {
-        val checkpoint = state?.workspaceCheckpoint ?: return
-        Thread({
-            runCatching { ScriptPluginAgentWorkspaceTools.discard(context, checkpoint) }
-                .onFailure { error ->
-                    h.Hchat.utils.HLog.e("[Hchat:ScriptAgent] 清理恢复工作区失败", error)
-                }
-        }, "Hchat-Script-Agent-Workspace-Discard").start()
-    }
-
-    fun sendMessage(
-        content: String = messageInput,
-        attachments: List<ScriptPluginAgentAttachment> = pendingAttachments,
-        quotedMessage: ScriptPluginAgentQuotedMessage? = pendingQuotedMessage,
-        consumeComposer: Boolean = true,
-        resumeFrom: ScriptPluginAgentResumeState? = null
-    ): Boolean {
-        if (showPendingConfirmation()) return false
-        if (generating || contextCompacting || applyingFileOperation) return false
-        val message = content.trim()
-        if (message.isBlank() && attachments.isEmpty()) {
-            Toast.makeText(context, "请输入消息", Toast.LENGTH_SHORT).show()
-            return false
-        }
-        val config = currentConfig()
-        if (config.apiBaseUrl.isBlank() || config.model.isBlank()) {
-            showConfig = true
-            Toast.makeText(context, "请先完成 Agent 配置", Toast.LENGTH_SHORT).show()
-            return false
-        }
-        endpointError(config).takeIf { it.isNotBlank() }?.let { error ->
-            showConfig = true
-            Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-            return false
-        }
-        if (config.mcpServers.any { it.enabled && it.endpoint.isBlank() }) {
-            showConfig = true
-            Toast.makeText(context, "请填写已启用 MCP 的 Endpoint", Toast.LENGTH_SHORT).show()
-            return false
-        }
-        ScriptPluginAgentSettings.save(context, config)
-        val startedAt = System.currentTimeMillis()
-        val resumeSource = resumeFrom?.let { checkpoint ->
-            sessionMessages.lastOrNull { it.role == "user" && it.id == checkpoint.sourceUserMessageId }
-                ?: sessionMessages.lastOrNull { it.role == "user" && it.turnId == checkpoint.turnId }
-        }
-        if (resumeFrom != null && resumeSource == null) {
-            Toast.makeText(context, "原任务记录已不存在，无法继续", Toast.LENGTH_LONG).show()
-            return false
-        }
-        val runId = resumeFrom?.turnId?.takeIf { it.isNotBlank() }
-            ?: java.util.UUID.randomUUID().toString()
-        val userMessageId = resumeSource?.id ?: java.util.UUID.randomUUID().toString()
-        val nextMessages = if (resumeSource != null) {
-            sessionMessages
-        } else {
-            sessionMessages + ScriptPluginAgentChatMessage(
-                role = "user",
-                content = message.ifBlank { "请分析附件内容" },
-                id = userMessageId,
-                turnId = runId,
-                phase = "user",
-                attachments = attachments,
-                quotedMessage = quotedMessage,
-                createdAt = startedAt,
-                completedAt = startedAt
-            )
-        }
-        if (sessionMessages.isEmpty()) sessionTitle = ScriptPluginAgentSessionStore.titleFrom(nextMessages)
-        val assistantIndex = nextMessages.size
-        sessionMessages = nextMessages + ScriptPluginAgentChatMessage(
-            role = "assistant",
-            content = "",
-            turnId = runId,
-            parentMessageId = userMessageId,
-            phase = "assistant",
-            progress = "正在连接模型",
-            status = "streaming",
-            createdAt = startedAt
-        )
-        if (resumeFrom == null) discardResumeWorkspace()
-        resumeState = resumeFrom?.copy(
-            turnId = runId,
-            sourceUserMessageId = userMessageId,
-            autoOpen = true,
-            updatedAt = startedAt
-        ) ?: ScriptPluginAgentResumeState(
-            turnId = runId,
-            sourceUserMessageId = userMessageId,
-            startedAt = startedAt,
-            updatedAt = startedAt
-        )
-        if (consumeComposer) {
-            messageInput = ""
-            pendingAttachments = emptyList()
-            pendingQuotedMessage = null
-        }
-        saveCurrentSession()
-        val previousSummary = conversationSummary
-        val previousProtocolTranscript = protocolTranscript
-        val previousCompactedCount = compactedMessageCount.coerceIn(0, nextMessages.size)
-        val workspaceBelongsToSession = workspaceSessionId == activeSessionId
-        val draftSnapshot = sessionDraft.takeIf { workspaceBelongsToSession }
-        val targetSnapshot = targetPluginId.takeIf { workspaceBelongsToSession }.orEmpty()
-        val cancellation = ScriptPluginAgentCancellation()
-        val liveAssistantIndex = AtomicInteger(assistantIndex)
-        activeGenerationId = runId
-        activeAssistantIndex = assistantIndex
-        activeCancellation = cancellation
-        generationStartedAt = startedAt
-        generationHasVisibleReply = false
-        generating = true
-        Thread({
-            var requestSummary = previousSummary
-            var requestCompactedCount = previousCompactedCount
-            var requestProtocolTranscript = previousProtocolTranscript
-            var compactProgress = ""
-            var compactApplied = false
-            fun modelMessagesFrom(startIndex: Int): List<ScriptPluginAgentChatMessage> {
-                val modeled = ScriptPluginAgentContext.modelMessagesForTurn(
-                    nextMessages.drop(startIndex),
-                    runId
-                ).filterNot { message ->
-                    resumeSource != null && message.role == "assistant" && message.turnId == runId &&
-                        (message.status == "error" || message.status == "interrupted")
-                }
-                val source = resumeSource ?: return modeled
-                return if (modeled.any { it.id == source.id }) modeled else listOf(source) + modeled
-            }
-            val activeMessages = modelMessagesFrom(requestCompactedCount)
-            var requestNativeToolHistory = ScriptPluginAgentToolResultStore.rebuildNativeToolHistory(
-                context,
-                activeMessages
-            )
-            val estimatedTokensBeforeCompact = ScriptPluginAgentContext.estimateTokens(
-                requestSummary,
-                activeMessages,
-                draftSnapshot,
-                requestNativeToolHistory,
-                requestProtocolTranscript
-            )
-            val shouldCompact = resumeFrom == null && config.autoCompactEnabled &&
-                estimatedTokensBeforeCompact >= config.compactTokenThreshold
-            if (shouldCompact) {
-                val compactEnd = (nextMessages.size - 1).coerceAtLeast(requestCompactedCount)
-                if (compactEnd > requestCompactedCount) {
-                    Handler(Looper.getMainLooper()).post {
-                        if (activeGenerationId == runId) {
-                            contextCompacting = true
-                            contextCompactionStartedAt = System.currentTimeMillis()
-                        }
-                    }
-                    val compactResult = ScriptPluginAgentClient.compact(
-                        config = config,
-                        previousSummary = requestSummary,
-                        messages = nextMessages.subList(requestCompactedCount, compactEnd),
-                        currentDraft = draftSnapshot,
-                        targetPluginId = targetSnapshot,
-                        cancellation = cancellation
-                    )
-                    compactResult.onSuccess { summary ->
-                        val estimatedTokensAfterCompact = ScriptPluginAgentContext.estimateTokens(
-                            summary,
-                            nextMessages.drop(compactEnd),
-                            draftSnapshot,
-                            ""
-                        )
-                        if (estimatedTokensAfterCompact < estimatedTokensBeforeCompact) {
-                            requestSummary = summary
-                            requestCompactedCount = compactEnd
-                            requestNativeToolHistory = ""
-                            requestProtocolTranscript = ""
-                            compactApplied = true
-                            compactProgress = "已自动压缩上下文：$estimatedTokensBeforeCompact → " +
-                                "$estimatedTokensAfterCompact Token"
-                        } else {
-                            compactProgress = "自动压缩未减少上下文，已保留原上下文"
-                        }
-                    }.onFailure {
-                        compactProgress = "自动压缩失败，已保留原上下文"
-                    }
-                    Handler(Looper.getMainLooper()).post {
-                        if (activeGenerationId == runId) {
-                            contextCompacting = false
-                            contextCompactionStartedAt = 0L
-                            if (!cancellation.isCancelled) {
-                                Toast.makeText(
-                                    context,
-                                    if (compactResult.isSuccess) compactProgress
-                                    else "自动压缩失败，已使用原上下文",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        }
-                    }
-                }
-            }
-            if (cancellation.isCancelled) return@Thread
-            val requestMessages = modelMessagesFrom(requestCompactedCount)
-            requestNativeToolHistory = ScriptPluginAgentToolResultStore.rebuildNativeToolHistory(
-                context,
-                requestMessages
-            )
-            val request = ScriptPluginAgentRequest(
-                existing = null,
-                messages = requestMessages,
-                currentDraft = draftSnapshot,
-                targetPluginId = targetSnapshot,
-                conversationSummary = requestSummary,
-                compactedMessageCount = requestCompactedCount,
-                nativeToolHistory = requestNativeToolHistory,
-                protocolTranscript = requestProtocolTranscript,
-                lockedTaskGoal = resumeFrom?.taskGoal.orEmpty(),
-                agentWorkContext = resumeFrom?.workContext.orEmpty().let { previous ->
-                    if (resumeFrom == null) previous else listOf(
-                        previous,
-                        if (resumeFrom.workspaceCheckpoint != null) {
-                            "上一轮任务意外中断。客户端将校验并恢复已保存的插件暂存工作区；继续同一目标和执行位置，不得重新执行已成功的工具调用或写入。"
-                        } else {
-                            "上一轮任务意外中断。继续同一目标并复用已完成的工具结果，不得自动重放已成功的 MCP 或未知副作用操作。"
-                        }
-                    ).filter { it.isNotBlank() }.joinToString("\n").takeLast(16_000)
-                },
-                workspaceCheckpoint = resumeFrom?.workspaceCheckpoint,
-                sessionId = activeSessionId,
-                turnId = runId,
-                allowedLocalPaths = ScriptPluginAgentLocalFiles.extractMentionedPaths(
-                    nextMessages.asSequence()
-                        .filter { it.role == "user" }
-                        .joinToString("\n") { it.content }
-                ).map { it.path }
-            )
-            val result = ScriptPluginAgentSessionStore.withMaterializedAttachments(
-                context,
-                request.messages.flatMap { it.attachments }
-            ) {
-                ScriptPluginAgentClient.generate(
-                    context,
-                    config,
-                    request,
-                    cancellation,
-                    { confirmation ->
-                        val approval = ScriptPluginAgentWorkspaceToolApproval(confirmation)
-                        Handler(Looper.getMainLooper()).post {
-                            if (activeGenerationId == runId) {
-                                pendingToolApproval = approval
-                                showToolApprovalDialog = true
-                            } else {
-                                approval.resolve(ScriptPluginAgentWorkspaceWriteDecision.CANCEL)
-                            }
-                        }
-                        try {
-                            approval.await(cancellation)
-                        } finally {
-                            Handler(Looper.getMainLooper()).post {
-                                if (pendingToolApproval === approval) {
-                                    pendingToolApproval = null
-                                    showToolApprovalDialog = false
-                                }
-                            }
-                        }
-                    }
-                ) { update ->
-                    Handler(Looper.getMainLooper()).post {
-                        if (activeGenerationId != runId) return@post
-                        when (update.phase) {
-                        "checkpoint" -> {
-                            update.resumeState?.let { resumeState = it }
-                            update.checkpointNativeToolHistory?.let { nativeToolHistory = it }
-                            update.checkpointProtocolTranscript?.let { protocolTranscript = it }
-                            update.checkpointConversationSummary?.let { conversationSummary = it }
-                            update.checkpointCompactedMessageCount?.let {
-                                compactedMessageCount = it.coerceIn(0, sessionMessages.size)
-                            }
-                            checkpointSaver.schedule(force = true)
-                        }
-
-                        "protocol_checkpoint" -> {
-                            update.checkpointProtocolTranscript?.let { protocolTranscript = it }
-                            checkpointSaver.schedule(force = true)
-                        }
-
-                        "assistant_start" -> {
-                            val streamId = update.streamId
-                            var index = if (streamId.isNotBlank()) {
-                                sessionMessages.indexOfLast { message ->
-                                    message.role == "assistant" && message.streamId == streamId
-                                }
-                            } else {
-                                liveAssistantIndex.get()
-                            }
-                            if (index !in sessionMessages.indices) {
-                                val placeholderIndex = liveAssistantIndex.get()
-                                val placeholder = sessionMessages.getOrNull(placeholderIndex)
-                                val canAdoptPlaceholder = placeholderIndex == sessionMessages.lastIndex &&
-                                    placeholder?.role == "assistant" &&
-                                    placeholder.status == "streaming" &&
-                                    placeholder.streamId.isBlank() &&
-                                    placeholder.content.isBlank() &&
-                                    placeholder.reasoning.isBlank() &&
-                                    placeholder.toolEvents.isEmpty()
-                                if (canAdoptPlaceholder) {
-                                    index = placeholderIndex
-                                } else {
-                                    val previousIndex = liveAssistantIndex.get()
-                                    val previous = sessionMessages.getOrNull(previousIndex)
-                                    if (previous != null && previous.role == "assistant" && previous.status == "streaming") {
-                                        sessionMessages = sessionMessages.toMutableList().also { messages ->
-                                            messages[previousIndex] = previous.copy(
-                                                status = "complete",
-                                                completedAt = System.currentTimeMillis()
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                            if (index !in sessionMessages.indices) {
-                                sessionMessages = sessionMessages.toMutableList().also { messages ->
-                                    messages += ScriptPluginAgentChatMessage(
-                                        role = "assistant",
-                                        content = "",
-                                        turnId = update.turnId,
-                                        parentMessageId = update.parentMessageId,
-                                        phase = "assistant",
-                                        status = "streaming",
-                                        streamId = streamId
-                                    )
-                                }
-                                index = sessionMessages.lastIndex
-                            }
-                            liveAssistantIndex.set(index)
-                            activeAssistantIndex = index
-                            val assistant = sessionMessages[index]
-                            val next = assistant.copy(
-                                id = streamId.ifBlank { assistant.id },
-                                turnId = update.turnId.ifBlank { assistant.turnId },
-                                parentMessageId = update.parentMessageId.ifBlank { assistant.parentMessageId },
-                                phase = "assistant",
-                                status = "streaming",
-                                streamId = streamId.ifBlank { assistant.streamId }
-                            )
-                            if (next != assistant) sessionMessages = sessionMessages.toMutableList().also {
-                                it[index] = next
-                            }
-                            checkpointSaver.schedule()
-                        }
-
-                        "assistant_reset" -> {
-                            val index = if (update.streamId.isNotBlank()) {
-                                sessionMessages.indexOfLast { message ->
-                                    message.role == "assistant" && message.streamId == update.streamId
-                                }
-                            } else {
-                                liveAssistantIndex.get()
-                            }
-                            val current = sessionMessages.getOrNull(index)
-                            if (current != null && current.role == "assistant") {
-                                sessionMessages = sessionMessages.toMutableList().also { messages ->
-                                    messages.removeAt(index)
-                                }
-                                liveAssistantIndex.set(-1)
-                                activeAssistantIndex = -1
-                                checkpointSaver.schedule()
-                            }
-                        }
-
-                        "working" -> {
-                            // Working is a transport state. Keep it out of the assistant message body.
-                        }
-
-                        "tool_start", "tool_update" -> {
-                            val event = update.toolEvents?.firstOrNull() ?: return@post
-                            if (update.phase == "tool_start") {
-                                val index = if (update.streamId.isNotBlank()) {
-                                    sessionMessages.indexOfLast { message ->
-                                        message.role == "assistant" && message.streamId == update.streamId
-                                    }
-                                } else {
-                                    liveAssistantIndex.get()
-                                }
-                                val current = sessionMessages.getOrNull(index)
-                                if (current != null && current.role == "assistant") {
-                                    sessionMessages = sessionMessages.toMutableList().also { messages ->
-                                        if (index == messages.lastIndex &&
-                                            (current.content.isBlank() ||
-                                                isScriptPluginAgentControlPreview(current.content)) &&
-                                            current.diff.isBlank()
-                                        ) {
-                                            messages[index] = current.copy(
-                                                content = "",
-                                                status = "complete",
-                                                phase = "assistant_tool_call",
-                                                completedAt = System.currentTimeMillis()
-                                            )
-                                        } else {
-                                            messages[index] = current.copy(
-                                                status = "complete",
-                                                completedAt = System.currentTimeMillis()
-                                            )
-                                        }
-                                    }
-                                }
-                                liveAssistantIndex.set(-1)
-                            }
-                            val existingToolIndex = sessionMessages.indexOfLast { message ->
-                                message.role == "tool" &&
-                                    (message.toolEvents.any { it.id == update.toolEventId } ||
-                                        (event.turnId.isNotBlank() &&
-                                            message.turnId == event.turnId &&
-                                            message.parentMessageId == event.parentAssistantMessageId))
-                            }
-                            val toolIndex = if (existingToolIndex >= 0) {
-                                sessionMessages = sessionMessages.toMutableList().also { messages ->
-                                    val current = messages[existingToolIndex]
-                                    val nextEvents = current.toolEvents.toMutableList().apply {
-                                        val eventIndex = indexOfFirst { it.id == event.id }
-                                        if (eventIndex >= 0) set(eventIndex, event) else add(event)
-                                    }
-                                    val hasPending = nextEvents.any {
-                                        it.status == "running" || it.status == "queued"
-                                    }
-                                    messages[existingToolIndex] = current.copy(
-                                        turnId = event.turnId.ifBlank { current.turnId },
-                                        parentMessageId = event.parentAssistantMessageId,
-                                        phase = "tool",
-                                        toolEvents = nextEvents,
-                                        status = if (hasPending) {
-                                            "streaming"
-                                        } else {
-                                            "complete"
-                                        },
-                                        completedAt = if (hasPending) 0L else nextEvents.maxOfOrNull {
-                                            it.finishedAt
-                                        } ?: event.finishedAt
-                                    )
-                                }
-                                existingToolIndex
-                            } else {
-                                sessionMessages = sessionMessages + ScriptPluginAgentChatMessage(
-                                    role = "tool",
-                                    content = "",
-                                    id = ScriptPluginAgentEventIds.toolGroup(
-                                        event.turnId,
-                                        event.parentAssistantMessageId
-                                    ),
-                                    turnId = event.turnId,
-                                    parentMessageId = event.parentAssistantMessageId,
-                                    phase = "tool",
-                                    toolEvents = listOf(event),
-                                    status = if (event.status == "running" || event.status == "queued") {
-                                        "streaming"
-                                    } else {
-                                        "complete"
-                                    },
-                                    completedAt = event.finishedAt,
-                                    streamId = update.streamId
-                                )
-                                sessionMessages.lastIndex
-                            }
-                            activeAssistantIndex = toolIndex
-                            checkpointSaver.schedule(
-                                force = event.status != "running" && event.status != "queued"
-                            )
-                        }
-
-                        else -> {
-                            if (update.reply.isNotBlank()) generationHasVisibleReply = true
-                            val index = if (update.streamId.isNotBlank()) {
-                                sessionMessages.indexOfLast { message ->
-                                    message.role == "assistant" && message.streamId == update.streamId
-                                }
-                            } else {
-                                liveAssistantIndex.get()
-                            }
-                            if (index !in sessionMessages.indices) return@post
-                            val current = sessionMessages[index]
-                            val next = current.copy(
-                                content = if (update.replyRevision) {
-                                    update.reply
-                                } else {
-                                    mergeScriptPluginAgentReply(current.content, update.reply)
-                                },
-                                reasoning = if (update.reasoningRevision) {
-                                    update.reasoning
-                                } else {
-                                    ScriptPluginAgentTextMerge.mergeReply(current.reasoning, update.reasoning)
-                                },
-                                status = "streaming"
-                            )
-                            if (next != current) sessionMessages = sessionMessages.toMutableList().also {
-                                it[index] = next
-                            }
-                            checkpointSaver.schedule()
-                        }
-                        }
-                    }
-                }
-            }
-            Handler(Looper.getMainLooper()).post {
-                if (activeGenerationId != runId) return@post
-                generating = false
-                contextCompacting = false
-                contextCompactionStartedAt = 0L
-                generationStartedAt = 0L
-                generationHasVisibleReply = false
-                activeCancellation = null
-                activeGenerationId = ""
-                activeAssistantIndex = -1
-                pendingToolApproval = null
-                showToolApprovalDialog = false
-                conversationSummary = requestSummary
-                compactedMessageCount = requestCompactedCount
-                nativeToolHistory = requestNativeToolHistory
-                if (compactApplied && protocolTranscript == previousProtocolTranscript) {
-                    protocolTranscript = requestProtocolTranscript
-                }
-                result.onSuccess { turn ->
-                    if (turn.protocolTranscript.isNotBlank()) {
-                        protocolTranscript = turn.protocolTranscript
-                    }
-                    if (turn.nativeToolHistory.isNotBlank()) {
-                        nativeToolHistory = turn.nativeToolHistory
-                    } else {
-                        nativeToolHistory = ScriptPluginAgentToolResultStore.mergeNativeToolHistory(
-                            context,
-                            requestNativeToolHistory,
-                            ScriptPluginAgentContext.modelMessagesForTurn(
-                                sessionMessages.drop(requestCompactedCount),
-                                runId
-                            )
-                        )
-                    }
-                    var finalAssistantIndex = liveAssistantIndex.get()
-                    val finalMessage = sessionMessages.getOrNull(finalAssistantIndex)
-                    if (finalAssistantIndex !in sessionMessages.indices ||
-                        finalMessage?.role != "assistant" ||
-                        finalAssistantIndex != sessionMessages.lastIndex
-                    ) {
-                        sessionMessages = sessionMessages + ScriptPluginAgentChatMessage(
-                            role = "assistant",
-                            content = "",
-                            turnId = runId,
-                            parentMessageId = userMessageId,
-                            phase = "assistant",
-                            status = "streaming"
-                        )
-                        finalAssistantIndex = sessionMessages.lastIndex
-                        liveAssistantIndex.set(finalAssistantIndex)
-                    }
-                    val previousDraft = sessionDraft
-                    val nextDraft = turn.draft?.let { value ->
-                        ScriptPluginAgentValidator.normalize(
-                            if (turn.targetPluginId.isNotBlank()) value.copy(pluginId = turn.targetPluginId) else value
-                        )
-                    }
-                    val actualDiff = nextDraft?.let { ScriptPluginAgentDiff.between(previousDraft, it) }.orEmpty()
-                    val currentMessage = sessionMessages.getOrNull(finalAssistantIndex)
-                    val displayedToolEventIds = sessionMessages.asSequence()
-                        .flatMap { message -> message.toolEvents.asSequence() }
-                        .map { event -> event.id }
-                        .toSet()
-                    val missingToolEvents = turn.toolEvents.filterNot { event ->
-                        event.id in displayedToolEventIds
-                    }
-                    val completedMessage = (currentMessage ?: ScriptPluginAgentChatMessage("assistant", ""))
-                        .copy(
-                        content = mergeScriptPluginAgentReply(currentMessage?.content.orEmpty(), turn.reply),
-                        progress = listOf(
-                            compactProgress.takeIf { compactApplied }.orEmpty(),
-                            turn.progress
-                        ).fold(currentMessage?.progress.orEmpty()) {
-                            current, next -> mergeScriptPluginAgentProgress(current, next)
-                        },
-                        diff = turn.diff.ifBlank { actualDiff },
-                        toolEvents = (currentMessage?.toolEvents.orEmpty() + missingToolEvents)
-                            .distinctBy { event -> event.id },
-                        status = "complete",
-                        completedAt = System.currentTimeMillis(),
-                        phase = "assistant",
-                        draftSnapshot = null,
-                        clearsDraft = false
-                    )
-                    sessionMessages = sessionMessages.toMutableList().also {
-                        if (finalAssistantIndex in it.indices) it[finalAssistantIndex] = completedMessage
-                        else it += completedMessage
-                    }
-                    val awaitsFileOperation =
-                        (turn.status.equals("workspace_ready", ignoreCase = true) && turn.workspaceChange != null) ||
-                            turn.status.equals("delete", ignoreCase = true) ||
-                            (turn.status.equals("ready", ignoreCase = true) && nextDraft != null)
-                    if (!awaitsFileOperation) resumeState = null
-                    if (turn.title.isNotBlank() && sessionMessages.count { it.role == "user" } <= 1) {
-                        sessionTitle = turn.title.take(32)
-                    }
-                    when {
-                        turn.status.equals("workspace_ready", ignoreCase = true) && turn.workspaceChange != null -> {
-                            prepareWorkspaceChange(
-                                finalAssistantIndex,
-                                turn.workspaceChange,
-                                workspaceWriteApprovalMode == ScriptPluginAgentSettings.WRITE_APPROVAL_ASK
-                            )
-                        }
-                        turn.status.equals("delete", ignoreCase = true) -> {
-                            preparePluginDelete(
-                                finalAssistantIndex,
-                                turn.targetPluginId,
-                                workspaceWriteApprovalMode == ScriptPluginAgentSettings.WRITE_APPROVAL_ASK
-                            )
-                        }
-                        turn.status.equals("ready", ignoreCase = true) && nextDraft != null -> {
-                            val modifyingExisting = turn.targetPluginId.isNotBlank() ||
-                                sessionDraft?.pluginId.equals(nextDraft.pluginId, ignoreCase = true)
-                            prepareAgentDraft(
-                                finalAssistantIndex,
-                                nextDraft,
-                                modifyingExisting,
-                                workspaceWriteApprovalMode == ScriptPluginAgentSettings.WRITE_APPROVAL_ASK
-                            )
-                        }
-                        else -> {
-                            if (turn.targetPluginId.isNotBlank()) targetPluginId = turn.targetPluginId
-                            saveCurrentSession()
-                        }
-                    }
-                }.onFailure { error ->
-                    var failureIndex = liveAssistantIndex.get()
-                    val failureMessage = sessionMessages.getOrNull(failureIndex)
-                    if (failureIndex !in sessionMessages.indices ||
-                        failureMessage?.role != "assistant" ||
-                        failureIndex != sessionMessages.lastIndex
-                    ) {
-                        sessionMessages = sessionMessages + ScriptPluginAgentChatMessage(
-                            role = "assistant",
-                            content = "",
-                            turnId = runId,
-                            parentMessageId = userMessageId,
-                            phase = "assistant",
-                            status = "error"
-                        )
-                        failureIndex = sessionMessages.lastIndex
-                    }
-                    val currentMessage = sessionMessages.getOrNull(failureIndex)
-                    if (currentMessage != null) {
-                        sessionMessages = sessionMessages.toMutableList().also { messages ->
-                            messages[failureIndex] = currentMessage.copy(
-                                status = if (cancellation.isCancellation(error)) "interrupted" else "error",
-                                completedAt = System.currentTimeMillis(),
-                                progress = mergeScriptPluginAgentProgress(
-                                    currentMessage.progress,
-                                    if (cancellation.isCancellation(error)) "已中断" else "请求失败"
-                                )
-                            )
-                        }
-                    }
-                    nativeToolHistory = ScriptPluginAgentToolResultStore.mergeNativeToolHistory(
-                        context,
-                        requestNativeToolHistory,
-                        ScriptPluginAgentContext.modelMessagesForTurn(
-                            sessionMessages.drop(requestCompactedCount),
-                            runId
-                        )
-                    )
-                    saveCurrentSession()
-                    if (!cancellation.isCancellation(error)) {
-                        Toast.makeText(context, error.message ?: "请求失败", Toast.LENGTH_LONG).show()
-                    }
-                }
-            }
-        }, "Hchat-Script-Agent-Chat").start()
-        return true
-    }
-
-    fun queueMessage() {
-        if (!generating || applyingFileOperation) return
-        val message = messageInput.trim()
-        if (message.isBlank() && pendingAttachments.isEmpty()) return
-        pendingMessages = pendingMessages + ScriptPluginAgentPendingMessage(
-            id = nextPendingMessageId++,
-            content = message,
-            attachments = pendingAttachments,
-            quotedMessage = pendingQuotedMessage
-        )
-        pendingMessagesExpanded = true
-        messageInput = ""
-        pendingAttachments = emptyList()
-        pendingQuotedMessage = null
-        Toast.makeText(context, "已加入待发送队列", Toast.LENGTH_SHORT).show()
-    }
-
-    fun editPendingMessage(id: Long) {
-        val pending = pendingMessages.firstOrNull { it.id == id } ?: return
-        pendingMessages = pendingMessages.filterNot { it.id == id }
-        messageInput = pending.content
-        pendingAttachments = pending.attachments
-        pendingQuotedMessage = pending.quotedMessage
-    }
-
-    fun sendPendingMessageNow(id: Long) {
-        val pending = pendingMessages.firstOrNull { it.id == id } ?: return
-        pendingMessages = listOf(pending) + pendingMessages.filterNot { it.id == id }
-        if (generating) cancelGeneration()
-    }
-
-    fun compactContext() {
-        if (generating || contextCompacting || applyingFileOperation) return
-        if (showPendingConfirmation()) return
-        val start = compactedMessageCount.coerceIn(0, sessionMessages.size)
-        val messagesToCompact = sessionMessages.drop(start)
-        if (messagesToCompact.isEmpty()) {
-            Toast.makeText(context, "没有需要压缩的新上下文", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val config = currentConfig()
-        val summarySnapshot = conversationSummary
-        val protocolTranscriptSnapshot = protocolTranscript
-        val draftSnapshot = sessionDraft
-        val targetSnapshot = targetPluginId
-        val compactedSize = sessionMessages.size
-        val runId = "compact:${java.util.UUID.randomUUID()}"
-        val cancellation = ScriptPluginAgentCancellation()
-        contextCompacting = true
-        contextCompactionStartedAt = System.currentTimeMillis()
-        activeGenerationId = runId
-        activeAssistantIndex = -1
-        activeCancellation = cancellation
-        Toast.makeText(context, "正在压缩上下文", Toast.LENGTH_SHORT).show()
-        Thread({
-            val nativeHistorySnapshot = ScriptPluginAgentToolResultStore.rebuildNativeToolHistory(
-                context,
-                messagesToCompact
-            )
-            val estimatedTokensBefore = ScriptPluginAgentContext.estimateTokens(
-                summarySnapshot,
-                messagesToCompact,
-                draftSnapshot,
-                nativeHistorySnapshot,
-                protocolTranscriptSnapshot
-            )
-            val result = ScriptPluginAgentClient.compact(
-                config = config,
-                previousSummary = summarySnapshot,
-                messages = messagesToCompact,
-                currentDraft = draftSnapshot,
-                targetPluginId = targetSnapshot,
-                cancellation = cancellation
-            )
-            Handler(Looper.getMainLooper()).post {
-                if (activeGenerationId != runId) return@post
-                contextCompacting = false
-                contextCompactionStartedAt = 0L
-                activeGenerationId = ""
-                activeAssistantIndex = -1
-                activeCancellation = null
-                result.onSuccess { summary ->
-                    val estimatedTokensAfter = ScriptPluginAgentContext.estimateTokens(
-                        summary,
-                        emptyList(),
-                        draftSnapshot,
-                        ""
-                    )
-                    if (estimatedTokensAfter < estimatedTokensBefore) {
-                        conversationSummary = summary
-                        nativeToolHistory = ""
-                        protocolTranscript = ""
-                        compactedMessageCount = compactedSize.coerceAtMost(sessionMessages.size)
-                        saveCurrentSession()
-                        Toast.makeText(
-                            context,
-                            "上下文已压缩：$estimatedTokensBefore → $estimatedTokensAfter Token",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    } else {
-                        Toast.makeText(
-                            context,
-                            "压缩结果未减少上下文，已保留原上下文",
-                            Toast.LENGTH_LONG
-                        ).show()
-                    }
-                }.onFailure {
-                    Toast.makeText(context, it.message ?: "上下文压缩失败", Toast.LENGTH_LONG).show()
-                }
-            }
-        }, "Hchat-Script-Agent-Compact").start()
-    }
-
-    fun saveConfig() {
-        val threshold = compactTokenThreshold.toIntOrNull()
-        if (threshold == null || threshold !in 2_000..1_000_000) {
-            Toast.makeText(context, "自动压缩阈值需为 2000 到 1000000", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val config = currentConfig()
-        if (config.apiBaseUrl.isBlank() || config.model.isBlank()) {
-            Toast.makeText(context, "API 地址和模型不能为空", Toast.LENGTH_SHORT).show()
-            return
-        }
-        endpointError(config).takeIf { it.isNotBlank() }?.let { error ->
-            Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (config.mcpServers.any { it.enabled && it.endpoint.isBlank() }) {
-            Toast.makeText(context, "已启用 MCP 的 Endpoint 不能为空", Toast.LENGTH_SHORT).show()
-            return
-        }
-        ScriptPluginAgentSettings.save(context, config)
-        apiBase = config.apiBaseUrl
-        val activeProfile = ScriptPluginAgentSettings.loadActiveProfile(context)
-        activeProfileId = activeProfile.id
-        activeProfileName = activeProfile.name
-        profileVersion++
-        showConfig = false
-        Toast.makeText(context, "Agent 配置已保存", Toast.LENGTH_SHORT).show()
-    }
-
-    fun selectProfile(profile: ScriptPluginAgentProfile) {
-        if (profile.id == activeProfileId) return
-        val appliesToNextRequest = generating
-        ScriptPluginAgentSettings.save(context, currentConfig())
-        ScriptPluginAgentSettings.setActiveProfile(context, profile.id)
-        applyProfile(ScriptPluginAgentSettings.loadActiveProfile(context))
-        profileVersion++
-        Toast.makeText(
-            context,
-            if (appliesToNextRequest) "已切换配置，将用于下一次请求" else "已切换配置",
-            Toast.LENGTH_SHORT
-        ).show()
-    }
-
-    fun setWebSearchEnabled(enabled: Boolean) {
-        val nextConfig = currentConfig().copy(webSearchEnabled = enabled)
-        webSearchEnabled = enabled
-        ScriptPluginAgentSettings.save(context, nextConfig)
-        profileVersion++
-    }
-
-    fun setMcpServerEnabled(id: String, enabled: Boolean) {
-        val nextServers = mcpServers.map { server ->
-            if (server.id == id) server.copy(enabled = enabled) else server
-        }
-        mcpServers = nextServers
-        ScriptPluginAgentSettings.save(context, currentConfig().copy(mcpServers = nextServers))
-        profileVersion++
-    }
-
-    fun setWorkspaceWriteApprovalMode(mode: String) {
-        workspaceWriteApprovalMode = mode
-        ScriptPluginAgentSettings.save(
-            context,
-            currentConfig().copy(workspaceWriteApprovalMode = mode)
-        )
-        profileVersion++
-    }
-
-    fun setPromptCacheMode(mode: String) {
-        promptCacheMode = mode
-        ScriptPluginAgentSettings.save(
-            context,
-            currentConfig().copy(promptCacheMode = mode)
-        )
-        profileVersion++
-    }
-
-    fun createProfile(name: String) {
-        runCatching {
-            ScriptPluginAgentSettings.save(context, currentConfig())
-            val created = ScriptPluginAgentSettings.createProfile(context, name, currentConfig())
-            applyProfile(created)
-            profileVersion++
-        }.onFailure {
-            Toast.makeText(context, it.message ?: "新建配置失败", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun renameProfile(name: String) {
-        runCatching {
-            val renamed = ScriptPluginAgentSettings.renameProfile(context, activeProfileId, name)
-            activeProfileName = renamed.name
-            profileVersion++
-        }.onFailure {
-            Toast.makeText(context, it.message ?: "重命名失败", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun deleteActiveProfile() {
-        runCatching {
-            ScriptPluginAgentSettings.save(context, currentConfig())
-            val next = ScriptPluginAgentSettings.deleteProfile(context, activeProfileId)
-            applyProfile(next)
-            profileVersion++
-        }.onFailure {
-            Toast.makeText(context, it.message ?: "删除配置失败", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun testAgentConnection() {
-        if (testingConnection) return
-        val config = currentConfig()
-        if (config.apiBaseUrl.isBlank() || config.model.isBlank()) {
-            Toast.makeText(context, "请先填写 API 地址和模型", Toast.LENGTH_SHORT).show()
-            return
-        }
-        endpointError(config).takeIf { it.isNotBlank() }?.let { error ->
-            Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-            return
-        }
-        testingConnection = true
-        Toast.makeText(context, "正在测试连接", Toast.LENGTH_SHORT).show()
-        Thread({
-            val result = ScriptPluginAgentClient.testConnection(config)
-            Handler(Looper.getMainLooper()).post {
-                testingConnection = false
-                result.onSuccess {
-                    Toast.makeText(context, "连接成功", Toast.LENGTH_SHORT).show()
-                }.onFailure {
-                    Toast.makeText(context, it.message ?: "连接失败", Toast.LENGTH_LONG).show()
-                }
-            }
-        }, "Hchat-Script-Agent-Test").start()
-    }
-
-    fun draftForMessages(messages: List<ScriptPluginAgentChatMessage>): ScriptPluginAgentDraft? {
-        return messages.asReversed()
-            .firstOrNull { it.draftSnapshot != null || it.clearsDraft }
-            ?.draftSnapshot
-    }
-
-    fun rebuildNativeHistory(messages: List<ScriptPluginAgentChatMessage>): String {
-        return ScriptPluginAgentToolResultStore.rebuildNativeToolHistory(context, messages)
-    }
-
-    fun deleteToolResults(messages: List<ScriptPluginAgentChatMessage>) {
-        messages.asSequence()
-            .flatMap { it.toolEvents.asSequence() }
-            .map { it.resultHandle }
-            .filter { it.isNotBlank() }
-            .distinct()
-            .forEach { ScriptPluginAgentToolResultStore.deleteHandle(context, it) }
-    }
-
-    fun prepareMessageHistoryChange(
-        retainedMessages: List<ScriptPluginAgentChatMessage>,
-        removedMessages: List<ScriptPluginAgentChatMessage>,
-        actionName: String,
-        onReady: (String) -> Boolean
-    ) {
-        val mutationState = renderedSessionState
-        val sourceMessages = mutationState.messages.value
-        mutationState.applyingFileOperation.value = true
-        Thread({
-            val historyResult = runCatching { rebuildNativeHistory(retainedMessages) }
-            Handler(Looper.getMainLooper()).post {
-                if (mutationState.messages.value !== sourceMessages) {
-                    mutationState.applyingFileOperation.value = false
-                    Toast.makeText(context, "会话内容已变化，请重试", Toast.LENGTH_SHORT).show()
-                    return@post
-                }
-                historyResult.fold(
-                    onSuccess = { restoredHistory ->
-                        mutationState.applyingFileOperation.value = false
-                        val applied = runCatching { onReady(restoredHistory) }
-                            .onFailure { error ->
-                                h.Hchat.utils.HLog.e(
-                                    "[Hchat:ScriptAgent] ${actionName}失败",
-                                    error
-                                )
-                                Toast.makeText(context, "${actionName}失败，请重试", Toast.LENGTH_SHORT).show()
-                            }
-                            .getOrDefault(false)
-                        if (applied) {
-                            val snapshot = mutationState.snapshot()
-                            val sessionId = mutationState.id
-                            Thread({
-                                val saveResult = runCatching {
-                                    if (ScriptPluginAgentSessionStore.hasConversation(snapshot.messages)) {
-                                        ScriptPluginAgentSessionStore.revive(sessionId)
-                                        ScriptPluginAgentSessionStore.save(context, snapshot)
-                                    } else {
-                                        ScriptPluginAgentSessionStore.delete(context, sessionId)
-                                    }
-                                }
-                                saveResult.onSuccess {
-                                    runCatching {
-                                        if (removedMessages.isNotEmpty()) deleteToolResults(removedMessages)
-                                    }.onFailure { error ->
-                                        h.Hchat.utils.HLog.e(
-                                            "[Hchat:ScriptAgent] ${actionName}清理工具结果失败",
-                                            error
-                                        )
-                                    }
-                                }.onFailure { error ->
-                                    h.Hchat.utils.HLog.e(
-                                        "[Hchat:ScriptAgent] ${actionName}保存会话失败",
-                                        error
-                                    )
-                                    Handler(Looper.getMainLooper()).post {
-                                        Toast.makeText(
-                                            context,
-                                            "${actionName}已完成，但会话保存失败",
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    }
-                                }
-                            }, "Hchat-Agent-History-Save").start()
-                        }
-                    },
-                    onFailure = { error ->
-                        mutationState.applyingFileOperation.value = false
-                        h.Hchat.utils.HLog.e("[Hchat:ScriptAgent] ${actionName}重建历史失败", error)
-                        Toast.makeText(context, "${actionName}失败，请重试", Toast.LENGTH_SHORT).show()
-                    }
-                )
-            }
-        }, "Hchat-Agent-History-Change").start()
-    }
-
-    fun removeMessageTree(index: Int): Pair<List<ScriptPluginAgentChatMessage>, List<ScriptPluginAgentChatMessage>> {
-        val root = sessionMessages[index]
-        val removedIds = linkedSetOf(root.id)
-        var changed: Boolean
-        do {
-            changed = false
-            sessionMessages.forEach { message ->
-                if (message.id !in removedIds && message.parentMessageId in removedIds) {
-                    removedIds += message.id
-                    changed = true
-                }
-            }
-        } while (changed)
-        return sessionMessages.partition { it.id !in removedIds }
-    }
-
-    fun createMessageBranch(index: Int) {
-        if (generating || contextCompacting || applyingFileOperation || hasPendingConfirmation() ||
-            index !in sessionMessages.indices
-        ) return
-        val sourceMessages = sessionMessages.take(index + 1)
-        val sourceSessionId = activeSessionId
-        val sourceTitle = sessionTitle
-        val sourceTargetPluginId = targetPluginId
-        val branchId = java.util.UUID.randomUUID().toString().replace("-", "")
-        applyingFileOperation = true
-        Thread({
-            val result = runCatching {
-                val branchMessages = ScriptPluginAgentToolResultStore.copySessionResults(
-                    context,
-                    sourceSessionId,
-                    branchId,
-                    sourceMessages
-                )
-                val branchDraft = draftForMessages(branchMessages)
-                val now = System.currentTimeMillis()
-                ScriptPluginAgentSession(
-                    id = branchId,
-                    title = (sourceTitle.ifBlank { "新对话" } + " 分支").take(32),
-                    createdAt = now,
-                    updatedAt = now,
-                    messages = branchMessages,
-                    draft = branchDraft,
-                    targetPluginId = branchDraft?.pluginId?.ifBlank { sourceTargetPluginId }
-                        ?: sourceTargetPluginId,
-                    conversationSummary = "",
-                    nativeToolHistory = rebuildNativeHistory(branchMessages),
-                    protocolTranscript = "",
-                    compactedMessageCount = 0
-                ).also { branch -> ScriptPluginAgentSessionStore.save(context, branch) }
-            }
-            Handler(Looper.getMainLooper()).post {
-                applyingFileOperation = false
-                result.onSuccess { branch ->
-                    openSession(branch)
-                    Toast.makeText(context, "已从此处创建分支", Toast.LENGTH_SHORT).show()
-                    historyVersion++
-                }.onFailure { error ->
-                    h.Hchat.utils.HLog.e("[Hchat:ScriptAgent] 创建会话分支失败", error)
-                    Toast.makeText(context, error.message ?: "创建分支失败", Toast.LENGTH_LONG).show()
-                }
-            }
-        }, "Hchat-Agent-Create-Branch").start()
-    }
-
-    fun editAndResendMessage(index: Int) {
-        if (generating || contextCompacting || applyingFileOperation || hasPendingConfirmation() ||
-            index !in sessionMessages.indices
-        ) return
-        val selected = sessionMessages[index]
-        if (selected.role != "user") return
-        val sourceMessages = sessionMessages
-        val retainedMessages = sourceMessages.take(index)
-        val removedMessages = sourceMessages.drop(index)
-        val restoredDraft = draftForMessages(retainedMessages)
-        val previousResumeState = resumeState
-        prepareMessageHistoryChange(
-            retainedMessages = retainedMessages,
-            removedMessages = removedMessages,
-            actionName = "编辑重发"
-        ) { restoredHistory ->
-            sessionMessages = retainedMessages
-            sessionDraft = restoredDraft
-            conversationSummary = ""
-            nativeToolHistory = restoredHistory
-            protocolTranscript = ""
-            discardResumeWorkspace(previousResumeState)
-            resumeState = null
-            compactedMessageCount = 0
-            messageInput = selected.content
-            pendingAttachments = selected.attachments
-            pendingQuotedMessage = selected.quotedMessage
-            if (retainedMessages.isEmpty()) historyVersion++
-            Toast.makeText(context, "已覆盖后续记录并填入原消息", Toast.LENGTH_SHORT).show()
-            true
-        }
-    }
-
-    fun quoteAgentMessage(index: Int) {
-        val selected = sessionMessages.getOrNull(index) ?: return
-        val quotedContent = selected.content.trim()
-        if (quotedContent.isBlank()) {
-            Toast.makeText(context, "当前消息没有可引用内容", Toast.LENGTH_SHORT).show()
-            return
-        }
-        pendingQuotedMessage = ScriptPluginAgentQuotedMessage(
-            role = selected.role,
-            content = quotedContent.take(24_000),
-            createdAt = selected.createdAt
-        )
-    }
-
-    fun regenerateAssistantMessage(index: Int) {
-        if (generating || contextCompacting || applyingFileOperation || hasPendingConfirmation() ||
-            index !in sessionMessages.indices
-        ) return
-        val selected = sessionMessages[index]
-        val sourceIndex = (index - 1 downTo 0).firstOrNull { sessionMessages[it].role == "user" } ?: return
-        val source = sessionMessages[sourceIndex]
-        if (selected.role != "assistant") return
-        val config = currentConfig()
-        if (config.apiBaseUrl.isBlank() || config.model.isBlank()) {
-            showConfig = true
-            Toast.makeText(context, "请先完成 Agent 配置", Toast.LENGTH_SHORT).show()
-            return
-        }
-        endpointError(config).takeIf { it.isNotBlank() }?.let { error ->
-            showConfig = true
-            Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (config.mcpServers.any { it.enabled && it.endpoint.isBlank() }) {
-            showConfig = true
-            Toast.makeText(context, "请填写已启用 MCP 的 Endpoint", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val sourceMessages = sessionMessages
-        val retainedMessages = sourceMessages.take(sourceIndex)
-        val removedMessages = sourceMessages.drop(sourceIndex)
-        val restoredDraft = draftForMessages(retainedMessages)
-        val previousResumeState = resumeState
-        prepareMessageHistoryChange(
-            retainedMessages = retainedMessages,
-            removedMessages = removedMessages,
-            actionName = "重新生成"
-        ) { restoredHistory ->
-            sessionMessages = retainedMessages
-            sessionDraft = restoredDraft
-            targetPluginId = restoredDraft?.pluginId.orEmpty()
-            conversationSummary = ""
-            nativeToolHistory = restoredHistory
-            protocolTranscript = ""
-            discardResumeWorkspace(previousResumeState)
-            resumeState = null
-            compactedMessageCount = 0
-            val started = sendMessage(
-                content = source.content,
-                attachments = source.attachments,
-                quotedMessage = source.quotedMessage,
-                consumeComposer = false
-            )
-            if (started) Toast.makeText(context, "正在重新生成", Toast.LENGTH_SHORT).show()
-            started
-        }
-    }
-
-    fun continueInterruptedTask(index: Int) {
-        if (generating || contextCompacting || applyingFileOperation || index !in sessionMessages.indices) return
-        val selected = sessionMessages[index]
-        val turnInterrupted = selected.status == "interrupted" || selected.status == "error" ||
-            sessionMessages.any { message ->
-                message.turnId == selected.turnId && (
-                    message.status == "interrupted" || message.status == "error" ||
-                        message.toolEvents.any { it.status == "interrupted" }
-                )
-            }
-        if (!turnInterrupted) return
-        val sourceIndex = (index downTo 0).firstOrNull { candidate ->
-            val message = sessionMessages[candidate]
-            message.role == "user" && (
-                selected.turnId.isBlank() || message.turnId == selected.turnId
-            )
-        } ?: return
-        val source = sessionMessages[sourceIndex]
-        val savedCheckpoint = resumeState?.takeIf { it.turnId == selected.turnId }
-        val hasLaterTurnMessages = sessionMessages.drop(index + 1).any {
-            it.turnId == selected.turnId
-        }
-        if (savedCheckpoint == null && hasLaterTurnMessages) {
-            Toast.makeText(context, "该中断记录已经继续处理", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val checkpoint = savedCheckpoint
-            ?: ScriptPluginAgentResumeState(
-                turnId = selected.turnId,
-                sourceUserMessageId = source.id,
-                startedAt = source.createdAt,
-                updatedAt = System.currentTimeMillis()
-            )
-        val started = sendMessage(
-            content = source.content,
-            attachments = emptyList(),
-            quotedMessage = null,
-            consumeComposer = false,
-            resumeFrom = checkpoint
-        )
-        if (started) Toast.makeText(context, "正在从已保存进度继续", Toast.LENGTH_SHORT).show()
-    }
-
-    fun rollbackToMessage(messageId: String) {
-        val index = sessionMessages.indexOfFirst { it.id == messageId }
-        if (generating || contextCompacting || applyingFileOperation || hasPendingConfirmation() ||
-            index < 0
-        ) return
-        val sourceMessages = sessionMessages
-        val retainedMessages = sourceMessages.take(index + 1)
-        val removedMessages = sourceMessages.drop(index + 1)
-        val restoredDraft = draftForMessages(retainedMessages)
-        val rollbackResumeState = resumeState
-        prepareMessageHistoryChange(
-            retainedMessages = retainedMessages,
-            removedMessages = removedMessages,
-            actionName = "回滚会话"
-        ) { restoredHistory ->
-            sessionMessages = retainedMessages
-            sessionDraft = restoredDraft
-            conversationSummary = ""
-            nativeToolHistory = restoredHistory
-            protocolTranscript = ""
-            discardResumeWorkspace(rollbackResumeState)
-            resumeState = null
-            compactedMessageCount = 0
-            Toast.makeText(context, "已回滚到所选消息", Toast.LENGTH_SHORT).show()
-            true
-        }
-    }
-
-    fun deleteAgentMessage(index: Int) {
-        if (generating || contextCompacting || applyingFileOperation || hasPendingConfirmation() ||
-            index !in sessionMessages.indices
-        ) return
-        val hadLaterMessages = index < sessionMessages.lastIndex
-        val (remainingMessages, removedMessages) = removeMessageTree(index)
-        val restoredDraft = draftForMessages(remainingMessages)
-        val nextDraft = if (restoredDraft != null || !hadLaterMessages) restoredDraft else sessionDraft
-        val previousResumeState = resumeState
-        prepareMessageHistoryChange(
-            retainedMessages = remainingMessages,
-            removedMessages = removedMessages,
-            actionName = "删除消息"
-        ) { restoredHistory ->
-            sessionMessages = remainingMessages
-            sessionDraft = nextDraft
-            conversationSummary = ""
-            nativeToolHistory = restoredHistory
-            protocolTranscript = ""
-            discardResumeWorkspace(previousResumeState)
-            resumeState = null
-            compactedMessageCount = 0
-            if (remainingMessages.isEmpty()) {
-                historyVersion++
-            }
-            Toast.makeText(context, "消息已删除", Toast.LENGTH_SHORT).show()
-            true
-        }
-    }
-
-    fun currentSessionSnapshot(updatedAt: Long = System.currentTimeMillis()): ScriptPluginAgentSession {
-        return renderedSessionState.snapshot(updatedAt)
-    }
-
-    fun persistSession(session: ScriptPluginAgentSession) {
-        ScriptPluginAgentSessionStore.save(context, session)
-        ScriptPluginAgentRuntime.updateMetadata(session)
-        if (session.id == activeSessionId) {
-            sessionTitle = session.title
-            sessionPinned = session.pinned
-            sessionLocked = session.locked
-            sessionSortOrder = session.sortOrder
-        }
-        historyVersion++
-    }
-
-    fun renameSession(session: ScriptPluginAgentSession, title: String) {
-        val cleanTitle = title.replace(Regex("\\s+"), " ").trim().take(32)
-        if (cleanTitle.isBlank()) return
-        val source = if (session.id == activeSessionId) {
-            currentSessionSnapshot(session.updatedAt)
-        } else {
-            session
-        }
-        persistSession(source.copy(title = cleanTitle))
-    }
-
-    fun setSessionPinned(session: ScriptPluginAgentSession, pinned: Boolean) {
-        val source = if (session.id == activeSessionId) {
-            currentSessionSnapshot(session.updatedAt)
-        } else {
-            session
-        }
-        val nextOrder = if (pinned) {
-            (ScriptPluginAgentSessionStore.list(context).maxOfOrNull { it.sortOrder } ?: source.sortOrder) + 1L
-        } else {
-            source.sortOrder
-        }
-        persistSession(source.copy(pinned = pinned, sortOrder = nextOrder))
-    }
-
-    fun setSessionLocked(session: ScriptPluginAgentSession, locked: Boolean) {
-        val source = if (session.id == activeSessionId) {
-            currentSessionSnapshot(session.updatedAt)
-        } else {
-            session
-        }
-        persistSession(source.copy(locked = locked))
-    }
-
-    fun persistSessionOrder(ordered: List<ScriptPluginAgentSession>) {
-        val topOrder = (ordered.maxOfOrNull { it.sortOrder } ?: System.currentTimeMillis()) + ordered.size + 1L
-        val reordered = ordered.mapIndexed { index, item -> item.copy(sortOrder = topOrder - index) }
-        reordered.firstOrNull { it.id == activeSessionId }?.let { sessionSortOrder = it.sortOrder }
-        Thread({
-            runCatching {
-                reordered.forEach { ScriptPluginAgentSessionStore.save(context, it) }
-            }.onSuccess {
-                Handler(Looper.getMainLooper()).post { historyVersion++ }
-            }.onFailure { error ->
-                h.Hchat.utils.HLog.e("[Hchat:ScriptAgent] 保存历史会话排序失败", error)
-            }
-        }, "Hchat-Agent-Session-Order").start()
-    }
-
-    fun deleteSession(session: ScriptPluginAgentSession) {
-        if (session.locked) {
-            Toast.makeText(context, "请先解锁该对话", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (ScriptPluginAgentRuntime.isBusy(session.id)) {
-            Toast.makeText(context, "该对话正在运行或有待确认操作，请先处理后再删除", Toast.LENGTH_SHORT).show()
-            return
-        }
-        discardResumeWorkspace(
-            if (session.id == activeSessionId) resumeState else session.resumeState
-        )
-        ScriptPluginAgentSessionStore.delete(context, session.id)
-        ScriptPluginAgentRuntime.remove(session.id)
-        historyVersion++
-        if (session.id == activeSessionId) {
-            val next = ScriptPluginAgentSessionStore.list(context).firstOrNull()
-            if (next == null) newSession(saveCurrent = false) else openSession(next, saveCurrent = false)
-        }
-    }
-
-    fun prepareForExit() {
-        if (!exitPrepared.compareAndSet(false, true)) return
-        val hasConversation = ScriptPluginAgentSessionStore.hasConversation(sessionMessages)
-        saveCurrentSession()
-        if (hasConversation) ScriptPluginAgentRuntime.resumeOnNextEntry(activeSessionId)
-    }
-
-    fun exitPage() {
-        prepareForExit()
-        onBack()
-    }
-
-    val latestExitHandler = rememberUpdatedState(newValue = { exitPage() })
-    val latestPrepareForExit = rememberUpdatedState(newValue = { prepareForExit() })
-    DisposableEffect(onExitHandlerChanged) {
-        val handler = { latestExitHandler.value.invoke() }
-        onExitHandlerChanged(handler)
-        onDispose {
-            onExitHandlerChanged(null)
-            latestPrepareForExit.value.invoke()
-        }
-    }
-
-    LaunchedEffect(
-        generating,
-        applyingFileOperation,
-        pendingWrite,
-        pendingDelete,
-        pendingWorkspaceChange,
-        showConfig,
-        showModelPicker,
-        showQuickProfilePicker,
-        showQuickOptions,
-        pendingMessages
-    ) {
-        if (
-            !generating &&
-            !applyingFileOperation &&
-            pendingWrite == null &&
-            pendingDelete == null &&
-            pendingWorkspaceChange == null &&
-            !showConfig &&
-            !showModelPicker &&
-            !showQuickProfilePicker &&
-            !showQuickOptions &&
-            pendingMessages.isNotEmpty()
-        ) {
-            delay(250L)
-            val next = pendingMessages.firstOrNull() ?: return@LaunchedEffect
-            if (
-                sendMessage(
-                    content = next.content,
-                    attachments = next.attachments,
-                    quotedMessage = next.quotedMessage,
-                    consumeComposer = false
-                )
-            ) {
-                pendingMessages = pendingMessages.filterNot { it.id == next.id }
-            }
-        }
-    }
-
-    if (showToolApprovalDialog) {
-        pendingToolApproval?.let { approval ->
-            var alwaysAllow by remember(approval.confirmation.eventId) { mutableStateOf(false) }
-            WindowDialog(
-                show = true,
-                title = approval.confirmation.toolName,
-                onDismissRequest = { showToolApprovalDialog = false },
-                content = {
-                    Column(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
-                        Column(
-                            modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
-                                .verticalScroll(rememberScrollState())
-                        ) {
-                            Text(
-                                text = "Agent 正在修改插件 ${approval.confirmation.pluginId}，确认后继续执行。",
-                                color = MiuixTheme.colorScheme.onSurface,
-                                fontSize = 13.sp
-                            )
-                            Text(
-                                text = "代码差异",
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(top = 12.dp)
-                            )
-                            ScriptPluginAgentDiffCodeBlock(
-                                approval.confirmation.diff.ifBlank { "无代码变化" }
-                            )
-                        }
-                        ScriptPluginAgentAlwaysAllowRow(
-                            checked = alwaysAllow,
-                            summary = "确认后，本轮后续写入和最终提交不再询问",
-                            onCheckedChange = { alwaysAllow = it }
-                        )
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(10.dp)
-                        ) {
-                            TextButton(
-                                text = "取消修改",
-                                onClick = {
-                                    showToolApprovalDialog = false
-                                    pendingToolApproval = null
-                                    approval.resolve(ScriptPluginAgentWorkspaceWriteDecision.CANCEL)
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.textButtonColorsPrimary()
-                            )
-                            TextButton(
-                                text = "确认并继续",
-                                onClick = {
-                                    if (alwaysAllow) {
-                                        setWorkspaceWriteApprovalMode(
-                                            ScriptPluginAgentSettings.WRITE_APPROVAL_ALWAYS_ALLOW
-                                        )
-                                    }
-                                    showToolApprovalDialog = false
-                                    pendingToolApproval = null
-                                    approval.resolve(
-                                        if (alwaysAllow) {
-                                            ScriptPluginAgentWorkspaceWriteDecision.ALWAYS_ALLOW
-                                        } else {
-                                            ScriptPluginAgentWorkspaceWriteDecision.APPROVE_ONCE
-                                        }
-                                    )
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.textButtonColorsPrimary()
-                            )
-                        }
-                    }
-                }
-            )
-        }
-    }
-    if (showPendingWorkspaceDialog) pendingWorkspaceChange?.let { pending ->
-        var alwaysAllow by remember(pending.change.stagingPath) { mutableStateOf(false) }
-        fun dismissWorkspaceChange() {
-            showPendingWorkspaceDialog = false
-            pendingWorkspaceChange = null
-            resumeState = null
-            Thread({
-                ScriptPluginAgentWorkspaceTools.discard(context, pending.change)
-            }, "Hchat-Script-Agent-Workspace-Discard").start()
-            recordFileOperation(pending.messageIndex, "已取消插件工作区变更")
-        }
-        WindowDialog(
-            show = true,
-            title = when {
-                pending.change.deletePlugin -> "删除插件"
-                pending.isNewPlugin -> "创建插件"
-                pending.hasDeletedPaths -> "确认删除路径"
-                pending.risky -> "确认高风险修改"
-                else -> "确认修改"
-            },
-            onDismissRequest = { showPendingWorkspaceDialog = false },
-            content = {
-                Column(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        Text(
-                            text = buildString {
-                                when {
-                                    pending.change.deletePlugin -> append(
-                                        "Agent 将删除插件“${pending.change.pluginName}”（${pending.change.pluginId}）。"
-                                    )
-                                    pending.isNewPlugin -> append(
-                                        "Agent 将创建插件“${pending.change.pluginName}”（${pending.change.pluginId}）。"
-                                    )
-                                    else -> append("Agent 将更新插件 ${pending.change.pluginId}。")
-                                }
-                                if (!pending.change.deletePlugin) append("提交后插件保持禁用。")
-                                if (pending.applyError.isNotBlank()) {
-                                    append("\n\n上次提交失败：").append(pending.applyError)
-                                    append("\n暂存修改仍在，可直接重试；若目标代码文件已被其它操作修改，请取消后让 Agent 重新读取。")
-                                }
-                                val summaries = buildList {
-                                    if (pending.change.createdPaths.isNotEmpty()) {
-                                        add("新增 ${pending.change.createdPaths.size} 项")
-                                    }
-                                    if (pending.change.modifiedPaths.isNotEmpty()) {
-                                        add("修改 ${pending.change.modifiedPaths.size} 项")
-                                    }
-                                    if (pending.change.deletedPaths.isNotEmpty()) {
-                                        add("删除 ${pending.change.deletedPaths.size} 项")
-                                    }
-                                }
-                                if (summaries.isNotEmpty()) {
-                                    append("\n\n").append(summaries.joinToString("，"))
-                                }
-                                val changedPaths = (
-                                    pending.change.createdPaths +
-                                        pending.change.modifiedPaths +
-                                        pending.change.deletedPaths
-                                    ).distinct().take(6)
-                                if (changedPaths.isNotEmpty()) {
-                                    append("\n").append(changedPaths.joinToString("\n") { "- $it" })
-                                }
-                                if (pending.risky) {
-                                    append("\n\n静态检查发现高风险代码：")
-                                    append(
-                                        pending.change.warnings.filter { it.risky }
-                                            .joinToString("；") { it.message }
-                                    )
-                                }
-                            },
-                            color = MiuixTheme.colorScheme.onSurface,
-                            fontSize = 13.sp
-                        )
-                        Text(
-                            text = "代码差异",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 12.dp)
-                        )
-                        ScriptPluginAgentDiffCodeBlock(pending.change.diff.ifBlank { "无代码变化" })
-                    }
-                    ScriptPluginAgentAlwaysAllowRow(
-                        checked = alwaysAllow,
-                        summary = "确认后，后续插件修改不再询问",
-                        onCheckedChange = { alwaysAllow = it }
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        TextButton(
-                            text = "取消",
-                            onClick = { dismissWorkspaceChange() },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                        TextButton(
-                            text = when {
-                                pending.change.deletePlugin -> "确认删除"
-                                pending.isNewPlugin -> "确认创建"
-                                pending.applyError.isNotBlank() -> "重试提交"
-                                else -> "确认提交"
-                            },
-                            onClick = {
-                                if (alwaysAllow) {
-                                    setWorkspaceWriteApprovalMode(
-                                        ScriptPluginAgentSettings.WRITE_APPROVAL_ALWAYS_ALLOW
-                                    )
-                                }
-                                showPendingWorkspaceDialog = false
-                                pendingWorkspaceChange = null
-                                applyWorkspaceChange(pending.messageIndex, pending.change)
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                }
-            }
-        )
-    }
-    if (showPendingWriteDialog) pendingWrite?.let { pending ->
-        var alwaysAllow by remember(pending.messageIndex, pending.draft.pluginId) { mutableStateOf(false) }
-        fun dismissPendingWrite() {
-            showPendingWriteDialog = false
-            pendingWrite = null
-            resumeState = null
-            recordFileOperation(
-                pending.messageIndex,
-                when {
-                    pending.isNewPlugin -> "已取消创建插件"
-                    pending.confirmsCreation -> "已取消替换同名插件"
-                    pending.risky -> "已取消高风险修改"
-                    else -> "已取消插件修改"
-                }
-            )
-        }
-        WindowDialog(
-            show = true,
-            title = when {
-                pending.isNewPlugin -> "创建插件"
-                pending.confirmsCreation -> "替换同名插件"
-                pending.risky -> "确认高风险修改"
-                else -> "确认修改"
-            },
-            onDismissRequest = { showPendingWriteDialog = false },
-            content = {
-                Column(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
-                    Column(
-                        modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
-                            .verticalScroll(rememberScrollState())
-                    ) {
-                        Text(
-                            text = buildString {
-                                if (pending.isNewPlugin) {
-                                    append("Agent 将创建插件“${pending.draft.pluginName}”（${pending.draft.pluginId}）。创建后默认禁用。")
-                                } else if (pending.confirmsCreation) {
-                                    append("目录 ${pending.draft.pluginId} 已存在。继续会把它作为同名插件更新，并保持禁用。")
-                                } else {
-                                    append("Agent 将直接修改插件 ${pending.draft.pluginId}，写入后插件会保持禁用。")
-                                }
-                                if (pending.risky) {
-                                    append("\n\n静态检查发现网络、反射、Hook、文件删除或进程执行等高风险代码，请确认代码来源和用途。")
-                                }
-                            },
-                            color = MiuixTheme.colorScheme.onSurface,
-                            fontSize = 13.sp
-                        )
-                        Text(
-                            text = "代码差异",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 12.dp)
-                        )
-                        ScriptPluginAgentDiffCodeBlock(pending.diff.ifBlank { "无代码变化" })
-                    }
-                    ScriptPluginAgentAlwaysAllowRow(
-                        checked = alwaysAllow,
-                        summary = "确认后，后续插件修改不再询问",
-                        onCheckedChange = { alwaysAllow = it }
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        TextButton(
-                            text = "取消",
-                            onClick = { dismissPendingWrite() },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                        TextButton(
-                            text = when {
-                                pending.isNewPlugin -> "确认创建"
-                                pending.confirmsCreation -> "确认替换"
-                                else -> "确认修改"
-                            },
-                            onClick = {
-                                if (alwaysAllow) {
-                                    setWorkspaceWriteApprovalMode(
-                                        ScriptPluginAgentSettings.WRITE_APPROVAL_ALWAYS_ALLOW
-                                    )
-                                }
-                                showPendingWriteDialog = false
-                                pendingWrite = null
-                                writeAgentDraft(pending.messageIndex, pending.draft, pending.isNewPlugin)
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                }
-            }
-        )
-    }
-    if (showPendingDeleteDialog) pendingDelete?.let { pending ->
-        var alwaysAllow by remember(pending.messageIndex, pending.pluginId) { mutableStateOf(false) }
-        fun dismissPendingDelete() {
-            showPendingDeleteDialog = false
-            pendingDelete = null
-            resumeState = null
-            recordFileOperation(pending.messageIndex, "已取消删除插件")
-        }
-        WindowDialog(
-            show = true,
-            title = "删除插件",
-            onDismissRequest = { showPendingDeleteDialog = false },
-            content = {
-                Column {
-                    Text(
-                        text = "确定删除插件“${pending.pluginName}”（${pending.pluginId}）吗？插件目录内的全部文件都会被删除，此操作无法撤销。",
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontSize = 13.sp
-                    )
-                    ScriptPluginAgentAlwaysAllowRow(
-                        checked = alwaysAllow,
-                        summary = "确认后，后续插件修改不再询问",
-                        onCheckedChange = { alwaysAllow = it }
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        TextButton(
-                            text = "取消",
-                            onClick = { dismissPendingDelete() },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                        TextButton(
-                            text = "确认删除",
-                            onClick = {
-                                if (alwaysAllow) {
-                                    setWorkspaceWriteApprovalMode(
-                                        ScriptPluginAgentSettings.WRITE_APPROVAL_ALWAYS_ALLOW
-                                    )
-                                }
-                                showPendingDeleteDialog = false
-                                pendingDelete = null
-                                deleteAgentPlugin(pending.messageIndex, pending.pluginId)
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                }
-            }
-        )
-    }
-    if (showQuickProfilePicker) {
-        ScriptPluginAgentQuickProfileDialog(
-            profiles = profiles,
-            activeProfileId = activeProfileId,
-            onSelected = {
-                selectProfile(it)
-                showQuickProfilePicker = false
-            },
-            onDismiss = { showQuickProfilePicker = false }
-        )
-    }
-    if (showQuickOptions) {
-        ScriptPluginAgentQuickOptionsDialog(
-            webSearchEnabled = webSearchEnabled,
-            workspaceWriteApprovalMode = workspaceWriteApprovalMode,
-            promptCacheMode = promptCacheMode,
-            endpointMode = endpointMode,
-            mcpServers = mcpServers,
-            onWebSearchChanged = { setWebSearchEnabled(it) },
-            onWorkspaceWriteApprovalChanged = { setWorkspaceWriteApprovalMode(it) },
-            onPromptCacheModeChanged = { setPromptCacheMode(it) },
-            onMcpChanged = { id, enabled -> setMcpServerEnabled(id, enabled) },
-            onDismiss = { showQuickOptions = false }
-        )
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        when {
-            showModelPicker -> ScriptPluginAgentModelPickerPage(
-                config = currentConfig(),
-                currentModel = model,
-                onSelected = {
-                    val appliesToNextRequest = generating
-                    ScriptPluginAgentSettings.save(context, currentConfig().copy(model = it))
-                    model = it
-                    showModelPicker = false
-                    Toast.makeText(
-                        context,
-                        if (appliesToNextRequest) "已切换模型，将用于下一次请求" else "已切换模型",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                },
-                onBack = { showModelPicker = false }
-            )
-            showConfig -> ScriptPluginAgentConfigPage(
-                profiles = profiles,
-                activeProfileId = activeProfileId,
-                activeProfileName = activeProfileName,
-                testingConnection = testingConnection,
-                apiBase = apiBase,
-                endpointMode = endpointMode,
-                apiKey = apiKey,
-                model = model,
-                mcpServers = mcpServers,
-                autoCompactEnabled = autoCompactEnabled,
-                compactTokenThreshold = compactTokenThreshold,
-                promptCacheMode = promptCacheMode,
-                onApiBaseChange = { apiBase = it },
-                onEndpointModeChange = { mode ->
-                    endpointMode = mode
-                    ScriptPluginAgentSettings.presetRequestUrl(mode)
-                        .takeIf { it.isNotBlank() }
-                        ?.let { apiBase = it }
-                },
-                onApiKeyChange = { apiKey = it },
-                onModelChange = { model = it },
-                onMcpServersChange = { mcpServers = it },
-                onAutoCompactEnabledChange = { autoCompactEnabled = it },
-                onCompactTokenThresholdChange = { compactTokenThreshold = it.filter(Char::isDigit) },
-                onPromptCacheModeChange = { promptCacheMode = it },
-                onProfileSelected = { selectProfile(it) },
-                onCreateProfile = { createProfile(it) },
-                onRenameProfile = { renameProfile(it) },
-                onDeleteProfile = { deleteActiveProfile() },
-                onTestConnection = { testAgentConnection() },
-                onOpenModels = { showModelPicker = true },
-                onCompact = { compactContext() },
-                onSave = { saveConfig() },
-                onBack = { showConfig = false }
-            )
-            else -> ScriptPluginAgentChatPage(
-                title = sessionTitle,
-                messages = sessionMessages,
-                messageInput = messageInput,
-                pendingAttachments = pendingAttachments,
-                pendingQuotedMessage = pendingQuotedMessage,
-                pendingMessages = pendingMessages,
-                pendingMessagesExpanded = pendingMessagesExpanded,
-                activeProfileName = activeProfileName,
-                activeModel = model,
-                enabled = !generating && !contextCompacting && !applyingFileOperation &&
-                    !hasPendingConfirmation(),
-                inputEnabled = !contextCompacting && !applyingFileOperation &&
-                    !hasPendingConfirmation(),
-                generating = generating,
-                contextCompacting = contextCompacting,
-                workingStartedAt = if (contextCompacting) contextCompactionStartedAt else generationStartedAt,
-                workingLabel = when {
-                    contextCompacting && generating -> "正在自动压缩上下文"
-                    contextCompacting -> "正在压缩上下文"
-                    else -> ""
-                },
-                showWorking = generating && !generationHasVisibleReply,
-                pendingConfirmationLabel = when {
-                    pendingToolApproval != null -> "${pendingToolApproval?.confirmation?.toolName}待确认"
-                    pendingWorkspaceChange != null -> "最终插件修改待确认"
-                    pendingWrite != null -> "最终插件写入待确认"
-                    pendingDelete != null -> "删除插件待确认"
-                    else -> null
-                },
-                onMessageInputChange = { messageInput = it },
-                onSend = { sendMessage() },
-                onQueue = { queueMessage() },
-                onCancel = { cancelGeneration() },
-                onAttach = { selectAttachments() },
-                onRemoveAttachment = { path ->
-                    val removed = pendingAttachments.filter { it.path == path }
-                    pendingAttachments = pendingAttachments.filterNot { it.path == path }
-                    ScriptPluginAgentSessionStore.cleanupAttachments(context, removed)
-                },
-                onClearQuotedMessage = { pendingQuotedMessage = null },
-                onPendingMessagesExpandedChange = { pendingMessagesExpanded = it },
-                onEditPendingMessage = { editPendingMessage(it) },
-                onDeletePendingMessage = { id ->
-                    pendingMessages.firstOrNull { it.id == id }?.let { pending ->
-                        ScriptPluginAgentSessionStore.cleanupAttachments(context, pending.attachments)
-                    }
-                    pendingMessages = pendingMessages.filterNot { it.id == id }
-                },
-                onSendPendingMessageNow = { sendPendingMessageNow(it) },
-                onOpenProfilePicker = { showQuickProfilePicker = true },
-                onOpenModelPicker = { showModelPicker = true },
-                onOpenQuickOptions = { showQuickOptions = true },
-                onOpenPendingConfirmation = { showPendingConfirmation() },
-                onCompact = { compactContext() },
-                onOpenHistory = { showHistory = true },
-                onOpenConfig = {
-                    if (!generating && !contextCompacting && !applyingFileOperation &&
-                        !showPendingConfirmation()
-                    ) {
-                        showConfig = true
-                    }
-                },
-                onEditAndResend = { editAndResendMessage(it) },
-                onQuoteMessage = { quoteAgentMessage(it) },
-                onContinueMessage = { continueInterruptedTask(it) },
-                onRegenerateMessage = { regenerateAssistantMessage(it) },
-                onRollback = { rollbackToMessage(it) },
-                onDeleteMessage = { deleteAgentMessage(it) },
-                onCreateBranch = { createMessageBranch(it) },
-                onBack = { exitPage() }
-            )
-        }
-        if (showHistory) {
-            val workingSessionIds = ScriptPluginAgentRuntime.workingSessionIds()
-            val visibleSessions = if (ScriptPluginAgentSessionStore.hasConversation(sessionMessages)) {
-                val currentSession = currentSessionSnapshot()
-                (sessions.filterNot { it.id == activeSessionId } + currentSession).distinctBy { it.id }
-            } else {
-                sessions.filterNot { it.id == activeSessionId }
-            }
-            val runtimeSessions = ScriptPluginAgentRuntime.snapshots()
-            ScriptPluginAgentHistoryDrawer(
-                sessions = ScriptPluginAgentSessionStore.sorted(
-                    (visibleSessions + runtimeSessions).distinctBy { it.id }
-                ),
-                activeId = activeSessionId,
-                workingSessionIds = workingSessionIds,
-                enabled = true,
-                onNewSession = { newSession() },
-                onSelect = { openSession(it) },
-                onRename = { session, title -> renameSession(session, title) },
-                onCommitOrder = { persistSessionOrder(it) },
-                onSetPinned = { session, pinned -> setSessionPinned(session, pinned) },
-                onSetLocked = { session, locked -> setSessionLocked(session, locked) },
-                onDelete = { deleteSession(it) },
-                onClose = { showHistory = false }
-            )
-        }
-    }
-}
-
-internal fun promptCacheModeChoices(): List<PopupChoice<String>> = listOf(
-    PopupChoice("自动", ScriptPluginAgentSettings.PROMPT_CACHE_AUTO),
-    PopupChoice("强制", ScriptPluginAgentSettings.PROMPT_CACHE_FORCE),
-    PopupChoice("关闭", ScriptPluginAgentSettings.PROMPT_CACHE_OFF)
-)
-
-internal fun promptCacheModeSummary(mode: String, endpointMode: String): String {
-    if (endpointMode == ScriptPluginAgentSettings.ENDPOINT_MODE_GEMINI) {
-        return "Gemini 不使用 OpenAI 或 Anthropic 的显式缓存字段"
-    }
-    return when (mode) {
-        ScriptPluginAgentSettings.PROMPT_CACHE_FORCE ->
-            "向兼容接口发送稳定缓存标识，不支持时自动回退"
-        ScriptPluginAgentSettings.PROMPT_CACHE_OFF ->
-            "不发送显式缓存字段"
-        else -> "官方接口显式缓存，其他接口使用服务端默认策略"
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentConfigPage(
-    profiles: List<ScriptPluginAgentProfile>,
-    activeProfileId: String,
-    activeProfileName: String,
-    testingConnection: Boolean,
-    apiBase: String,
-    endpointMode: String,
-    apiKey: String,
-    model: String,
-    mcpServers: List<ScriptPluginAgentMcpServer>,
-    autoCompactEnabled: Boolean,
-    compactTokenThreshold: String,
-    promptCacheMode: String,
-    onApiBaseChange: (String) -> Unit,
-    onEndpointModeChange: (String) -> Unit,
-    onApiKeyChange: (String) -> Unit,
-    onModelChange: (String) -> Unit,
-    onMcpServersChange: (List<ScriptPluginAgentMcpServer>) -> Unit,
-    onAutoCompactEnabledChange: (Boolean) -> Unit,
-    onCompactTokenThresholdChange: (String) -> Unit,
-    onPromptCacheModeChange: (String) -> Unit,
-    onProfileSelected: (ScriptPluginAgentProfile) -> Unit,
-    onCreateProfile: (String) -> Unit,
-    onRenameProfile: (String) -> Unit,
-    onDeleteProfile: () -> Unit,
-    onTestConnection: () -> Unit,
-    onOpenModels: () -> Unit,
-    onCompact: () -> Unit,
-    onSave: () -> Unit,
-    onBack: () -> Unit
-) {
-    var profileDialog by remember { mutableStateOf("") }
-    var profileNameDraft by remember(activeProfileName, profileDialog) {
-        mutableStateOf(if (profileDialog == "rename") activeProfileName else "")
-    }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    val resolvedEndpoint = remember(apiBase, endpointMode, model) {
-        ScriptPluginAgentSettings.requestUrl(apiBase, endpointMode, model)
-    }
-
-    if (profileDialog.isNotBlank()) {
-        WindowDialog(
-            show = true,
-            title = if (profileDialog == "rename") "重命名配置" else "新建配置",
-            onDismissRequest = { profileDialog = "" },
-            content = {
-                Column {
-                    InputRow(
-                        title = "配置名称",
-                        summary = "用于区分不同服务和模型",
-                        value = profileNameDraft,
-                        onValueChange = { profileNameDraft = it.take(32) }
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        TextButton(
-                            text = "取消",
-                            onClick = { profileDialog = "" },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                        TextButton(
-                            text = "确认",
-                            onClick = {
-                                if (profileNameDraft.isNotBlank()) {
-                                    if (profileDialog == "rename") {
-                                        onRenameProfile(profileNameDraft)
-                                    } else {
-                                        onCreateProfile(profileNameDraft)
-                                    }
-                                    profileDialog = ""
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                }
-            }
-        )
-    }
-    if (showDeleteConfirm) {
-        WindowDialog(
-            show = true,
-            title = "删除配置",
-            onDismissRequest = { showDeleteConfirm = false },
-            content = {
-                Column {
-                    Text(
-                        text = "确定删除“$activeProfileName”吗？",
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontSize = 14.sp
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        TextButton(
-                            text = "取消",
-                            onClick = { showDeleteConfirm = false },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                        TextButton(
-                            text = "删除",
-                            onClick = {
-                                showDeleteConfirm = false
-                                onDeleteProfile()
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                }
-            }
-        )
-    }
-
-    val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
-        title = "Agent 配置",
-        largeTitle = "Agent 配置",
+        title = provider.title(),
+        largeTitle = provider.title(),
         scrollBehavior = scrollBehavior,
         bottomBar = {
             BottomActionBar(
-                primaryText = "保存配置",
+                primaryText = "新增任务",
+                onPrimaryClick = onAdd,
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "发送计划") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        checked = enabled,
+                        title = "启用定时任务",
+                        summary = "开启后按计划时间发送聊天消息或发布朋友圈"
+                    ) { onEnabledChange(it) }
+                    InsetDivider()
+                    InfoRow("当前任务", if (tasks.isEmpty()) "暂无任务" else "${tasks.size} 个")
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "任务列表") }
+            when {
+                tasks.isEmpty() -> item {
+                    SettingsCard {
+                        EmptyText("还没有定时任务，点击底部“新增任务”。")
+                    }
+                }
+                else -> tasks.forEach { task ->
+                    item {
+                        SettingsCard {
+                            ActionRow(
+                                scheduledTaskTitle(task),
+                                scheduledTaskSummary(task)
+                            ) {
+                                onEdit(task)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ScheduledTaskEditorPage(
+    context: Context,
+    task: ScheduledTaskItem,
+    isEditing: Boolean,
+    listState: LazyListState,
+    onBack: () -> Unit,
+    onTaskChange: (ScheduledTaskItem) -> Unit,
+    onPickTargets: () -> Unit,
+    onPickFiles: (Int, Int) -> Unit,
+    onPickMomentsMedia: (Int) -> Unit,
+    onPickFavorite: (Int) -> Unit,
+    onSave: () -> Unit,
+    onDelete: (() -> Unit)?,
+    onExecuteNow: (() -> Unit)?
+) {
+    val scrollBehavior = MiuixScrollBehavior()
+    PageScaffold(
+        title = if (isEditing) "编辑任务" else "新增任务",
+        largeTitle = if (isEditing) "编辑任务" else "新增任务",
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存任务",
                 onPrimaryClick = onSave,
                 secondaryText = "返回",
                 onSecondaryClick = onBack
@@ -3472,231 +647,888 @@ internal fun ScriptPluginAgentConfigPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
-            item { SmallTitle(text = "模型配置") }
+            item { SmallTitle(text = "备注") }
             item {
                 SettingsCard {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 10.dp, end = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "选择模型配置",
-                            color = MiuixTheme.colorScheme.onSurface,
-                            fontWeight = FontWeight.Medium,
-                            modifier = Modifier.weight(1f)
-                        )
-                        TextButton(
-                            text = "+ 新建",
-                            onClick = {
-                                profileNameDraft = ""
-                                profileDialog = "create"
-                            },
-                            minWidth = 0.dp,
-                            minHeight = 34.dp,
-                            cornerRadius = 10.dp,
-                            insideMargin = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                    PopupChoiceRow(
-                        title = "当前配置",
-                        summary = activeProfileName,
-                        options = profiles.map { PopupChoice(it.name, it.id) },
-                        currentValue = activeProfileId,
-                        onValueChanged = { id -> profiles.firstOrNull { it.id == id }?.let(onProfileSelected) }
-                    )
-                    InsetDivider()
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        TextButton(
-                            text = "重命名",
-                            onClick = {
-                                profileNameDraft = activeProfileName
-                                profileDialog = "rename"
-                            },
-                            modifier = Modifier.weight(1f),
-                            minWidth = 0.dp,
-                            minHeight = 34.dp,
-                            cornerRadius = 10.dp,
-                            insideMargin = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                        TextButton(
-                            text = "删除",
-                            onClick = { showDeleteConfirm = true },
-                            enabled = profiles.size > 1,
-                            modifier = Modifier.weight(1f),
-                            minWidth = 0.dp,
-                            minHeight = 34.dp,
-                            cornerRadius = 10.dp,
-                            insideMargin = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                        TextButton(
-                            text = if (testingConnection) "测试中" else "测试连接",
-                            onClick = onTestConnection,
-                            enabled = !testingConnection,
-                            modifier = Modifier.weight(1f),
-                            minWidth = 0.dp,
-                            minHeight = 34.dp,
-                            cornerRadius = 10.dp,
-                            insideMargin = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "API 设置") }
-            item {
-                SettingsCard {
-                    PopupChoiceRow(
-                        title = "接口类型",
-                        summary = ScriptPluginAgentSettings.endpointModeLabel(endpointMode),
-                        options = listOf(
-                            PopupChoice("OpenAI 兼容", ScriptPluginAgentSettings.ENDPOINT_MODE_OPENAI_COMPATIBLE),
-                            PopupChoice("OpenAI", ScriptPluginAgentSettings.ENDPOINT_MODE_OPENAI),
-                            PopupChoice("DeepSeek", ScriptPluginAgentSettings.ENDPOINT_MODE_DEEPSEEK),
-                            PopupChoice("OpenRouter", ScriptPluginAgentSettings.ENDPOINT_MODE_OPENROUTER),
-                            PopupChoice("硅基流动", ScriptPluginAgentSettings.ENDPOINT_MODE_SILICONFLOW),
-                            PopupChoice("Gemini", ScriptPluginAgentSettings.ENDPOINT_MODE_GEMINI),
-                            PopupChoice("Anthropic", ScriptPluginAgentSettings.ENDPOINT_MODE_ANTHROPIC),
-                            PopupChoice("自定义请求链接", ScriptPluginAgentSettings.ENDPOINT_MODE_CUSTOM_URL)
-                        ),
-                        currentValue = endpointMode,
-                        onValueChanged = onEndpointModeChange
-                    )
-                    InsetDivider()
                     InputRow(
-                        if (endpointMode == ScriptPluginAgentSettings.ENDPOINT_MODE_CUSTOM_URL) {
-                            "请求链接"
-                        } else {
-                            "API 地址"
-                        },
-                        if (endpointMode == ScriptPluginAgentSettings.ENDPOINT_MODE_GEMINI) {
-                            "自动补全 Gemini 模型与 generateContent 请求路径"
-                        } else if (endpointMode == ScriptPluginAgentSettings.ENDPOINT_MODE_ANTHROPIC) {
-                            "自动补全 /v1/messages"
-                        } else if (endpointMode == ScriptPluginAgentSettings.ENDPOINT_MODE_CUSTOM_URL) {
-                            "手动填写完整 URL，不会自动补全或改写"
-                        } else {
-                            "可填写域名、/v1 地址或完整 /chat/completions 地址"
-                        },
-                        apiBase,
-                        onValueChange = onApiBaseChange
-                    )
-                    if (resolvedEndpoint.isNotBlank()) {
-                        InsetDivider()
-                        ScriptPluginAgentEndpointPreview(resolvedEndpoint)
-                    }
-                    InsetDivider()
-                    InputRow("API Key", "留空表示接口不需要密钥", apiKey, onValueChange = onApiKeyChange)
-                    InsetDivider()
-                    InputRow("模型", "填写服务端可用的模型名称", model, onValueChange = onModelChange)
-                    InsetDivider()
-                    ActionRow("拉取模型列表", "从当前 API 地址获取") { onOpenModels() }
-                    InsetDivider()
-                    PopupChoiceRow(
-                        title = "提示缓存",
-                        summary = promptCacheModeSummary(promptCacheMode, endpointMode),
-                        options = promptCacheModeChoices(),
-                        currentValue = promptCacheMode,
-                        onValueChanged = onPromptCacheModeChange
+                        title = "任务备注",
+                        summary = "用于在任务列表区分任务，可留空",
+                        value = task.remark,
+                        onValueChange = { onTaskChange(task.copy(remark = it)) }
                     )
                 }
             }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "上下文") }
+            item { SmallTitle(text = "任务目标") }
+            item {
+                SettingsCard {
+                    if (scheduledTaskEditableItems(task).any { it.type == ScheduledTaskSettings.TYPE_SELECTED_MESSAGE }) {
+                        InfoRow(label = "发送到", value = "聊天")
+                    } else {
+                        PopupChoiceRow(
+                            title = "发送到",
+                            summary = scheduledTaskTargetTypeLabel(task.targetType),
+                            options = scheduledTaskTargetTypeChoices(),
+                            currentValue = task.targetType.toString(),
+                            onValueChanged = { value ->
+                                val targetType = value.toIntOrNull() ?: ScheduledTaskSettings.TARGET_CHAT
+                                onTaskChange(updateScheduledTaskTargetType(task, targetType))
+                            }
+                        )
+                    }
+                    if (task.targetType == ScheduledTaskSettings.TARGET_CHAT) {
+                        InsetDivider()
+                        PopupChoiceRow(
+                            title = "发送通道",
+                            summary = scheduledTaskSendChannelLabel(task.sendChannel),
+                            options = scheduledTaskSendChannelChoices(),
+                            currentValue = task.sendChannel.toString(),
+                            onValueChanged = { value ->
+                                val channel = value.toIntOrNull()
+                                    ?.takeIf { ScheduledTaskSettings.sendChannelIsValid(it) }
+                                    ?: ScheduledTaskSettings.SEND_CHANNEL_MODULE
+                                onTaskChange(
+                                    task.copy(
+                                        sendChannel = channel,
+                                        targetIds = if (channel == task.sendChannel) {
+                                            task.targetIds
+                                        } else {
+                                            emptyList()
+                                        }
+                                    )
+                                )
+                            }
+                        )
+                        InsetDivider()
+                        ActionRow(
+                            if (task.sendChannel == ScheduledTaskSettings.SEND_CHANNEL_OFFICIAL) {
+                                "选择好友"
+                            } else {
+                                "选择聊天"
+                            },
+                            scheduledTaskTargetSummary(task.targetIds)
+                        ) {
+                            onPickTargets()
+                        }
+                    }
+                }
+            }
+            item {
+                SmallTitle(
+                    modifier = Modifier.padding(top = 10.dp),
+                    text = if (task.targetType == ScheduledTaskSettings.TARGET_MOMENTS) "朋友圈内容" else "发送内容"
+                )
+            }
+            item {
+                SettingsCard {
+                    if (task.targetType == ScheduledTaskSettings.TARGET_MOMENTS) {
+                        PopupChoiceRow(
+                            title = "朋友圈类型",
+                            summary = scheduledTaskMomentsTypeLabel(task.momentsType),
+                            options = scheduledTaskMomentsTypeChoices(),
+                            currentValue = task.momentsType.toString(),
+                            onValueChanged = { value ->
+                                val type = value.toIntOrNull() ?: ScheduledTaskSettings.MOMENTS_TEXT
+                                onTaskChange(updateScheduledTaskMomentsType(task, type))
+                            }
+                        )
+                        if (scheduledTaskMomentsUsesText(task.momentsType)) {
+                            InsetDivider()
+                            VariableInputRow(
+                                title = "朋友圈文字",
+                                summary = "输入要发布的朋友圈文案",
+                                value = scheduledTaskMomentsText(task),
+                                variables = emptyList(),
+                                minLines = 3
+                            ) {
+                                onTaskChange(updateScheduledTaskMomentsText(task, it))
+                            }
+                        }
+                        val mediaType = scheduledTaskMomentsMediaType(task.momentsType)
+                        if (mediaType != null) {
+                            val paths = scheduledTaskMomentsMediaPaths(task, mediaType)
+                            InsetDivider()
+                            ActionRow(
+                                if (mediaType == ScheduledTaskSettings.TYPE_IMAGE) "选择图片" else "选择视频",
+                                scheduledTaskMediaSummary(mediaType, paths)
+                            ) {
+                                onPickMomentsMedia(mediaType)
+                            }
+                            if (paths.isNotEmpty()) {
+                                InsetDivider()
+                                ActionRow("清空媒体", "移除已选择的朋友圈媒体") {
+                                    onTaskChange(updateScheduledTaskMomentsMedia(task, mediaType, emptyList()))
+                                }
+                            }
+                        }
+                    } else {
+                        ScheduledTaskChatContentRows(
+                            task = task,
+                            onTaskChange = onTaskChange,
+                            onPickFiles = onPickFiles,
+                            onPickFavorite = onPickFavorite,
+                            massSendOnly = task.sendChannel == ScheduledTaskSettings.SEND_CHANNEL_OFFICIAL
+                        )
+                    }
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "执行计划") }
+            item {
+                SettingsCard {
+                    val planTimes = ScheduledTaskSettings.normalizedPlanTimes(task)
+                    planTimes.forEachIndexed { index, planTime ->
+                        if (index > 0) InsetDivider()
+                        ActionRow("计划时间 ${index + 1}", scheduledTaskTimeText(planTime)) {
+                            val activity = context as? Activity
+                            if (activity == null) {
+                                Toast.makeText(context, "当前页面无法打开时间选择器", Toast.LENGTH_SHORT).show()
+                            } else {
+                                showScheduledTaskTimeActionPicker(
+                                    activity = activity,
+                                    canDelete = planTimes.size > 1,
+                                    onEdit = {
+                                        showScheduledTaskDateTimePicker(activity, planTime) { picked ->
+                                            val next = planTimes.toMutableList().apply { set(index, picked) }
+                                            onTaskChange(updateScheduledTaskPlanTimes(task, next))
+                                        }
+                                    },
+                                    onDelete = {
+                                        onTaskChange(
+                                            updateScheduledTaskPlanTimes(
+                                                task,
+                                                planTimes.filterIndexed { currentIndex, _ -> currentIndex != index }
+                                            )
+                                        )
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    InsetDivider()
+                    ActionRow("新增计划时间", "同一任务可在多个时间分别执行") {
+                        val activity = context as? Activity
+                        if (activity == null) {
+                            Toast.makeText(context, "当前页面无法打开时间选择器", Toast.LENGTH_SHORT).show()
+                        } else {
+                            val initialTime = planTimes.lastOrNull()
+                                ?.let { it + 5 * 60 * 1000L }
+                                ?: (System.currentTimeMillis() + 5 * 60 * 1000L)
+                            showScheduledTaskDateTimePicker(activity, initialTime) { picked ->
+                                onTaskChange(updateScheduledTaskPlanTimes(task, planTimes + picked))
+                            }
+                        }
+                    }
+                    InsetDivider()
+                    PopupChoiceRow(
+                        title = "重复方式",
+                        summary = scheduledTaskRepeatLabel(task.repeatType),
+                        options = scheduledTaskRepeatChoices(),
+                        currentValue = task.repeatType.toString(),
+                        onValueChanged = { value ->
+                            val repeatType = value.toIntOrNull() ?: ScheduledTaskSettings.REPEAT_NONE
+                            onTaskChange(
+                                task.copy(
+                                    repeatType = repeatType,
+                                    repeatDays = if (repeatType == ScheduledTaskSettings.REPEAT_WEEKLY) {
+                                        task.repeatDays.ifEmpty { setOf(Calendar.MONDAY) }
+                                    } else {
+                                        emptySet()
+                                    }
+                                )
+                            )
+                        }
+                    )
+                    if (task.repeatType == ScheduledTaskSettings.REPEAT_WEEKLY) {
+                        InsetDivider()
+                        ScheduledTaskWeekdayRow(task.repeatDays) { day ->
+                            val next = if (task.repeatDays.contains(day)) {
+                                task.repeatDays - day
+                            } else {
+                                task.repeatDays + day
+                            }
+                            onTaskChange(task.copy(repeatDays = next))
+                        }
+                    }
+                    InsetDivider()
+                    SwitchRow(
+                        checked = task.sendOnTimeout,
+                        title = "超时补发",
+                        summary = "微信进程错过执行时间后，恢复时自动补发"
+                    ) {
+                        onTaskChange(task.copy(sendOnTimeout = it))
+                    }
+                }
+            }
+            if (
+                task.targetType == ScheduledTaskSettings.TARGET_CHAT &&
+                task.sendChannel == ScheduledTaskSettings.SEND_CHANNEL_MODULE
+            ) {
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "发送节奏") }
+                item {
+                    SettingsCard {
+                        NumberInputRow("聊天间隔", "单位秒，多个聊天之间的等待时间", task.intervalSeconds.toString()) {
+                            onTaskChange(task.copy(intervalSeconds = it.toIntOrNull()?.coerceIn(0, 3600) ?: 0))
+                        }
+                        if (scheduledTaskHasOrderedItems(task)) {
+                            InsetDivider()
+                            NumberInputRow(scheduledTaskItemIntervalTitle(), "单位秒，同一聊天连续发送的等待时间", task.mediaIntervalSeconds.toString()) {
+                                onTaskChange(task.copy(mediaIntervalSeconds = it.toIntOrNull()?.coerceIn(0, 3600) ?: 0))
+                            }
+                        }
+                    }
+                }
+            }
+            if (onExecuteNow != null || onDelete != null) {
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
+                item {
+                    SettingsCard {
+                        if (onExecuteNow != null) {
+                            ActionRow("立即执行", "保存当前内容后立刻发送一次") {
+                                onExecuteNow()
+                            }
+                        }
+                        if (onExecuteNow != null && onDelete != null) {
+                            InsetDivider()
+                        }
+                        if (onDelete != null) {
+                            ActionRow("删除任务", "移除当前定时任务") {
+                                onDelete()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ScheduledTaskWeekdayRow(
+    selectedDays: Set<Int>,
+    onToggle: (Int) -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        scheduledTaskWeekdayOptions().forEach { (day, label) ->
+            ContactFilterChip(
+                text = label,
+                selected = selectedDays.contains(day),
+                onClick = { onToggle(day) },
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+internal fun ScheduledTaskChatContentRows(
+    task: ScheduledTaskItem,
+    onTaskChange: (ScheduledTaskItem) -> Unit,
+    onPickFiles: (Int, Int) -> Unit,
+    onPickFavorite: (Int) -> Unit,
+    massSendOnly: Boolean = false
+) {
+    val items = scheduledTaskEditableItems(task)
+    items.forEachIndexed { index, item ->
+        if (index > 0) InsetDivider()
+        if (item.type == ScheduledTaskSettings.TYPE_SELECTED_MESSAGE) {
+            InfoRow(
+                label = if (items.size == 1) "发送类型" else "发送类型 ${index + 1}",
+                value = scheduledTaskTypeLabel(item.type)
+            )
+            InsetDivider()
+            InfoRow(
+                label = "消息",
+                value = SelectedMessageSnapshot.decode(item.value)?.label() ?: "不可用"
+            )
+        } else {
+            PopupChoiceRow(
+                title = if (items.size == 1) "发送类型" else "发送类型 ${index + 1}",
+                summary = if (massSendOnly) {
+                    selectedMessagesContentTypeLabel(item.type)
+                } else {
+                    scheduledTaskTypeLabel(item.type)
+                },
+                options = if (massSendOnly) selectedMessagesContentTypeChoices() else scheduledTaskTypeChoices(),
+                currentValue = item.type.toString(),
+                onValueChanged = { value ->
+                    val type = value.toIntOrNull() ?: if (massSendOnly) {
+                        ScheduledTaskSettings.TYPE_TEXT
+                    } else {
+                        ScheduledTaskSettings.TYPE_TEXT
+                    }
+                    onTaskChange(updateScheduledTaskContentItemType(task, index, type))
+                }
+            )
+            InsetDivider()
+        }
+        if (item.type != ScheduledTaskSettings.TYPE_SELECTED_MESSAGE && scheduledTaskUsesText(item.type)) {
+            VariableInputRow(
+                title = if (massSendOnly && item.type == ScheduledTaskSettings.TYPE_XML) {
+                    "视频号内容"
+                } else {
+                    scheduledTaskContentTitle(item.type)
+                },
+                summary = if (item.type == ScheduledTaskSettings.TYPE_XML) {
+                    if (massSendOnly) "输入视频号分享消息 XML" else "输入 <msg><appmsg>...</appmsg></msg>"
+                } else {
+                    "输入要发送的内容"
+                },
+                value = item.value,
+                variables = if (massSendOnly) emptyList() else scheduledTaskTemplateVariables,
+                minLines = if (item.type == ScheduledTaskSettings.TYPE_XML) 4 else 2
+            ) {
+                onTaskChange(updateScheduledTaskContentItemValue(task, index, it))
+            }
+        } else if (item.type != ScheduledTaskSettings.TYPE_SELECTED_MESSAGE &&
+            item.type == ScheduledTaskSettings.TYPE_FAVORITE
+        ) {
+            ActionRow(scheduledTaskPickerTitle(item.type), favoriteSummary(item.value)) {
+                onPickFavorite(index)
+            }
+            if (item.value.isNotBlank()) {
+                InsetDivider()
+                ActionRow("清空收藏", "移除当前收藏") {
+                    onTaskChange(updateScheduledTaskContentItemValue(task, index, ""))
+                }
+            }
+        } else if (item.type != ScheduledTaskSettings.TYPE_SELECTED_MESSAGE) {
+            ActionRow("选择文件", scheduledTaskMediaSummary(item.type, listOf(item.value))) {
+                onPickFiles(index, item.type)
+            }
+            if (item.value.isNotBlank()) {
+                InsetDivider()
+                ActionRow("清空文件", "移除当前文件") {
+                    onTaskChange(updateScheduledTaskContentItemValue(task, index, ""))
+                }
+            }
+        }
+        if (items.size > 1) {
+            InsetDivider()
+            ActionRow("删除本条", "移除第 ${index + 1} 条内容") {
+                onTaskChange(removeScheduledTaskContentItem(task, index))
+            }
+        }
+    }
+    if (items.none { it.type == ScheduledTaskSettings.TYPE_SELECTED_MESSAGE }) {
+        InsetDivider()
+        ActionRow("新增内容", "添加一条按顺序发送的内容") {
+            onTaskChange(
+                appendScheduledTaskContentItem(
+                    task,
+                    ScheduledTaskSettings.TYPE_TEXT
+                )
+            )
+        }
+    }
+}
+
+internal fun scheduledTaskUsesText(type: Int): Boolean {
+    return ScheduledTaskSettings.scheduledTypeUsesText(type)
+}
+
+internal fun scheduledTaskEditableItems(task: ScheduledTaskItem): List<ScheduledTaskContentItem> {
+    return task.items.ifEmpty {
+        if (scheduledTaskUsesText(task.type)) {
+            val contents = task.contentItems.ifEmpty { listOf(task.content) }
+            contents.map { ScheduledTaskContentItem(task.type, it) }
+        } else {
+            task.mediaPaths.map { ScheduledTaskContentItem(task.type, it) }
+        }
+    }.ifEmpty {
+        listOf(ScheduledTaskContentItem(ScheduledTaskSettings.TYPE_TEXT, ""))
+    }.map {
+        val type = it.type.takeIf { value -> ScheduledTaskSettings.scheduledTypeIsValid(value) }
+            ?: ScheduledTaskSettings.TYPE_TEXT
+        ScheduledTaskContentItem(type, it.value)
+    }
+}
+
+internal fun updateScheduledTaskContentItemType(
+    task: ScheduledTaskItem,
+    index: Int,
+    type: Int
+): ScheduledTaskItem {
+    val items = scheduledTaskEditableItems(task).toMutableList()
+    if (index !in items.indices) return task
+    val previous = items[index]
+    val keepValue = previous.type == type ||
+        (
+            scheduledTaskUsesText(previous.type) == scheduledTaskUsesText(type) &&
+                previous.type != ScheduledTaskSettings.TYPE_FAVORITE &&
+                type != ScheduledTaskSettings.TYPE_FAVORITE
+            )
+    items[index] = ScheduledTaskContentItem(type, if (keepValue) previous.value else "")
+    return task.copy(items = items)
+}
+
+internal fun updateScheduledTaskContentItemValue(
+    task: ScheduledTaskItem,
+    index: Int,
+    value: String
+): ScheduledTaskItem {
+    val items = scheduledTaskEditableItems(task).toMutableList()
+    if (index !in items.indices) return task
+    items[index] = items[index].copy(value = value)
+    return task.copy(items = items)
+}
+
+internal fun updateScheduledTaskMediaItem(
+    task: ScheduledTaskItem,
+    index: Int,
+    type: Int,
+    paths: List<String>
+): ScheduledTaskItem {
+    val nextPaths = paths.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+    if (nextPaths.isEmpty()) return task
+    val items = scheduledTaskEditableItems(task).toMutableList()
+    if (index !in items.indices) return task
+    items[index] = ScheduledTaskContentItem(type, nextPaths.first())
+    nextPaths.drop(1).forEachIndexed { offset, path ->
+        items.add(index + 1 + offset, ScheduledTaskContentItem(type, path))
+    }
+    return task.copy(items = items)
+}
+
+internal fun appendScheduledTaskContentItem(
+    task: ScheduledTaskItem,
+    defaultType: Int = ScheduledTaskSettings.TYPE_TEXT
+): ScheduledTaskItem {
+    val items = scheduledTaskEditableItems(task) + ScheduledTaskContentItem(defaultType, "")
+    return task.copy(items = items)
+}
+
+internal fun removeScheduledTaskContentItem(task: ScheduledTaskItem, index: Int): ScheduledTaskItem {
+    val items = scheduledTaskEditableItems(task).toMutableList()
+    if (items.size <= 1 || index !in items.indices) return task
+    items.removeAt(index)
+    return task.copy(items = items)
+}
+
+internal fun scheduledTaskContentTitle(type: Int): String {
+    return if (type == ScheduledTaskSettings.TYPE_XML) "XML 内容" else "发送内容"
+}
+
+internal fun scheduledTaskHasOrderedItems(task: ScheduledTaskItem): Boolean {
+    return scheduledTaskEditableItems(task).size > 1
+}
+
+internal fun scheduledTaskItemIntervalTitle(): String {
+    return "多条间隔"
+}
+
+internal fun scheduledTaskTargetTypeChoices(): List<PopupChoice<String>> = listOf(
+    PopupChoice("聊天", ScheduledTaskSettings.TARGET_CHAT.toString()),
+    PopupChoice("朋友圈", ScheduledTaskSettings.TARGET_MOMENTS.toString())
+)
+
+internal fun scheduledTaskSendChannelChoices(): List<PopupChoice<String>> = listOf(
+    PopupChoice("模块通道", ScheduledTaskSettings.SEND_CHANNEL_MODULE.toString()),
+    PopupChoice("微信原生群发助手", ScheduledTaskSettings.SEND_CHANNEL_OFFICIAL.toString())
+)
+
+internal fun scheduledTaskSendChannelLabel(channel: Int): String {
+    return if (channel == ScheduledTaskSettings.SEND_CHANNEL_OFFICIAL) {
+        "微信原生群发助手"
+    } else {
+        "模块通道"
+    }
+}
+
+internal fun scheduledTaskTargetTypeLabel(type: Int): String = when (type) {
+    ScheduledTaskSettings.TARGET_MOMENTS -> "朋友圈"
+    else -> "聊天"
+}
+
+internal fun scheduledTaskMomentsTypeChoices(): List<PopupChoice<String>> = listOf(
+    PopupChoice("文字", ScheduledTaskSettings.MOMENTS_TEXT.toString()),
+    PopupChoice("图文", ScheduledTaskSettings.MOMENTS_TEXT_IMAGE.toString()),
+    PopupChoice("视文", ScheduledTaskSettings.MOMENTS_TEXT_VIDEO.toString()),
+    PopupChoice("图片", ScheduledTaskSettings.MOMENTS_IMAGE.toString()),
+    PopupChoice("视频", ScheduledTaskSettings.MOMENTS_VIDEO.toString())
+)
+
+internal fun scheduledTaskMomentsTypeLabel(type: Int): String = when (type) {
+    ScheduledTaskSettings.MOMENTS_TEXT_IMAGE -> "图文"
+    ScheduledTaskSettings.MOMENTS_TEXT_VIDEO -> "视文"
+    ScheduledTaskSettings.MOMENTS_IMAGE -> "图片"
+    ScheduledTaskSettings.MOMENTS_VIDEO -> "视频"
+    else -> "文字"
+}
+
+internal fun scheduledTaskMomentsUsesText(type: Int): Boolean {
+    return type == ScheduledTaskSettings.MOMENTS_TEXT ||
+        type == ScheduledTaskSettings.MOMENTS_TEXT_IMAGE ||
+        type == ScheduledTaskSettings.MOMENTS_TEXT_VIDEO
+}
+
+internal fun scheduledTaskMomentsMediaType(type: Int): Int? = when (type) {
+    ScheduledTaskSettings.MOMENTS_TEXT_IMAGE,
+    ScheduledTaskSettings.MOMENTS_IMAGE -> ScheduledTaskSettings.TYPE_IMAGE
+    ScheduledTaskSettings.MOMENTS_TEXT_VIDEO,
+    ScheduledTaskSettings.MOMENTS_VIDEO -> ScheduledTaskSettings.TYPE_VIDEO
+    else -> null
+}
+
+internal fun scheduledTaskMomentsText(task: ScheduledTaskItem): String {
+    return task.items.firstOrNull { it.type == ScheduledTaskSettings.TYPE_TEXT }?.value
+        ?: task.content.takeIf { task.type == ScheduledTaskSettings.TYPE_TEXT }.orEmpty()
+}
+
+internal fun scheduledTaskMomentsMediaPaths(task: ScheduledTaskItem, mediaType: Int): List<String> {
+    val itemPaths = task.items.asSequence()
+        .filter { it.type == mediaType }
+        .map { it.value.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .toList()
+    if (itemPaths.isNotEmpty()) return itemPaths
+    return if (task.type == mediaType) task.mediaPaths else emptyList()
+}
+
+internal fun updateScheduledTaskTargetType(task: ScheduledTaskItem, targetType: Int): ScheduledTaskItem {
+    val safeTarget = targetType.takeIf { ScheduledTaskSettings.targetTypeIsValid(it) }
+        ?: ScheduledTaskSettings.TARGET_CHAT
+    if (safeTarget == task.targetType) return task
+    if (safeTarget == ScheduledTaskSettings.TARGET_CHAT) {
+        return task.copy(targetType = safeTarget)
+    }
+    val hasText = scheduledTaskMomentsText(task).isNotBlank()
+    val hasImages = scheduledTaskMomentsMediaPaths(task, ScheduledTaskSettings.TYPE_IMAGE).isNotEmpty()
+    val hasVideo = scheduledTaskMomentsMediaPaths(task, ScheduledTaskSettings.TYPE_VIDEO).isNotEmpty()
+    val momentsType = when {
+        hasText && hasImages -> ScheduledTaskSettings.MOMENTS_TEXT_IMAGE
+        hasText && hasVideo -> ScheduledTaskSettings.MOMENTS_TEXT_VIDEO
+        hasImages -> ScheduledTaskSettings.MOMENTS_IMAGE
+        hasVideo -> ScheduledTaskSettings.MOMENTS_VIDEO
+        else -> ScheduledTaskSettings.MOMENTS_TEXT
+    }
+    return task.copy(
+        targetType = safeTarget,
+        momentsType = momentsType,
+        sendChannel = ScheduledTaskSettings.SEND_CHANNEL_MODULE,
+        targetIds = emptyList()
+    )
+}
+
+internal fun updateScheduledTaskMomentsType(task: ScheduledTaskItem, momentsType: Int): ScheduledTaskItem {
+    val safeType = momentsType.takeIf { ScheduledTaskSettings.momentsTypeIsValid(it) }
+        ?: ScheduledTaskSettings.MOMENTS_TEXT
+    return task.copy(momentsType = safeType)
+}
+
+internal fun updateScheduledTaskMomentsText(task: ScheduledTaskItem, value: String): ScheduledTaskItem {
+    val items = task.items.filterNot { it.type == ScheduledTaskSettings.TYPE_TEXT }.toMutableList()
+    items.add(0, ScheduledTaskContentItem(ScheduledTaskSettings.TYPE_TEXT, value))
+    return task.copy(items = items)
+}
+
+internal fun updateScheduledTaskMomentsMedia(
+    task: ScheduledTaskItem,
+    mediaType: Int,
+    paths: List<String>
+): ScheduledTaskItem {
+    val nextPaths = paths.asSequence()
+        .map { it.trim() }
+        .filter { it.isNotBlank() }
+        .distinct()
+        .let { values ->
+            if (mediaType == ScheduledTaskSettings.TYPE_IMAGE) values.take(9) else values.take(1)
+        }
+        .toList()
+    val items = task.items.filterNot { it.type == mediaType }.toMutableList()
+    items += nextPaths.map { ScheduledTaskContentItem(mediaType, it) }
+    return task.copy(items = items)
+}
+
+internal fun scheduledTaskTypeChoices(): List<PopupChoice<String>> = listOf(
+    PopupChoice("文本", ScheduledTaskSettings.TYPE_TEXT.toString()),
+    PopupChoice("图片", ScheduledTaskSettings.TYPE_IMAGE.toString()),
+    PopupChoice("视频", ScheduledTaskSettings.TYPE_VIDEO.toString()),
+    PopupChoice("文件", ScheduledTaskSettings.TYPE_FILE.toString()),
+    PopupChoice("表情", ScheduledTaskSettings.TYPE_EMOJI.toString()),
+    PopupChoice("语音", ScheduledTaskSettings.TYPE_VOICE.toString()),
+    PopupChoice("XML", ScheduledTaskSettings.TYPE_XML.toString()),
+    PopupChoice("收藏", ScheduledTaskSettings.TYPE_FAVORITE.toString())
+)
+
+internal fun selectedMessagesContentTypeChoices(): List<PopupChoice<String>> = listOf(
+    PopupChoice("文字", ScheduledTaskSettings.TYPE_TEXT.toString()),
+    PopupChoice("图片", ScheduledTaskSettings.TYPE_IMAGE.toString()),
+    PopupChoice("视频", ScheduledTaskSettings.TYPE_VIDEO.toString()),
+    PopupChoice("语音", ScheduledTaskSettings.TYPE_VOICE.toString()),
+    PopupChoice("表情", ScheduledTaskSettings.TYPE_EMOJI.toString()),
+    PopupChoice("视频号", ScheduledTaskSettings.TYPE_XML.toString())
+)
+
+internal fun selectedMessagesContentTypeLabel(type: Int): String = when (type) {
+    ScheduledTaskSettings.TYPE_TEXT -> "文字"
+    ScheduledTaskSettings.TYPE_IMAGE -> "图片"
+    ScheduledTaskSettings.TYPE_VIDEO -> "视频"
+    ScheduledTaskSettings.TYPE_VOICE -> "语音"
+    ScheduledTaskSettings.TYPE_EMOJI -> "表情"
+    ScheduledTaskSettings.TYPE_XML -> "视频号"
+    else -> scheduledTaskTypeLabel(type)
+}
+
+internal fun scheduledTaskRepeatChoices(): List<PopupChoice<String>> = listOf(
+    PopupChoice("单次", ScheduledTaskSettings.REPEAT_NONE.toString()),
+    PopupChoice("每天", ScheduledTaskSettings.REPEAT_DAILY.toString()),
+    PopupChoice("每周", ScheduledTaskSettings.REPEAT_WEEKLY.toString())
+)
+
+internal fun scheduledTaskTypeLabel(type: Int): String = when (type) {
+    ScheduledTaskSettings.TYPE_TEXT -> "文本"
+    ScheduledTaskSettings.TYPE_IMAGE -> "图片"
+    ScheduledTaskSettings.TYPE_VIDEO -> "视频"
+    ScheduledTaskSettings.TYPE_FILE -> "文件"
+    ScheduledTaskSettings.TYPE_EMOJI -> "表情"
+    ScheduledTaskSettings.TYPE_VOICE -> "语音"
+    ScheduledTaskSettings.TYPE_XML -> "XML"
+    ScheduledTaskSettings.TYPE_FAVORITE -> "收藏"
+    ScheduledTaskSettings.TYPE_SELECTED_MESSAGE -> "聊天记录"
+    else -> "未知"
+}
+
+internal fun scheduledTaskRepeatLabel(repeatType: Int): String = when (repeatType) {
+    ScheduledTaskSettings.REPEAT_DAILY -> "每天"
+    ScheduledTaskSettings.REPEAT_WEEKLY -> "每周"
+    else -> "单次"
+}
+
+internal fun scheduledTaskTargetSummary(targetIds: List<String>): String {
+    return if (targetIds.isEmpty()) "未选择" else "已选 ${targetIds.distinct().size} 个聊天"
+}
+
+internal fun scheduledTaskTargetSummary(task: ScheduledTaskItem): String {
+    return if (task.targetType == ScheduledTaskSettings.TARGET_MOMENTS) {
+        "朋友圈"
+    } else {
+        scheduledTaskTargetSummary(task.targetIds)
+    }
+}
+
+internal fun scheduledTaskMediaSummary(type: Int, paths: List<String>): String {
+    if (type == ScheduledTaskSettings.TYPE_FAVORITE) {
+        return favoriteSummary(paths.joinToString("|"))
+    }
+    val values = paths.map { it.trim() }.filter { it.isNotBlank() }
+    if (values.isEmpty()) return "未选择"
+    val first = File(values.first()).name.ifBlank { "文件" }
+    return if (values.size == 1) first else "$first 等 ${values.size} 个文件"
+}
+
+internal fun scheduledTaskTitle(task: ScheduledTaskItem): String {
+    task.remark.trim().takeIf { it.isNotBlank() }?.let { return it }
+    if (task.targetType == ScheduledTaskSettings.TARGET_MOMENTS) {
+        return "朋友圈 · ${scheduledTaskMomentsTypeLabel(task.momentsType)}"
+    }
+    val countText = scheduledTaskItemCountText(task)
+    return "${scheduledTaskTypeSummary(task)}$countText · ${scheduledTaskTargetSummary(task)}"
+}
+
+internal fun scheduledTaskItemCountText(task: ScheduledTaskItem): String {
+    if (task.targetType == ScheduledTaskSettings.TARGET_MOMENTS) return ""
+    val count = ScheduledTaskSettings.normalizedItems(task).size
+    if (count <= 1) return ""
+    return "(${count}条)"
+}
+
+internal fun scheduledTaskSummary(task: ScheduledTaskItem): String {
+    val repeat = when (task.repeatType) {
+        ScheduledTaskSettings.REPEAT_DAILY -> "每天"
+        ScheduledTaskSettings.REPEAT_WEEKLY -> scheduledTaskRepeatDaysText(task.repeatDays)
+        else -> "单次"
+    }
+    val result = if (task.lastExecutedTime > 0L) {
+        " · 上次 ${task.lastSuccessCount}/${task.lastFailCount}"
+    } else {
+        ""
+    }
+    val channel = if (task.targetType == ScheduledTaskSettings.TARGET_CHAT) {
+        scheduledTaskSendChannelLabel(task.sendChannel) + " / "
+    } else {
+        ""
+    }
+    val planTimes = ScheduledTaskSettings.normalizedPlanTimes(task)
+    val timeSummary = if (planTimes.size <= 1) {
+        scheduledTaskTimeText(task.planTime)
+    } else {
+        "${scheduledTaskTimeText(task.planTime)} 等 ${planTimes.size} 个时间"
+    }
+    val schedule = "$channel$timeSummary / $repeat$result"
+    return if (task.remark.isBlank()) {
+        schedule
+    } else {
+        val countText = scheduledTaskItemCountText(task)
+        "${scheduledTaskTypeSummary(task)}$countText · ${scheduledTaskTargetSummary(task)} / $schedule"
+    }
+}
+
+internal fun scheduledTaskTypeSummary(task: ScheduledTaskItem): String {
+    if (task.targetType == ScheduledTaskSettings.TARGET_MOMENTS) {
+        return scheduledTaskMomentsTypeLabel(task.momentsType)
+    }
+    val items = ScheduledTaskSettings.normalizedItems(task)
+    if (items.isEmpty()) return scheduledTaskTypeLabel(task.type)
+    val types = items.map { it.type }.distinct()
+    return if (types.size == 1) scheduledTaskTypeLabel(types.first()) else "混合"
+}
+
+internal fun scheduledTaskWeekdayOptions(): List<Pair<Int, String>> = listOf(
+    Calendar.MONDAY to "一",
+    Calendar.TUESDAY to "二",
+    Calendar.WEDNESDAY to "三",
+    Calendar.THURSDAY to "四",
+    Calendar.FRIDAY to "五",
+    Calendar.SATURDAY to "六",
+    Calendar.SUNDAY to "日"
+)
+
+internal fun scheduledTaskRepeatDaysText(days: Set<Int>): String {
+    if (days.isEmpty()) return "每周"
+    val labels = scheduledTaskWeekdayOptions()
+        .filter { days.contains(it.first) }
+        .joinToString("") { "周${it.second}" }
+    return labels.ifBlank { "每周" }
+}
+
+internal fun scheduledTaskTimeText(timeMillis: Long): String {
+    if (timeMillis <= 0L) return "未设置"
+    return runCatching {
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.CHINA).format(Date(timeMillis))
+    }.getOrDefault("未设置")
+}
+
+internal fun showScheduledTaskDateTimePicker(
+    activity: Activity,
+    currentTimeMillis: Long,
+    onPicked: (Long) -> Unit
+) {
+    val base = Calendar.getInstance().apply {
+        timeInMillis = if (currentTimeMillis > 0L) currentTimeMillis else System.currentTimeMillis()
+    }
+    DatePickerDialog(
+        activity,
+        { _: DatePicker, year: Int, month: Int, dayOfMonth: Int ->
+            TimePickerDialog(
+                activity,
+                { _: TimePicker, hourOfDay: Int, minute: Int ->
+                    showScheduledTaskSecondPicker(activity, base.get(Calendar.SECOND)) { second ->
+                        val next = Calendar.getInstance().apply {
+                            set(Calendar.YEAR, year)
+                            set(Calendar.MONTH, month)
+                            set(Calendar.DAY_OF_MONTH, dayOfMonth)
+                            set(Calendar.HOUR_OF_DAY, hourOfDay)
+                            set(Calendar.MINUTE, minute)
+                            set(Calendar.SECOND, second)
+                            set(Calendar.MILLISECOND, 0)
+                        }
+                        onPicked(next.timeInMillis)
+                    }
+                },
+                base.get(Calendar.HOUR_OF_DAY),
+                base.get(Calendar.MINUTE),
+                true
+            ).show()
+        },
+        base.get(Calendar.YEAR),
+        base.get(Calendar.MONTH),
+        base.get(Calendar.DAY_OF_MONTH)
+    ).show()
+}
+
+internal fun showScheduledTaskTimeActionPicker(
+    activity: Activity,
+    canDelete: Boolean,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val choices = buildList {
+        add("修改时间" to "重新选择该计划时间")
+        if (canDelete) add("删除时间" to "从当前任务移除该计划时间")
+    }
+    VoiceForwardMiuixDialog.showChoices(
+        activity = activity,
+        title = "计划时间",
+        summary = "",
+        choices = choices,
+        onSelected = { index ->
+            if (index == 0) onEdit() else onDelete()
+        },
+        onDismiss = {}
+    )
+}
+
+internal fun updateScheduledTaskPlanTimes(
+    task: ScheduledTaskItem,
+    values: List<Long>
+): ScheduledTaskItem {
+    val planTimes = values.filter { it > 0L }.distinct().sorted()
+    return task.copy(
+        planTime = planTimes.firstOrNull() ?: 0L,
+        planTimes = planTimes
+    )
+}
+
+internal fun showScheduledTaskSecondPicker(
+    activity: Activity,
+    initialSecond: Int,
+    onPicked: (Int) -> Unit
+) {
+    val showDialog: () -> Unit = {
+        VoiceForwardMiuixDialog.showNumberInput(
+            activity = activity,
+            title = "设置秒数",
+            initialValue = initialSecond,
+            minValue = 0,
+            maxValue = 59,
+            onConfirm = onPicked,
+            onDismiss = {}
+        )
+    }
+    activity.window?.decorView?.postOnAnimation {
+        if (!activity.isFinishing && !activity.isDestroyed) showDialog()
+    } ?: showDialog()
+}
+
+@Composable
+internal fun FakeScanCameraMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, FakeScanCameraSettings.PREFS_NAME) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar("返回", onBack)
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "扫码") }
             item {
                 SettingsCard {
                     SwitchRow(
-                        checked = autoCompactEnabled,
-                        title = "自动压缩上下文",
-                        summary = "达到设定阈值后压缩较早对话",
-                        onCheckedChange = onAutoCompactEnabledChange
+                        sp,
+                        FakeScanCameraSettings.KEY_ENABLE,
+                        "模拟相机扫码",
+                        "让相册识别二维码按相机扫码来源处理",
+                        FakeScanCameraSettings.DEFAULT_ENABLE
                     )
-                    if (autoCompactEnabled) {
-                        InsetDivider()
-                        InputRow(
-                            "压缩阈值",
-                            "Token 估算值，范围 2000 到 1000000",
-                            compactTokenThreshold,
-                            onValueChange = onCompactTokenThresholdChange
-                        )
-                    }
-                    InsetDivider()
-                    ActionRow("立即压缩当前会话", "保留本地历史和当前代码草稿") { onCompact() }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "MCP 工具") }
-            item {
-                SettingsCard {
-                    ActionRow("添加 MCP", "可同时启用多个远程 MCP 服务器") {
-                        val nextIndex = mcpServers.size + 1
-                        onMcpServersChange(
-                            mcpServers + ScriptPluginAgentMcpServer(
-                                id = java.util.UUID.randomUUID().toString().replace("-", ""),
-                                name = "MCP $nextIndex"
-                            )
-                        )
-                    }
-                }
-            }
-            mcpServers.forEachIndexed { index, server ->
-                item(key = "agent-mcp-${server.id}") {
-                    SettingsCard(modifier = Modifier.padding(top = 8.dp)) {
-                        InputRow(
-                            "名称",
-                            "用于区分工具来源",
-                            server.name,
-                            onValueChange = { value ->
-                                onMcpServersChange(
-                                    mcpServers.map { if (it.id == server.id) it.copy(name = value.take(32)) else it }
-                                )
-                            }
-                        )
-                        InsetDivider()
-                        SwitchRow(
-                            checked = server.enabled,
-                            title = "启用 ${server.name.ifBlank { "MCP ${index + 1}" }}",
-                            summary = if (server.enabled) "此服务器的工具可供 Agent 调用" else "此服务器不会连接或提供工具",
-                            onCheckedChange = { enabled ->
-                                onMcpServersChange(
-                                    mcpServers.map { if (it.id == server.id) it.copy(enabled = enabled) else it }
-                                )
-                            }
-                        )
-                        if (server.enabled) {
-                            InsetDivider()
-                            InputRow(
-                                "MCP Endpoint",
-                                "例如 https://example.com/mcp",
-                                server.endpoint,
-                                onValueChange = { value ->
-                                    onMcpServersChange(
-                                        mcpServers.map { if (it.id == server.id) it.copy(endpoint = value) else it }
-                                    )
-                                }
-                            )
-                            InsetDivider()
-                            InputRow(
-                                "Authorization",
-                                "可选，例如 Bearer token",
-                                server.authorization,
-                                onValueChange = { value ->
-                                    onMcpServersChange(
-                                        mcpServers.map {
-                                            if (it.id == server.id) it.copy(authorization = value) else it
-                                        }
-                                    )
-                                }
-                            )
-                        }
-                        InsetDivider()
-                        ActionRow("删除 MCP", "移除此服务器配置") {
-                            onMcpServersChange(mcpServers.filterNot { it.id == server.id })
-                        }
-                    }
                 }
             }
         }
@@ -3704,74 +1536,367 @@ internal fun ScriptPluginAgentConfigPage(
 }
 
 @Composable
-internal fun ScriptPluginAgentEndpointPreview(endpoint: String) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        Text(
-            text = "实际请求地址",
-            color = MiuixTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.Medium
-        )
-        Text(
-            text = endpoint,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            fontSize = 12.sp,
-            modifier = Modifier.padding(top = 4.dp)
-        )
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentModelPickerPage(
-    config: ScriptPluginAgentConfig,
-    currentModel: String,
-    onSelected: (String) -> Unit,
+internal fun RedPacketMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
     onBack: () -> Unit
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
+    val sp = remember { HchatStorage.preferences(context, RedPacketSettings.PREFS_NAME) }
+    var templates by remember {
+        mutableStateOf(
+            RedPacketRuleConfig.parseTemplates(sp.getString(RedPacketRuleConfig.KEY_TEMPLATES, "") ?: "")
+        )
+    }
+    var bindings by remember {
+        mutableStateOf(
+            RedPacketRuleConfig.parseBindings(sp.getString(RedPacketRuleConfig.KEY_BINDINGS, "") ?: "")
+        )
+    }
+    var defaultTemplateId by remember {
+        mutableStateOf(sp.getString(RedPacketRuleConfig.KEY_DEFAULT_TEMPLATE_ID, "") ?: "")
+    }
+    var keywords by remember { mutableStateOf(sp.getString(RedPacketSettings.KEY_KEYWORDS, "") ?: "") }
+    var keywordMode by remember { mutableStateOf(sp.getInt(RedPacketSettings.KEY_KW_MODE, 0)) }
+    var whitelist by remember { mutableStateOf(sp.getString(RedPacketSettings.KEY_WHITELIST, "") ?: "") }
+    var blacklist by remember { mutableStateOf(sp.getString(RedPacketSettings.KEY_BLACKLIST, "") ?: "") }
+    var listMode by remember { mutableStateOf(sp.getInt(RedPacketSettings.KEY_MODE, 0)) }
+    var wishText by remember { mutableStateOf(sp.getString(RedPacketSettings.KEY_WISH_TEXT, "谢谢老板") ?: "谢谢老板") }
+    var privateReplySteps by remember { mutableStateOf(loadGlobalRedPacketReplySteps(sp)) }
+    var groupReplySteps by remember { mutableStateOf(loadGlobalGroupRedPacketReplySteps(sp)) }
+    var notifyText by remember { mutableStateOf(sp.getString(RedPacketSettings.KEY_NOTIFY_TEXT, "抢到红包 {amount} 元") ?: "") }
+    var notifyToastText by remember {
+        mutableStateOf(
+            sp.getString(
+                RedPacketSettings.KEY_NOTIFY_TOAST_TEXT,
+                sp.getString(RedPacketSettings.KEY_NOTIFY_TEXT, "抢到红包 {amount} 元") ?: "抢到红包 {amount} 元"
+            ) ?: ""
+        )
+    }
+    var failText by remember { mutableStateOf(sp.getString(RedPacketSettings.KEY_NOTIFY_FAILED_TEXT, "未抢到红包") ?: "") }
+    var failToastText by remember {
+        mutableStateOf(
+            sp.getString(
+                RedPacketSettings.KEY_NOTIFY_FAILED_TOAST_TEXT,
+                sp.getString(RedPacketSettings.KEY_NOTIFY_FAILED_TEXT, "未抢到红包") ?: "未抢到红包"
+            ) ?: ""
+        )
+    }
+    var announceText by remember { mutableStateOf(sp.getString(RedPacketSettings.KEY_ANNOUNCE_TEXT, "抢到红包 {amount} 元") ?: "") }
+    var timeFormat by remember {
+        mutableStateOf(
+            PaymentTemplateTimeFormatter.normalizePattern(
+                sp.getString(RedPacketSettings.KEY_TIME_FORMAT, RedPacketSettings.DEFAULT_TIME_FORMAT)
+            )
+        )
+    }
+    var wishEnabled by remember { mutableStateOf(sp.getBoolean(RedPacketSettings.KEY_WISH_ENABLE, false)) }
+    var replyEnabled by remember { mutableStateOf(sp.getBoolean(RedPacketSettings.KEY_REPLY_ENABLE, false)) }
+    var notifySystemEnabled by remember { mutableStateOf(sp.getBoolean(RedPacketSettings.KEY_NOTIFY_SYSTEM_ENABLE, false)) }
+    var notifyToastEnabled by remember { mutableStateOf(sp.getBoolean(RedPacketSettings.KEY_NOTIFY_TOAST_ENABLE, false)) }
+    var notifySoundEnabled by remember { mutableStateOf(sp.getBoolean(RedPacketSettings.KEY_NOTIFY_SOUND_ENABLE, false)) }
+    var announceEnabled by remember { mutableStateOf(sp.getBoolean(RedPacketSettings.KEY_ANNOUNCE_ENABLE, false)) }
+    var notifyFailedSystemEnabled by remember { mutableStateOf(sp.getBoolean(RedPacketSettings.KEY_NOTIFY_FAILED_SYSTEM_ENABLE, false)) }
+    var notifyFailedToastEnabled by remember { mutableStateOf(sp.getBoolean(RedPacketSettings.KEY_NOTIFY_FAILED_TOAST_ENABLE, false)) }
+    var notifySoundUri by remember { mutableStateOf(sp.getString(RedPacketSettings.KEY_NOTIFY_SOUND_URI, "") ?: "") }
+    var notifySoundMode by remember {
+        mutableStateOf(sp.getInt(
+            RedPacketSettings.KEY_NOTIFY_SOUND_MODE,
+            RedPacketSettings.NOTIFY_SOUND_MODE_SYSTEM
+        ))
+    }
+    var grabDelay by remember { mutableStateOf(sp.getInt(RedPacketSettings.KEY_DELAY_VALUE, 0).coerceAtLeast(0).toString()) }
+    var grabRandomMinDelay by remember {
+        mutableStateOf(sp.getInt(RedPacketSettings.KEY_DELAY_RANDOM_MIN, 500).coerceAtLeast(0).toString())
+    }
+    var grabRandomMaxDelay by remember {
+        mutableStateOf(sp.getInt(RedPacketSettings.KEY_DELAY_RANDOM_MAX, 3000).coerceAtLeast(0).toString())
+    }
+    var grabDelayMode by remember {
+        mutableStateOf(redPacketDelayModeFromPrefs(sp))
+    }
+    var picker by remember { mutableStateOf<ContactPickerRequest?>(null) }
+    var bindingPicker by remember { mutableStateOf<MessageBlockContactPickerRequest?>(null) }
+    var optionPicker by remember { mutableStateOf<OptionPickerRequest?>(null) }
+    var templateEditor by remember { mutableStateOf<RedPacketTemplateEditorRequest?>(null) }
+    var bindingEditor by remember { mutableStateOf<RedPacketBindingEditorRequest?>(null) }
+    var showTemplateManager by remember { mutableStateOf(false) }
+    var showListManager by remember { mutableStateOf(false) }
+    var editingReplyStepsForGroup by remember { mutableStateOf<Boolean?>(null) }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
-    var models by remember(config.apiBaseUrl, config.apiKey) { mutableStateOf<List<String>>(emptyList()) }
-    var pendingModel by remember(currentModel) { mutableStateOf(currentModel) }
-    var query by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(false) }
-    var loadError by remember { mutableStateOf("") }
-    val visibleModels = remember(models, query) {
-        val keyword = query.trim()
-        if (keyword.isBlank()) models else models.filter { it.contains(keyword, ignoreCase = true) }
+    fun persistRules(
+        nextTemplates: List<RedPacketRuleTemplate> = templates,
+        nextBindings: List<RedPacketRuleBinding> = bindings,
+        nextDefaultTemplateId: String = defaultTemplateId
+    ) {
+        sp.edit()
+            .putString(RedPacketRuleConfig.KEY_TEMPLATES, RedPacketRuleConfig.encodeTemplates(nextTemplates))
+            .putString(RedPacketRuleConfig.KEY_BINDINGS, RedPacketRuleConfig.encodeBindings(nextBindings))
+            .putString(RedPacketRuleConfig.KEY_DEFAULT_TEMPLATE_ID, nextDefaultTemplateId)
+            .commit()
     }
 
-    fun loadModels() {
-        if (loading) return
-        loading = true
-        loadError = ""
-        scope.launch {
-            val result = withContext(Dispatchers.IO) { ScriptPluginAgentClient.fetchModels(config) }
-            loading = false
-            result.onSuccess { fetched ->
-                models = fetched
-                if (pendingModel.isBlank()) pendingModel = fetched.firstOrNull().orEmpty()
-                if (fetched.isEmpty()) loadError = "未获取到模型"
-            }.onFailure {
-                loadError = it.message ?: "拉取模型失败"
+    val route = when {
+        templateEditor != null -> RedPacketRoute.TemplateEditor(templateEditor!!)
+        bindingEditor != null -> RedPacketRoute.BindingEditor(bindingEditor!!)
+        bindingPicker != null -> RedPacketRoute.RuleContactPicker(bindingPicker!!)
+        picker != null -> RedPacketRoute.ContactPicker(picker!!)
+        optionPicker != null -> RedPacketRoute.OptionPicker(optionPicker!!)
+        editingReplyStepsForGroup != null -> RedPacketRoute.ReplySteps
+        showTemplateManager -> RedPacketRoute.TemplateManager
+        showListManager -> RedPacketRoute.ListManager
+        else -> RedPacketRoute.Main
+    }
+
+    SettingsRouteTransition(
+        targetState = route,
+        label = "RedPacketRouteTransition",
+        depthOf = { it.depth() }
+    ) { currentRoute ->
+        when (currentRoute) {
+            is RedPacketRoute.TemplateEditor -> {
+                val request = currentRoute.request
+                RedPacketTemplatePage(
+                    context = context,
+                    request = request,
+                    onBack = { templateEditor = null },
+                    onSave = { updated ->
+                        val next = if (request.index in templates.indices) {
+                            templates.toMutableList().also { it[request.index] = updated }
+                        } else {
+                            templates + updated
+                        }
+                        val nextDefault = defaultTemplateId
+                            .takeIf { id -> next.any { it.id == id } }
+                            ?: next.firstOrNull()?.id.orEmpty()
+                        templates = next
+                        defaultTemplateId = nextDefault
+                        persistRules(nextTemplates = next, nextDefaultTemplateId = nextDefault)
+                        templateEditor = null
+                    },
+                    onDelete = {
+                        if (request.index in templates.indices) {
+                            val deletedId = templates[request.index].id
+                            val next = templates.toMutableList().also { it.removeAt(request.index) }
+                            val nextBindings = bindings.map { binding ->
+                                if (binding.templateId == deletedId) binding.copy(templateId = "") else binding
+                            }
+                            val nextDefault = defaultTemplateId
+                                .takeIf { id -> id != deletedId && next.any { it.id == id } }
+                                ?: next.firstOrNull()?.id.orEmpty()
+                            templates = next
+                            bindings = nextBindings
+                            defaultTemplateId = nextDefault
+                            persistRules(nextTemplates = next, nextBindings = nextBindings, nextDefaultTemplateId = nextDefault)
+                        }
+                        templateEditor = null
+                    }
+                )
             }
-        }
-    }
-
-    LaunchedEffect(config.apiBaseUrl, config.apiKey) { loadModels() }
-    PageScaffold(
-        title = "模型选择",
-        largeTitle = "模型选择",
+            is RedPacketRoute.BindingEditor -> {
+                val request = currentRoute.request
+                RedPacketBindingPage(
+                    context = context,
+                    request = request,
+                    templates = templates,
+                    onBack = { bindingEditor = null },
+                    onSave = { updated ->
+                        val normalized = normalizedRedPacketBinding(updated)
+                        val base = if (request.index in bindings.indices) {
+                            bindings.toMutableList().also { it.removeAt(request.index) }
+                        } else {
+                            bindings
+                        }
+                        val next = upsertRedPacketBindings(base, listOf(normalized))
+                        bindings = next
+                        persistRules(nextBindings = next)
+                        bindingEditor = null
+                    },
+                    onDelete = {
+                        if (request.index in bindings.indices) {
+                            val next = bindings.toMutableList().also { it.removeAt(request.index) }
+                            bindings = next
+                            persistRules(nextBindings = next)
+                        }
+                        bindingEditor = null
+                    }
+                )
+            }
+            is RedPacketRoute.RuleContactPicker -> {
+                val request = currentRoute.request
+                MessageBlockContactPickerPage(
+                    context = context,
+                    request = request,
+                    onBack = { bindingPicker = null },
+                    onConfirm = { selected ->
+                        val additions = selected.map {
+                            redPacketBindingFromContact(
+                                row = it,
+                                templates = templates,
+                                existing = findRedPacketBinding(bindings, it.contact.id)
+                            )
+                        }
+                        if (additions.size == 1) {
+                            val binding = additions.first()
+                            val existingIndex = bindings.indexOfFirst { it.targetId == binding.targetId }
+                            bindingEditor = RedPacketBindingEditorRequest(
+                                index = existingIndex.takeIf { it >= 0 } ?: bindings.size,
+                                binding = binding,
+                                canDelete = existingIndex >= 0
+                            )
+                        } else if (additions.isNotEmpty()) {
+                            val next = upsertRedPacketBindings(bindings, additions)
+                            bindings = next
+                            persistRules(nextBindings = next)
+                            Toast.makeText(context, "已添加 ${additions.size} 个适用聊天", Toast.LENGTH_SHORT).show()
+                        }
+                        bindingPicker = null
+                    }
+                )
+            }
+            RedPacketRoute.TemplateManager -> {
+                RedPacketTemplateListPage(
+                    templates = templates,
+                    onBack = { showTemplateManager = false },
+                    onOpenTemplate = { index, template ->
+                        templateEditor = RedPacketTemplateEditorRequest(index, template, canDelete = true)
+                    },
+                    onAddTemplate = {
+                        templateEditor = RedPacketTemplateEditorRequest(
+                            templates.size,
+                            newRedPacketTemplate(templates.size + 1, sp),
+                            canDelete = false
+                        )
+                    }
+                )
+            }
+            RedPacketRoute.ListManager -> {
+                RedPacketBindingListPage(
+                    bindings = bindings,
+                    templates = templates,
+                    onBack = { showListManager = false },
+                    onOpenBinding = { index, binding ->
+                        bindingEditor = RedPacketBindingEditorRequest(index, binding, canDelete = true)
+                    },
+                    onAddBinding = {
+                        bindingPicker = MessageBlockContactPickerRequest(
+                            title = "选择适用聊天",
+                            existingValue = "",
+                            onValue = {},
+                            allowOfficialAccounts = false
+                        )
+                    },
+                    onDeleteBindings = { targets ->
+                        val removeIds = targets.mapTo(HashSet()) { it.id }
+                        val next = bindings.filterNot { it.id in removeIds }
+                        bindings = next
+                        persistRules(nextBindings = next)
+                        Toast.makeText(context, "已删除 ${targets.size} 个适用聊天", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+            is RedPacketRoute.ContactPicker -> {
+                val request = currentRoute.request
+                ContactPickerPage(
+                    context = context,
+                    request = request,
+                    onBack = { picker = null },
+                    onConfirm = { selected ->
+                        request.onValue(formatIds(selected.map { it.id }))
+                        picker = null
+                    }
+                )
+            }
+            is RedPacketRoute.OptionPicker -> {
+                val request = currentRoute.request
+                OptionPickerPage(
+                    request = request,
+                    onBack = { optionPicker = null },
+                    onSelected = { selected ->
+                        request.onSelected(selected)
+                    }
+                )
+            }
+            RedPacketRoute.ReplySteps -> {
+                val group = editingReplyStepsForGroup == true
+                RedPacketReplyStepsPage(
+                    context = context,
+                    title = if (group) "群红包回复" else "私聊红包回复",
+                    initialSteps = if (group) groupReplySteps else privateReplySteps,
+                    onBack = { editingReplyStepsForGroup = null },
+                    onSave = { steps ->
+                        if (group) groupReplySteps = steps else privateReplySteps = steps
+                        editingReplyStepsForGroup = null
+                        Toast.makeText(context, "回复步骤已更新", Toast.LENGTH_SHORT).show()
+                    }
+                )
+            }
+            RedPacketRoute.Main -> PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
         scrollBehavior = scrollBehavior,
         bottomBar = {
             BottomActionBar(
-                primaryText = "使用所选模型",
-                onPrimaryClick = {
-                    if (pendingModel.isBlank()) {
-                        Toast.makeText(context, "请先选择模型", Toast.LENGTH_SHORT).show()
-                    } else {
-                        onSelected(pendingModel)
+                primaryText = "保存设置",
+                onPrimaryClick = save@{
+                    if (!PaymentTemplateTimeFormatter.isValidPattern(timeFormat)) {
+                        Toast.makeText(context, "时间格式无效", Toast.LENGTH_SHORT).show()
+                        return@save
                     }
+                    val normalizedTimeFormat = PaymentTemplateTimeFormatter.normalizePattern(timeFormat)
+                    val cleanPrivateReplySteps = cleanRedPacketReplySteps(privateReplySteps)
+                    val cleanGroupReplySteps = cleanRedPacketReplySteps(groupReplySteps)
+                    val firstReply = cleanPrivateReplySteps.firstOrNull()
+                    val firstReplyText = firstReply?.content.orEmpty()
+                    val firstReplyMode = firstReply?.mode ?: RedPacketRuleConfig.REPLY_OFF
+                    val firstReplyDelayMs = firstReply?.delayMs?.coerceAtLeast(0L) ?: 0L
+                    val randomMinDelay = grabRandomMinDelay.toIntOrNull()?.coerceIn(0, 600000) ?: 0
+                    val randomMaxDelay = grabRandomMaxDelay.toIntOrNull()?.coerceIn(randomMinDelay, 600000) ?: randomMinDelay
+                    sp.edit()
+                        .putString(RedPacketSettings.KEY_KEYWORDS, if (keywordMode == 0) "" else keywords)
+                        .putString(RedPacketSettings.KEY_WHITELIST, whitelist)
+                        .putString(RedPacketSettings.KEY_BLACKLIST, blacklist)
+                        .putString(RedPacketSettings.KEY_WISH_TEXT, wishText)
+                        .putInt(RedPacketSettings.KEY_REPLY_TYPE, firstReplyMode)
+                        .putString(RedPacketSettings.KEY_REPLY_TEMPLATES, if (redPacketReplyUsesText(firstReplyMode)) firstReplyText else "")
+                        .putString(RedPacketSettings.KEY_REPLY_TEXT, if (redPacketReplyUsesText(firstReplyMode)) firstTemplate(firstReplyText) else "")
+                        .putString(
+                            RedPacketSettings.KEY_REPLY_MEDIA_PATHS,
+                            if (firstReplyMode != RedPacketRuleConfig.REPLY_OFF && !redPacketReplyUsesText(firstReplyMode)) {
+                                firstReplyText.trim()
+                            } else {
+                                ""
+                            }
+                        )
+                        .putString(RedPacketSettings.KEY_REPLY_ITEMS, RedPacketRuleConfig.encodeReplySteps(cleanPrivateReplySteps))
+                        .putString(RedPacketSettings.KEY_REPLY_GROUP_ITEMS, RedPacketRuleConfig.encodeReplySteps(cleanGroupReplySteps))
+                        .putString(RedPacketSettings.KEY_NOTIFY_TEXT, notifyText)
+                        .putString(RedPacketSettings.KEY_NOTIFY_TOAST_TEXT, notifyToastText)
+                        .putString(RedPacketSettings.KEY_NOTIFY_FAILED_TEXT, failText)
+                        .putString(RedPacketSettings.KEY_NOTIFY_FAILED_TOAST_TEXT, failToastText)
+                        .putString(RedPacketSettings.KEY_ANNOUNCE_TEXT, announceText)
+                        .putString(RedPacketSettings.KEY_TIME_FORMAT, normalizedTimeFormat)
+                        .putString(RedPacketSettings.KEY_NOTIFY_SOUND_URI, notifySoundUri.trim())
+                        .putInt(RedPacketSettings.KEY_DELAY_MODE, grabDelayMode)
+                        .putInt(
+                            RedPacketSettings.KEY_DELAY_VALUE,
+                            if (grabDelayMode == RedPacketRuleConfig.DELAY_CUSTOM) {
+                                grabDelay.toIntOrNull()?.coerceIn(0, 10000) ?: 0
+                            } else {
+                                0
+                            }
+                        )
+                        .putInt(RedPacketSettings.KEY_DELAY_RANDOM_MIN, randomMinDelay)
+                        .putInt(RedPacketSettings.KEY_DELAY_RANDOM_MAX, randomMaxDelay)
+                        .putInt(RedPacketSettings.KEY_REPLY_DELAY_VALUE, (firstReplyDelayMs / 1000L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+                        .putInt(RedPacketSettings.KEY_REPLY_DELAY_UNIT, 1)
+                        .putBoolean(RedPacketSettings.KEY_REPLY_CUSTOM_ENABLE, firstReplyDelayMs > 0L)
+                        .putBoolean(RedPacketSettings.KEY_REPLY_RANDOM, firstReply?.random ?: false)
+                        .apply()
+                    privateReplySteps = cleanPrivateReplySteps
+                    groupReplySteps = cleanGroupReplySteps
+                    timeFormat = normalizedTimeFormat
+                    Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
                 },
                 secondaryText = "返回",
                 onSecondaryClick = onBack
@@ -3786,2417 +1911,351 @@ internal fun ScriptPluginAgentModelPickerPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
+            item { SmallTitle(text = "核心功能") }
             item {
                 SettingsCard {
-                    ActionRow(
-                        "拉取模型列表",
-                        when {
-                            loading -> "正在拉取模型"
-                            loadError.isNotBlank() -> loadError
-                            else -> "已获取 ${models.size} 个模型"
+                    SwitchRow(sp, RedPacketSettings.KEY_ENABLE, "自动抢红包", "开启后自动识别并抢红包", false)
+                    InsetDivider()
+                    OptionRow(
+                        sp = sp,
+                        key = RedPacketSettings.KEY_GRAB_MODE,
+                        title = "抢包模式",
+                        options = optionItems("打开红包页面" to 0, "静默抢包（后台）" to 1),
+                        defaultValue = RedPacketSettings.DEFAULT_GRAB_MODE
+                    )
+                    InsetDivider()
+                    SwitchRow(sp, RedPacketSettings.KEY_SKIP_SELF, "跳过自己的红包", "不会抢自己发出的红包", false)
+                    InsetDivider()
+                    SwitchRow(
+                        sp,
+                        RedPacketSettings.KEY_BLOCK_NEW_GROUP_ENABLE,
+                        "自动屏蔽新进群",
+                        "新群自动加入适用聊天，并默认关闭该群抢红包",
+                        false
+                    )
+                    InsetDivider()
+                    SwitchRow(sp, RedPacketSettings.KEY_AUTO_CLOSE, "自动关闭页面", "抢完或失败后自动收起红包页", false)
+                    InsetDivider()
+                    PopupOptionRow(
+                        title = "抢包延迟",
+                        summary = redPacketDelayModeLabel(grabDelayMode),
+                        options = redPacketDelayModeOptions(includeRandom = true),
+                        currentValue = grabDelayMode,
+                        onValueChanged = { mode ->
+                            grabDelayMode = mode
+                            if (mode == RedPacketRuleConfig.DELAY_FIXED) grabDelay = "0"
                         }
-                    ) { loadModels() }
-                    if (models.isNotEmpty()) {
+                    )
+                    if (grabDelayMode == RedPacketRuleConfig.DELAY_CUSTOM) {
                         InsetDivider()
-                        InputRow("搜索", "输入模型名称", query) { query = it }
+                        NumberInputRow("自定义延迟", "单位 ms，保存后生效", grabDelay) { grabDelay = it }
+                    } else if (grabDelayMode == RedPacketRuleConfig.DELAY_RANDOM) {
+                        InsetDivider()
+                        NumberInputRow("最小延迟", "单位 ms，保存后生效", grabRandomMinDelay) { grabRandomMinDelay = it }
+                        InsetDivider()
+                        NumberInputRow("最大延迟", "单位 ms，不能小于最小延迟", grabRandomMaxDelay) { grabRandomMaxDelay = it }
                     }
                 }
             }
-            visibleModels.take(300).forEach { modelName ->
-                item(key = modelName) {
-                    SettingsCard(modifier = Modifier.padding(top = 6.dp)) {
-                        ActionRow(
-                            title = modelName,
-                            summary = when {
-                                modelName == pendingModel -> "已选择"
-                                modelName == currentModel -> "当前模型"
-                                else -> ""
-                            }
-                        ) { pendingModel = modelName }
-                    }
-                }
-            }
-        }
-    }
-}
-
-internal fun scriptPluginAgentRenderedMessages(
-    messages: List<ScriptPluginAgentChatMessage>
-): List<ScriptPluginAgentRenderedMessage> {
-    val firstToolIndexByTurn = HashMap<String, Int>()
-    messages.forEachIndexed { index, message ->
-        if (message.role == "tool" && message.turnId.isNotBlank()) {
-            firstToolIndexByTurn.putIfAbsent(message.turnId, index)
-        }
-    }
-    val eventsByTurn = messages.asSequence()
-        .filter { it.role == "tool" && it.turnId.isNotBlank() }
-        .groupBy { it.turnId }
-        .mapValues { (_, groups) -> groups.flatMap { it.toolEvents }.distinctBy { it.id } }
-    return buildList {
-        messages.forEachIndexed { index, message ->
-            if (message.role != "tool" || message.turnId.isBlank()) {
-                add(ScriptPluginAgentRenderedMessage(index, message))
-                return@forEachIndexed
-            }
-            if (firstToolIndexByTurn[message.turnId] != index) return@forEachIndexed
-            val events = eventsByTurn[message.turnId].orEmpty()
-            val hasPending = events.any { it.status == "queued" || it.status == "running" }
-            val wasInterrupted = events.any { it.status == "interrupted" }
-            add(
-                ScriptPluginAgentRenderedMessage(
-                    sourceIndex = index,
-                    message = message.copy(
-                        toolEvents = events,
-                        status = when {
-                            hasPending -> "streaming"
-                            wasInterrupted -> "interrupted"
-                            else -> "complete"
-                        },
-                        completedAt = events.maxOfOrNull { it.finishedAt } ?: message.completedAt
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "规则管理") }
+            item {
+                SettingsCard {
+                    SelectRow(
+                        title = "红包模板",
+                        summary = if (templates.isEmpty()) "暂无模板，进入后添加不同群的抢包策略" else "${templates.size} 个模板，进入后新增或修改",
+                        onClick = { showTemplateManager = true }
                     )
-                )
-            )
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-internal fun ScriptPluginAgentChatPage(
-    title: String,
-    messages: List<ScriptPluginAgentChatMessage>,
-    messageInput: String,
-    pendingAttachments: List<ScriptPluginAgentAttachment>,
-    pendingQuotedMessage: ScriptPluginAgentQuotedMessage?,
-    pendingMessages: List<ScriptPluginAgentPendingMessage>,
-    pendingMessagesExpanded: Boolean,
-    activeProfileName: String,
-    activeModel: String,
-    enabled: Boolean,
-    inputEnabled: Boolean,
-    generating: Boolean,
-    contextCompacting: Boolean,
-    workingStartedAt: Long,
-    workingLabel: String,
-    showWorking: Boolean,
-    pendingConfirmationLabel: String?,
-    onMessageInputChange: (String) -> Unit,
-    onSend: () -> Unit,
-    onQueue: () -> Unit,
-    onCancel: () -> Unit,
-    onAttach: () -> Unit,
-    onRemoveAttachment: (String) -> Unit,
-    onClearQuotedMessage: () -> Unit,
-    onPendingMessagesExpandedChange: (Boolean) -> Unit,
-    onEditPendingMessage: (Long) -> Unit,
-    onDeletePendingMessage: (Long) -> Unit,
-    onSendPendingMessageNow: (Long) -> Unit,
-    onOpenProfilePicker: () -> Unit,
-    onOpenModelPicker: () -> Unit,
-    onOpenQuickOptions: () -> Unit,
-    onOpenPendingConfirmation: () -> Unit,
-    onCompact: () -> Unit,
-    onOpenHistory: () -> Unit,
-    onOpenConfig: () -> Unit,
-    onEditAndResend: (Int) -> Unit,
-    onQuoteMessage: (Int) -> Unit,
-    onContinueMessage: (Int) -> Unit,
-    onRegenerateMessage: (Int) -> Unit,
-    onRollback: (String) -> Unit,
-    onDeleteMessage: (Int) -> Unit,
-    onCreateBranch: (Int) -> Unit,
-    onBack: () -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-    val imeVisible = WindowInsets.isImeVisible
-    var actionMessageId by remember { mutableStateOf<String?>(null) }
-    var infoMessageId by remember { mutableStateOf<String?>(null) }
-    var showScrollToBottom by remember { mutableStateOf(false) }
-    var autoFollowOutput by remember { mutableStateOf(true) }
-    var previousRenderedMessageCount by remember { mutableStateOf(-1) }
-    val actionMessage = actionMessageId?.let { id -> messages.firstOrNull { it.id == id } }
-    val infoMessage = infoMessageId?.let { id -> messages.firstOrNull { it.id == id } }
-    val renderedMessages = remember(messages) {
-        scriptPluginAgentRenderedMessages(messages)
-    }
-
-    fun consumeActionMessageIndex(): Int? {
-        val messageId = actionMessageId
-        actionMessageId = null
-        return messageId?.let { id -> messages.indexOfFirst { it.id == id }.takeIf { it >= 0 } }
-    }
-
-    DisposableEffect(context) {
-        val window = findAgentActivity(context)?.window
-        val originalSoftInputMode = window?.attributes?.softInputMode
-        if (window != null && originalSoftInputMode != null) {
-            val state = originalSoftInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_STATE
-            window.setSoftInputMode(state or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
-        }
-        onDispose {
-            if (window != null && originalSoftInputMode != null) {
-                window.setSoftInputMode(originalSoftInputMode)
-            }
-        }
-    }
-
-    if (actionMessage != null) {
-        ScriptPluginAgentMessageMenu(
-            message = actionMessage,
-            onDismiss = { actionMessageId = null },
-            onCopy = {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                clipboard?.setPrimaryClip(ClipData.newPlainText("插件 Agent 消息", actionMessage.content))
-                Toast.makeText(context, "消息已复制", Toast.LENGTH_SHORT).show()
-                actionMessageId = null
-            },
-            onReadAloud = {
-                ScriptPluginAgentSpeech.speak(context, actionMessage.content)
-                Toast.makeText(context, "开始朗读", Toast.LENGTH_SHORT).show()
-                actionMessageId = null
-            },
-            onQuote = {
-                val index = consumeActionMessageIndex()
-                if (index != null) onQuoteMessage(index)
-            },
-            onRegenerate = if (actionMessage.role == "assistant" && actionMessage.status != "streaming") {
-                {
-                    val index = consumeActionMessageIndex()
-                    if (index != null) onRegenerateMessage(index)
-                }
-            } else {
-                null
-            },
-            onEditAndResend = if (actionMessage.role == "user") {
-                {
-                    val index = consumeActionMessageIndex()
-                    if (index != null) onEditAndResend(index)
-                }
-            } else {
-                null
-            },
-            onRollback = {
-                val messageId = actionMessageId
-                actionMessageId = null
-                if (messageId != null) {
-                    val renderedIndex = renderedMessages.indexOfFirst { it.message.id == messageId }
-                    if (renderedIndex >= 0) listState.requestScrollToItem(renderedIndex)
-                    onRollback(messageId)
-                }
-            },
-            onDelete = {
-                val index = consumeActionMessageIndex()
-                if (index != null) onDeleteMessage(index)
-            },
-            onCreateBranch = {
-                val index = consumeActionMessageIndex()
-                if (index != null) onCreateBranch(index)
-            },
-            onInfo = {
-                infoMessageId = actionMessageId
-                actionMessageId = null
-            }
-        )
-    }
-    if (infoMessage != null) {
-        ScriptPluginAgentMessageInfoDialog(
-            message = infoMessage,
-            onDismiss = { infoMessageId = null }
-        )
-    }
-    LaunchedEffect(renderedMessages.size) {
-        val previousCount = previousRenderedMessageCount
-        previousRenderedMessageCount = renderedMessages.size
-        if (messages.isNotEmpty()) {
-            autoFollowOutput = true
-            if (previousCount >= 0 && renderedMessages.size < previousCount) {
-                listState.requestScrollToItem(renderedMessages.size)
-            } else {
-                delay(80L)
-                listState.animateScrollToLatest(renderedMessages.size)
-            }
-        }
-    }
-    LaunchedEffect(
-        messages.lastOrNull()?.content,
-        messages.lastOrNull()?.reasoning,
-        messages.lastOrNull()?.toolEvents?.size,
-        messages.lastOrNull()?.progress
-    ) {
-        if (messages.isNotEmpty() && autoFollowOutput) {
-            delay(40L)
-            listState.scrollToLatest(renderedMessages.size)
-        }
-    }
-    LaunchedEffect(listState, messages.isNotEmpty()) {
-        snapshotFlow { listState.isScrollInProgress to listState.isNearBottom() }.collect { (scrolling, atBottom) ->
-            if (atBottom) autoFollowOutput = true
-            else if (scrolling) autoFollowOutput = false
-            showScrollToBottom = !atBottom && messages.isNotEmpty()
-        }
-    }
-    LaunchedEffect(imeVisible) {
-        if (imeVisible && autoFollowOutput && messages.isNotEmpty()) {
-            delay(180L)
-            listState.scrollToLatest(renderedMessages.size)
-        }
-    }
-    LaunchedEffect(contextCompacting) {
-        if (contextCompacting && !generating && messages.isNotEmpty()) {
-            autoFollowOutput = true
-            delay(40L)
-            listState.animateScrollToLatest(renderedMessages.size)
-        }
-    }
-    PageScaffold(
-        title = title.ifBlank { "插件 Agent" },
-        largeTitle = "",
-        scrollBehavior = scrollBehavior,
-        onBack = onBack,
-        topBarActions = {
-            Image(
-                imageVector = NavIcons.Compact,
-                contentDescription = "压缩上下文",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
-                modifier = Modifier.size(24.dp).responsiveTap(onClick = onCompact)
-            )
-            Image(
-                imageVector = NavIcons.History,
-                contentDescription = "会话历史",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
-                modifier = Modifier.padding(start = 14.dp).size(24.dp).responsiveTap(onClick = onOpenHistory)
-            )
-            Image(
-                imageVector = NavIcons.Settings,
-                contentDescription = "Agent 配置",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
-                modifier = Modifier.padding(start = 14.dp).size(24.dp).responsiveTap(onClick = onOpenConfig)
-            )
-        },
-    ) { padding ->
-        Column(modifier = Modifier.fillMaxSize().imePadding()) {
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize()
-                        .nestedScroll(scrollBehavior.nestedScrollConnection),
-                    state = listState,
-                    verticalArrangement = Arrangement.Bottom,
-                    contentPadding = PaddingValues(
-                        top = padding.calculateTopPadding() + 8.dp,
-                        bottom = 8.dp
+                    InsetDivider()
+                    SelectRow(
+                        title = "适用聊天",
+                        summary = if (bindings.isEmpty()) "暂无适用聊天，未命中时走默认规则" else "${bindings.size} 个聊天，进入后分配模板",
+                        onClick = { showListManager = true }
                     )
-                ) {
-                    if (messages.isEmpty()) {
-                        item {
-                            Text(
-                                text = "开始一个新会话",
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                fontSize = 14.sp,
-                                modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 28.dp),
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    } else {
-                        renderedMessages.forEach { rendered ->
-                            val index = rendered.sourceIndex
-                            val message = rendered.message
-                            item(key = message.id) {
-                                ScriptPluginAgentMessageBlock(
-                                    message = message,
-                                    showWorking = showWorking && index == messages.lastIndex,
-                                    workingStartedAt = workingStartedAt,
-                                    workingLabel = workingLabel,
-                                    longPressEnabled = enabled && message.role != "tool",
-                                    onLongPress = { actionMessageId = message.id },
-                                    onContinue = if (
-                                        !generating &&
-                                        (message.status == "interrupted" || message.status == "error") &&
-                                        messages.drop(index + 1).none { it.role == "user" }
-                                    ) {
-                                        { onContinueMessage(index) }
-                                    } else null,
-                                    onRetry = if (
-                                        !generating && message.role == "assistant" &&
-                                        (message.status == "interrupted" || message.status == "error")
-                                    ) {
-                                        { onRegenerateMessage(index) }
-                                    } else null
-                                )
-                            }
-                        }
-                        if (contextCompacting && !generating) {
-                            item(key = "agent-context-compaction") {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth()
-                                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                                ) {
-                                    ScriptPluginAgentWorkingIndicator(
-                                        startedAt = workingStartedAt,
-                                        label = workingLabel
-                                    )
-                                }
-                            }
-                        }
-                        item(key = "agent-message-tail") {
-                            Spacer(modifier = Modifier.height(1.dp))
-                        }
-                    }
-                }
-                if (showScrollToBottom && messages.isNotEmpty()) {
-                    Image(
-                        imageVector = NavIcons.MoveDown,
-                        contentDescription = "回到底部",
-                        colorFilter = ColorFilter.tint(Color.White),
-                        modifier = Modifier.align(Alignment.BottomEnd)
-                            .padding(end = 16.dp, bottom = 8.dp)
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(18.dp))
-                            .background(MiuixTheme.colorScheme.primary)
-                            .clickable {
-                                showScrollToBottom = false
-                                autoFollowOutput = true
-                                scope.launch { listState.animateScrollToLatest(renderedMessages.size) }
-                            }
-                            .padding(7.dp)
-                    )
-                }
-            }
-            if (pendingConfirmationLabel != null) {
-                ScriptPluginAgentPendingConfirmationBar(
-                    label = pendingConfirmationLabel,
-                    onClick = onOpenPendingConfirmation
-                )
-            }
-            Box(
-                modifier = Modifier.fillMaxWidth()
-                    .padding(bottom = padding.calculateBottomPadding())
-            ) {
-                ScriptPluginAgentComposer(
-                    value = messageInput,
-                    attachments = pendingAttachments,
-                    quotedMessage = pendingQuotedMessage,
-                    pendingMessages = pendingMessages,
-                    pendingMessagesExpanded = pendingMessagesExpanded,
-                    activeProfileName = activeProfileName,
-                    activeModel = activeModel,
-                    enabled = inputEnabled,
-                    generating = generating || contextCompacting,
-                    onValueChange = onMessageInputChange,
-                    onSend = onSend,
-                    onQueue = onQueue,
-                    onCancel = onCancel,
-                    onAttach = onAttach,
-                    onRemoveAttachment = onRemoveAttachment,
-                    onClearQuotedMessage = onClearQuotedMessage,
-                    onPendingMessagesExpandedChange = onPendingMessagesExpandedChange,
-                    onEditPendingMessage = onEditPendingMessage,
-                    onDeletePendingMessage = onDeletePendingMessage,
-                    onSendPendingMessageNow = onSendPendingMessageNow,
-                    onOpenProfilePicker = onOpenProfilePicker,
-                    onOpenModelPicker = onOpenModelPicker,
-                    onOpenQuickOptions = onOpenQuickOptions
-                )
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentAlwaysAllowRow(
-    checked: Boolean,
-    summary: String,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    SwitchRow(
-        checked = checked,
-        title = "始终允许",
-        summary = summary,
-        onCheckedChange = onCheckedChange
-    )
-}
-
-@Composable
-internal fun ScriptPluginAgentPendingConfirmationBar(label: String, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(MiuixTheme.colorScheme.surfaceVariant)
-            .responsiveTap(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Image(
-            imageVector = NavIcons.Modules,
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
-            modifier = Modifier.size(20.dp)
-        )
-        Column(modifier = Modifier.padding(start = 10.dp).weight(1f)) {
-            Text(
-                text = "待确认的插件修改",
-                color = MiuixTheme.colorScheme.onSurface,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = label,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 11.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Text(
-            text = "查看 Diff",
-            color = MiuixTheme.colorScheme.primary,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.padding(start = 10.dp)
-        )
-    }
-}
-
-private suspend fun LazyListState.animateScrollToLatest(index: Int) {
-    animateScrollToItem(index)
-}
-
-private suspend fun LazyListState.scrollToLatest(index: Int) {
-    scrollToItem(index)
-}
-
-internal fun LazyListState.isNearBottom(thresholdPx: Int = 120): Boolean {
-    val info = layoutInfo
-    if (info.totalItemsCount == 0) return true
-    val lastVisible = info.visibleItemsInfo.lastOrNull() ?: return true
-    if (lastVisible.index < info.totalItemsCount - 1) return false
-    return lastVisible.offset + lastVisible.size <= info.viewportEndOffset + thresholdPx
-}
-
-@Composable
-internal fun ScriptPluginAgentMessageBlock(
-    message: ScriptPluginAgentChatMessage,
-    showWorking: Boolean,
-    workingStartedAt: Long,
-    workingLabel: String,
-    longPressEnabled: Boolean,
-    onLongPress: () -> Unit,
-    onContinue: (() -> Unit)?,
-    onRetry: (() -> Unit)?
-) {
-    if (message.phase == "assistant_tool_call" && message.content.isBlank()) return
-    val context = LocalContext.current
-    val waitingForReply = message.role == "assistant" &&
-        message.status == "streaming" &&
-        message.content.isBlank()
-    if (waitingForReply && !showWorking && message.reasoning.isBlank() && message.toolEvents.isEmpty()) return
-    val longPressModifier = Modifier.agentMessageLongPress(
-        key = message.id.hashCode().toLong(),
-        enabled = longPressEnabled,
-        onLongPress = onLongPress
-    )
-    if (message.role == "user") {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.End
-        ) {
-            Box(
-                modifier = Modifier
-                    .then(longPressModifier)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.14f))
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
-            ) {
-                Column {
-                    message.quotedMessage?.let { quoted ->
-                        ScriptPluginAgentQuotedMessagePreview(
-                            quotedMessage = quoted,
-                            maxLines = 3,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                    }
-                    Text(text = message.content, color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp)
-                    if (message.attachments.isNotEmpty()) {
-                        Text(
-                            text = message.attachments.joinToString("\n") { "附件: ${it.name}" },
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            fontSize = 12.sp,
-                            modifier = Modifier.padding(top = 6.dp)
-                        )
-                    }
-                }
-            }
-        }
-    } else {
-        Column(
-            modifier = Modifier.fillMaxWidth().then(longPressModifier)
-                .padding(horizontal = 16.dp, vertical = 10.dp)
-        ) {
-            if (waitingForReply) {
-                if (showWorking) {
-                    ScriptPluginAgentWorkingIndicator(
-                        startedAt = workingStartedAt.takeIf { it > 0L } ?: message.createdAt,
-                        label = workingLabel
-                    )
-                }
-            } else if (message.role == "tool") {
-                Text(
-                    text = "工具调用",
-                    color = MiuixTheme.colorScheme.primary,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-            ScriptPluginAgentReasoningGroup(message)
-            ScriptPluginAgentToolGroup(message)
-            if (message.role != "tool" && message.content.isBlank() && !waitingForReply) {
-                Text(
-                    text = when (message.status) {
-                        "interrupted" -> "已中断，尚未收到回复"
-                        else -> "本轮没有返回可显示内容"
-                    },
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(top = if (message.toolEvents.isNotEmpty()) 8.dp else 4.dp)
-                )
-            } else if (message.role != "tool") {
-                if (message.status == "streaming") {
-                    Text(
-                        text = message.content,
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontSize = 14.sp,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                } else {
-                    MarkdownUi.Content(
-                        context = context,
-                        markdown = message.content,
-                        contentPadding = PaddingValues(top = if (message.toolEvents.isNotEmpty()) 8.dp else 4.dp),
-                        bodyFontSize = 14.sp,
-                        onCopyCode = { code ->
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                            clipboard?.setPrimaryClip(ClipData.newPlainText("Agent 代码", code))
-                            Toast.makeText(context, "代码已复制", Toast.LENGTH_SHORT).show()
-                        }
-                    )
-                }
-            }
-            if (message.status == "interrupted" || message.status == "error") {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (message.status == "interrupted") "已中断" else "请求失败",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    if (onContinue != null) {
-                        TextButton(
-                            text = "继续任务",
-                            onClick = onContinue,
-                            minWidth = 0.dp,
-                            minHeight = 30.dp,
-                            insideMargin = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                    if (onRetry != null) {
-                        TextButton(
-                            text = "重新开始",
-                            onClick = onRetry,
-                            minWidth = 0.dp,
-                            minHeight = 30.dp,
-                            insideMargin = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                }
-            }
-            if (message.role != "tool" && message.diff.isNotBlank()) {
-                ScriptPluginAgentDiffGroup("message:${message.createdAt}", message.diff)
-            }
-        }
-    }
-}
-
-internal fun isScriptPluginAgentControlPreview(content: String): Boolean {
-    return content.trim().startsWith("准备调用")
-}
-
-@Composable
-internal fun ScriptPluginAgentWorkingIndicator(startedAt: Long, label: String = "") {
-    var elapsedSeconds by remember(startedAt) {
-        mutableStateOf(((System.currentTimeMillis() - startedAt).coerceAtLeast(0L) / 1_000L))
-    }
-    LaunchedEffect(startedAt) {
-        while (true) {
-            elapsedSeconds = (System.currentTimeMillis() - startedAt).coerceAtLeast(0L) / 1_000L
-            delay(1_000L)
-        }
-    }
-    val elapsedText = if (elapsedSeconds < 60L) {
-        "${elapsedSeconds}s"
-    } else {
-        "${elapsedSeconds / 60L}m ${elapsedSeconds % 60L}s"
-    }
-    Text(
-        text = buildString {
-            append("Working (").append(elapsedText).append(')')
-            if (label.isNotBlank()) append(" · ").append(label)
-        },
-        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-        fontSize = 13.sp,
-        fontWeight = FontWeight.Medium
-    )
-}
-
-fun findAgentActivity(context: Context): Activity? {
-    var current: Context? = context
-    while (current is ContextWrapper) {
-        if (current is Activity) return current
-        current = current.baseContext
-    }
-    return current as? Activity
-}
-
-@Composable
-internal fun ScriptPluginAgentReasoningGroup(message: ScriptPluginAgentChatMessage) {
-    val context = LocalContext.current
-    val reasoning = message.reasoning
-    if (reasoning.isEmpty()) return
-    var expanded by rememberSaveable(message.createdAt, "reasoning") {
-        mutableStateOf(false)
-    }
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(220),
-        label = "agentReasoningArrow"
-    )
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 5.dp).animateContentSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-                .responsiveTap(onClick = {
-                    expanded = !expanded
-                })
-                .padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Image(
-                imageVector = NavIcons.Expand,
-                contentDescription = if (expanded) "收起思考过程" else "展开思考过程",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation }
-            )
-            Text(
-                text = if (message.status == "streaming") "思考中" else "思考过程",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(start = 7.dp)
-            )
-        }
-        AnimatedVisibility(
-            visible = expanded,
-            enter = fadeIn(tween(160)),
-            exit = fadeOut(tween(120))
-        ) {
-            MarkdownUi.Text(
-                context = context,
-                text = reasoning,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 12.sp,
-                modifier = Modifier.fillMaxWidth().padding(start = 25.dp, bottom = 6.dp)
-            )
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentQuotedMessagePreview(
-    quotedMessage: ScriptPluginAgentQuotedMessage,
-    maxLines: Int,
-    modifier: Modifier = Modifier,
-    onClear: (() -> Unit)? = null
-) {
-    Row(
-        modifier = modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(4.dp))
-            .background(MiuixTheme.colorScheme.onSurface.copy(alpha = 0.05f))
-            .padding(start = 8.dp, top = 6.dp, end = if (onClear == null) 8.dp else 4.dp, bottom = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = if (quotedMessage.role == "assistant") "引用 Agent" else "引用用户",
-                color = MiuixTheme.colorScheme.primary,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = quotedMessage.content,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 11.sp,
-                maxLines = maxLines,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        if (onClear != null) {
-            Image(
-                imageVector = NavIcons.Close,
-                contentDescription = "取消引用",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                modifier = Modifier.padding(start = 6.dp).size(24.dp)
-                    .clip(RoundedCornerShape(4.dp))
-                    .clickable(onClick = onClear)
-                    .padding(5.dp)
-            )
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentToolGroup(message: ScriptPluginAgentChatMessage) {
-    val context = LocalContext.current
-    if (message.toolEvents.isEmpty()) return
-    val streaming = message.status == "streaming"
-    var expanded by rememberSaveable(message.createdAt) { mutableStateOf(streaming) }
-    var userOverride by rememberSaveable(message.createdAt, "work-override") {
-        mutableStateOf<Boolean?>(null)
-    }
-    var detailEvent by remember(message.createdAt) { mutableStateOf<ScriptPluginAgentToolEvent?>(null) }
-    detailEvent?.let { event ->
-        ScriptPluginAgentToolEventDialog(
-            event = event,
-            onCopy = { value ->
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                clipboard?.setPrimaryClip(ClipData.newPlainText(event.name, value))
-                Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
-            },
-            onDismiss = { detailEvent = null }
-        )
-    }
-    LaunchedEffect(streaming) {
-        if (userOverride == null) expanded = streaming
-    }
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(250),
-        label = "agentWorkArrow"
-    )
-    Column(
-        modifier = Modifier.fillMaxWidth().padding(top = 5.dp).animateContentSize()
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-                .responsiveTap(onClick = {
-                    expanded = !expanded
-                    userOverride = expanded
-                })
-                .padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Image(
-                imageVector = NavIcons.Expand,
-                contentDescription = if (expanded) "收起" else "展开",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation }
-            )
-            Text(
-                text = "工具调用（${message.toolEvents.size}）",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(start = 7.dp)
-            )
-        }
-        AnimatedVisibility(
-            visible = expanded,
-            enter = fadeIn(tween(180)),
-            exit = fadeOut(tween(140))
-        ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(start = 24.dp, bottom = 6.dp)) {
-                message.toolEvents.forEach { event ->
-                    ScriptPluginAgentToolEventRow(event) { detailEvent = event }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentToolEventRow(
-    event: ScriptPluginAgentToolEvent,
-    onClick: () -> Unit
-) {
-    val workspaceWrite = isScriptPluginAgentWorkspaceWriteEvent(event)
-    val icon = when (event.kind) {
-        "search" -> NavIcons.Search
-        "plugin", "workspace" -> NavIcons.Modules
-        else -> NavIcons.Compact
-    }
-    val statusText = when (event.status) {
-        "queued" -> "排队"
-        "running" -> "进行中"
-        "success" -> "完成"
-        "interrupted" -> "已中断"
-        else -> "失败"
-    }
-    val durationMs = if (event.startedAt > 0L && event.finishedAt >= event.startedAt) {
-        event.finishedAt - event.startedAt
-    } else {
-        0L
-    }
-    val durationText = if (durationMs >= 1_000L) {
-        "${durationMs / 1_000L}.${(durationMs % 1_000L) / 100}s"
-    } else if (durationMs > 0L) {
-        "${durationMs}ms"
-    } else {
-        ""
-    }
-    val canOpen = if (workspaceWrite) {
-        event.diff.isNotBlank()
-    } else {
-        event.arguments.isNotBlank() || event.diff.isNotBlank() || event.result.isNotBlank()
-    }
-    Column(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-            .then(if (canOpen) Modifier.responsiveTap(onClick = onClick) else Modifier)
-            .padding(vertical = 5.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Image(
-                imageVector = icon,
-                contentDescription = null,
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
-                modifier = Modifier.size(18.dp)
-            )
-            Text(
-                text = event.name,
-                color = MiuixTheme.colorScheme.primary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(start = 8.dp).weight(1f)
-            )
-            Text(
-                text = listOf(statusText, durationText).filter { it.isNotBlank() }.joinToString(" "),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 11.sp,
-                modifier = Modifier.padding(start = 8.dp)
-            )
-        }
-        if (workspaceWrite) {
-            if (event.progress.isNotBlank() && event.status == "running") {
-                Text(
-                    text = event.progress,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth().padding(start = 26.dp, top = 2.dp)
-                )
-            }
-            return@Column
-        }
-        if (event.arguments.isNotBlank()) {
-            Text(
-                text = scriptPluginAgentToolPreview(event.arguments),
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().padding(start = 26.dp, top = 2.dp)
-            )
-        }
-        if (event.progress.isNotBlank() && event.status == "running") {
-            Text(
-                text = event.progress,
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 11.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth().padding(start = 26.dp, top = 2.dp)
-            )
-        }
-        if (event.diff.isNotBlank()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 26.dp, top = 3.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Image(
-                    imageVector = NavIcons.Modules,
-                    contentDescription = null,
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
-                    modifier = Modifier.size(14.dp)
-                )
-                Text(
-                    text = "查看 Diff",
-                    color = MiuixTheme.colorScheme.primary,
-                    fontSize = 11.sp,
-                    modifier = Modifier.padding(start = 6.dp)
-                )
-            }
-        }
-        if (event.result.isNotBlank()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 26.dp, top = 3.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Image(
-                    imageVector = NavIcons.Back,
-                    contentDescription = null,
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                    modifier = Modifier.size(14.dp).graphicsLayer { rotationZ = 180f }
-                )
-                Text(
-                    text = scriptPluginAgentToolPreview(event.result),
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(start = 6.dp).weight(1f)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentToolEventDialog(
-    event: ScriptPluginAgentToolEvent,
-    onCopy: (String) -> Unit,
-    onDismiss: () -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var fullResult by remember(event.id) { mutableStateOf<String?>(null) }
-    var loadingFullResult by remember(event.id) { mutableStateOf(false) }
-    WindowDialog(
-        show = true,
-        title = event.name,
-        onDismissRequest = onDismiss,
-        content = {
-            Column(
-                modifier = Modifier.fillMaxWidth().heightIn(max = 460.dp)
-                    .verticalScroll(rememberScrollState())
-            ) {
-                val workspaceWrite = isScriptPluginAgentWorkspaceWriteEvent(event)
-                if (workspaceWrite && event.diff.isNotBlank()) {
-                    ScriptPluginAgentDiffCodeBlock(event.diff)
-                }
-                if (!workspaceWrite && event.arguments.isNotBlank()) {
-                    Text(
-                        text = "调用参数",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                    )
-                    MarkdownUi.CodeBlock(event.arguments)
-                }
-                if (!workspaceWrite && event.diff.isNotBlank()) {
-                    Text(
-                        text = "代码差异",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                    )
-                    ScriptPluginAgentDiffCodeBlock(event.diff)
-                }
-                if (!workspaceWrite && event.result.isNotBlank()) {
-                    Text(
-                        text = if (event.status == "success") "执行结果" else "执行信息",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                    )
-                    ScriptPluginAgentToolResultBlock(event, event.result)
-                    TextButton(
-                        text = "复制结果",
-                        onClick = { onCopy(event.result) },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                }
-                if (!workspaceWrite && event.resultHandle.isNotBlank()) {
-                    Text(
-                        text = "完整结果已保存（${event.resultLength} 字符）",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
-                    )
-                    TextButton(
-                        text = if (loadingFullResult) "正在读取完整结果" else "加载完整结果",
-                        enabled = !loadingFullResult,
+                    InsetDivider()
+                    SelectRow(
+                        title = "默认规则",
+                        summary = describeRedPacketDefaultTemplate(defaultTemplateId, templates),
                         onClick = {
-                            loadingFullResult = true
-                            scope.launch {
-                                fullResult = withContext(Dispatchers.IO) {
-                                    ScriptPluginAgentToolResultStore.readAll(context, event.resultHandle).getOrNull()
-                                }
-                                loadingFullResult = false
+                            val options = listOf(
+                                OptionItem(
+                                    label = "旧版全局设置",
+                                    value = -1,
+                                    summary = "未命中适用聊天时继续使用下方全局设置"
+                                )
+                            ) + templates.mapIndexed { index, template ->
+                                OptionItem(
+                                    label = template.name.ifBlank { "模板 ${index + 1}" },
+                                    value = index,
+                                    summary = describeRedPacketTemplate(template)
+                                )
                             }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                    fullResult?.let { value ->
-                        ScriptPluginAgentToolResultBlock(event, value)
-                        TextButton(
-                            text = "复制完整结果",
-                            onClick = { onCopy(value) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                }
-                TextButton(
-                    text = "关闭",
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
-                )
-            }
-        }
-    )
-}
-
-internal fun isScriptPluginAgentWorkspaceWriteEvent(event: ScriptPluginAgentToolEvent): Boolean {
-    if (event.name == "写入插件文件" || event.name == "修改插件文件") return true
-    if (event.kind != "workspace") return false
-    val protocolName = event.protocolName.lowercase(Locale.ROOT)
-    return protocolName == "write_file" ||
-        protocolName == "apply_patch" ||
-        protocolName.endsWith(".write_file") ||
-        protocolName.endsWith(".apply_patch") ||
-        protocolName.endsWith("_write_file") ||
-        protocolName.endsWith("_apply_patch")
-}
-
-@Composable
-internal fun ScriptPluginAgentDiffGroup(stateKey: String, diff: String) {
-    var expanded by rememberSaveable(stateKey, "diff") { mutableStateOf(false) }
-    val rotation by animateFloatAsState(
-        targetValue = if (expanded) 90f else 0f,
-        animationSpec = tween(250),
-        label = "agentDiffArrow"
-    )
-    Column(modifier = Modifier.fillMaxWidth().padding(top = 6.dp).animateContentSize()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-                .responsiveTap(onClick = { expanded = !expanded })
-                .padding(vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Image(
-                imageVector = NavIcons.Expand,
-                contentDescription = if (expanded) "收起代码变更" else "展开代码变更",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                modifier = Modifier.size(18.dp).graphicsLayer { rotationZ = rotation }
-            )
-            Text(
-                text = "代码变更",
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(start = 7.dp)
-            )
-        }
-        AnimatedVisibility(
-            visible = expanded,
-            enter = fadeIn(tween(180)),
-            exit = fadeOut(tween(140))
-        ) {
-            ScriptPluginAgentDiffCodeBlock(diff)
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentToolResultBlock(event: ScriptPluginAgentToolEvent, value: String) {
-    val isDiffTool = event.name == "查看代码差异" ||
-        event.protocolName.contains("show_diff", ignoreCase = true)
-    val diff = if (isDiffTool) scriptPluginAgentDiffFromToolResult(value) else null
-    if (diff != null) {
-        ScriptPluginAgentDiffCodeBlock(diff)
-    } else {
-        MarkdownUi.CodeBlock(value)
-    }
-}
-
-internal fun scriptPluginAgentDiffFromToolResult(value: String): String? {
-    return runCatching {
-        JSONObject(value).optString("diff", "").takeIf { it.isNotBlank() }
-    }.getOrNull()
-}
-
-@Composable
-internal fun ScriptPluginAgentDiffCodeBlock(diff: String) {
-    val darkTheme = isSystemInDarkTheme()
-    val additionText = if (darkTheme) Color(0xFF7EE787) else Color(0xFF116329)
-    val additionBackground = if (darkTheme) Color(0xFF123820) else Color(0xFFE6FFEC)
-    val deletionText = if (darkTheme) Color(0xFFFFA198) else Color(0xFFCF222E)
-    val deletionBackground = if (darkTheme) Color(0xFF3D1C20) else Color(0xFFFFEBE9)
-    val hunkText = if (darkTheme) Color(0xFF79C0FF) else Color(0xFF0969DA)
-    val hunkBackground = if (darkTheme) Color(0xFF162A42) else Color(0xFFDDF4FF)
-    val neutralText = MiuixTheme.colorScheme.onSurface
-    val headerText = MiuixTheme.colorScheme.onSurfaceVariantSummary
-
-    Column(
-        modifier = Modifier.fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MiuixTheme.colorScheme.surfaceVariant)
-            .horizontalScroll(rememberScrollState())
-            .padding(vertical = 6.dp)
-    ) {
-        diff.lines().forEach { line ->
-            val isHeader = line.startsWith("diff --git ") ||
-                line.startsWith("--- ") ||
-                line.startsWith("+++ ") ||
-                line.startsWith("index ") ||
-                line.startsWith("new file mode ") ||
-                line.startsWith("deleted file mode ") ||
-                line.startsWith("similarity index ") ||
-                line.startsWith("rename from ") ||
-                line.startsWith("rename to ") ||
-                line.startsWith("Binary files ") ||
-                line.startsWith("Only in ")
-            val (textColor, backgroundColor) = when {
-                line.startsWith("@@") -> hunkText to hunkBackground
-                isHeader -> headerText to Color.Transparent
-                line.startsWith("+") -> additionText to additionBackground
-                line.startsWith("-") -> deletionText to deletionBackground
-                else -> neutralText to Color.Transparent
-            }
-            Text(
-                text = line.ifEmpty { " " },
-                color = textColor,
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-                softWrap = false,
-                maxLines = 1,
-                modifier = Modifier.fillMaxWidth()
-                    .background(backgroundColor)
-                    .padding(horizontal = 10.dp, vertical = 1.dp)
-            )
-        }
-    }
-}
-
-internal fun scriptPluginAgentToolPreview(value: String): String {
-    return value.replace(Regex("\\s+"), " ").trim()
-}
-
-@Composable
-internal fun ScriptPluginAgentMessageMenu(
-    message: ScriptPluginAgentChatMessage,
-    onDismiss: () -> Unit,
-    onCopy: () -> Unit,
-    onReadAloud: () -> Unit,
-    onQuote: () -> Unit,
-    onRegenerate: (() -> Unit)?,
-    onEditAndResend: (() -> Unit)?,
-    onRollback: () -> Unit,
-    onDelete: () -> Unit,
-    onCreateBranch: () -> Unit,
-    onInfo: () -> Unit
-) {
-    WindowDialog(
-        show = true,
-        title = "消息操作",
-        onDismissRequest = onDismiss,
-        content = {
-            Column {
-                ScriptPluginAgentMessageActionRow(NavIcons.Copy, "复制消息", onCopy)
-                InsetDivider()
-                ScriptPluginAgentMessageActionRow(NavIcons.Volume, "朗读消息", onReadAloud)
-                InsetDivider()
-                ScriptPluginAgentMessageActionRow(NavIcons.Quote, "引用消息", onQuote)
-                if (onRegenerate != null) {
-                    InsetDivider()
-                    ScriptPluginAgentMessageActionRow(NavIcons.Refresh, "重新生成", onRegenerate)
-                }
-                if (onEditAndResend != null) {
-                    InsetDivider()
-                    ScriptPluginAgentMessageActionRow(NavIcons.Edit, "编辑并重发", onEditAndResend)
-                }
-                InsetDivider()
-                ScriptPluginAgentMessageActionRow(NavIcons.History, "回滚到此处", onRollback)
-                InsetDivider()
-                ScriptPluginAgentMessageActionRow(NavIcons.Delete, "删除", onDelete)
-                InsetDivider()
-                ScriptPluginAgentMessageActionRow(NavIcons.Branch, "创建分支", onCreateBranch)
-                InsetDivider()
-                ScriptPluginAgentMessageActionRow(NavIcons.Info, "信息", onInfo)
-                if (message.content.isBlank()) {
-                    Text(
-                        text = "当前消息没有正文",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            val current = templates.indexOfFirst { it.id == defaultTemplateId }
+                            optionPicker = OptionPickerRequest(
+                                title = "默认规则",
+                                options = options,
+                                currentValue = current.takeIf { it >= 0 } ?: -1,
+                                onSelected = { selected ->
+                                    val nextDefault = if (selected.value in templates.indices) {
+                                        templates[selected.value].id
+                                    } else {
+                                        ""
+                                    }
+                                    defaultTemplateId = nextDefault
+                                    persistRules(nextDefaultTemplateId = nextDefault)
+                                    optionPicker = null
+                                }
+                            )
+                        }
                     )
                 }
             }
-        }
-    )
-}
-
-@Composable
-internal fun ScriptPluginAgentMessageActionRow(
-    icon: ImageVector,
-    text: String,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
-            .responsiveTap(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Image(
-            imageVector = icon,
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-            modifier = Modifier.size(22.dp)
-        )
-        Text(
-            text = text,
-            color = MiuixTheme.colorScheme.onSurface,
-            fontSize = 14.sp,
-            modifier = Modifier.padding(start = 14.dp)
-        )
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentMessageInfoDialog(
-    message: ScriptPluginAgentChatMessage,
-    onDismiss: () -> Unit
-) {
-    val status = when (message.status) {
-        "streaming" -> "生成中"
-        "interrupted" -> "已中断"
-        "error" -> "请求失败"
-        else -> "已完成"
-    }
-    WindowDialog(
-        show = true,
-        title = "消息信息",
-        onDismissRequest = onDismiss,
-        content = {
-            Column {
-                InfoRow(
-                    "角色",
-                    when (message.role) {
-                        "user" -> "用户"
-                        "tool" -> "工具"
-                        else -> "Agent"
-                    }
-                )
-                InsetDivider()
-                InfoRow("时间", scheduledTaskTimeText(message.createdAt))
-                InsetDivider()
-                InfoRow("状态", status)
-                InsetDivider()
-                InfoRow("字符数", message.content.length.toString())
-                InsetDivider()
-                InfoRow(
-                    "Token 估算",
-                    ScriptPluginAgentContext.estimateTokens("", listOf(message), null).toString()
-                )
-                if (message.attachments.isNotEmpty()) {
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "过滤规则") }
+            item {
+                SettingsCard {
+                    OptionRow(
+                        sp = sp,
+                        key = RedPacketSettings.KEY_MODE,
+                        title = "过滤模式",
+                        options = optionItems("全部抢" to 0, "白名单（只抢指定人）" to 1, "黑名单（不抢指定人）" to 2),
+                        defaultValue = 0,
+                        onValueChanged = { listMode = it }
+                    )
                     InsetDivider()
-                    InfoRow("附件", message.attachments.size.toString())
-                }
-                TextButton(
-                    text = "关闭",
-                    onClick = onDismiss,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
-                )
-            }
-        }
-    )
-}
-
-internal fun mergeScriptPluginAgentProgress(current: String, next: String): String {
-    val cleanNext = next.trim()
-    return cleanNext.ifBlank { current }
-}
-
-internal fun mergeScriptPluginAgentReply(current: String, incoming: String): String {
-    if (incoming.isBlank()) return current
-    return ScriptPluginAgentTextMerge.mergeReply(current, incoming)
-}
-
-internal fun Modifier.agentMessageLongPress(
-    key: Long,
-    enabled: Boolean,
-    onLongPress: () -> Unit
-): Modifier = pointerInput(key, enabled) {
-    if (!enabled) return@pointerInput
-    awaitEachGesture {
-        val down = awaitFirstDown(
-            requireUnconsumed = false,
-            pass = PointerEventPass.Initial
-        )
-        val releasedOrMoved = withTimeoutOrNull(viewConfiguration.longPressTimeoutMillis) {
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                val change = event.changes.firstOrNull { it.id == down.id }
-                    ?: return@withTimeoutOrNull true
-                if (!change.pressed) return@withTimeoutOrNull true
-                if (
-                    abs(change.position.x - down.position.x) > viewConfiguration.touchSlop ||
-                    abs(change.position.y - down.position.y) > viewConfiguration.touchSlop
-                ) {
-                    return@withTimeoutOrNull true
+                    OptionRow(
+                        sp = sp,
+                        key = RedPacketSettings.KEY_KW_MODE,
+                        title = "关键词过滤",
+                        options = optionItems("无限制" to 0, "只抢含关键词的" to 1, "屏蔽含关键词的" to 2),
+                        defaultValue = 0,
+                        onValueChanged = {
+                            keywordMode = it
+                            if (it == 0) keywords = ""
+                        }
+                    )
+                    if (keywordMode != 0) {
+                        InsetDivider()
+                        InputRow("关键词列表", "多个关键词用 | 分隔", keywords) { keywords = it }
+                    }
+                    if (listMode == 1) {
+                        InsetDivider()
+                        ActionRow("白名单", autoReplySelectedIdSummary(whitelist)) {
+                            picker = ContactPickerRequest(
+                                title = "选择白名单",
+                                mode = ContactPickerMode.BOTH,
+                                multiSelect = true,
+                                existingValue = whitelist,
+                                onValue = { whitelist = it },
+                                enableLabels = true
+                            )
+                        }
+                    } else if (listMode == 2) {
+                        InsetDivider()
+                        ActionRow("黑名单", autoReplySelectedIdSummary(blacklist)) {
+                            picker = ContactPickerRequest(
+                                title = "选择黑名单",
+                                mode = ContactPickerMode.BOTH,
+                                multiSelect = true,
+                                existingValue = blacklist,
+                                onValue = { blacklist = it },
+                                enableLabels = true
+                            )
+                        }
+                    }
                 }
             }
-            @Suppress("UNREACHABLE_CODE")
-            false
-        }
-        if (releasedOrMoved == null) {
-            onLongPress()
-            while (true) {
-                val event = awaitPointerEvent(PointerEventPass.Initial)
-                val change = event.changes.firstOrNull { it.id == down.id }
-                change?.consume()
-                if (change == null || !change.pressed) break
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentHistoryDrawer(
-    sessions: List<ScriptPluginAgentSession>,
-    activeId: String,
-    workingSessionIds: Set<String>,
-    enabled: Boolean,
-    onNewSession: () -> Unit,
-    onSelect: (ScriptPluginAgentSession) -> Unit,
-    onRename: (ScriptPluginAgentSession, String) -> Unit,
-    onCommitOrder: (List<ScriptPluginAgentSession>) -> Unit,
-    onSetPinned: (ScriptPluginAgentSession, Boolean) -> Unit,
-    onSetLocked: (ScriptPluginAgentSession, Boolean) -> Unit,
-    onDelete: (ScriptPluginAgentSession) -> Unit,
-    onClose: () -> Unit
-) {
-    val context = LocalContext.current
-    val uiPrefs = remember(context) { HchatStorage.preferences(context, UI_PREFS_NAME) }
-    var actionSessionId by remember { mutableStateOf<String?>(null) }
-    var renameSessionId by remember { mutableStateOf<String?>(null) }
-    var deleteSessionId by remember { mutableStateOf<String?>(null) }
-    var draggedSessionId by remember { mutableStateOf<String?>(null) }
-    var dragOrderChanged by remember { mutableStateOf(false) }
-    var orderedSessions by remember { mutableStateOf(sessions) }
-    var showGestureHint by remember {
-        mutableStateOf(uiPrefs.getBoolean(KEY_AGENT_HISTORY_GESTURE_HINT, true))
-    }
-    var titleDraft by remember { mutableStateOf("") }
-    val actionSession = actionSessionId?.let { id -> orderedSessions.firstOrNull { it.id == id } }
-    val renameSession = renameSessionId?.let { id -> orderedSessions.firstOrNull { it.id == id } }
-    val deleteSession = deleteSessionId?.let { id -> orderedSessions.firstOrNull { it.id == id } }
-
-    LaunchedEffect(sessions) {
-        if (draggedSessionId == null) orderedSessions = sessions
-    }
-
-    fun movedSessions(session: ScriptPluginAgentSession, delta: Int): List<ScriptPluginAgentSession>? {
-        val next = orderedSessions.toMutableList()
-        val from = next.indexOfFirst { it.id == session.id }
-        val to = from + delta
-        if (from !in next.indices || to !in next.indices || next[from].pinned != next[to].pinned) return null
-        val moved = next.removeAt(from)
-        next.add(to, moved)
-        return next
-    }
-
-    if (renameSession != null) {
-        WindowDialog(
-            show = true,
-            title = "编辑标题",
-            onDismissRequest = { renameSessionId = null },
-            content = {
-                Column {
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模板变量") }
+            item {
+                SettingsCard {
                     InputRow(
-                        title = "对话标题",
-                        summary = "最多 32 个字符",
-                        value = titleDraft,
-                        onValueChange = { titleDraft = it.take(32) }
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        TextButton(
-                            text = "取消",
-                            onClick = { renameSessionId = null },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                        TextButton(
-                            text = "保存",
-                            onClick = {
-                                if (titleDraft.isNotBlank()) {
-                                    onRename(renameSession, titleDraft)
-                                    renameSessionId = null
-                                }
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
+                        "时间变量格式",
+                        "用于 {time}，例如 yyyy-MM-dd HH:mm:ss",
+                        timeFormat
+                    ) { timeFormat = it }
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "自动祝福") }
+            item {
+                SettingsCard {
+                    SwitchRow(wishEnabled, "自动发送祝福语", "抢到红包后发送祝福语") {
+                        wishEnabled = it
+                        sp.edit().putBoolean(RedPacketSettings.KEY_WISH_ENABLE, it).apply()
+                    }
+                    if (wishEnabled) {
+                        InsetDivider()
+                        InputRow("祝福语内容", "抢到红包后发送的文字", wishText) { wishText = it }
+                        InsetDivider()
+                        SwitchRow(sp, RedPacketSettings.KEY_WISH_RANDOM, "随机祝福语", "从模板中随机选择", false)
                     }
                 }
             }
-        )
-    }
-    if (deleteSession != null) {
-        WindowDialog(
-            show = true,
-            title = "删除对话",
-            onDismissRequest = { deleteSessionId = null },
-            content = {
-                Column {
-                    Text(
-                        text = "确定删除“${deleteSession.title.ifBlank { "新对话" }}”吗？此操作无法撤销。",
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontSize = 14.sp
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        TextButton(
-                            text = "取消",
-                            onClick = { deleteSessionId = null },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "自动回复") }
+            item {
+                SettingsCard {
+                    SwitchRow(replyEnabled, "抢到后自动回复", "发送到红包所在会话") {
+                        replyEnabled = it
+                        sp.edit().putBoolean(RedPacketSettings.KEY_REPLY_ENABLE, it).apply()
+                    }
+                    if (replyEnabled) {
+                        InsetDivider()
+                        SelectRow(
+                            title = "私聊红包回复",
+                            summary = describeRedPacketReplySteps(privateReplySteps),
+                            onClick = { editingReplyStepsForGroup = false }
                         )
-                        TextButton(
-                            text = "删除",
-                            onClick = {
-                                deleteSessionId = null
-                                onDelete(deleteSession)
-                            },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        InsetDivider()
+                        SelectRow(
+                            title = "群红包回复",
+                            summary = describeRedPacketReplySteps(groupReplySteps),
+                            onClick = { editingReplyStepsForGroup = true }
                         )
                     }
                 }
             }
-        )
-    }
-    if (actionSession != null) {
-        val index = orderedSessions.indexOfFirst { it.id == actionSession.id }
-        val canMoveUp = index > 0 && orderedSessions[index - 1].pinned == actionSession.pinned
-        val canMoveDown = index in 0 until orderedSessions.lastIndex &&
-            orderedSessions[index + 1].pinned == actionSession.pinned
-        WindowDialog(
-            show = true,
-            title = "对话历史",
-            onDismissRequest = { actionSessionId = null },
-            content = {
-                Column {
-                    Text(
-                        text = actionSession.title.ifBlank { "新对话" },
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontSize = 15.sp,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.fillMaxWidth().padding(start = 8.dp, end = 8.dp, bottom = 10.dp),
-                        textAlign = TextAlign.Center
-                    )
-                    ScriptPluginAgentHistoryActionRow(NavIcons.Edit, "编辑标题") {
-                        titleDraft = actionSession.title
-                        renameSessionId = actionSession.id
-                        actionSessionId = null
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "通知提醒") }
+            item {
+                SettingsCard {
+                    SwitchRow(notifySystemEnabled, "通知栏提醒", "抢到红包时提醒") {
+                        notifySystemEnabled = it
+                        sp.edit().putBoolean(RedPacketSettings.KEY_NOTIFY_SYSTEM_ENABLE, it).apply()
                     }
-                    ScriptPluginAgentHistoryActionRow(NavIcons.MoveUp, "上移", enabled = canMoveUp) {
-                        movedSessions(actionSession, -1)?.let { next ->
-                            orderedSessions = next
-                            onCommitOrder(next)
-                        }
-                        actionSessionId = null
-                    }
-                    ScriptPluginAgentHistoryActionRow(NavIcons.MoveDown, "下移", enabled = canMoveDown) {
-                        movedSessions(actionSession, 1)?.let { next ->
-                            orderedSessions = next
-                            onCommitOrder(next)
-                        }
-                        actionSessionId = null
-                    }
-                    ScriptPluginAgentHistoryActionRow(
-                        NavIcons.Pin,
-                        if (actionSession.pinned) "取消置顶" else "置顶聊天"
-                    ) {
-                        onSetPinned(actionSession, !actionSession.pinned)
-                        actionSessionId = null
-                    }
-                    ScriptPluginAgentHistoryActionRow(
-                        if (actionSession.locked) NavIcons.Unlock else NavIcons.Lock,
-                        if (actionSession.locked) "解锁聊天" else "锁定聊天"
-                    ) {
-                        onSetLocked(actionSession, !actionSession.locked)
-                        actionSessionId = null
-                    }
-                    ScriptPluginAgentHistoryActionRow(
-                        NavIcons.Delete,
-                        if (actionSession.locked) "删除（已锁定）" else "删除",
-                        destructive = true,
-                        enabled = !actionSession.locked
-                    ) {
-                        deleteSessionId = actionSession.id
-                        actionSessionId = null
-                    }
-                    TextButton(
-                        text = "取消",
-                        onClick = { actionSessionId = null },
-                        modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                }
-            }
-        )
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.28f)).responsiveTap(onClick = onClose)
-        )
-        Column(
-            modifier = Modifier
-                .fillMaxWidth(0.84f)
-                .fillMaxHeight()
-                .background(MiuixTheme.colorScheme.background)
-                .padding(top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding())
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "对话历史",
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontSize = 22.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f)
-                )
-                TextButton(
-                    text = "关闭",
-                    onClick = onClose,
-                    colors = ButtonDefaults.textButtonColorsPrimary()
-                )
-            }
-            TextButton(
-                text = "+  新建对话",
-                onClick = onNewSession,
-                enabled = enabled,
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp),
-                colors = ButtonDefaults.textButtonColorsPrimary()
-            )
-            if (showGestureHint) {
-                Row(
-                    modifier = Modifier.fillMaxWidth()
-                        .responsiveTap(onClick = {
-                            showGestureHint = false
-                            uiPrefs.edit().putBoolean(KEY_AGENT_HISTORY_GESTURE_HINT, false).apply()
-                        })
-                        .padding(horizontal = 18.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Image(
-                        imageVector = NavIcons.Swipe,
-                        contentDescription = null,
-                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = "左右滑动可编辑或删除（点击不再显示）",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(start = 9.dp)
-                    )
-                }
-            }
-            InsetDivider()
-            LazyColumn(modifier = Modifier.fillMaxSize(), contentPadding = PaddingValues(vertical = 8.dp)) {
-                orderedSessions.forEach { session ->
-                    item(key = session.id) {
-                        ScriptPluginAgentHistoryItem(
-                            modifier = if (draggedSessionId == session.id) {
-                                Modifier
-                            } else {
-                                Modifier.animateItem(
-                                    fadeInSpec = null,
-                                    placementSpec = tween(durationMillis = 180),
-                                    fadeOutSpec = null
-                                )
-                            },
-                            session = session,
-                            selected = session.id == activeId,
-                            working = session.id in workingSessionIds,
-                            enabled = enabled,
-                            onSelect = { onSelect(session) },
-                            onLongPress = { actionSessionId = session.id },
-                            onSwipeRename = {
-                                titleDraft = session.title
-                                renameSessionId = session.id
-                            },
-                            onSwipeDelete = {
-                                if (session.locked) {
-                                    Toast.makeText(context, "请先解锁该对话", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    deleteSessionId = session.id
-                                }
-                            },
-                            onDragMove = { delta ->
-                                movedSessions(session, delta)?.let { next ->
-                                    orderedSessions = next
-                                    dragOrderChanged = true
-                                    true
-                                } ?: false
-                            },
-                            onDragStateChange = { dragging ->
-                                if (dragging) {
-                                    draggedSessionId = session.id
-                                    dragOrderChanged = false
-                                } else if (draggedSessionId == session.id) {
-                                    draggedSessionId = null
-                                    if (dragOrderChanged) onCommitOrder(orderedSessions)
-                                }
-                            }
+                    if (notifySystemEnabled) {
+                        InsetDivider()
+                        VariableInputRow(
+                            title = "通知栏文案",
+                            summary = "支持下方变量",
+                            value = notifyText,
+                            variables = redPacketTemplateVariables,
+                            onValueChange = { notifyText = it }
                         )
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentWorkingSpinner(modifier: Modifier = Modifier) {
-    val transition = rememberInfiniteTransition(label = "agentHistoryWorking")
-    val spinnerColor = MiuixTheme.colorScheme.primary
-    val rotation by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 900, easing = LinearEasing)
-        ),
-        label = "agentHistoryWorkingRotation"
-    )
-    Canvas(
-        modifier = modifier
-            .size(18.dp)
-            .graphicsLayer { rotationZ = rotation }
-    ) {
-        drawArc(
-            color = spinnerColor,
-            startAngle = -90f,
-            sweepAngle = 285f,
-            useCenter = false,
-            style = Stroke(width = 2.dp.toPx())
-        )
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentHistoryItem(
-    modifier: Modifier = Modifier,
-    session: ScriptPluginAgentSession,
-    selected: Boolean,
-    working: Boolean,
-    enabled: Boolean,
-    onSelect: () -> Unit,
-    onLongPress: () -> Unit,
-    onSwipeRename: () -> Unit,
-    onSwipeDelete: () -> Unit,
-    onDragMove: (Int) -> Boolean,
-    onDragStateChange: (Boolean) -> Unit
-) {
-    val density = LocalDensity.current
-    val actionWidthPx = with(density) { 82.dp.toPx() }
-    var offsetX by remember(session.id) { mutableStateOf(0f) }
-    var itemHeightPx by remember(session.id) { mutableStateOf(0f) }
-    var dragDistanceY by remember(session.id) { mutableStateOf(0f) }
-    var dragging by remember(session.id) { mutableStateOf(false) }
-    val currentOnDragMove by rememberUpdatedState(onDragMove)
-    val currentOnDragStateChange by rememberUpdatedState(onDragStateChange)
-    val visualDragY by animateFloatAsState(
-        targetValue = dragDistanceY,
-        animationSpec = tween(durationMillis = if (dragging) 0 else 170),
-        label = "AgentHistoryDragOffset"
-    )
-    val dragScale by animateFloatAsState(
-        targetValue = if (dragging) 1.015f else 1f,
-        animationSpec = tween(durationMillis = 120),
-        label = "AgentHistoryDragScale"
-    )
-    Box(
-        modifier = modifier
-            .zIndex(if (dragging) 1f else 0f)
-            .graphicsLayer {
-                translationY = visualDragY
-                scaleX = dragScale
-                scaleY = dragScale
-                shadowElevation = if (dragging) with(density) { 8.dp.toPx() } else 0f
-                shape = RoundedCornerShape(8.dp)
-            }
-            .fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp)
-            .clip(RoundedCornerShape(8.dp))
-    ) {
-        if (offsetX != 0f) {
-            Box(
-                modifier = Modifier.matchParentSize(),
-                contentAlignment = if (offsetX > 0f) Alignment.CenterStart else Alignment.CenterEnd
-            ) {
-                Box(
-                    modifier = Modifier.fillMaxHeight().sizeIn(minWidth = 82.dp)
-                        .background(
-                            if (offsetX > 0f) MiuixTheme.colorScheme.primary.copy(alpha = 0.88f)
-                            else Color(0xFFD93025)
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = if (offsetX > 0f) "编辑" else "删除",
-                        color = Color.White,
-                        fontSize = 13.sp
-                    )
-                }
-            }
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth()
-                .onSizeChanged { itemHeightPx = it.height.toFloat() }
-                .graphicsLayer { translationX = offsetX }
-                .background(MiuixTheme.colorScheme.background)
-                .background(
-                    if (selected) MiuixTheme.colorScheme.primary.copy(alpha = 0.13f)
-                    else Color.Transparent
-                )
-                .pointerInput(session.id, enabled) {
-                    if (!enabled) return@pointerInput
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        var totalX = 0f
-                        var totalY = 0f
-                        var horizontal = false
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            totalX += change.position.x - change.previousPosition.x
-                            totalY += change.position.y - change.previousPosition.y
-                            if (!horizontal && abs(totalX) > viewConfiguration.touchSlop && abs(totalX) > abs(totalY) * 1.25f) {
-                                horizontal = true
-                            }
-                            if (horizontal) {
-                                offsetX = totalX.coerceIn(-actionWidthPx, actionWidthPx)
-                                change.consume()
-                            }
-                            if (!change.pressed) break
-                        }
-                        val action = when {
-                            offsetX >= actionWidthPx * 0.58f -> 1
-                            offsetX <= -actionWidthPx * 0.58f -> -1
-                            else -> 0
-                        }
-                        offsetX = 0f
-                        if (action > 0) onSwipeRename() else if (action < 0) onSwipeDelete()
-                    }
-                }
-                .pointerInput(session.id, enabled) {
-                    detectTapGestures(
-                        onTap = { if (enabled) onSelect() },
-                        onLongPress = { position ->
-                            if (enabled && position.x > with(density) { 38.dp.toPx() }) onLongPress()
-                        }
-                    )
-                }
-                .padding(horizontal = 14.dp, vertical = 11.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Image(
-                imageVector = NavIcons.Drag,
-                contentDescription = "长按拖动排序",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                modifier = Modifier.size(22.dp)
-                    .pointerInput(session.id, enabled, itemHeightPx) {
-                        if (!enabled) return@pointerInput
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                dragDistanceY = 0f
-                                dragging = true
-                                currentOnDragStateChange(true)
-                            },
-                            onDragEnd = {
-                                dragging = false
-                                dragDistanceY = 0f
-                                currentOnDragStateChange(false)
-                            },
-                            onDragCancel = {
-                                dragging = false
-                                dragDistanceY = 0f
-                                currentOnDragStateChange(false)
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                dragDistanceY += dragAmount.y
-                                val step = (itemHeightPx.takeIf { it > 0f }
-                                    ?: with(density) { 56.dp.toPx() }) + with(density) { 6.dp.toPx() }
-                                while (dragDistanceY <= -step * 0.5f) {
-                                    if (currentOnDragMove(-1)) {
-                                        dragDistanceY += step
-                                    } else {
-                                        dragDistanceY = -step * 0.45f
-                                        break
-                                    }
-                                }
-                                while (dragDistanceY >= step * 0.5f) {
-                                    if (currentOnDragMove(1)) {
-                                        dragDistanceY -= step
-                                    } else {
-                                        dragDistanceY = step * 0.45f
-                                        break
-                                    }
-                                }
-                            }
-                        )
-                    }
-            )
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(
-                    text = session.title.ifBlank { "新对话" },
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontSize = 14.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                val lastUser = session.messages.lastOrNull { it.role == "user" }?.content.orEmpty()
-                if (lastUser.isNotBlank() && lastUser != session.title) {
-                    Text(
-                        text = lastUser,
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 3.dp)
-                    )
-                }
-            }
-            if (session.pinned) {
-                Image(
-                    imageVector = NavIcons.Pin,
-                    contentDescription = "已置顶",
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
-                    modifier = Modifier.padding(start = 6.dp).size(17.dp)
-                )
-            }
-            if (session.locked) {
-                Image(
-                    imageVector = NavIcons.Lock,
-                    contentDescription = "已锁定",
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                    modifier = Modifier.padding(start = 6.dp).size(17.dp)
-                )
-            }
-            if (working) {
-                ScriptPluginAgentWorkingSpinner(Modifier.padding(start = 8.dp))
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentHistoryActionRow(
-    icon: ImageVector,
-    text: String,
-    destructive: Boolean = false,
-    enabled: Boolean = true,
-    onClick: () -> Unit
-) {
-    val contentColor = when {
-        !enabled -> MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f)
-        destructive -> Color(0xFFD93025)
-        else -> MiuixTheme.colorScheme.onSurface
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (destructive) Color(0xFFD93025).copy(alpha = 0.08f)
-                else MiuixTheme.colorScheme.secondaryVariant
-            )
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Image(
-            imageVector = icon,
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(contentColor),
-            modifier = Modifier.size(22.dp)
-        )
-        Text(
-            text = text,
-            color = contentColor,
-            fontSize = 15.sp,
-            modifier = Modifier.padding(start = 18.dp)
-        )
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentQuickProfileDialog(
-    profiles: List<ScriptPluginAgentProfile>,
-    activeProfileId: String,
-    onSelected: (ScriptPluginAgentProfile) -> Unit,
-    onDismiss: () -> Unit
-) {
-    WindowDialog(
-        show = true,
-        title = "切换模型配置",
-        onDismissRequest = onDismiss,
-        content = {
-            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 360.dp)) {
-                profiles.forEach { profile ->
-                    item(key = profile.id) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable { onSelected(profile) }
-                                .padding(horizontal = 12.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = profile.name,
-                                    color = MiuixTheme.colorScheme.onSurface,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = profile.config.model.ifBlank { "未设置模型" },
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                    fontSize = 12.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            if (profile.id == activeProfileId) {
-                                Text(
-                                    text = "当前",
-                                    color = MiuixTheme.colorScheme.primary,
-                                    fontSize = 12.sp,
-                                    modifier = Modifier.padding(start = 12.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    )
-}
-
-@Composable
-internal fun ScriptPluginAgentQuickOptionsDialog(
-    webSearchEnabled: Boolean,
-    workspaceWriteApprovalMode: String,
-    promptCacheMode: String,
-    endpointMode: String,
-    mcpServers: List<ScriptPluginAgentMcpServer>,
-    onWebSearchChanged: (Boolean) -> Unit,
-    onWorkspaceWriteApprovalChanged: (String) -> Unit,
-    onPromptCacheModeChanged: (String) -> Unit,
-    onMcpChanged: (String, Boolean) -> Unit,
-    onDismiss: () -> Unit
-) {
-    WindowDialog(
-        show = true,
-        title = "快捷选项",
-        onDismissRequest = onDismiss,
-        content = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                SwitchRow(
-                    checked = webSearchEnabled,
-                    title = "联网搜索",
-                    summary = if (webSearchEnabled) "允许 Agent 按需查询公开资料" else "已关闭，Agent 不会发起搜索",
-                    onCheckedChange = onWebSearchChanged
-                )
-                InsetDivider()
-                PopupChoiceRow(
-                    title = "插件文件修改确认",
-                    summary = if (workspaceWriteApprovalMode == ScriptPluginAgentSettings.WRITE_APPROVAL_ASK) {
-                        "每次询问工具写入和最终提交"
-                    } else {
-                        "始终允许并自动提交"
-                    },
-                    options = listOf(
-                        PopupChoice("每次询问", ScriptPluginAgentSettings.WRITE_APPROVAL_ASK),
-                        PopupChoice("始终允许", ScriptPluginAgentSettings.WRITE_APPROVAL_ALWAYS_ALLOW)
-                    ),
-                    currentValue = workspaceWriteApprovalMode,
-                    onValueChanged = onWorkspaceWriteApprovalChanged
-                )
-                InsetDivider()
-                PopupChoiceRow(
-                    title = "提示缓存",
-                    summary = promptCacheModeSummary(promptCacheMode, endpointMode),
-                    options = promptCacheModeChoices(),
-                    currentValue = promptCacheMode,
-                    onValueChanged = onPromptCacheModeChanged
-                )
-                if (mcpServers.isNotEmpty()) {
                     InsetDivider()
-                    Text(
-                        text = "MCP 服务器",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    )
-                    mcpServers.forEachIndexed { index, server ->
-                        if (index > 0) InsetDivider()
-                        SwitchRow(
-                            checked = server.enabled,
-                            title = server.name.ifBlank { "MCP ${index + 1}" },
-                            summary = server.endpoint.ifBlank { "未配置 Endpoint" },
-                            onCheckedChange = { onMcpChanged(server.id, it) }
+                    SwitchRow(notifyToastEnabled, "浮窗提醒", "抢到红包时短暂提示") {
+                        notifyToastEnabled = it
+                        sp.edit().putBoolean(RedPacketSettings.KEY_NOTIFY_TOAST_ENABLE, it).apply()
+                    }
+                    if (notifyToastEnabled) {
+                        InsetDivider()
+                        VariableInputRow(
+                            title = "浮窗文案",
+                            summary = "支持下方变量",
+                            value = notifyToastText,
+                            variables = redPacketTemplateVariables,
+                            onValueChange = { notifyToastText = it }
                         )
                     }
-                } else {
-                    Text(
-                        text = "暂无 MCP 服务器，请先在 Agent 配置中添加。",
-                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                    )
-                }
-            }
-        }
-    )
-}
-
-@Composable
-internal fun ScriptPluginAgentPendingMessagePanel(
-    messages: List<ScriptPluginAgentPendingMessage>,
-    expanded: Boolean,
-    onExpandedChange: (Boolean) -> Unit,
-    onEdit: (Long) -> Unit,
-    onDelete: (Long) -> Unit,
-    onSendNow: (Long) -> Unit
-) {
-    if (messages.isEmpty()) return
-    Column(
-        modifier = Modifier.fillMaxWidth()
-            .padding(start = 10.dp, top = 8.dp, end = 10.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth().clickable { onExpandedChange(!expanded) }
-                .padding(horizontal = 10.dp, vertical = 7.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "待发送 ${messages.size}",
-                color = MiuixTheme.colorScheme.onSurface,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f)
-            )
-            Image(
-                imageVector = if (expanded) NavIcons.MoveUp else NavIcons.MoveDown,
-                contentDescription = if (expanded) "收起待发送消息" else "展开待发送消息",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                modifier = Modifier.size(18.dp)
-            )
-        }
-        if (expanded) {
-            LazyColumn(modifier = Modifier.fillMaxWidth().heightIn(max = 150.dp)) {
-                messages.forEachIndexed { index, message ->
-                    item(key = message.id) {
-                        if (index > 0) InsetDivider()
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(start = 10.dp, end = 6.dp, top = 5.dp, bottom = 5.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = buildString {
-                                    if (message.quotedMessage != null) append("引用 · ")
-                                    append(message.content.ifBlank { "${message.attachments.size} 个附件" })
-                                },
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                fontSize = 12.sp,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f)
-                            )
-                            ScriptPluginAgentPendingMessageAction(
-                                icon = NavIcons.Edit,
-                                description = "编辑待发送消息"
-                            ) { onEdit(message.id) }
-                            ScriptPluginAgentPendingMessageAction(
-                                icon = NavIcons.Send,
-                                description = "立即发送"
-                            ) { onSendNow(message.id) }
-                            ScriptPluginAgentPendingMessageAction(
-                                icon = NavIcons.Delete,
-                                description = "删除待发送消息"
-                            ) { onDelete(message.id) }
-                        }
+                    InsetDivider()
+                    SwitchRow(notifySoundEnabled, "通知铃声", "开启后播放通知铃声") {
+                        notifySoundEnabled = it
+                        sp.edit().putBoolean(RedPacketSettings.KEY_NOTIFY_SOUND_ENABLE, it).apply()
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentPendingMessageAction(
-    icon: ImageVector,
-    description: String,
-    onClick: () -> Unit
-) {
-    Image(
-        imageVector = icon,
-        contentDescription = description,
-        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-        modifier = Modifier.padding(start = 4.dp).size(26.dp)
-            .clip(RoundedCornerShape(4.dp))
-            .clickable(onClick = onClick)
-            .padding(5.dp)
-    )
-}
-
-@Composable
-internal fun ScriptPluginAgentQuickChoice(
-    label: String,
-    value: String,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-    onClick: () -> Unit
-) {
-    Row(
-        modifier = modifier.height(28.dp)
-            .clip(RoundedCornerShape(6.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant)
-            .clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            text = "$label · $value",
-            color = if (enabled) {
-                MiuixTheme.colorScheme.onSurfaceVariantSummary
-            } else {
-                MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.5f)
-            },
-            fontSize = 11.sp,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.weight(1f)
-        )
-        Image(
-            imageVector = NavIcons.MoveDown,
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-            modifier = Modifier.padding(start = 3.dp).size(14.dp)
-        )
-    }
-}
-
-@Composable
-internal fun ScriptPluginAgentComposer(
-    value: String,
-    attachments: List<ScriptPluginAgentAttachment>,
-    quotedMessage: ScriptPluginAgentQuotedMessage?,
-    pendingMessages: List<ScriptPluginAgentPendingMessage>,
-    pendingMessagesExpanded: Boolean,
-    activeProfileName: String,
-    activeModel: String,
-    enabled: Boolean,
-    generating: Boolean,
-    onValueChange: (String) -> Unit,
-    onSend: () -> Unit,
-    onQueue: () -> Unit,
-    onCancel: () -> Unit,
-    onAttach: () -> Unit,
-    onRemoveAttachment: (String) -> Unit,
-    onClearQuotedMessage: () -> Unit,
-    onPendingMessagesExpandedChange: (Boolean) -> Unit,
-    onEditPendingMessage: (Long) -> Unit,
-    onDeletePendingMessage: (Long) -> Unit,
-    onSendPendingMessageNow: (Long) -> Unit,
-    onOpenProfilePicker: () -> Unit,
-    onOpenModelPicker: () -> Unit,
-    onOpenQuickOptions: () -> Unit
-) {
-    val canSend = value.isNotBlank() || attachments.isNotEmpty()
-    val actionEnabled = enabled && canSend
-    val actionBackground = MiuixTheme.colorScheme.primary
-    val actionTint = Color.White
-    Column(
-        modifier = Modifier.fillMaxWidth()
-            .background(MiuixTheme.colorScheme.background.copy(alpha = 0.96f))
-    ) {
-        quotedMessage?.let { quoted ->
-            ScriptPluginAgentQuotedMessagePreview(
-                quotedMessage = quoted,
-                maxLines = 1,
-                modifier = Modifier.padding(start = 10.dp, top = 8.dp, end = 10.dp),
-                onClear = onClearQuotedMessage
-            )
-        }
-        ScriptPluginAgentPendingMessagePanel(
-            messages = pendingMessages,
-            expanded = pendingMessagesExpanded,
-            onExpandedChange = onPendingMessagesExpandedChange,
-            onEdit = onEditPendingMessage,
-            onDelete = onDeletePendingMessage,
-            onSendNow = onSendPendingMessageNow
-        )
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 8.dp, end = 10.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            ScriptPluginAgentQuickChoice(
-                label = "配置",
-                value = activeProfileName.ifBlank { "默认配置" },
-                enabled = enabled,
-                modifier = Modifier.weight(1f),
-                onClick = onOpenProfilePicker
-            )
-            ScriptPluginAgentQuickChoice(
-                label = "模型",
-                value = activeModel.ifBlank { "未设置" },
-                enabled = enabled,
-                modifier = Modifier.weight(1f),
-                onClick = onOpenModelPicker
-            )
-            Image(
-                imageVector = NavIcons.Settings,
-                contentDescription = "快捷选项",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                modifier = Modifier.size(28.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant)
-                    .clickable(enabled = enabled, onClick = onOpenQuickOptions)
-                    .padding(6.dp)
-            )
-        }
-        if (attachments.isNotEmpty()) {
-            Row(
-                modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                    .padding(start = 12.dp, top = 8.dp, end = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                attachments.forEach { attachment ->
-                    Row(
-                        modifier = Modifier.clip(RoundedCornerShape(6.dp))
-                            .background(MiuixTheme.colorScheme.secondaryVariant)
-                            .padding(start = 8.dp, top = 6.dp, bottom = 6.dp, end = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = attachment.name,
-                            color = MiuixTheme.colorScheme.onSurface,
-                            fontSize = 12.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.sizeIn(maxWidth = 180.dp)
+                    if (notifySoundEnabled) {
+                        InsetDivider()
+                        OptionRow(
+                            sp = sp,
+                            key = RedPacketSettings.KEY_NOTIFY_SOUND_MODE,
+                            title = "铃声模式",
+                            options = optionItems(
+                                "选择系统铃声" to RedPacketSettings.NOTIFY_SOUND_MODE_SYSTEM,
+                                "从文件选择铃声" to RedPacketSettings.NOTIFY_SOUND_MODE_CUSTOM
+                            ),
+                            defaultValue = RedPacketSettings.NOTIFY_SOUND_MODE_SYSTEM,
+                            onValueChanged = { mode ->
+                                notifySoundMode = mode
+                                notifySoundUri = ""
+                                sp.edit()
+                                    .putInt(RedPacketSettings.KEY_NOTIFY_SOUND_MODE, mode)
+                                    .putString(RedPacketSettings.KEY_NOTIFY_SOUND_URI, "")
+                                    .apply()
+                                optionPicker = null
+                                val activity = context as? Activity
+                                if (activity == null) {
+                                    Toast.makeText(context, "当前页面无法打开铃声选择器", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    val onPicked: (String) -> Unit = { uri ->
+                                        if (uri.isNotBlank()) {
+                                            val storedUri = if (mode == RedPacketSettings.NOTIFY_SOUND_MODE_CUSTOM) {
+                                                CustomNotificationRuntime.freezeRingtoneUri(context, uri)
+                                            } else {
+                                                uri
+                                            }
+                                            notifySoundUri = storedUri
+                                            sp.edit()
+                                                .putInt(RedPacketSettings.KEY_NOTIFY_SOUND_MODE, mode)
+                                                .putString(RedPacketSettings.KEY_NOTIFY_SOUND_URI, storedUri)
+                                                .apply()
+                                        }
+                                    }
+                                    if (mode == RedPacketSettings.NOTIFY_SOUND_MODE_CUSTOM) {
+                                        RingtonePickerBridge.launchFile(activity, onPicked)
+                                    } else {
+                                        RingtonePickerBridge.launchSystem(activity, notifySoundUri, onPicked)
+                                    }
+                                }
+                            }
                         )
-                        Image(
-                            imageVector = NavIcons.Close,
-                            contentDescription = "移除附件",
-                            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                            modifier = Modifier.padding(start = 4.dp).size(18.dp)
-                                .responsiveTap(onClick = { onRemoveAttachment(attachment.path) })
+                        InsetDivider()
+                        InfoRow("当前铃声", ringtoneDisplayName(context, notifySoundUri, notifySoundMode))
+                    }
+                    InsetDivider()
+                    SwitchRow(sp, RedPacketSettings.KEY_NOTIFY_VIBRATE_ENABLE, "通知震动", "开启后触发通知震动", false)
+                    InsetDivider()
+                    SwitchRow(announceEnabled, "抢到红包播报", "抢到后用系统语音播报") {
+                        announceEnabled = it
+                        sp.edit().putBoolean(RedPacketSettings.KEY_ANNOUNCE_ENABLE, it).apply()
+                    }
+                    if (announceEnabled) {
+                        InsetDivider()
+                        VariableInputRow(
+                            title = "播报文案",
+                            summary = "支持下方变量",
+                            value = announceText,
+                            variables = redPacketTemplateVariables,
+                            onValueChange = { announceText = it }
+                        )
+                    }
+                    InsetDivider()
+                    SwitchRow(notifyFailedSystemEnabled, "未抢到提醒", "未抢到红包时通知") {
+                        notifyFailedSystemEnabled = it
+                        sp.edit().putBoolean(RedPacketSettings.KEY_NOTIFY_FAILED_SYSTEM_ENABLE, it).apply()
+                    }
+                    if (notifyFailedSystemEnabled) {
+                        InsetDivider()
+                        VariableInputRow(
+                            title = "未抢到通知栏文案",
+                            summary = "支持下方变量",
+                            value = failText,
+                            variables = redPacketTemplateVariables,
+                            onValueChange = { failText = it }
+                        )
+                    }
+                    InsetDivider()
+                    SwitchRow(notifyFailedToastEnabled, "未抢到浮窗", "未抢到红包时短暂提示") {
+                        notifyFailedToastEnabled = it
+                        sp.edit().putBoolean(RedPacketSettings.KEY_NOTIFY_FAILED_TOAST_ENABLE, it).apply()
+                    }
+                    if (notifyFailedToastEnabled) {
+                        InsetDivider()
+                        VariableInputRow(
+                            title = "未抢到浮窗文案",
+                            summary = "支持下方变量",
+                            value = failToastText,
+                            variables = redPacketTemplateVariables,
+                            onValueChange = { failToastText = it }
                         )
                     }
                 }
             }
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 10.dp, top = 10.dp, end = 10.dp, bottom = 10.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant)
-                .padding(start = 8.dp, top = 9.dp, end = 12.dp, bottom = 9.dp),
-            verticalAlignment = Alignment.Bottom
-        ) {
-            Image(
-                imageVector = NavIcons.Attach,
-                contentDescription = "添加附件",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                modifier = Modifier.padding(end = 8.dp, bottom = 1.dp).size(24.dp)
-                    .responsiveTap(onClick = onAttach)
-            )
-            BasicTextField(
-                value = value,
-                onValueChange = onValueChange,
-                enabled = enabled,
-                minLines = 1,
-                maxLines = 4,
-                textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
-                modifier = Modifier.weight(1f).align(Alignment.Top).heightIn(min = 34.dp),
-                decorationBox = { innerTextField ->
-                    Box(
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 34.dp),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        if (value.isBlank()) {
-                            Text(
-                                text = "输入消息",
-                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                fontSize = 14.sp
-                            )
-                        }
-                        innerTextField()
-                    }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "假红包兼容") }
+            item {
+                SettingsCard {
+                    SwitchRow(sp, RedPacketSettings.KEY_FAKE_PACKET_ENABLE, "开启假红包", "发送假红包时修正请求和响应", false)
+                    InsetDivider()
+                    SwitchRow(sp, RedPacketSettings.KEY_FAKE_PACKET_RECEIVE_ENABLE, "领取假红包", "收到异常群 ID 红包时尝试修正", false)
                 }
-            )
-            if (generating) {
-                Image(
-                    imageVector = NavIcons.Stop,
-                    contentDescription = "停止生成",
-                    colorFilter = ColorFilter.tint(Color(0xFFD93025)),
-                    modifier = Modifier.padding(start = 6.dp).size(30.dp)
-                        .clip(RoundedCornerShape(15.dp))
-                        .background(Color.White)
-                        .clickable(onClick = onCancel)
-                        .padding(7.dp)
-                )
             }
-            if (!generating || canSend) {
-                Image(
-                    imageVector = if (generating) NavIcons.Add else NavIcons.Send,
-                    contentDescription = if (generating) "加入待发送队列" else "发送",
-                    colorFilter = ColorFilter.tint(actionTint),
-                    modifier = Modifier.padding(start = 6.dp)
-                        .size(34.dp)
-                        .clip(RoundedCornerShape(17.dp))
-                        .background(actionBackground)
-                        .clickable(enabled = actionEnabled) {
-                            if (generating) onQueue() else onSend()
-                        }
-                        .padding(7.dp)
-                )
-            }
+            item { StatsCard(sp) }
+        }
+    }
         }
     }
 }
-
-}
-
-@Composable

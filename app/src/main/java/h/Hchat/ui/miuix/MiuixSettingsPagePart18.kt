@@ -540,1653 +540,1065 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.random.Random
 
-internal fun GroupMemberPickerPage(
+@Composable
+internal fun ClickHintTag() {
+    Text(
+        text = "单击",
+        color = MiuixTheme.colorScheme.primary,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Medium,
+        maxLines = 1,
+        softWrap = false,
+        overflow = TextOverflow.Clip,
+        modifier = Modifier
+            .defaultMinSize(minWidth = 40.dp)
+            .clip(RoundedCornerShape(999.dp))
+            .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f))
+            .padding(horizontal = 8.dp, vertical = 2.dp)
+    )
+}
+
+object ScriptPluginSettingsMiuixContent {
+
+@Composable
+fun ScriptPluginSettingsContent(
     context: Context,
-    request: GroupMemberPickerRequest,
-    onBack: () -> Unit,
-    onConfirm: (List<String>) -> Unit
+    onOpenReadme: (ScriptPluginRuntime.ScriptPlugin) -> Unit,
+    onOpenMarket: () -> Unit,
+    onOpenAgent: () -> Unit,
+    onOpenManager: () -> Unit
 ) {
-    var groupLoading by remember(request) { mutableStateOf(true) }
-    var groupError by remember(request) { mutableStateOf("") }
-    var groups by remember(request) { mutableStateOf(emptyList<ContactOption>()) }
-    var selectedGroup by remember(request) { mutableStateOf<ContactOption?>(null) }
-    var memberLoading by remember(request) { mutableStateOf(false) }
-    var memberError by remember(request) { mutableStateOf("") }
-    var members by remember(request) { mutableStateOf(emptyList<ContactOption>()) }
-    var query by remember(request) { mutableStateOf("") }
-    val initialSelectedEntries = remember(request) {
-        parseGroupMemberEntries(request.existingValue).filterTo(linkedSetOf()) { entry ->
-            request.allowedGroupIds?.let { entry.substringBefore('/') in it } != false
-        }
+    val scope = rememberCoroutineScope()
+    val sp = remember { HchatStorage.preferences(context, ScriptPluginSettings.PREFS_NAME) }
+    val pluginRootPath = remember(context) { ScriptPluginRuntime.scriptDir(context).absolutePath }
+    var pluginListVersion by remember { mutableStateOf(0) }
+    val managedPlugins = remember(pluginListVersion) { ScriptPluginManager.listForDisplay(context) }
+    val plugins = remember(managedPlugins) { managedPlugins.map { it.plugin } }
+    val pinnedIds = remember(managedPlugins) {
+        managedPlugins.filter { it.pinned }.mapTo(LinkedHashSet()) { it.plugin.id }
     }
-    var selectedEntries by remember(request) { mutableStateOf<Set<String>>(initialSelectedEntries) }
-    var selectionEdited by remember(request) { mutableStateOf(initialSelectedEntries.isNotEmpty()) }
-    val groupListState = rememberLazyListState()
-    val memberListState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    LaunchedEffect(request) {
-        loadContacts(context, ContactPickerMode.GROUPS) { result, throwable ->
-            groupLoading = false
-            if (throwable != null) {
-                groupError = throwable.message ?: "读取群聊失败"
-            } else {
-                groups = request.allowedGroupIds?.let { allowed ->
-                    result.filter { it.id in allowed }
-                } ?: result
+    var globalEnabled by remember {
+        mutableStateOf(sp.getBoolean(ScriptPluginSettings.KEY_ENABLE, ScriptPluginSettings.DEFAULT_ENABLE))
+    }
+    var pluginEnabledStates by remember(plugins) {
+        mutableStateOf(plugins.associate { it.id to ScriptPluginRuntime.isPluginEnabled(context, it.id) })
+    }
+    var showPluginRootDialog by remember { mutableStateOf(false) }
+    var actionPlugin by remember { mutableStateOf<ScriptPluginRuntime.ScriptPlugin?>(null) }
+    var renamePlugin by remember { mutableStateOf<ScriptPluginRuntime.ScriptPlugin?>(null) }
+    var deletePlugin by remember { mutableStateOf<ScriptPluginRuntime.ScriptPlugin?>(null) }
+    DisposableEffect(context) {
+        val subscription = ScriptPluginRuntime.subscribePluginCatalog(context) {
+            Handler(Looper.getMainLooper()).post {
+                pluginEnabledStates = ScriptPluginRuntime.listPlugins(context)
+                    .associate { it.id to ScriptPluginRuntime.isPluginEnabled(context, it.id) }
+                globalEnabled = sp.getBoolean(
+                    ScriptPluginSettings.KEY_ENABLE,
+                    ScriptPluginSettings.DEFAULT_ENABLE
+                )
+                pluginListVersion++
             }
         }
-    }
-    LaunchedEffect(selectedGroup?.id) {
-        val group = selectedGroup
-        if (group == null) {
-            members = emptyList()
-            memberError = ""
-            memberLoading = false
-            return@LaunchedEffect
-        }
-        memberLoading = true
-        memberError = ""
-        members = emptyList()
-        query = ""
-        memberListState.scrollToItem(0)
-        loadGroupMembers(context, group) { result, throwable ->
-            memberLoading = false
-            if (throwable != null) {
-                memberError = throwable.message ?: "读取群成员失败"
-            } else {
-                members = result
-            }
-        }
+        onDispose { subscription.unsubscribe() }
     }
 
-    val group = selectedGroup
-    PageScaffold(
-        title = group?.label ?: request.title,
-        largeTitle = group?.label ?: request.title,
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar(
-                primaryText = if (group == null && selectedEntries.isEmpty() && !selectionEdited) "选择群聊" else "保存选择",
-                onPrimaryClick = {
-                    if (selectedGroup == null && selectedEntries.isEmpty() && !selectionEdited) {
-                        Toast.makeText(context, "请先选择群聊", Toast.LENGTH_SHORT).show()
-                    } else {
-                        onConfirm(selectedEntries.toList())
+    Column {
+        SettingsCard {
+            PathSwitchRow(
+                globalEnabled,
+                "插件总开关",
+                "启动时自动加载已启用插件\n相关说明:\n请确认插件安全再进行加载,\n否则造成的后果需自行承担。",
+                onInfoClick = { showPluginRootDialog = true },
+            ) { next ->
+                val old = globalEnabled
+                globalEnabled = next
+                Thread({
+                    val result = ScriptPluginRuntime.setGlobalEnabled(context, next)
+                    Handler(Looper.getMainLooper()).post {
+                        if (result.isFailure) {
+                            globalEnabled = old
+                            Toast.makeText(
+                                context,
+                                "切换失败: ${result.exceptionOrNull()?.message}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            pluginListVersion++
+                        }
+                    }
+                }, "Hchat-Script-Global").start()
+            }
+        }
+        if (showPluginRootDialog) {
+            ScriptPluginPathDialog(
+                context = context,
+                title = "插件目录",
+                path = pluginRootPath,
+                onClose = { showPluginRootDialog = false }
+            )
+        }
+        SettingsCard(modifier = Modifier.padding(top = 10.dp)) {
+            ActionRow("插件 Agent", "按需求生成或修改脚本插件") {
+                onOpenAgent()
+            }
+        }
+        SettingsCard(modifier = Modifier.padding(top = 10.dp)) {
+            ActionRow("在线插件", "浏览、安装或上传社区脚本插件") {
+                onOpenMarket()
+            }
+        }
+        SettingsCard(modifier = Modifier.padding(top = 10.dp)) {
+            ActionRow("本地插件管理", "排序、置顶、导入、导出或批量管理插件") {
+                onOpenManager()
+            }
+        }
+        SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "本地插件(${plugins.size})")
+        SettingsCard {
+            if (plugins.isEmpty()) {
+                Text(
+                    text = "暂无插件",
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 13.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
+                )
+            } else {
+                plugins.forEachIndexed { index, plugin ->
+                    val checked = pluginEnabledStates[plugin.id]
+                        ?: ScriptPluginRuntime.isPluginEnabled(context, plugin.id)
+                    val summary = buildString {
+                        append(plugin.dir.name)
+                        append("\n")
+                        append("作者: ")
+                        append(plugin.author.ifBlank { "未知" })
+                        append(" | 更新于: ")
+                        append(plugin.updateTime.ifBlank { "未知" })
+                    }
+                    val title = buildString {
+                        append(plugin.displayName ?: "未知")
+                        append("(")
+                        append(plugin.version.ifBlank { "未知" })
+                        append(")")
+                    }
+                    ScriptPluginRow(
+                        checked = checked,
+                        title = title,
+                        summary = summary,
+                        showSettings = ScriptPluginRuntime.canOpenSettings(plugin),
+                        onOpenReadme = { onOpenReadme(plugin) },
+                        onOpenSettings = {
+                            val result = ScriptPluginRuntime.callOpenSettings(plugin.id)
+                            if (result.isFailure) {
+                                Toast.makeText(
+                                    context,
+                                    result.exceptionOrNull()?.message ?: "打开设置失败",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        onOpenManager = { actionPlugin = plugin },
+                        onCheckedChange = { next ->
+                            val oldMap = pluginEnabledStates
+                            pluginEnabledStates = pluginEnabledStates + (plugin.id to next)
+                            Thread({
+                                val result = ScriptPluginRuntime.setPluginEnabled(context, plugin.id, next)
+                                Handler(Looper.getMainLooper()).post {
+                                    if (result.isFailure) {
+                                        pluginEnabledStates = oldMap
+                                        Toast.makeText(
+                                            context,
+                                            "加载[${plugin.displayName ?: "未知"}]失败，已自动关闭",
+                                            Toast.LENGTH_SHORT
+                                        ).show()
+                                    }
+                                }
+                            }, "Hchat-Script-${plugin.id}").start()
+                        }
+                    )
+                    if (index != plugins.lastIndex) InsetDivider()
+                }
+            }
+        }
+        actionPlugin?.let { plugin ->
+            ScriptPluginActionDialog(
+                plugin = plugin,
+                pinned = plugin.id in pinnedIds,
+                onDismiss = { actionPlugin = null },
+                onPinChanged = { pinned ->
+                    actionPlugin = null
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            ScriptPluginManager.setPinned(context, listOf(plugin.id), pinned)
+                        }
+                        result.fold(
+                            onSuccess = {
+                                pluginListVersion++
+                                Toast.makeText(
+                                    context,
+                                    if (pinned) "已置顶" else "已取消置顶",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
+                            onFailure = { showScriptPluginManagerError(context, it) }
+                        )
                     }
                 },
-                secondaryText = if (group == null) "返回" else "重新选群",
-                onSecondaryClick = {
-                    if (selectedGroup == null) {
-                        onBack()
-                    } else {
-                        selectedGroup = null
-                        query = ""
+                onRename = {
+                    actionPlugin = null
+                    showAfterDialogDismiss(context) { renamePlugin = plugin }
+                },
+                onExport = {
+                    actionPlugin = null
+                    showAfterDialogDismiss(context) {
+                        launchScriptPluginExport(
+                            context = context,
+                            plugins = listOf(plugin)
+                        )
                     }
                 },
-                middleText = if (selectedEntries.isEmpty()) null else "清空选择",
-                onMiddleClick = if (selectedEntries.isEmpty()) null else {
-                    {
-                        selectedEntries = emptySet()
-                        selectionEdited = true
+                onDelete = {
+                    actionPlugin = null
+                    showAfterDialogDismiss(context) { deletePlugin = plugin }
+                }
+            )
+        }
+        renamePlugin?.let { plugin ->
+            ScriptPluginRenameDialog(
+                plugin = plugin,
+                onDismiss = { renamePlugin = null },
+                onConfirm = { name ->
+                    renamePlugin = null
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            ScriptPluginManager.renamePlugin(context, plugin.id, name)
+                        }
+                        result.fold(
+                            onSuccess = {
+                                pluginListVersion++
+                                Toast.makeText(context, "已重命名", Toast.LENGTH_SHORT).show()
+                            },
+                            onFailure = { showScriptPluginManagerError(context, it) }
+                        )
                     }
                 }
             )
         }
-    ) { padding ->
-        val listRoute = group?.let { GroupMemberPickerRoute.Members(it) } ?: GroupMemberPickerRoute.Groups
-        SettingsRouteTransition(
-            targetState = listRoute,
-            label = "GroupMemberPickerTransition",
-            depthOf = { it.depth() }
-        ) { route ->
-            val routeGroup = (route as? GroupMemberPickerRoute.Members)?.group
-            val lower = query.trim().lowercase(Locale.US)
-            val rows = if (routeGroup == null) groups else members
-            val visible = rows.filter {
-                it.matchesSearch(lower)
-            }.selectedFirst { option ->
-                if (routeGroup == null) {
-                    initialSelectedEntries.any { it.substringBefore('/') == option.id }
-                } else {
-                    initialSelectedEntries.contains(groupMemberEntry(routeGroup.id, option.id))
-                }
-            }
-            val routeListState = if (routeGroup == null) groupListState else memberListState
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                state = routeListState,
-                contentPadding = PaddingValues(
-                    top = padding.calculateTopPadding() + 8.dp,
-                    bottom = padding.calculateBottomPadding() + 84.dp
-                )
-            ) {
-                item {
-                    SettingsCard {
-                        InputRow(
-                            title = "搜索",
-                            summary = if (routeGroup == null) "群名称 / 群聊备注 / 群号" else "群昵称 / wxid",
-                            value = query,
-                            onValueChange = { query = it }
+        deletePlugin?.let { plugin ->
+            ScriptPluginDeleteDialog(
+                pluginNames = listOf(plugin.displayName ?: plugin.name.ifBlank { plugin.id }),
+                onDismiss = { deletePlugin = null },
+                onConfirm = {
+                    deletePlugin = null
+                    scope.launch {
+                        val result = withContext(Dispatchers.IO) {
+                            ScriptPluginManager.deletePlugin(context, plugin.id)
+                        }
+                        result.fold(
+                            onSuccess = {
+                                pluginListVersion++
+                                Toast.makeText(context, "插件已删除", Toast.LENGTH_SHORT).show()
+                            },
+                            onFailure = { showScriptPluginManagerError(context, it) }
                         )
                     }
                 }
-                item {
-                    SmallTitle(
-                        modifier = Modifier.padding(top = 10.dp),
-                        text = if (routeGroup == null) "群聊" else "群成员"
+            )
+        }
+    }
+}
+
+@Composable
+fun ScriptPluginManagerPage(
+    context: Context,
+    onBack: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    var query by rememberSaveable { mutableStateOf("") }
+    var refreshVersion by remember { mutableStateOf(0) }
+    var loading by remember { mutableStateOf(true) }
+    var managedPlugins by remember {
+        mutableStateOf<List<ScriptPluginManager.ManagedPlugin>>(emptyList())
+    }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var draggedPluginId by remember { mutableStateOf<String?>(null) }
+    var dragOrderChanged by remember { mutableStateOf(false) }
+    var actionPlugin by remember { mutableStateOf<ScriptPluginManager.ManagedPlugin?>(null) }
+    var renamePlugin by remember { mutableStateOf<ScriptPluginRuntime.ScriptPlugin?>(null) }
+    var deletePlugins by remember { mutableStateOf<List<ScriptPluginRuntime.ScriptPlugin>>(emptyList()) }
+    var importInspection by remember { mutableStateOf<ScriptPluginManager.ImportInspection?>(null) }
+    var importOverwriteIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var busyText by remember { mutableStateOf("") }
+    val pageActive = remember { AtomicBoolean(true) }
+    val activeImportSessionId = remember { AtomicReference<String?>(null) }
+
+    LaunchedEffect(refreshVersion) {
+        loading = true
+        val result = withContext(Dispatchers.IO) {
+            runCatching {
+                ScriptPluginManager.cleanupStaleDisplayIds(context).getOrThrow()
+                ScriptPluginManager.listForDisplay(context)
+            }
+        }
+        result.fold(
+            onSuccess = { plugins ->
+                managedPlugins = plugins
+                selectedIds = selectedIds.intersect(plugins.mapTo(LinkedHashSet()) { it.plugin.id })
+            },
+            onFailure = { showScriptPluginManagerError(context, it) }
+        )
+        loading = false
+    }
+    DisposableEffect(context) {
+        val subscription = ScriptPluginRuntime.subscribePluginCatalog(context) {
+            Handler(Looper.getMainLooper()).post { refreshVersion++ }
+        }
+        onDispose { subscription.unsubscribe() }
+    }
+    DisposableEffect(Unit) {
+        pageActive.set(true)
+        onDispose {
+            pageActive.set(false)
+            activeImportSessionId.getAndSet(null)?.let { sessionId ->
+                Thread({ ScriptPluginManager.discardImport(context, sessionId) }, "Hchat-Plugin-Import-Cleanup").start()
+            }
+        }
+    }
+
+    val normalizedQuery = query.trim().lowercase(Locale.ROOT)
+    val visiblePlugins = managedPlugins.filter { item ->
+        val plugin = item.plugin
+        normalizedQuery.isEmpty() ||
+            plugin.id.lowercase(Locale.ROOT).contains(normalizedQuery) ||
+            plugin.name.lowercase(Locale.ROOT).contains(normalizedQuery) ||
+            plugin.author.lowercase(Locale.ROOT).contains(normalizedQuery) ||
+            plugin.version.lowercase(Locale.ROOT).contains(normalizedQuery)
+    }
+    val pinnedPlugins = visiblePlugins.filter { it.pinned }
+    val normalPlugins = visiblePlugins.filterNot { it.pinned }
+    val visibleIds = visiblePlugins.mapTo(LinkedHashSet()) { it.plugin.id }
+    val allVisibleSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
+
+    fun refresh() {
+        refreshVersion++
+    }
+
+    fun setPinned(ids: Set<String>, pinned: Boolean) {
+        if (ids.isEmpty() || busyText.isNotEmpty()) return
+        busyText = if (pinned) "正在置顶" else "正在取消置顶"
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                ScriptPluginManager.setPinned(context, ids, pinned)
+            }
+            busyText = ""
+            result.fold(
+                onSuccess = {
+                    refresh()
+                    Toast.makeText(
+                        context,
+                        if (pinned) "已置顶 ${ids.size} 个插件" else "已取消置顶 ${ids.size} 个插件",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                },
+                onFailure = { showScriptPluginManagerError(context, it) }
+            )
+        }
+    }
+
+    fun commitOrder() {
+        val ids = managedPlugins.map { it.plugin.id }
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                ScriptPluginManager.saveDisplayOrder(context, ids)
+            }
+            result.onFailure { showScriptPluginManagerError(context, it) }
+        }
+    }
+
+    fun movePlugin(item: ScriptPluginManager.ManagedPlugin, delta: Int): Boolean {
+        if (query.isNotBlank()) return false
+        val index = managedPlugins.indexOfFirst { it.plugin.id == item.plugin.id }
+        val targetIndex = index + delta
+        if (index < 0 || targetIndex !in managedPlugins.indices) return false
+        if (managedPlugins[targetIndex].pinned != item.pinned) return false
+        val next = managedPlugins.toMutableList()
+        val moved = next.removeAt(index)
+        next.add(targetIndex, moved)
+        managedPlugins = next
+        return true
+    }
+
+    fun launchImportPicker() {
+        val activity = context as? Activity
+        if (activity == null) {
+            Toast.makeText(context, "无法打开文件选择器", Toast.LENGTH_SHORT).show()
+            return
+        }
+        ScriptPluginDocumentBridge.launchImport(activity) { uri ->
+            if (!pageActive.get()) return@launchImport
+            busyText = "正在检查导入包"
+            Thread({
+                val result = runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        ScriptPluginManager.inspectImport(context, input).getOrThrow()
+                    } ?: error("无法读取所选文件")
+                }
+                if (!pageActive.get()) {
+                    result.getOrNull()?.let { inspection ->
+                        ScriptPluginManager.discardImport(context, inspection.sessionId)
+                    }
+                    return@Thread
+                }
+                Handler(Looper.getMainLooper()).post {
+                    if (!pageActive.get()) {
+                        result.getOrNull()?.let { inspection ->
+                            Thread(
+                                { ScriptPluginManager.discardImport(context, inspection.sessionId) },
+                                "Hchat-Plugin-Import-Late-Cleanup"
+                            ).start()
+                        }
+                        return@post
+                    }
+                    busyText = ""
+                    result.fold(
+                        onSuccess = { inspection ->
+                            activeImportSessionId.set(inspection.sessionId)
+                            importInspection = inspection
+                            importOverwriteIds = emptySet()
+                        },
+                        onFailure = { showScriptPluginManagerError(context, it) }
                     )
                 }
-                when {
-                    routeGroup == null && groupLoading -> item { SettingsCard { EmptyText("正在载入群聊...") } }
-                    routeGroup == null && groupError.isNotEmpty() -> item { SettingsCard { EmptyText(groupError) } }
-                    routeGroup != null && memberLoading -> item { SettingsCard { EmptyText("正在载入群成员...") } }
-                    routeGroup != null && memberError.isNotEmpty() -> item { SettingsCard { EmptyText(memberError) } }
-                    visible.isEmpty() -> item { SettingsCard { EmptyText("没有匹配结果") } }
-                    else -> visible.forEach { option ->
+            }, "Hchat-Plugin-Import-Inspect").start()
+        }
+    }
+
+    PageScaffold(
+        title = "本地插件管理",
+        largeTitle = "本地插件管理",
+        scrollBehavior = scrollBehavior,
+        onBack = onBack,
+        bottomBar = { BottomActionBar("返回", onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item {
+                SearchBarSurface(
+                    query = query,
+                    placeholder = "搜索本地插件",
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    onQueryChange = { query = it }
+                )
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 6.dp), text = "管理") }
+            item {
+                SettingsCard {
+                    ScriptPluginManagerCommandRow(
+                        icon = NavIcons.Import,
+                        title = "导入插件",
+                        summary = "从 ZIP 文件导入，导入后默认关闭",
+                        enabled = busyText.isEmpty(),
+                        onClick = ::launchImportPicker
+                    )
+                    InsetDivider()
+                    ScriptPluginSelectionToolbar(
+                        selectedCount = selectedIds.size,
+                        allVisibleSelected = allVisibleSelected,
+                        enabled = visibleIds.isNotEmpty() && busyText.isEmpty(),
+                        onSelectAll = {
+                            selectedIds = if (allVisibleSelected) {
+                                selectedIds - visibleIds
+                            } else {
+                                selectedIds + visibleIds
+                            }
+                        },
+                        onInvert = {
+                            selectedIds = (selectedIds - visibleIds) + (visibleIds - selectedIds)
+                        }
+                    )
+                    if (selectedIds.isNotEmpty()) {
+                        InsetDivider()
+                        ScriptPluginBatchActions(
+                            enabled = busyText.isEmpty(),
+                            onPin = { setPinned(selectedIds, true) },
+                            onUnpin = { setPinned(selectedIds, false) },
+                            onExport = {
+                                val selected = managedPlugins.filter { it.plugin.id in selectedIds }.map { it.plugin }
+                                launchScriptPluginExport(context, selected)
+                            },
+                            onDelete = {
+                                deletePlugins = managedPlugins
+                                    .filter { it.plugin.id in selectedIds }
+                                    .map { it.plugin }
+                            }
+                        )
+                    }
+                }
+            }
+            if (busyText.isNotEmpty()) {
+                item {
+                    Text(
+                        text = busyText,
+                        color = MiuixTheme.colorScheme.primary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)
+                    )
+                }
+            }
+            when {
+                loading -> item { EmptyText("正在加载插件") }
+                managedPlugins.isEmpty() -> item { EmptyText("暂无本地插件") }
+                visiblePlugins.isEmpty() -> item { EmptyText("没有匹配的插件") }
+                else -> {
+                    if (pinnedPlugins.isNotEmpty()) {
+                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "已置顶(${pinnedPlugins.size})") }
                         item {
-                            val entry = routeGroup?.let { groupMemberEntry(it.id, option.id) }.orEmpty()
-                            ContactListCard(
-                                option = option,
-                                selected = if (routeGroup == null) false else selectedEntries.contains(entry),
-                                multiSelect = routeGroup != null,
-                                onClick = {
-                                    if (routeGroup == null) {
-                                        selectedGroup = option
-                                    } else if (selectedEntries.contains(entry)) {
-                                        selectedEntries = selectedEntries - entry
-                                        selectionEdited = true
-                                    } else {
-                                        selectedEntries = selectedEntries + entry
-                                        selectionEdited = true
+                            SettingsCard {
+                                pinnedPlugins.forEachIndexed { index, item ->
+                                    key(item.plugin.id) {
+                                        ScriptPluginManagerRow(
+                                            modifier = Modifier,
+                                            item = item,
+                                            selected = item.plugin.id in selectedIds,
+                                            dragEnabled = query.isBlank() && busyText.isEmpty(),
+                                            onSelectedChange = { selected ->
+                                                selectedIds = if (selected) {
+                                                    selectedIds + item.plugin.id
+                                                } else {
+                                                    selectedIds - item.plugin.id
+                                                }
+                                            },
+                                            onOpenActions = { actionPlugin = item },
+                                            onDragMove = { delta -> movePlugin(item, delta) },
+                                            onDragStateChange = { dragging ->
+                                                if (dragging) {
+                                                    draggedPluginId = item.plugin.id
+                                                    dragOrderChanged = false
+                                                } else if (draggedPluginId == item.plugin.id) {
+                                                    draggedPluginId = null
+                                                    if (dragOrderChanged) commitOrder()
+                                                }
+                                            },
+                                            onOrderChanged = { dragOrderChanged = true }
+                                        )
+                                        if (index != pinnedPlugins.lastIndex) InsetDivider()
                                     }
                                 }
-                            )
+                            }
+                        }
+                    }
+                    if (normalPlugins.isNotEmpty()) {
+                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "其他插件(${normalPlugins.size})") }
+                        item {
+                            SettingsCard {
+                                normalPlugins.forEachIndexed { index, item ->
+                                    key(item.plugin.id) {
+                                        ScriptPluginManagerRow(
+                                            modifier = Modifier,
+                                            item = item,
+                                            selected = item.plugin.id in selectedIds,
+                                            dragEnabled = query.isBlank() && busyText.isEmpty(),
+                                            onSelectedChange = { selected ->
+                                                selectedIds = if (selected) {
+                                                    selectedIds + item.plugin.id
+                                                } else {
+                                                    selectedIds - item.plugin.id
+                                                }
+                                            },
+                                            onOpenActions = { actionPlugin = item },
+                                            onDragMove = { delta -> movePlugin(item, delta) },
+                                            onDragStateChange = { dragging ->
+                                                if (dragging) {
+                                                    draggedPluginId = item.plugin.id
+                                                    dragOrderChanged = false
+                                                } else if (draggedPluginId == item.plugin.id) {
+                                                    draggedPluginId = null
+                                                    if (dragOrderChanged) commitOrder()
+                                                }
+                                            },
+                                            onOrderChanged = { dragOrderChanged = true }
+                                        )
+                                        if (index != normalPlugins.lastIndex) InsetDivider()
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
         }
     }
-}
 
-@Composable
-internal fun OptionPickerPage(
-    request: OptionPickerRequest,
-    onBack: () -> Unit,
-    onSelected: (OptionItem) -> Unit
-) {
-    val scrollBehavior = MiuixScrollBehavior()
-    val listState = rememberLazyListState()
-    var selectedValue by remember(request) { mutableStateOf(request.currentValue) }
-    PageScaffold(
-        title = request.title,
-        largeTitle = request.title,
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar("返回", onBack)
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "选项") }
-            item {
-                SettingsCard {
-                    request.options.forEachIndexed { index, item ->
-                        OptionChoiceRow(
-                            item = item,
-                            selected = item.value == selectedValue,
-                            onClick = {
-                                selectedValue = item.value
-                                onSelected(item)
-                            }
-                        )
-                        if (index < request.options.lastIndex) InsetDivider()
+    actionPlugin?.let { item ->
+        ScriptPluginActionDialog(
+            plugin = item.plugin,
+            pinned = item.pinned,
+            onDismiss = { actionPlugin = null },
+            onPinChanged = { pinned ->
+                actionPlugin = null
+                setPinned(setOf(item.plugin.id), pinned)
+            },
+            onRename = {
+                actionPlugin = null
+                showAfterDialogDismiss(context) { renamePlugin = item.plugin }
+            },
+            onExport = {
+                actionPlugin = null
+                showAfterDialogDismiss(context) {
+                    launchScriptPluginExport(context, listOf(item.plugin))
+                }
+            },
+            onDelete = {
+                actionPlugin = null
+                showAfterDialogDismiss(context) { deletePlugins = listOf(item.plugin) }
+            }
+        )
+    }
+    renamePlugin?.let { plugin ->
+        ScriptPluginRenameDialog(
+            plugin = plugin,
+            onDismiss = { renamePlugin = null },
+            onConfirm = { name ->
+                renamePlugin = null
+                busyText = "正在重命名"
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        ScriptPluginManager.renamePlugin(context, plugin.id, name)
                     }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun UnsupportedFeaturePage(provider: FeatureSettingsProvider, onBack: () -> Unit) {
-    val scrollBehavior = MiuixScrollBehavior()
-    val listState = rememberLazyListState()
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar("返回", onBack)
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item {
-                SettingsCard {
-                    EmptyText("这个模块暂时没有可配置项")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-public fun PageScaffold(
-    title: String,
-    largeTitle: String,
-    scrollBehavior: ScrollBehavior,
-    onBack: (() -> Unit)? = null,
-    topBarActions: @Composable RowScope.() -> Unit = {},
-    bottomBar: @Composable ((Backdrop) -> Unit)? = null,
-    content: @Composable (PaddingValues) -> Unit
-) {
-    RegisterSettingsBackHandler(onBack)
-    val graphicsLayer = rememberGraphicsLayer()
-    val backdrop = rememberLayerBackdrop(graphicsLayer)
-    val navigationInset = navigationButtonBottomInset()
-    val navigationGap = if (navigationInset > 0.dp) NAVIGATION_BUTTON_EXTRA_GAP else 0.dp
-    val bottomAvoidance = navigationInset + navigationGap
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MiuixTheme.colorScheme.background)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .layerBackdrop(backdrop)
-        ) {
-            top.yukonga.miuix.kmp.basic.Scaffold(
-                topBar = {
-                    TopAppBar(
-                        title = title,
-                        largeTitle = largeTitle,
-                        scrollBehavior = scrollBehavior,
-                        navigationIcon = {
-                            onBack?.let { back ->
-                                Box(
-                                    modifier = Modifier.size(40.dp).responsiveTap(onClick = back),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Image(
-                                        imageVector = NavIcons.Back,
-                                        contentDescription = "返回",
-                                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
+                    busyText = ""
+                    result.fold(
+                        onSuccess = {
+                            refresh()
+                            Toast.makeText(context, "已重命名", Toast.LENGTH_SHORT).show()
                         },
-                        actions = topBarActions,
-                        defaultWindowInsetsPadding = true
-                    )
-                },
-                bottomBar = {},
-                contentWindowInsets = WindowInsets(0, 0, 0, 0),
-                content = { padding ->
-                    content(
-                        PaddingValues(
-                            top = padding.calculateTopPadding(),
-                            bottom = padding.calculateBottomPadding() + bottomAvoidance
-                        )
+                        onFailure = { showScriptPluginManagerError(context, it) }
                     )
                 }
-            )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = bottomAvoidance)
-                .align(Alignment.BottomCenter)
-        ) {
-            bottomBar?.invoke(backdrop)
-        }
+            }
+        )
+    }
+    if (deletePlugins.isNotEmpty()) {
+        val pendingDelete = deletePlugins
+        ScriptPluginDeleteDialog(
+            pluginNames = pendingDelete.map { it.displayName ?: it.name.ifBlank { it.id } },
+            onDismiss = { deletePlugins = emptyList() },
+            onConfirm = {
+                deletePlugins = emptyList()
+                busyText = "正在删除插件"
+                scope.launch {
+                    val result = withContext(Dispatchers.IO) {
+                        ScriptPluginManager.deletePlugins(context, pendingDelete.map { it.id })
+                    }
+                    busyText = ""
+                    result.fold(
+                        onSuccess = {
+                            selectedIds = selectedIds - pendingDelete.mapTo(LinkedHashSet()) { it.id }
+                            refresh()
+                            Toast.makeText(context, "已删除 ${pendingDelete.size} 个插件", Toast.LENGTH_SHORT).show()
+                        },
+                        onFailure = { showScriptPluginManagerError(context, it) }
+                    )
+                }
+            }
+        )
+    }
+    importInspection?.let { inspection ->
+        ScriptPluginImportDialog(
+            inspection = inspection,
+            overwriteIds = importOverwriteIds,
+            applying = busyText == "正在导入插件",
+            onOverwriteChanged = { pluginId, overwrite ->
+                importOverwriteIds = if (overwrite) {
+                    importOverwriteIds + pluginId
+                } else {
+                    importOverwriteIds - pluginId
+                }
+            },
+            onDismiss = {
+                activeImportSessionId.set(null)
+                importInspection = null
+                Thread(
+                    { ScriptPluginManager.discardImport(context, inspection.sessionId) },
+                    "Hchat-Plugin-Import-Discard"
+                ).start()
+            },
+            onConfirm = {
+                busyText = "正在导入插件"
+                scope.launch {
+                    val actions = inspection.conflicts.associateWith { pluginId ->
+                        if (pluginId in importOverwriteIds) {
+                            ScriptPluginManager.ImportConflictAction.OVERWRITE
+                        } else {
+                            ScriptPluginManager.ImportConflictAction.SKIP
+                        }
+                    }
+                    val result = withContext(Dispatchers.IO) {
+                        ScriptPluginManager.applyImport(context, inspection.sessionId, actions)
+                    }
+                    busyText = ""
+                    result.fold(
+                        onSuccess = { imported ->
+                            activeImportSessionId.set(null)
+                            importInspection = null
+                            importOverwriteIds = emptySet()
+                            refresh()
+                            Toast.makeText(
+                                context,
+                                "已导入 ${imported.importedPluginIds.size} 个插件，保持关闭状态",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        },
+                        onFailure = { showScriptPluginManagerError(context, it) }
+                    )
+                }
+            }
+        )
     }
 }
 
 @Composable
-public fun SettingsCard(
-    modifier: Modifier = Modifier,
-    content: @Composable () -> Unit
+internal fun ScriptPluginSelectionToolbar(
+    selectedCount: Int,
+    allVisibleSelected: Boolean,
+    enabled: Boolean,
+    onSelectAll: () -> Unit,
+    onInvert: () -> Unit
 ) {
-    Card(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 12.dp),
-        cornerRadius = 18.dp
-    ) {
-        content()
-    }
-}
-
-@Composable
-public fun SwitchRow(
-    sp: SharedPreferences,
-    key: String,
-    title: String,
-    summary: String,
-    defaultValue: Boolean
-) {
-    var checked by remember { mutableStateOf(sp.getBoolean(key, defaultValue)) }
     Row(
-        modifier = Modifier.fillMaxWidth().clickable {
-            checked = !checked
-            sp.edit().putBoolean(key, checked).apply()
-        }.padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            if (summary.isNotBlank()) {
-                Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-            }
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = {
-                checked = it
-                sp.edit().putBoolean(key, it).apply()
-            }
+        Text(
+            text = if (selectedCount == 0) "未选择插件" else "已选择 $selectedCount 个",
+            color = MiuixTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.weight(1f)
+        )
+        TextButton(
+            text = if (allVisibleSelected) "取消全选" else "全选",
+            enabled = enabled,
+            onClick = onSelectAll,
+            colors = ButtonDefaults.textButtonColorsPrimary()
+        )
+        TextButton(
+            text = "反选",
+            enabled = enabled,
+            onClick = onInvert,
+            colors = ButtonDefaults.textButtonColorsPrimary()
         )
     }
 }
 
 @Composable
-public fun SwitchRow(
-    checked: Boolean,
-    title: String,
-    summary: String,
-    enabled: Boolean = true,
-    onCheckedChange: (Boolean) -> Unit
+internal fun ScriptPluginBatchActions(
+    enabled: Boolean,
+    onPin: () -> Unit,
+    onUnpin: () -> Unit,
+    onExport: () -> Unit,
+    onDelete: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth().then(
-            if (enabled) {
-                Modifier.clickable { onCheckedChange(!checked) }
-            } else {
-                Modifier
-            }
-        ).padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = { if (enabled) onCheckedChange(it) }
-        )
-    }
-}
-
-@Composable
-internal fun OptionRow(
-    sp: SharedPreferences,
-    key: String,
-    title: String,
-    options: List<OptionItem>,
-    defaultValue: Int,
-    onValueChanged: (Int) -> Unit = {}
-) {
-    var currentValue by remember {
-        mutableStateOf(sp.getInt(key, defaultValue))
-    }
-    PopupOptionRow(
-        title = title,
-        summary = options.firstOrNull { it.value == currentValue }?.label
-            ?: options.firstOrNull { it.value == defaultValue }?.label
-            ?: "",
-        options = options,
-        currentValue = currentValue,
-        onValueChanged = {
-            currentValue = it
-            onValueChanged(it)
-            sp.edit().putInt(key, it).apply()
-        }
-    )
-}
-
-@Composable
-internal fun PopupOptionRow(
-    title: String,
-    summary: String,
-    options: List<OptionItem>,
-    currentValue: Int,
-    onValueChanged: (Int) -> Unit,
-    enabled: Boolean = true
-) {
-    val selectedIndex = options.indexOfFirst { it.value == currentValue }.takeIf { it >= 0 } ?: 0
-    val labels = options.map { it.label }
-    WindowDropdown(
-        items = labels,
-        selectedIndex = selectedIndex,
-        title = title,
-        summary = summary,
-        enabled = enabled,
-        showValue = true,
-        onSelectedIndexChange = { index ->
-            options.getOrNull(index)?.let { onValueChanged(it.value) }
-        }
-    )
-}
-
-@Composable
-public fun InputRow(
-    title: String,
-    summary: String,
-    value: String,
-    minLines: Int = 1,
-    onValueChange: (String) -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-        Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-        Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-        BasicTextField(
-            value = value,
-            onValueChange = onValueChange,
-            textStyle = TextStyle(
-                color = MiuixTheme.colorScheme.onSurface,
-                fontSize = 14.sp
-            ),
-            minLines = minLines,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant)
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-        )
-    }
-}
-
-@Composable
-internal fun PopupChoiceRow(
-    title: String,
-    summary: String,
-    options: List<PopupChoice<String>>,
-    currentValue: String,
-    onValueChanged: (String) -> Unit,
-    enabled: Boolean = true
-) {
-    val selectedIndex = options.indexOfFirst { it.value == currentValue }.takeIf { it >= 0 } ?: 0
-    WindowDropdown(
-        items = options.map { it.label },
-        selectedIndex = selectedIndex,
-        title = title,
-        summary = summary,
-        enabled = enabled,
-        showValue = true,
-        onSelectedIndexChange = { index ->
-            options.getOrNull(index)?.let { onValueChanged(it.value) }
-        }
-    )
-}
-
-@Composable
-public fun ColorPickerRow(
-    title: String,
-    summary: String,
-    value: String,
-    allowGradient: Boolean = true,
-    onReset: (() -> Unit)? = null,
-    onValueChange: (String) -> Unit
-) {
-    var expanded by remember { mutableStateOf(false) }
-    val currentValue by rememberUpdatedState(value)
-    val colorParts = if (allowGradient) {
-        colorSpecParts(value)
-    } else {
-        MemberTitleStore.cleanColor(value) to ""
-    }
-    var editEnd by remember { mutableStateOf(colorParts.second.isNotEmpty()) }
-    val selectedColor = if (allowGradient && editEnd) colorParts.second.ifEmpty { colorParts.first } else colorParts.first
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
         Row(
-            modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Text(
-                        text = title,
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-                    ClickHintTag()
-                }
-                Text(
-                    text = if (allowGradient) {
-                        "$summary，支持 #RRGGBB / #AARRGGBB / #A,#B 渐变"
-                    } else {
-                        "$summary，支持 #RRGGBB / #AARRGGBB"
-                    },
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 12.sp
-                )
-            }
-            ColorPreviewDot(if (allowGradient) value else colorParts.first)
+            ScriptPluginCompactAction("置顶", enabled, Modifier.weight(1f), onPin)
+            ScriptPluginCompactAction("取消置顶", enabled, Modifier.weight(1f), onUnpin)
         }
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            BasicTextField(
-                value = value,
-                onValueChange = { onValueChange(it.take(if (allowGradient) 19 else 9)) },
-                textStyle = TextStyle(
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontSize = 14.sp
-                ),
-                modifier = Modifier.weight(1f)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant)
-                    .padding(horizontal = 12.dp, vertical = 10.dp)
-            )
-            if (onReset != null) {
-                Text(
-                    text = "重置",
-                    color = MiuixTheme.colorScheme.primary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable(onClick = onReset)
-                        .background(MiuixTheme.colorScheme.secondaryVariant)
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
-                )
-            }
+            ScriptPluginCompactAction("导出", enabled, Modifier.weight(1f), onExport)
+            ScriptPluginCompactAction("删除", enabled, Modifier.weight(1f), onDelete, destructive = true)
         }
-        if (expanded) {
-            if (allowGradient) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    ColorSpecChip(
-                        label = "起始色",
-                        value = colorParts.first,
-                        selected = !editEnd,
-                        onClick = { editEnd = false },
-                        modifier = Modifier.weight(1f)
-                    )
-                    ColorSpecChip(
-                        label = "结束色",
-                        value = colorParts.second,
-                        selected = editEnd,
-                        onClick = { editEnd = true },
-                        modifier = Modifier.weight(1f)
+    }
+}
+
+@Composable
+internal fun ScriptPluginCompactAction(
+    text: String,
+    enabled: Boolean,
+    modifier: Modifier,
+    onClick: () -> Unit,
+    destructive: Boolean = false
+) {
+    val color = when {
+        !enabled -> MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f)
+        destructive -> Color(0xFFD93025)
+        else -> MiuixTheme.colorScheme.primary
+    }
+    Box(
+        modifier = modifier.height(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(color.copy(alpha = 0.10f))
+            .clickable(enabled = enabled, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text = text, color = color, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+internal fun ScriptPluginManagerCommandRow(
+    icon: ImageVector,
+    title: String,
+    summary: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    val color = if (enabled) MiuixTheme.colorScheme.onSurface else {
+        MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Image(
+            imageVector = icon,
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(color),
+            modifier = Modifier.size(22.dp)
+        )
+        Column(modifier = Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(text = title, color = color, fontWeight = FontWeight.Medium)
+            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+        }
+    }
+}
+
+@Composable
+internal fun ScriptPluginManagerRow(
+    modifier: Modifier,
+    item: ScriptPluginManager.ManagedPlugin,
+    selected: Boolean,
+    dragEnabled: Boolean,
+    onSelectedChange: (Boolean) -> Unit,
+    onOpenActions: () -> Unit,
+    onDragMove: (Int) -> Boolean,
+    onDragStateChange: (Boolean) -> Unit,
+    onOrderChanged: () -> Unit
+) {
+    val plugin = item.plugin
+    val density = LocalDensity.current
+    var itemHeightPx by remember(plugin.id) { mutableStateOf(0f) }
+    var dragDistanceY by remember(plugin.id) { mutableStateOf(0f) }
+    var dragging by remember(plugin.id) { mutableStateOf(false) }
+    val currentOnDragMove by rememberUpdatedState(onDragMove)
+    val currentOnDragStateChange by rememberUpdatedState(onDragStateChange)
+    val currentOnOrderChanged by rememberUpdatedState(onOrderChanged)
+    val visualDragY by animateFloatAsState(
+        targetValue = dragDistanceY,
+        animationSpec = tween(durationMillis = if (dragging) 0 else 160),
+        label = "ScriptPluginDragOffset"
+    )
+    Row(
+        modifier = modifier.zIndex(if (dragging) 1f else 0f)
+            .graphicsLayer {
+                translationY = visualDragY
+                shadowElevation = if (dragging) with(density) { 7.dp.toPx() } else 0f
+                shape = RoundedCornerShape(8.dp)
+            }
+            .fillMaxWidth()
+            .onSizeChanged { itemHeightPx = it.height.toFloat() }
+            .clickable { onSelectedChange(!selected) }
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SelectionMark(selected = selected, multiSelect = true)
+        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = plugin.displayName ?: plugin.name.ifBlank { plugin.id },
+                    color = MiuixTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                if (item.pinned) {
+                    Image(
+                        imageVector = NavIcons.Pin,
+                        contentDescription = "已置顶",
+                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
+                        modifier = Modifier.padding(start = 6.dp).size(16.dp)
                     )
                 }
             }
-            PsColorPicker(
-                value = selectedColor,
-                onValueChange = { picked ->
-                    val next = if (allowGradient) {
-                        val latestParts = colorSpecParts(currentValue)
-                        if (editEnd) {
-                            composeColorSpec(latestParts.first.ifEmpty { picked }, picked)
-                        } else {
-                            composeColorSpec(picked, latestParts.second)
-                        }
-                    } else {
-                        picked
-                    }
-                    onValueChange(next)
-                },
-                modifier = Modifier.padding(top = if (allowGradient) 12.dp else 8.dp)
-            )
             Text(
-                text = if (allowGradient) {
-                    "先选起始色或结束色，再用色盘取色；清空输入框可恢复默认/跟随昵称"
-                } else {
-                    "可直接输入颜色值，也可以用色盘取色；清空输入框可恢复默认色"
+                text = buildString {
+                    append(plugin.id)
+                    append(" · ").append(plugin.author.ifBlank { "未知作者" })
+                    append(" · ").append(plugin.version.ifBlank { "未知版本" })
                 },
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 fontSize = 12.sp,
-                modifier = Modifier.padding(top = 8.dp)
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
+        Image(
+            imageVector = NavIcons.More,
+            contentDescription = "管理插件",
+            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+            modifier = Modifier.padding(start = 8.dp).size(32.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .clickable {
+                    onOpenActions()
+                }
+                .padding(5.dp)
+        )
+        Image(
+            imageVector = NavIcons.Drag,
+            contentDescription = if (dragEnabled) "长按拖动排序" else "搜索时不可排序",
+            colorFilter = ColorFilter.tint(
+                MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = if (dragEnabled) 1f else 0.35f)
+            ),
+            modifier = Modifier.padding(start = 4.dp).size(32.dp)
+                .pointerInput(plugin.id, dragEnabled, itemHeightPx) {
+                    if (!dragEnabled) return@pointerInput
+                    detectDragGesturesAfterLongPress(
+                        onDragStart = {
+                            dragDistanceY = 0f
+                            dragging = true
+                            currentOnDragStateChange(true)
+                        },
+                        onDragEnd = {
+                            dragging = false
+                            dragDistanceY = 0f
+                            currentOnDragStateChange(false)
+                        },
+                        onDragCancel = {
+                            dragging = false
+                            dragDistanceY = 0f
+                            currentOnDragStateChange(false)
+                        },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            dragDistanceY += dragAmount.y
+                            val step = itemHeightPx.takeIf { it > 0f } ?: with(density) { 62.dp.toPx() }
+                            while (dragDistanceY <= -step * 0.5f) {
+                                if (currentOnDragMove(-1)) {
+                                    dragDistanceY += step
+                                    currentOnOrderChanged()
+                                } else {
+                                    dragDistanceY = -step * 0.45f
+                                    break
+                                }
+                            }
+                            while (dragDistanceY >= step * 0.5f) {
+                                if (currentOnDragMove(1)) {
+                                    dragDistanceY -= step
+                                    currentOnOrderChanged()
+                                } else {
+                                    dragDistanceY = step * 0.45f
+                                    break
+                                }
+                            }
+                        }
+                    )
+                }
+                .padding(5.dp)
+        )
     }
 }
 
 @Composable
-internal fun ColorSpecChip(
-    label: String,
-    value: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+internal fun ScriptPluginActionDialog(
+    plugin: ScriptPluginRuntime.ScriptPlugin,
+    pinned: Boolean,
+    onDismiss: () -> Unit,
+    onPinChanged: (Boolean) -> Unit,
+    onRename: () -> Unit,
+    onExport: () -> Unit,
+    onDelete: () -> Unit
 ) {
-    val borderColor = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.outline.copy(alpha = 0.45f)
+    WindowDialog(
+        show = true,
+        title = plugin.displayName ?: plugin.name.ifBlank { plugin.id },
+        onDismissRequest = onDismiss,
+        content = {
+            Column {
+                ScriptPluginDialogActionRow(
+                    icon = NavIcons.Pin,
+                    text = if (pinned) "取消置顶" else "置顶",
+                    onClick = { onPinChanged(!pinned) }
+                )
+                ScriptPluginDialogActionRow(NavIcons.Edit, "重命名", onClick = onRename)
+                ScriptPluginDialogActionRow(NavIcons.Export, "导出", onClick = onExport)
+                ScriptPluginDialogActionRow(NavIcons.Delete, "删除", destructive = true, onClick = onDelete)
+            }
+        }
+    )
+}
+
+@Composable
+internal fun ScriptPluginDialogActionRow(
+    icon: ImageVector,
+    text: String,
+    destructive: Boolean = false,
+    onClick: () -> Unit
+) {
+    val color = if (destructive) Color(0xFFD93025) else MiuixTheme.colorScheme.onSurface
     Row(
-        modifier = modifier
-            .clip(RoundedCornerShape(10.dp))
-            .border(1.dp, borderColor, RoundedCornerShape(10.dp))
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (destructive) Color(0xFFD93025).copy(alpha = 0.08f)
+                else MiuixTheme.colorScheme.secondaryVariant
+            )
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        ColorPreviewDot(value, size = 24.dp)
-        Column {
-            Text(text = label, color = MiuixTheme.colorScheme.onSurface, fontSize = 12.sp)
-            Text(
-                text = value.ifEmpty { "未设置" },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 11.sp
-            )
-        }
-    }
-}
-
-@Composable
-internal fun ColorPreviewDot(value: String, size: Dp = 34.dp) {
-    val colorParts = colorSpecParts(value)
-    val startColor = composeColorFromHex(colorParts.first) ?: MiuixTheme.colorScheme.secondaryVariant
-    val endColor = composeColorFromHex(colorParts.second)
-    val shape = RoundedCornerShape(size / 2)
-    val colorBackground = if (endColor != null && endColor != startColor) {
-        Modifier.background(Brush.horizontalGradient(listOf(startColor, endColor)))
-    } else {
-        Modifier.background(startColor)
-    }
-    Box(
-        modifier = Modifier
-            .size(size)
-            .clip(shape)
-            .then(colorBackground)
-            .border(2.dp, MiuixTheme.colorScheme.outline.copy(alpha = 0.45f), shape),
-        contentAlignment = Alignment.Center
-    ) {
-        if (value.isEmpty()) {
-            Text(text = "-", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 15.sp)
-        }
-    }
-}
-
-@Composable
-internal fun PsColorPicker(
-    value: String,
-    onValueChange: (String) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val selected = colorPickerSelection(value)
-    val markerColor = MiuixTheme.colorScheme.onSurface
-    val density = LocalDensity.current
-    val paletteSize = 228.dp
-    val hueBarWidth = 40.dp
-    val paletteSizePx = remember(density) { with(density) { paletteSize.roundToPx() } }
-    val hueBarWidthPx = remember(density) { with(density) { hueBarWidth.roundToPx() } }
-    val paletteBitmap = remember(selected.hue, paletteSizePx) {
-        buildSvPaletteBitmap(selected.hue, paletteSizePx)
-    }
-    val hueBitmap = remember(paletteSizePx, hueBarWidthPx) {
-        buildHuePaletteBitmap(hueBarWidthPx, paletteSizePx)
-    }
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.Center,
+            .padding(horizontal = 18.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Canvas(
-            modifier = Modifier
-                .size(paletteSize)
-                .pointerInput(selected.hue) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        onValueChange(
-                            colorFromSvOffset(
-                                selected.hue,
-                                down.position,
-                                size.width.toFloat(),
-                                size.height.toFloat()
-                            )
-                        )
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            onValueChange(
-                                colorFromSvOffset(
-                                    selected.hue,
-                                    change.position,
-                                    size.width.toFloat(),
-                                    size.height.toFloat()
-                                )
-                            )
-                            change.consume()
-                            if (!change.pressed) break
-                        }
-                    }
-                }
-        ) {
-            drawImage(paletteBitmap)
-            val marker = Offset(
-                selected.saturation * size.width,
-                (1f - selected.value) * size.height
-            )
-            drawCircle(color = markerColor, radius = 9f, center = marker)
-            drawCircle(color = Color.White, radius = 5.5f, center = marker)
-        }
-        Canvas(
-            modifier = Modifier
-                .padding(start = 14.dp)
-                .size(width = hueBarWidth, height = paletteSize)
-                .clip(RoundedCornerShape(14.dp))
-                .pointerInput(selected.saturation, selected.value) {
-                    awaitEachGesture {
-                        val down = awaitFirstDown(requireUnconsumed = false)
-                        onValueChange(
-                            colorFromHueOffset(
-                                selected.saturation,
-                                selected.value,
-                                down.position.y,
-                                size.height.toFloat()
-                            )
-                        )
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                            onValueChange(
-                                colorFromHueOffset(
-                                    selected.saturation,
-                                    selected.value,
-                                    change.position.y,
-                                    size.height.toFloat()
-                                )
-                            )
-                            change.consume()
-                            if (!change.pressed) break
-                        }
-                    }
-                }
-        ) {
-            drawImage(hueBitmap)
-            val markerY = (selected.hue / 360f).coerceIn(0f, 1f) * size.height
-            drawCircle(color = markerColor, radius = 10f, center = Offset(size.width / 2f, markerY))
-            drawCircle(color = Color.White, radius = 6f, center = Offset(size.width / 2f, markerY))
-        }
-    }
-}
-
-internal fun buildSvPaletteBitmap(hue: Float, sizePx: Int): ImageBitmap {
-    val safeSize = sizePx.coerceAtLeast(2)
-    val bitmap = Bitmap.createBitmap(safeSize, safeSize, Bitmap.Config.ARGB_8888)
-    val pixels = IntArray(safeSize * safeSize)
-    var index = 0
-    for (y in 0 until safeSize) {
-        val value = (1f - (y.toFloat() / (safeSize - 1))).coerceIn(0f, 1f)
-        for (x in 0 until safeSize) {
-            val saturation = (x.toFloat() / (safeSize - 1)).coerceIn(0f, 1f)
-            pixels[index++] = AndroidColor.HSVToColor(floatArrayOf(hue, saturation, value))
-        }
-    }
-    bitmap.setPixels(pixels, 0, safeSize, 0, 0, safeSize, safeSize)
-    return bitmap.asImageBitmap()
-}
-
-internal fun buildHuePaletteBitmap(widthPx: Int, heightPx: Int): ImageBitmap {
-    val safeWidth = widthPx.coerceAtLeast(2)
-    val safeHeight = heightPx.coerceAtLeast(2)
-    val bitmap = Bitmap.createBitmap(safeWidth, safeHeight, Bitmap.Config.ARGB_8888)
-    val pixels = IntArray(safeWidth * safeHeight)
-    var index = 0
-    for (y in 0 until safeHeight) {
-        val hue = (y.toFloat() / (safeHeight - 1)).coerceIn(0f, 1f) * 360f
-        val color = AndroidColor.HSVToColor(floatArrayOf(hue, 1f, 1f))
-        repeat(safeWidth) {
-            pixels[index++] = color
-        }
-    }
-    bitmap.setPixels(pixels, 0, safeWidth, 0, 0, safeWidth, safeHeight)
-    return bitmap.asImageBitmap()
-}
-
-internal fun composeColorFromHex(value: String): Color? {
-    val normalized = RealNameTailStore.cleanColor(value)
-    if (normalized.isEmpty()) return null
-    return runCatching { Color(AndroidColor.parseColor(normalized)) }.getOrNull()
-}
-
-internal fun colorSpecParts(value: String): Pair<String, String> {
-    val cleaned = MemberTitleStore.cleanColorSpec(value)
-    if (cleaned.isEmpty()) return "" to ""
-    val parts = cleaned.split(',').take(2)
-    return parts.getOrElse(0) { "" } to parts.getOrElse(1) { "" }
-}
-
-internal fun composeColorSpec(start: String, end: String): String {
-    val first = MemberTitleStore.cleanColor(start)
-    val second = MemberTitleStore.cleanColor(end)
-    if (first.isEmpty()) return ""
-    return if (second.isEmpty() || second == first) first else "$first,$second"
-}
-
-@Composable
-internal fun WeightInputRow(
-    title: String,
-    value: String,
-    onValueChange: (String) -> Unit
-) {
-    InputRow(
-        title = title,
-        summary = "100-900，600 以上显示为加粗",
-        value = value,
-        onValueChange = { next ->
-            onValueChange(next.filter { it.isDigit() }.take(3))
-        }
-    )
-}
-
-internal data class ColorPickerSelection(val hue: Float, val saturation: Float, val value: Float)
-
-internal fun colorPickerSelection(value: String): ColorPickerSelection {
-    val normalized = MemberTitleStore.cleanColor(value)
-    if (normalized.isEmpty()) return ColorPickerSelection(0f, 1f, 1f)
-    return runCatching {
-        val hsv = FloatArray(3)
-        AndroidColor.colorToHSV(AndroidColor.parseColor(normalized), hsv)
-        ColorPickerSelection(hsv[0], hsv[1], hsv[2])
-    }.getOrDefault(ColorPickerSelection(0f, 1f, 1f))
-}
-
-internal fun colorFromSvOffset(hue: Float, offset: Offset, width: Float, height: Float): String {
-    val saturation = (offset.x / width).coerceIn(0f, 1f)
-    val value = (1f - (offset.y / height)).coerceIn(0f, 1f)
-    val color = AndroidColor.HSVToColor(floatArrayOf(hue, saturation, value))
-    return String.format("#%06X", 0xFFFFFF and color)
-}
-
-internal fun colorFromHueOffset(saturation: Float, value: Float, y: Float, height: Float): String {
-    val hue = (y / height).coerceIn(0f, 1f) * 360f
-    val color = AndroidColor.HSVToColor(floatArrayOf(hue, saturation, value))
-    return String.format("#%06X", 0xFFFFFF and color)
-}
-
-@Composable
-internal fun VariableInputRow(
-    title: String,
-    summary: String,
-    value: String,
-    variables: List<TemplateVariable>,
-    minLines: Int = 1,
-    onValueChange: (String) -> Unit
-) {
-    var fieldValue by remember {
-        mutableStateOf(TextFieldValue(value, TextRange(value.length)))
-    }
-    LaunchedEffect(value) {
-        if (value != fieldValue.text) {
-            fieldValue = TextFieldValue(value, TextRange(value.length))
-        }
-    }
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-        Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-        if (summary.isNotBlank()) {
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-        }
-        BasicTextField(
-            value = fieldValue,
-            onValueChange = {
-                fieldValue = it
-                onValueChange(it.text)
-            },
-            textStyle = TextStyle(
-                color = MiuixTheme.colorScheme.onSurface,
-                fontSize = 14.sp
-            ),
-            minLines = minLines,
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant)
-                .padding(horizontal = 12.dp, vertical = 10.dp)
+        Image(
+            imageVector = icon,
+            contentDescription = null,
+            colorFilter = ColorFilter.tint(color),
+            modifier = Modifier.size(22.dp)
         )
-        VariableChipRow(
-            variables = variables,
-            onInsert = { token ->
-                val next = fieldValue.insertToken(token)
-                fieldValue = next
-                onValueChange(next.text)
-            }
-        )
+        Text(text = text, color = color, fontSize = 15.sp, modifier = Modifier.padding(start = 18.dp))
     }
 }
 
 @Composable
-internal fun RedPacketReplyContentEditor(
-    context: Context,
-    replyMode: Int,
-    value: String,
-    onValueChange: (String) -> Unit,
-    onFavoritePicker: (FavoritePickerRequest) -> Unit,
-    templateVariables: List<TemplateVariable> = redPacketReplyTemplateVariables
-) {
-    when {
-        redPacketReplyUsesText(replyMode) -> {
-            VariableInputRow(
-                title = "回复内容",
-                summary = "多个回复用 | 分隔随机选择",
-                value = value,
-                variables = templateVariables,
-                minLines = 2,
-                onValueChange = onValueChange
-            )
-        }
-        replyMode == RedPacketRuleConfig.REPLY_XML -> {
-            VariableInputRow(
-                title = "XML 内容",
-                summary = "输入 <msg><appmsg>...</appmsg></msg>，支持变量",
-                value = value,
-                variables = templateVariables,
-                minLines = 4,
-                onValueChange = onValueChange
-            )
-        }
-        replyMode == RedPacketRuleConfig.REPLY_FAVORITE -> {
-            ActionRow(
-                title = redPacketReplyPickerTitle(replyMode),
-                summary = redPacketReplyContentSummary(replyMode, value)
-            ) {
-                onFavoritePicker(
-                    FavoritePickerRequest(
-                        title = redPacketReplyPickerTitle(replyMode),
-                        existingValue = value,
-                        onValue = onValueChange,
-                        multiSelect = true,
-                        delimiter = "|"
-                    )
-                )
-            }
-            if (value.isNotBlank()) {
-                InsetDivider()
-                ActionRow("清空已选收藏", "当前会从该回复类型移除已选收藏") {
-                    onValueChange("")
-                }
-            }
-        }
-        else -> {
-            ActionRow(
-                title = redPacketReplyPickerTitle(replyMode),
-                summary = redPacketReplyContentSummary(replyMode, value)
-            ) {
-                val activity = context as? Activity
-                if (activity == null) {
-                    Toast.makeText(context, "当前页面无法打开文件选择器", Toast.LENGTH_SHORT).show()
-                } else {
-                    RedPacketReplyFilePickerBridge.launch(activity, replyMode) { paths ->
-                        if (paths.isNotEmpty()) {
-                            onValueChange(paths.joinToString("|"))
-                            Toast.makeText(context, "已选择 ${paths.size} 个文件", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            }
-            if (value.isNotBlank()) {
-                InsetDivider()
-                ActionRow("清空已选文件", "当前会从该回复类型移除已选文件") {
-                    onValueChange("")
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun RedPacketReplyStepsPage(
-    context: Context,
-    title: String,
-    initialSteps: List<RedPacketReplyStep>,
-    onBack: () -> Unit,
-    onSave: (List<RedPacketReplyStep>) -> Unit,
-    templateVariables: List<TemplateVariable> = redPacketReplyTemplateVariables
-) {
-    var steps by remember(initialSteps) {
-        mutableStateOf(initialSteps.map { normalizeRedPacketReplyStepForUi(it) })
-    }
-    var editingIndex by remember { mutableStateOf<Int?>(null) }
-    var favoritePicker by remember { mutableStateOf<FavoritePickerRequest?>(null) }
-    val listState = rememberLazyListState()
-
-    fun updateStep(index: Int, step: RedPacketReplyStep) {
-        if (index !in steps.indices) return
-        steps = steps.toMutableList().also { it[index] = normalizeRedPacketReplyStepForUi(step) }
-    }
-
-    val currentEditingIndex = editingIndex?.takeIf { it in steps.indices }
-    val route = when {
-        favoritePicker != null -> RedPacketReplyStepsRoute.FavoritePicker(favoritePicker!!)
-        currentEditingIndex != null -> RedPacketReplyStepsRoute.StepEditor(currentEditingIndex)
-        else -> RedPacketReplyStepsRoute.Main
-    }
-
-    SettingsRouteTransition(
-        targetState = route,
-        label = "RedPacketReplyStepsRoute",
-        depthOf = { it.depth() }
-    ) { currentRoute ->
-        when (currentRoute) {
-            is RedPacketReplyStepsRoute.FavoritePicker -> {
-                FavoritePickerPage(
-                    request = currentRoute.request,
-                    onBack = { favoritePicker = null }
-                )
-            }
-            is RedPacketReplyStepsRoute.StepEditor -> {
-                val index = currentRoute.index
-                val step = steps[index]
-                RedPacketReplyStepEditorPage(
-                    context = context,
-                    title = "第 ${index + 1} 条回复",
-                    step = step,
-                    canMoveUp = index > 0,
-                    canMoveDown = index < steps.lastIndex,
-                    onBack = { editingIndex = null },
-                    onStepChange = { updateStep(index, it) },
-                    templateVariables = templateVariables,
-                    onFavoritePicker = { favoritePicker = it },
-                    onMoveUp = {
-                        if (index > 0) {
-                            steps = steps.toMutableList().also {
-                                val current = it.removeAt(index)
-                                it.add(index - 1, current)
-                            }
-                            editingIndex = index - 1
-                        }
-                    },
-                    onMoveDown = {
-                        if (index < steps.lastIndex) {
-                            steps = steps.toMutableList().also {
-                                val current = it.removeAt(index)
-                                it.add(index + 1, current)
-                            }
-                            editingIndex = index + 1
-                        }
-                    },
-                    onDelete = {
-                        steps = steps.toMutableList().also { it.removeAt(index) }
-                        editingIndex = null
-                    }
-                )
-            }
-            RedPacketReplyStepsRoute.Main -> RedPacketReplyStepsListPage(
-                title = title,
-                steps = steps,
-                listState = listState,
-                onBack = onBack,
-                onSave = { onSave(cleanRedPacketReplySteps(steps)) },
-                onOpenStep = { editingIndex = it },
-                onAddStep = {
-                    val index = steps.size
-                    steps = steps + newRedPacketReplyStep(index + 1)
-                    editingIndex = index
-                },
-                onMoveUp = { index ->
-                    if (index > 0) {
-                        steps = steps.toMutableList().also {
-                            val current = it.removeAt(index)
-                            it.add(index - 1, current)
-                        }
-                    }
-                },
-                onMoveDown = { index ->
-                    if (index < steps.lastIndex) {
-                        steps = steps.toMutableList().also {
-                            val current = it.removeAt(index)
-                            it.add(index + 1, current)
-                        }
-                    }
-                },
-                onDelete = { index ->
-                    if (index in steps.indices) steps = steps.toMutableList().also { it.removeAt(index) }
-                }
-            )
-        }
-    }
-}
-
-@Composable
-internal fun RedPacketReplyStepsListPage(
-    title: String,
-    steps: List<RedPacketReplyStep>,
-    listState: LazyListState,
-    onBack: () -> Unit,
-    onSave: () -> Unit,
-    onOpenStep: (Int) -> Unit,
-    onAddStep: () -> Unit,
-    onMoveUp: (Int) -> Unit,
-    onMoveDown: (Int) -> Unit,
-    onDelete: (Int) -> Unit
-) {
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = title,
-        largeTitle = title,
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar(
-                primaryText = "保存回复",
-                onPrimaryClick = onSave,
-                secondaryText = "返回",
-                onSecondaryClick = onBack
-            )
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "按顺序发送") }
-            if (steps.isEmpty()) {
-                item {
-                    SettingsCard {
-                        EmptyText("暂无回复步骤。添加后会按列表顺序依次发送。")
-                    }
-                }
-            } else {
-                steps.forEachIndexed { index, step ->
-                    item { SmallTitle(modifier = Modifier.padding(top = if (index == 0) 0.dp else 10.dp), text = "第 ${index + 1} 条") }
-                    item {
-                        SettingsCard {
-                            SelectRow(
-                                title = redPacketReplyModeLabel(step.mode),
-                                summary = redPacketReplyStepSummary(step),
-                                onClick = { onOpenStep(index) }
-                            )
-                            InsetDivider()
-                            RedPacketReplyStepActions(
-                                canMoveUp = index > 0,
-                                canMoveDown = index < steps.lastIndex,
-                                onMoveUp = { onMoveUp(index) },
-                                onMoveDown = { onMoveDown(index) },
-                                onDelete = { onDelete(index) }
-                            )
-                        }
-                    }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
-            item {
-                SettingsCard {
-                    ActionRow("新增回复", "添加一条按顺序发送的回复", onAddStep)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun RedPacketReplyStepEditorPage(
-    context: Context,
-    title: String,
-    step: RedPacketReplyStep,
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
-    onBack: () -> Unit,
-    onStepChange: (RedPacketReplyStep) -> Unit,
-    templateVariables: List<TemplateVariable>,
-    onFavoritePicker: (FavoritePickerRequest) -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
-    onDelete: () -> Unit
-) {
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = title,
-        largeTitle = title,
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar(
-                primaryText = "完成",
-                onPrimaryClick = onBack,
-                secondaryText = "返回",
-                onSecondaryClick = onBack
-            )
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "回复内容") }
-            item {
-                SettingsCard {
-                    PopupOptionRow(
-                        title = "回复类型",
-                        summary = redPacketReplyModeLabel(step.mode),
-                        options = redPacketReplyStepModeOptions(),
-                        currentValue = step.mode,
-                        onValueChanged = { mode ->
-                            onStepChange(
-                                step.copy(
-                                    mode = mode,
-                                    content = if (mode == step.mode) {
-                                        step.content
-                                    } else {
-                                        defaultRedPacketReplyContent(mode)
-                                    }
-                                )
-                            )
-                        }
-                    )
-                    InsetDivider()
-                    RedPacketReplyContentEditor(
-                        context = context,
-                        replyMode = step.mode,
-                        value = step.content,
-                        onValueChange = { onStepChange(step.copy(content = it)) },
-                        onFavoritePicker = onFavoritePicker,
-                        templateVariables = templateVariables
-                    )
-                    InsetDivider()
-                    NumberInputRow(
-                        title = "发送前延迟",
-                        summary = "单位 ms，按步骤顺序等待",
-                        value = step.delayMs.coerceAtLeast(0L).toString(),
-                        onValueChange = { value ->
-                            onStepChange(step.copy(delayMs = value.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L))
-                        }
-                    )
-                    InsetDivider()
-                    SwitchRow(
-                        checked = step.random,
-                        title = "随机追加延迟",
-                        summary = "在发送前延迟后随机追加 0-2 秒",
-                        onCheckedChange = { onStepChange(step.copy(random = it)) }
-                    )
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
-            item {
-                SettingsCard {
-                    RedPacketReplyStepActions(
-                        canMoveUp = canMoveUp,
-                        canMoveDown = canMoveDown,
-                        onMoveUp = onMoveUp,
-                        onMoveDown = onMoveDown,
-                        onDelete = onDelete
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun RedPacketReplyStepActions(
-    canMoveUp: Boolean,
-    canMoveDown: Boolean,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
-    onDelete: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        TextButton(
-            text = "上移",
-            onClick = { if (canMoveUp) onMoveUp() },
-            modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.textButtonColorsPrimary()
-        )
-        TextButton(
-            text = "下移",
-            onClick = { if (canMoveDown) onMoveDown() },
-            modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.textButtonColorsPrimary()
-        )
-        TextButton(
-            text = "删除",
-            onClick = onDelete,
-            modifier = Modifier.weight(1f),
-            colors = ButtonDefaults.textButtonColorsPrimary()
-        )
-    }
-}
-
-@Composable
-internal fun VariableChipRow(
-    variables: List<TemplateVariable>,
-    onInsert: (String) -> Unit
-) {
-    if (variables.isEmpty()) return
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .padding(top = 10.dp)
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        variables.forEach { variable ->
-            VariableChip(variable = variable, onClick = { onInsert(variable.token) })
-        }
-    }
-}
-
-@Composable
-internal fun VariableChip(variable: TemplateVariable, onClick: () -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
-    val bg = if (pressed) {
-        MiuixTheme.colorScheme.primary.copy(alpha = 0.22f)
-    } else {
-        MiuixTheme.colorScheme.primary.copy(alpha = 0.12f)
-    }
-    Row(
-        modifier = Modifier
-            .height(34.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(bg)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
-            .padding(horizontal = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        Text(
-            text = variable.label,
-            color = MiuixTheme.colorScheme.primary,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}
-
-internal fun TextFieldValue.insertToken(token: String): TextFieldValue {
-    val start = selection.start.coerceIn(0, text.length)
-    val end = selection.end.coerceIn(0, text.length)
-    val left = minOf(start, end)
-    val right = maxOf(start, end)
-    val nextText = text.replaceRange(left, right, token)
-    val cursor = left + token.length
-    return TextFieldValue(nextText, TextRange(cursor))
-}
-
-@Composable
-internal fun NumberInputRow(title: String, summary: String, value: String, onValueChange: (String) -> Unit) {
-    InputRow(title, summary, value.filter { it.isDigit() }, onValueChange = { next ->
-        onValueChange(next.filter { it.isDigit() })
-    })
-}
-
-@Composable
-internal fun TimeOfDayPickerRow(
-    title: String,
-    value: String,
-    allowEmpty: Boolean = false,
-    onValueChange: (String) -> Unit
-) {
-    var showPicker by remember { mutableStateOf(false) }
-    val normalized = normalizeTimeOfDay(value, if (allowEmpty) "" else "00:00:00")
-    ActionRow(
-        title = title,
-        summary = normalized.ifBlank { "不限制" },
-        onClick = { showPicker = true }
-    )
-    if (showPicker) {
-        TimeOfDayPickerDialog(
-            title = title,
-            initialValue = normalized,
-            allowEmpty = allowEmpty,
-            onDismiss = { showPicker = false },
-            onConfirm = {
-                onValueChange(it)
-                showPicker = false
-            }
-        )
-    }
-}
-
-@Composable
-internal fun TimeOfDayPickerDialog(
-    title: String,
-    initialValue: String,
-    allowEmpty: Boolean,
+internal fun ScriptPluginRenameDialog(
+    plugin: ScriptPluginRuntime.ScriptPlugin,
     onDismiss: () -> Unit,
     onConfirm: (String) -> Unit
 ) {
-    val initialSeconds = parseTimeOfDaySeconds(initialValue).takeIf { it >= 0 } ?: 0
-    var hour by remember(initialValue) { mutableStateOf((initialSeconds / 3600).toString()) }
-    var minute by remember(initialValue) { mutableStateOf((initialSeconds / 60 % 60).toString()) }
-    var second by remember(initialValue) { mutableStateOf((initialSeconds % 60).toString()) }
-    val hourValue = hour.toIntOrNull()
-    val minuteValue = minute.toIntOrNull()
-    val secondValue = second.toIntOrNull()
-    val valid = hourValue != null && hourValue in 0..23 &&
-        minuteValue != null && minuteValue in 0..59 &&
-        secondValue != null && secondValue in 0..59
+    var name by remember(plugin.id) {
+        mutableStateOf(plugin.displayName ?: plugin.name.ifBlank { plugin.id })
+    }
     WindowDialog(
         show = true,
-        title = title,
-        onDismissRequest = onDismiss,
-        content = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    TimeOfDayNumberField("时", hour, 23, Modifier.weight(1f)) { hour = it }
-                    TimeOfDayNumberField("分", minute, 59, Modifier.weight(1f)) { minute = it }
-                    TimeOfDayNumberField("秒", second, 59, Modifier.weight(1f)) { second = it }
-                }
-                Text(
-                    text = if (valid) {
-                        String.format(
-                            Locale.US,
-                            "%02d:%02d:%02d",
-                            hourValue ?: 0,
-                            minuteValue ?: 0,
-                            secondValue ?: 0
-                        )
-                    } else {
-                        "请输入有效的时、分、秒"
-                    },
-                    color = if (valid) MiuixTheme.colorScheme.onSurfaceVariantSummary else Color(0xFFD93025),
-                    fontSize = 13.sp,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    textAlign = TextAlign.Center
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    if (allowEmpty) {
-                        TextButton(
-                            text = "清空",
-                            onClick = { onConfirm("") },
-                            modifier = Modifier.weight(1f),
-                            colors = ButtonDefaults.textButtonColorsPrimary()
-                        )
-                    }
-                    TextButton(
-                        text = "取消",
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                    TextButton(
-                        text = "确定",
-                        onClick = {
-                            if (valid) {
-                                onConfirm(
-                                    String.format(
-                                        Locale.US,
-                                        "%02d:%02d:%02d",
-                                        hourValue ?: 0,
-                                        minuteValue ?: 0,
-                                        secondValue ?: 0
-                                    )
-                                )
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                }
-            }
-        }
-    )
-}
-
-@Composable
-internal fun TimeOfDayNumberField(
-    label: String,
-    value: String,
-    max: Int,
-    modifier: Modifier,
-    onValueChange: (String) -> Unit
-) {
-    Column(modifier = modifier) {
-        Text(
-            text = label,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            fontSize = 12.sp,
-            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
-            textAlign = TextAlign.Center
-        )
-        BasicTextField(
-            value = value,
-            onValueChange = { next ->
-                val digits = next.filter { it.isDigit() }.take(2)
-                val number = digits.toIntOrNull()
-                if (digits.isEmpty() || (number != null && number <= max)) onValueChange(digits)
-            },
-            singleLine = true,
-            textStyle = TextStyle(
-                color = MiuixTheme.colorScheme.onSurface,
-                fontSize = 20.sp,
-                textAlign = TextAlign.Center
-            ),
-            modifier = Modifier.fillMaxWidth()
-                .height(48.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(MiuixTheme.colorScheme.surfaceVariant)
-                .padding(horizontal = 8.dp, vertical = 10.dp)
-        )
-    }
-}
-
-internal fun normalizeTimeOfDay(value: String?, fallback: String): String {
-    val seconds = parseTimeOfDaySeconds(value)
-    if (seconds < 0) return fallback
-    return String.format(
-        Locale.US,
-        "%02d:%02d:%02d",
-        seconds / 3600,
-        seconds / 60 % 60,
-        seconds % 60
-    )
-}
-
-internal fun parseTimeOfDaySeconds(value: String?): Int {
-    if (value.isNullOrBlank()) return -1
-    val parts = value.trim().split(":")
-    if (parts.size !in 2..3) return -1
-    val hour = parts[0].toIntOrNull() ?: return -1
-    val minute = parts[1].toIntOrNull() ?: return -1
-    val second = parts.getOrNull(2)?.toIntOrNull() ?: 0
-    if (hour !in 0..23 || minute !in 0..59 || second !in 0..59) return -1
-    return hour * 3600 + minute * 60 + second
-}
-
-@Composable
-internal fun MessageBlockContactFilterRow(
-    selected: MessageBlockContactFilter,
-    enableOfficials: Boolean = true,
-    onSelected: (MessageBlockContactFilter) -> Unit
-) {
-    val items = buildList {
-        add(MessageBlockContactFilter.FRIENDS)
-        add(MessageBlockContactFilter.GROUPS)
-        if (enableOfficials) add(MessageBlockContactFilter.OFFICIALS)
-        add(MessageBlockContactFilter.LABELS)
-        add(MessageBlockContactFilter.ALL)
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        items.forEach { item ->
-            ContactFilterChip(
-                text = item.label,
-                selected = item == selected,
-                onClick = { onSelected(item) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-internal fun ConversationRuleCategoryTabs(
-    selected: ConversationRuleCategory,
-    onSelected: (ConversationRuleCategory) -> Unit,
-    includeOfficial: Boolean = true
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        ConversationRuleCategory.entries
-            .filter { includeOfficial || it != ConversationRuleCategory.OFFICIAL }
-            .forEach { category ->
-            ContactFilterChip(
-                text = category.label,
-                selected = category == selected,
-                onClick = { onSelected(category) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-internal fun BatchDeleteConfirmDialog(
-    show: Boolean,
-    message: String,
-    labels: List<String>,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    if (!show) return
-    WindowDialog(
-        show = true,
-        title = "确认批量删除",
+        title = "重命名插件",
         onDismissRequest = onDismiss,
         content = {
             Column {
                 Text(
-                    text = buildString {
-                        append(message)
-                        val names = labels.filter { it.isNotBlank() }.take(6).joinToString("、")
-                        if (names.isNotBlank()) append("\n\n").append(names)
-                        if (labels.size > 6) append(" 等")
-                    },
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontSize = 14.sp
+                    text = "仅修改展示名称，插件目录和 ID 保持不变",
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 12.sp
+                )
+                BasicTextField(
+                    value = name,
+                    onValueChange = { name = it.take(100) },
+                    singleLine = true,
+                    textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 15.sp),
+                    cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MiuixTheme.colorScheme.secondaryVariant)
+                        .padding(horizontal = 12.dp, vertical = 11.dp)
                 )
                 Row(
                     modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
@@ -2199,7 +1611,51 @@ internal fun BatchDeleteConfirmDialog(
                         colors = ButtonDefaults.textButtonColorsPrimary()
                     )
                     TextButton(
-                        text = "确认删除",
+                        text = "确定",
+                        onClick = { onConfirm(name.trim()) },
+                        enabled = name.trim().isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                }
+            }
+        }
+    )
+}
+
+@Composable
+internal fun ScriptPluginDeleteDialog(
+    pluginNames: List<String>,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    WindowDialog(
+        show = true,
+        title = if (pluginNames.size == 1) "删除插件" else "批量删除插件",
+        onDismissRequest = onDismiss,
+        content = {
+            Column {
+                Text(
+                    text = if (pluginNames.size == 1) {
+                        "确定删除“${pluginNames.first()}”吗？插件会先停止运行，删除后无法恢复。"
+                    } else {
+                        "确定删除已选的 ${pluginNames.size} 个插件吗？插件会先停止运行，删除后无法恢复。"
+                    },
+                    color = MiuixTheme.colorScheme.onSurface,
+                    fontSize = 14.sp
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    TextButton(
+                        text = "取消",
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                    TextButton(
+                        text = "删除",
                         onClick = onConfirm,
                         modifier = Modifier.weight(1f),
                         colors = ButtonDefaults.textButtonColorsPrimary()
@@ -2211,393 +1667,215 @@ internal fun BatchDeleteConfirmDialog(
 }
 
 @Composable
-internal fun FriendContactFilterRow(
-    selected: ContactPickerFilter,
-    onSelected: (ContactPickerFilter) -> Unit
+internal fun ScriptPluginImportDialog(
+    inspection: ScriptPluginManager.ImportInspection,
+    overwriteIds: Set<String>,
+    applying: Boolean,
+    onOverwriteChanged: (String, Boolean) -> Unit,
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
 ) {
-    val items = listOf(ContactPickerFilter.FRIENDS, ContactPickerFilter.LABELS)
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        items.forEach { item ->
-            ContactFilterChip(
-                text = item.label,
-                selected = item == selected,
-                onClick = { onSelected(item) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-internal fun ContactPickerScopeFilterRow(
-    selected: ContactPickerScopeTab,
-    onSelected: (ContactPickerScopeTab) -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        ContactPickerScopeTab.entries.forEach { item ->
-            ContactFilterChip(
-                text = item.label,
-                selected = item == selected,
-                onClick = { onSelected(item) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-internal fun ContactPickerScopeRow(
-    title: String,
-    memberCount: Int,
-    selectedCount: Int,
-    memberUnit: String,
-    onClick: () -> Unit
-) {
-    var pressed by remember { mutableStateOf(false) }
-    val allSelected = memberCount > 0 && selectedCount == memberCount
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(rememberPressFeedbackColor(pressed))
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                color = MiuixTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = if (selectedCount == 0) {
-                    "$memberCount $memberUnit"
-                } else {
-                    "已选 $selectedCount / $memberCount $memberUnit"
-                },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 12.sp
-            )
-        }
-        SelectionMark(selected = allSelected, multiSelect = true)
-    }
-}
-
-@Composable
-internal fun ContactFilterRow(
-    selected: ContactPickerFilter,
-    enableLabels: Boolean = false,
-    enableOfficials: Boolean = false,
-    onSelected: (ContactPickerFilter) -> Unit
-) {
-    val items = buildList {
-        add(ContactPickerFilter.FRIENDS)
-        add(ContactPickerFilter.GROUPS)
-        if (enableOfficials) add(ContactPickerFilter.OFFICIALS)
-        if (enableLabels) add(ContactPickerFilter.LABELS)
-        add(ContactPickerFilter.ALL)
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp)
-    ) {
-        items.forEach { item ->
-            ContactFilterChip(
-                text = item.label,
-                selected = item == selected,
-                onClick = { onSelected(item) },
-                modifier = Modifier.weight(1f)
-            )
-        }
-    }
-}
-
-@Composable
-internal fun FavoritePickerFilterRow(
-    selected: FavoritePickerFilter,
-    onSelected: (FavoritePickerFilter) -> Unit
-) {
-    val rows = listOf(
-        listOf(FavoritePickerFilter.IMAGE, FavoritePickerFilter.TEXT, FavoritePickerFilter.VOICE),
-        listOf(FavoritePickerFilter.VIDEO, FavoritePickerFilter.OTHER, FavoritePickerFilter.ALL)
-    )
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp)) {
-        rows.forEachIndexed { index, filters ->
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = if (index == 0) 0.dp else 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                filters.forEach { item ->
-                    ContactFilterChip(
-                        text = item.label,
-                        selected = item == selected,
-                        onClick = { onSelected(item) },
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ContactLabelFilterRow(
-    labels: List<String>,
-    selected: String,
-    onSelected: (String) -> Unit
-) {
-    if (labels.isEmpty()) {
-        EmptyText("没有好友标签")
-        return
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(8.dp).horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        labels.forEach { label ->
-            ContactFilterChip(
-                text = label,
-                selected = label == selected,
-                onClick = { onSelected(label) },
-                modifier = Modifier.defaultMinSize(minWidth = 70.dp)
-            )
-        }
-    }
-}
-
-@Composable
-internal fun GroupChatLabelPickerRow(
-    label: GroupChatLabel,
-    selectedCount: Int,
-    onClick: () -> Unit
-) {
-    var pressed by remember { mutableStateOf(false) }
-    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-    val allSelected = selectedCount == label.groupIds.size
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(pressFeedbackColor)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = label.name,
-                color = MiuixTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Medium
-            )
-            Text(
-                text = if (selectedCount == 0) {
-                    "${label.groupIds.size} 个群聊"
-                } else {
-                    "已选 $selectedCount / ${label.groupIds.size} 个群聊"
-                },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 12.sp
-            )
-        }
-        SelectionMark(selected = allSelected, multiSelect = true)
-    }
-}
-
-@Composable
-internal fun ContactFilterChip(
-    text: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var pressed by remember { mutableStateOf(false) }
-    var visualPressed by remember { mutableStateOf(false) }
-    LaunchedEffect(pressed) {
-        if (pressed) {
-            visualPressed = true
-        } else {
-            delay(100L)
-            visualPressed = false
-        }
-    }
-    val scale by animateFloatAsState(
-        targetValue = if (visualPressed) 0.96f else 1f,
-        animationSpec = tween(durationMillis = if (pressed) 60 else 145),
-        label = "ContactFilterPressScale"
-    )
-    val background = if (selected) {
-        MiuixTheme.colorScheme.primary.copy(alpha = if (visualPressed) 0.88f else 1f)
-    } else {
-        MiuixTheme.colorScheme.onSurface.copy(alpha = if (visualPressed) 0.18f else 0.06f)
-    }
-    val textColor = if (selected) {
-        Color.White
-    } else {
-        MiuixTheme.colorScheme.onSurfaceVariantSummary
-    }
-    Box(
-        modifier = modifier
-            .height(38.dp)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(RoundedCornerShape(12.dp))
-            .background(background)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            color = textColor,
-            fontSize = 14.sp,
-            fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            softWrap = false
-        )
-    }
-}
-
-@Composable
-internal fun PickerSectionHeader(
-    text: String
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, top = 10.dp, end = 20.dp, bottom = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(
-            modifier = Modifier.weight(1f),
-            text = text,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            fontWeight = FontWeight.Medium
-        )
-    }
-}
-
-@Composable
-public fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
-    SelectRow(title = title, summary = summary, onClick = onClick)
-}
-
-@Composable
-internal fun SelectRow(title: String, summary: String, onClick: () -> Unit) {
-    var pressed by remember { mutableStateOf(false) }
-    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(pressFeedbackColor)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            if (summary.isNotBlank()) {
-                Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-            }
-        }
-        Text(text = "›", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 22.sp)
-    }
-}
-
-@Composable
-internal fun MessageBlockLabelListCard(
-    label: MessageBlockLabelOption,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        cornerRadius = 14.dp
-    ) {
-        var pressed by remember { mutableStateOf(false) }
-        val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-        Row(
-            modifier = Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(pressFeedbackColor)
-                .responsiveTap(
-                    onClick = onClick,
-                    onPressedChange = { pressed = it }
-                )
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Box(
-                modifier = Modifier.size(42.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MiuixTheme.colorScheme.secondaryVariant),
-                contentAlignment = Alignment.Center
-            ) {
+    WindowDialog(
+        show = true,
+        title = "导入插件",
+        onDismissRequest = { if (!applying) onDismiss() },
+        content = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
                 Text(
-                    text = label.name.take(1).ifEmpty { "签" },
-                    color = MiuixTheme.colorScheme.onSecondaryVariant,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(text = label.name, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-                Text(
-                    text = "${label.contactIds.size} 人",
+                    text = "共 ${inspection.plugins.size} 个插件。已有同 ID 插件默认跳过，可单独选择覆盖。",
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     fontSize = 12.sp
                 )
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false).padding(top = 10.dp)
+                ) {
+                    items(inspection.plugins, key = { it.pluginId }) { plugin ->
+                        Row(
+                            modifier = Modifier.fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(enabled = !applying && plugin.conflict) {
+                                    onOverwriteChanged(plugin.pluginId, plugin.pluginId !in overwriteIds)
+                                }
+                                .padding(horizontal = 10.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = plugin.name.ifBlank { plugin.pluginId },
+                                    color = MiuixTheme.colorScheme.onSurface,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = if (plugin.conflict) {
+                                        if (plugin.pluginId in overwriteIds) "覆盖已有插件" else "跳过已有插件"
+                                    } else {
+                                        "新增插件"
+                                    },
+                                    color = if (plugin.conflict && plugin.pluginId in overwriteIds) {
+                                        Color(0xFFD93025)
+                                    } else {
+                                        MiuixTheme.colorScheme.onSurfaceVariantSummary
+                                    },
+                                    fontSize = 12.sp
+                                )
+                            }
+                            if (plugin.conflict) {
+                                SelectionMark(
+                                    selected = plugin.pluginId in overwriteIds,
+                                    multiSelect = true
+                                )
+                            }
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    TextButton(
+                        text = "取消",
+                        onClick = onDismiss,
+                        enabled = !applying,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                    TextButton(
+                        text = if (applying) "正在导入" else "导入",
+                        onClick = onConfirm,
+                        enabled = !applying,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                }
             }
-            Text(text = "›", color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 22.sp)
         }
+    )
+}
+
+internal fun launchScriptPluginExport(
+    context: Context,
+    plugins: List<ScriptPluginRuntime.ScriptPlugin>
+) {
+    if (plugins.isEmpty()) {
+        Toast.makeText(context, "未选择插件", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val activity = context as? Activity
+    if (activity == null) {
+        Toast.makeText(context, "无法打开文件选择器", Toast.LENGTH_SHORT).show()
+        return
+    }
+    val fileName = scriptPluginExportFileName(plugins)
+    ScriptPluginDocumentBridge.launchExport(activity, fileName) { uri ->
+        Thread({
+            val result = runCatching {
+                context.contentResolver.openOutputStream(uri, "w")?.use { output ->
+                    ScriptPluginManager.exportPlugins(context, plugins.map { it.id }, output).getOrThrow()
+                } ?: error("无法写入所选文件")
+            }
+            if (result.isFailure) runCatching { context.contentResolver.delete(uri, null, null) }
+            Handler(Looper.getMainLooper()).post {
+                result.fold(
+                    onSuccess = { exported ->
+                        Toast.makeText(
+                            context,
+                            "已导出 ${exported.exportedPluginIds.size} 个插件",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    onFailure = { showScriptPluginManagerError(context, it) }
+                )
+            }
+        }, "Hchat-Plugin-Export").start()
     }
 }
 
-@Composable
-internal fun MessageBlockContactListCard(
-    row: MessageBlockContactOption,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    val option = row.contact
-    val summary = if (row.labelNames.isEmpty()) {
-        option.id
+internal fun scriptPluginExportFileName(plugins: List<ScriptPluginRuntime.ScriptPlugin>): String {
+    val base = if (plugins.size == 1) {
+        plugins.first().displayName ?: plugins.first().name.ifBlank { plugins.first().id }
     } else {
-        option.id + " · " + row.labelNames.joinToString(" / ")
+        "Hchat_脚本插件_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}"
     }
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        cornerRadius = 14.dp
+    val safe = base.removeSuffix(".zip")
+        .replace(Regex("""[\\/:*?\"<>|]"""), "_")
+        .trim()
+        .ifBlank { "Hchat_脚本插件" }
+    return "$safe.zip"
+}
+
+internal fun showAfterDialogDismiss(context: Context, action: () -> Unit) {
+    val activity = context as? Activity
+    if (activity != null) {
+        activity.window.decorView.postOnAnimation(action)
+    } else {
+        Handler(Looper.getMainLooper()).post(action)
+    }
+}
+
+internal fun showScriptPluginManagerError(context: Context, error: Throwable) {
+    h.Hchat.utils.HLog.e("[Hchat:ScriptManager] ${error.message ?: "操作失败"}", error)
+    Toast.makeText(context, error.message ?: "操作失败", Toast.LENGTH_LONG).show()
+}
+
+@Composable
+internal fun PathSwitchRow(
+    checked: Boolean,
+    title: String,
+    summary: String,
+    onInfoClick: () -> Unit,
+    onCheckedChange: (Boolean) -> Unit
+) {
+    var pressed by remember { mutableStateOf(false) }
+    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        MessageBlockContactRow(
-            option = option,
-            summary = summary,
-            selected = selected,
-            onClick = onClick
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(12.dp))
+                .background(pressFeedbackColor)
+                .responsiveTap(
+                    onClick = onInfoClick,
+                    onPressedChange = { pressed = it }
+                )
+                .padding(horizontal = 12.dp, vertical = 10.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = title,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                ClickHintTag()
+            }
+            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+            modifier = Modifier.padding(start = 12.dp)
         )
     }
 }
 
 @Composable
-internal fun MessageBlockContactRow(
-    option: ContactOption,
+internal fun ScriptPluginRow(
+    checked: Boolean,
+    title: String,
     summary: String,
-    selected: Boolean,
-    onClick: () -> Unit
+    showSettings: Boolean,
+    onOpenReadme: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenManager: () -> Unit,
+    onCheckedChange: (Boolean) -> Unit
 ) {
     var pressed by remember { mutableStateOf(false) }
     val pressFeedbackColor = rememberPressFeedbackColor(pressed)
@@ -2605,233 +1883,262 @@ internal fun MessageBlockContactRow(
         modifier = Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(pressFeedbackColor)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        ContactAvatar(option)
-        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(text = option.label, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+        Column(
+            modifier = Modifier.weight(1f)
+                .responsiveTap(
+                    onClick = onOpenReadme,
+                    onPressedChange = { pressed = it }
+                )
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = title,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+                ClickHintTag()
+            }
             Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
         }
-        SelectionMark(selected = selected, multiSelect = true)
-    }
-}
-
-@Composable
-internal fun ContactListCard(
-    option: ContactOption,
-    selected: Boolean,
-    multiSelect: Boolean,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        cornerRadius = 14.dp
-    ) {
-        ContactRow(
-            option = option,
-            selected = selected,
-            multiSelect = multiSelect,
-            onClick = onClick
+        if (showSettings) {
+            Image(
+                imageVector = NavIcons.Settings,
+                contentDescription = "插件设置",
+                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                modifier = Modifier
+                    .padding(start = 10.dp, end = 8.dp)
+                    .size(22.dp)
+                    .responsiveTap(onClick = onOpenSettings)
+            )
+        }
+        Image(
+            imageVector = NavIcons.More,
+            contentDescription = "管理插件",
+            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+            modifier = Modifier
+                .padding(start = if (showSettings) 0.dp else 10.dp, end = 8.dp)
+                .size(22.dp)
+                .responsiveTap(onClick = onOpenManager)
+        )
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange
         )
     }
 }
 
 @Composable
-internal fun FavoriteListCard(
-    item: WeChatFavoriteItem,
-    selected: Boolean,
-    multiSelect: Boolean,
-    onPreview: (String) -> Unit,
-    onClick: () -> Unit
-) {
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        cornerRadius = 8.dp
-    ) {
-        var pressed by remember { mutableStateOf(false) }
-        val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-        Row(
-            modifier = Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(pressFeedbackColor)
-                .responsiveTap(
-                    onClick = onClick,
-                    onPressedChange = { pressed = it }
-                )
-                .padding(horizontal = 16.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            FavoriteMediaThumbnail(item = item, onPreview = onPreview)
-            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-                Text(
-                    text = item.displayTitle(),
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Medium,
-                    fontSize = 16.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Text(
-                    text = item.displaySummary(),
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 12.sp,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(top = 3.dp)
-                )
-                if (item.tags.isNotEmpty()) {
-                    Text(
-                        text = "标签 · ${item.tags.joinToString(" / ")}",
-                        color = MiuixTheme.colorScheme.primary,
-                        fontSize = 12.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.padding(top = 3.dp)
-                    )
-                }
-            }
-            SelectionMark(selected = selected, multiSelect = multiSelect)
-        }
-    }
-}
-
-@Composable
-internal fun FavoriteMediaThumbnail(
-    item: WeChatFavoriteItem,
-    onPreview: (String) -> Unit
-) {
-    var previewPath by remember(item.localId) { mutableStateOf("") }
-    var thumbnail by remember(item.localId) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(item.localId, item.type) {
-        if (item.type != 2 && item.type != 4) return@LaunchedEffect
-        val result = withContext(Dispatchers.IO) {
-            val path = WeChatApis.media()?.favorites()?.previewPath(item.localId).orEmpty()
-            path to path.takeIf { it.isNotBlank() }
-                ?.let { loadFavoriteThumbnail(it, item.type, 320) }
-        }
-        previewPath = result.first
-        thumbnail = result.second
-    }
-    val previewModifier = if (previewPath.isNotBlank()) {
-        Modifier.responsiveTap(onClick = { onPreview(previewPath) })
-    } else {
-        Modifier
-    }
-    Box(
-        modifier = Modifier.size(56.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant)
-            .then(previewModifier),
-        contentAlignment = Alignment.Center
-    ) {
-        val image = thumbnail
-        if (image != null) {
-            Image(
-                bitmap = image,
-                contentDescription = if (item.type == 4) "预览视频" else "预览图片",
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize()
-            )
-            if (item.type == 4) {
-                Box(
-                    modifier = Modifier.size(28.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color.Black.copy(alpha = 0.56f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Image(
-                        imageVector = NavIcons.Entertainment,
-                        contentDescription = "播放",
-                        colorFilter = ColorFilter.tint(Color.White),
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-        } else {
-            Text(
-                text = item.typeLabel().take(1).ifEmpty { "藏" },
-                color = MiuixTheme.colorScheme.onSecondaryVariant,
-                fontWeight = FontWeight.Bold,
-                fontSize = 18.sp
-            )
-        }
-    }
-}
-
-internal fun loadFavoriteThumbnail(path: String, type: Int, maxDimension: Int): ImageBitmap? {
-    if (!File(path).isFile) return null
-    return if (type == 4) {
-        @Suppress("DEPRECATION")
-        ThumbnailUtils.createVideoThumbnail(path, MediaStore.Video.Thumbnails.MINI_KIND)?.asImageBitmap()
-    } else {
-        decodeFavoriteImage(path, maxDimension)
-    }
-}
-
-internal fun decodeFavoriteImage(path: String, maxDimension: Int): ImageBitmap? {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(path, bounds)
-    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-    var sample = 1
-    while (bounds.outWidth / sample > maxDimension * 2 || bounds.outHeight / sample > maxDimension * 2) {
-        sample *= 2
-    }
-    return BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
-        ?.asImageBitmap()
-}
-
-@Composable
-internal fun FavoriteMediaPreviewDialog(
-    media: FavoriteMediaPreview,
+internal fun ScriptPluginPathDialog(
+    context: Context,
+    title: String,
+    path: String,
     onClose: () -> Unit
 ) {
-    var image by remember(media.path) { mutableStateOf<ImageBitmap?>(null) }
-    var videoView by remember(media.path) { mutableStateOf<VideoView?>(null) }
-    val previewHeight = (LocalConfiguration.current.screenHeightDp.dp * 0.62f).coerceAtMost(560.dp)
-    LaunchedEffect(media.path, media.item.type) {
-        if (media.item.type == 2) {
-            image = withContext(Dispatchers.IO) { decodeFavoriteImage(media.path, 2048) }
-        }
-    }
-    DisposableEffect(media.path) {
-        onDispose { videoView?.stopPlayback() }
-    }
     WindowDialog(
         show = true,
-        title = "${media.item.typeLabel()}预览",
+        title = title,
         onDismissRequest = onClose,
         content = {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                if (media.item.type == 4) {
-                    AndroidView(
-                        factory = { context ->
-                            VideoView(context).also { view ->
-                                val controller = MediaController(context)
-                                controller.setAnchorView(view)
-                                view.setMediaController(controller)
-                                view.setVideoPath(media.path)
-                                view.setOnPreparedListener { view.start() }
-                                videoView = view
+            Column {
+                Text(
+                    text = path,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    fontSize = 13.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 8.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MiuixTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 12.dp, vertical = 10.dp)
+                )
+                TextButton(
+                    text = "复制路径",
+                    onClick = {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+                        clipboard?.setPrimaryClip(ClipData.newPlainText("HchatScriptDir", path))
+                        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
+                        onClose()
+                    },
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    colors = ButtonDefaults.textButtonColorsPrimary()
+                )
+                TextButton(
+                    text = "关闭",
+                    onClick = onClose,
+                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                    colors = ButtonDefaults.textButtonColorsPrimary()
+                )
+            }
+        }
+    )
+}
+
+@Composable
+fun FirstUseAgreementDialog(
+    context: Context,
+    onCancel: () -> Unit,
+    onAccepted: () -> Unit
+) {
+    var input by remember { mutableStateOf("") }
+    var remainingSeconds by remember { mutableStateOf(30) }
+    val acceptedText = TermsGate.AGREEMENT_TEXT
+    LaunchedEffect(Unit) {
+        while (remainingSeconds > 0) {
+            delay(1000L)
+            remainingSeconds -= 1
+        }
+    }
+    val agreement = remember {
+        """
+        Hchat 使用协议与免责声明
+
+        1. 本模块为免费模块，仅供个人学习、研究、测试、逆向分析和备份用途使用，不提供任何商业授权、售后承诺或稳定性保证。
+        2. 本模块与微信、腾讯及其关联主体无关，不代表官方立场，也不是官方客户端、官方插件或官方服务的一部分。
+        3. 禁止倒卖、付费分发、捆绑销售、二次打包收费、引流售卖、以捐赠名义收费，禁止冒充作者、官方渠道或授权代理发布。
+        4. 请勿在国内公开平台、群组、论坛、短视频平台、网盘分享页、应用市场或其它公开渠道传播、推广、引流、售卖或组织分发本模块。
+        5. 本模块可能会修改微信运行时行为，使用后可能出现功能异常、消息异常、账号风控、限制登录、数据异常、闪退、掉线、模块冲突或其它不可预期问题。
+        6. 使用者应自行确认所在地法律法规、平台协议、设备环境和账号风险；因安装、使用、传播、修改、二次分发或与其它模块共存产生的任何后果均由使用者自行承担。
+        7. 禁止将本模块用于骚扰、欺诈、刷量、营销轰炸、盗取信息、破坏服务稳定性、绕过平台风控、侵犯他人权益或其它违法违规用途。
+        8. 本模块不保证适配所有微信版本、系统版本、设备环境、热更新状态和其它模块共存环境，也不承诺持续维护、及时修复或提供任何形式的服务保障。
+        9. 如果你不同意以上任一条款，请点击取消并停止使用本模块。
+
+        如果你理解并接受以上内容，请在下方输入“$acceptedText”后继续使用。
+        """.trimIndent()
+    }
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val dialogMaxHeight = (screenHeight * 0.78f).coerceAtMost(640.dp)
+    val agreementMaxHeight = (screenHeight * 0.42f).coerceIn(220.dp, 430.dp)
+    WindowDialog(
+        show = true,
+        title = "使用协议",
+        onDismissRequest = {},
+        content = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = dialogMaxHeight)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = agreementMaxHeight)
+                        .verticalScroll(rememberScrollState())
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MiuixTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 14.dp, vertical = 12.dp)
+                ) {
+                    Text(
+                        text = agreement,
+                        color = MiuixTheme.colorScheme.onSurface,
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp
+                    )
+                }
+                Text(
+                    text = "请输入“$acceptedText”确认",
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 14.dp)
+                )
+                BasicTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = MiuixTheme.colorScheme.onSurface,
+                        fontSize = 15.sp
+                    ),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(MiuixTheme.colorScheme.secondaryVariant)
+                        .padding(horizontal = 12.dp, vertical = 11.dp)
+                )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    TextButton(
+                        text = "取消",
+                        onClick = onCancel,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                    TextButton(
+                        text = if (remainingSeconds > 0) "继续（${remainingSeconds}s）" else "同意并继续",
+                        onClick = {
+                            if (remainingSeconds > 0) {
+                                Toast.makeText(context, "请等待 ${remainingSeconds} 秒后继续", Toast.LENGTH_SHORT).show()
+                            } else if (input.trim() == acceptedText) {
+                                if (TermsGate.accept(context)) {
+                                    onAccepted()
+                                } else {
+                                    Toast.makeText(context, "协议状态保存失败，请重试", Toast.LENGTH_SHORT).show()
+                                }
+                            } else {
+                                Toast.makeText(context, "请输入“$acceptedText”后继续", Toast.LENGTH_SHORT).show()
                             }
                         },
-                        modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp, max = previewHeight)
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
                     )
-                } else {
-                    val bitmap = image
-                    if (bitmap == null) {
-                        EmptyText("正在载入预览...")
-                    } else {
-                        Image(
-                            bitmap = bitmap,
-                            contentDescription = "图片预览",
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxWidth().heightIn(min = 220.dp, max = previewHeight)
+                }
+            }
+        }
+    )
+}
+
+@Composable
+fun ScriptPluginReadmeDialog(
+    context: Context,
+    plugin: ScriptPluginRuntime.ScriptPlugin,
+    onClose: () -> Unit
+) {
+    val readme = remember(plugin.id) {
+        runCatching {
+            val file = File(plugin.dir, "README.md")
+            if (file.isFile) file.readText(Charsets.UTF_8) else ""
+        }.getOrDefault("")
+    }
+    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
+    val dialogMaxHeight = (screenHeight * 0.78f).coerceAtMost(640.dp)
+    val readmeMaxHeight = (screenHeight * 0.58f).coerceIn(240.dp, 520.dp)
+
+    WindowDialog(
+        show = true,
+        title = plugin.displayName ?: "未知",
+        onDismissRequest = onClose,
+        content = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = dialogMaxHeight)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = readmeMaxHeight)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    if (readme.isBlank()) {
+                        Text(
+                            text = "暂无说明",
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(vertical = 10.dp)
                         )
+                    } else {
+                        MarkdownUi.Content(context, readme)
                     }
                 }
                 TextButton(
@@ -2845,171 +2152,347 @@ internal fun FavoriteMediaPreviewDialog(
     )
 }
 
-@Composable
-internal fun ContactRow(
-    option: ContactOption,
-    selected: Boolean,
-    multiSelect: Boolean,
-    onClick: () -> Unit
-) {
-    var pressed by remember { mutableStateOf(false) }
-    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(pressFeedbackColor)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        ContactAvatar(option)
-        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(text = option.label, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            val summary = buildList {
-                add(option.id)
-                option.labels.takeIf { it.isNotEmpty() }?.let { add(it.joinToString(" / ")) }
-                option.extraSummary.takeIf { it.isNotBlank() }?.let(::add)
-            }.joinToString(" · ")
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-        }
-        SelectionMark(selected = selected, multiSelect = multiSelect)
-    }
 }
 
+internal object MarkdownUi {
+
 @Composable
-internal fun ContactAvatar(option: ContactOption) {
-    val context = LocalContext.current
-    var bitmap by remember(option.id, option.avatarUrl, option.avatarBackupUrl) { mutableStateOf<ImageBitmap?>(null) }
-    LaunchedEffect(option.id, option.avatarUrl, option.avatarBackupUrl) {
-        bitmap = loadAvatarBitmap(option.id, option.avatarUrl, option.avatarBackupUrl)
-    }
-    val image = bitmap
-    val avatarBg = if (image == null && option.group) Color(0xFF2E7DFF) else MiuixTheme.colorScheme.secondaryVariant
-    val avatarTextColor = if (image == null && option.group) Color.White else MiuixTheme.colorScheme.onSecondaryVariant
-    val avatarShape = if (RoundAvatarSettings.enabled(context)) {
-        RoundedCornerShape((42f * RoundAvatarSettings.radiusFactor(context)).dp)
-    } else {
-        RoundedCornerShape(12.dp)
-    }
-    Box(
-        modifier = Modifier.size(42.dp)
-            .clip(avatarShape)
-            .background(avatarBg),
-        contentAlignment = Alignment.Center
-    ) {
-        if (image != null) {
-            Image(
-                bitmap = image,
-                contentDescription = null,
-                modifier = Modifier.fillMaxSize()
-            )
-        } else {
-            Text(
-                text = if (option.group) "群" else option.label.take(1).ifEmpty { "友" },
-                color = avatarTextColor,
-                fontWeight = FontWeight.Bold
-            )
+fun Content(
+    context: Context,
+    markdown: String,
+    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
+    bodyFontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
+    onCopyCode: ((String) -> Unit)? = null
+) {
+    val lines = markdown.replace("\r\n", "\n").replace('\r', '\n').lines()
+    var inCodeBlock = false
+    var inlineState = MarkdownInlineState()
+    val codeLines = ArrayList<String>()
+    Column(modifier = Modifier.fillMaxWidth().padding(contentPadding)) {
+        lines.forEach { rawLine ->
+            val line = rawLine.trimEnd()
+            if (line.trimStart().startsWith("```")) {
+                if (inCodeBlock) {
+                    CodeBlock(codeLines.joinToString("\n"), onCopyCode)
+                    codeLines.clear()
+                    inCodeBlock = false
+                } else {
+                    inCodeBlock = true
+                    codeLines.clear()
+                }
+                return@forEach
+            }
+            if (inCodeBlock) {
+                codeLines += rawLine
+                return@forEach
+            }
+            val nextState = MarkdownLine(context, line, inlineState, bodyFontSize)
+            inlineState = nextState
+        }
+        if (inCodeBlock && codeLines.isNotEmpty()) {
+            CodeBlock(codeLines.joinToString("\n"), onCopyCode)
         }
     }
 }
 
 @Composable
-internal fun OptionChoiceRow(
-    item: OptionItem,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    var pressed by remember { mutableStateOf(false) }
-    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(pressFeedbackColor)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
+internal fun MarkdownLine(
+    context: Context,
+    line: String,
+    inlineState: MarkdownInlineState,
+    bodyFontSize: androidx.compose.ui.unit.TextUnit = 13.sp
+): MarkdownInlineState {
+    val trimmed = line.trim()
+    return when {
+        trimmed.isBlank() -> {
+            Box(modifier = Modifier.height(8.dp))
+            inlineState
+        }
+        trimmed.matches(Regex("""-{3,}|_{3,}|\*{3,}""")) -> {
+            Box(
+                modifier = Modifier.fillMaxWidth()
+                    .padding(vertical = 8.dp)
+                    .height(1.dp)
+                    .background(MiuixTheme.colorScheme.outline)
             )
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
+            inlineState
+        }
+        trimmed.startsWith("#") -> {
+            val level = trimmed.takeWhile { it == '#' }.length.coerceIn(1, 6)
+            val text = trimmed.drop(level).trim()
+            MarkdownTextResult(
+                context = context,
+                text = text,
+                inlineState = inlineState,
+                modifier = Modifier.padding(top = if (level <= 2) 10.dp else 8.dp, bottom = 4.dp),
+                color = MiuixTheme.colorScheme.onSurface,
+                fontSize = when (level) {
+                    1 -> 22.sp
+                    2 -> 19.sp
+                    3 -> 17.sp
+                    else -> 15.sp
+                },
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        trimmed.startsWith(">") -> {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+            ) {
+                Box(
+                    modifier = Modifier.padding(end = 8.dp)
+                        .size(width = 3.dp, height = 20.dp)
+                        .background(MiuixTheme.colorScheme.primary)
+                )
+                MarkdownTextResult(
+                    context = context,
+                    text = trimmed.removePrefix(">").trim(),
+                    inlineState = inlineState,
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = bodyFontSize,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+            inlineState
+        }
+        trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("+ ") -> {
+            MarkdownBullet(context, trimmed.drop(2).trim(), inlineState, fontSize = bodyFontSize)
+        }
+        Regex("""^\d+[.)]\s+.*""").matches(trimmed) -> {
+            val marker = trimmed.substringBefore(' ').trim()
+            MarkdownBullet(context, trimmed.removePrefix(marker).trim(), inlineState, marker, bodyFontSize)
+        }
+        else -> {
+            MarkdownTextResult(
+                context = context,
+                text = line,
+                inlineState = inlineState,
+                fontSize = bodyFontSize,
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
+internal fun MarkdownBullet(
+    context: Context,
+    text: String,
+    inlineState: MarkdownInlineState,
+    marker: String = "•",
+    fontSize: androidx.compose.ui.unit.TextUnit = 13.sp
+): MarkdownInlineState {
+    var nextState = inlineState
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+        Text(
+            text = marker,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = fontSize,
+            modifier = Modifier.padding(end = 8.dp)
+        )
+        nextState = MarkdownTextResult(
+            context = context,
+            text = text,
+            inlineState = inlineState,
+            fontSize = fontSize,
+            modifier = Modifier.weight(1f)
+        )
+    }
+    return nextState
+}
+
+@Composable
+fun CodeBlock(code: String, onCopy: ((String) -> Unit)? = null) {
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MiuixTheme.colorScheme.surfaceVariant)
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(text = item.label, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            if (item.summary.isNotEmpty()) {
-                Text(text = item.summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+        if (onCopy != null) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 4.dp, end = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "代码",
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Image(
+                    imageVector = NavIcons.Copy,
+                    contentDescription = "复制代码",
+                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
+                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(4.dp))
+                        .clickable { onCopy(code) }
+                        .padding(6.dp)
+                )
             }
         }
-        SelectionMark(selected = selected, multiSelect = false)
-    }
-}
-
-@Composable
-internal fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
-    Box(
-        modifier = Modifier.size(30.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Checkbox(
-            modifier = Modifier.size(22.dp),
-            state = if (selected) ToggleableState.On else ToggleableState.Off,
-            onClick = null
+        Text(
+            text = code,
+            color = MiuixTheme.colorScheme.onSurface,
+            fontSize = 12.sp,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
         )
     }
 }
 
 @Composable
-public fun BottomActionBar(
-    primaryText: String,
-    onPrimaryClick: () -> Unit,
-    secondaryText: String? = null,
-    onSecondaryClick: (() -> Unit)? = null,
-    middleText: String? = null,
-    onMiddleClick: (() -> Unit)? = null
+fun Text(
+    context: Context,
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = MiuixTheme.colorScheme.onSurface,
+    fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
+    fontWeight: FontWeight? = null
 ) {
-    val backAction = when {
-        secondaryText == "取消" && onSecondaryClick != null -> onSecondaryClick
-        middleText == "取消" && onMiddleClick != null -> onMiddleClick
-        primaryText == "取消" -> onPrimaryClick
-        secondaryText == "返回" && onSecondaryClick != null -> onSecondaryClick
-        middleText == "返回" && onMiddleClick != null -> onMiddleClick
-        primaryText == "返回" -> onPrimaryClick
-        secondaryText == "关闭" && onSecondaryClick != null -> onSecondaryClick
-        middleText == "关闭" && onMiddleClick != null -> onMiddleClick
-        primaryText == "关闭" -> onPrimaryClick
-        else -> null
-    }
-    RegisterSettingsBackHandler(backAction)
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(MiuixTheme.colorScheme.background.copy(alpha = 0.92f))
-            .padding(start = 12.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        if (secondaryText != null && onSecondaryClick != null) {
-            BottomBarButton(
-                text = secondaryText,
-                modifier = Modifier.weight(1f),
-                filled = false,
-                onClick = onSecondaryClick
-            )
-        }
-        if (middleText != null && onMiddleClick != null) {
-            BottomBarButton(
-                text = middleText,
-                modifier = Modifier.weight(1f),
-                filled = false,
-                onClick = onMiddleClick
-            )
-        }
-        BottomBarButton(
-            text = primaryText,
-            modifier = Modifier.weight(1f),
-            filled = true,
-            onClick = onPrimaryClick
-        )
-    }
+    MarkdownTextResult(context, text, MarkdownInlineState(), modifier, color, fontSize, fontWeight)
 }
 
 @Composable
+internal fun MarkdownTextResult(
+    context: Context,
+    text: String,
+    inlineState: MarkdownInlineState,
+    modifier: Modifier = Modifier,
+    color: Color = MiuixTheme.colorScheme.onSurface,
+    fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
+    fontWeight: FontWeight? = null
+): MarkdownInlineState {
+    val primary = MiuixTheme.colorScheme.primary
+    val result = remember(text, primary, inlineState.bold) {
+        buildMarkdownAnnotatedString(text, primary, inlineState)
+    }
+    ClickableText(
+        text = result.text,
+        modifier = modifier,
+        style = TextStyle(color = color, fontSize = fontSize, fontWeight = fontWeight),
+        onClick = { offset ->
+            result.text.getStringAnnotations(MARKDOWN_LINK_TAG, offset, offset)
+                .firstOrNull()
+                ?.let { annotation -> openMarkdownLink(context, annotation.item) }
+        }
+    )
+    return result.state
+}
+
+internal data class MarkdownInlineState(val bold: Boolean = false)
+
+internal data class MarkdownInlineResult(
+    val text: AnnotatedString,
+    val state: MarkdownInlineState
+)
+
+internal fun buildMarkdownAnnotatedString(
+    text: String,
+    accent: Color,
+    initialState: MarkdownInlineState
+): MarkdownInlineResult {
+    var state = initialState
+    val annotated = buildAnnotatedString {
+        state = appendInlineMarkdown(text, accent, state)
+    }
+    return MarkdownInlineResult(annotated, state)
+}
+
+internal fun AnnotatedString.Builder.appendInlineMarkdown(
+    text: String,
+    accent: Color,
+    initialState: MarkdownInlineState
+): MarkdownInlineState {
+    var state = initialState
+    var segmentStart = 0
+    MARKDOWN_LINK_REGEX.findAll(text).forEach { match ->
+        if (match.range.first > segmentStart) {
+            state = appendInlineMarkdownSegment(
+                text.substring(segmentStart, match.range.first),
+                accent,
+                state
+            )
+        }
+        val label = match.groupValues[1]
+        val url = match.groupValues[2].trim()
+        if (label.isNotBlank() && url.isNotBlank()) {
+            pushStringAnnotation(MARKDOWN_LINK_TAG, url)
+            appendStyledInline(label, accent, state, link = true)
+            pop()
+        } else {
+            append(match.value)
+        }
+        segmentStart = match.range.last + 1
+    }
+    if (segmentStart < text.length) {
+        state = appendInlineMarkdownSegment(text.substring(segmentStart), accent, state)
+    }
+    return state
+}
+
+internal fun AnnotatedString.Builder.appendInlineMarkdownSegment(
+    text: String,
+    accent: Color,
+    initialState: MarkdownInlineState
+): MarkdownInlineState {
+    var state = initialState
+    var index = 0
+    while (index < text.length) {
+        when {
+            text.startsWith("**", index) -> {
+                state = state.copy(bold = !state.bold)
+                index += 2
+            }
+            text[index] == '`' -> {
+                val end = text.indexOf('`', index + 1)
+                if (end > index) {
+                    withStyle(SpanStyle(color = accent, fontFamily = FontFamily.Monospace)) {
+                        append(text.substring(index + 1, end))
+                    }
+                    index = end + 1
+                } else {
+                    append(text[index])
+                    index++
+                }
+            }
+            else -> {
+                appendStyledInline(text[index].toString(), accent, state, link = false)
+                index++
+            }
+        }
+    }
+    return state
+}
+
+internal fun AnnotatedString.Builder.appendStyledInline(
+    value: String,
+    accent: Color,
+    state: MarkdownInlineState,
+    link: Boolean
+) {
+    val style = SpanStyle(
+        color = if (link) accent else Color.Unspecified,
+        fontWeight = when {
+            link -> FontWeight.Medium
+            state.bold -> FontWeight.SemiBold
+            else -> null
+        }
+    )
+    withStyle(style) {
+        append(value)
+    }
+}
+
+internal fun openMarkdownLink(context: Context, url: String) {
+    val value = url.trim()
+    if (value.isBlank()) return
+    runCatching {
+        val normalized = if (value.contains("://")) value else "https://$value"
+        val uri = Uri.parse(normalized)
+        val intent = Intent(Intent.ACTION_VIEW, uri)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+    }
+}
+
+}

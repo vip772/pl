@@ -540,444 +540,135 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.random.Random
 
-internal fun ClickHintTag() {
-    Text(
-        text = "单击",
-        color = MiuixTheme.colorScheme.primary,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Medium,
-        maxLines = 1,
-        softWrap = false,
-        overflow = TextOverflow.Clip,
-        modifier = Modifier
-            .defaultMinSize(minWidth = 40.dp)
-            .clip(RoundedCornerShape(999.dp))
-            .background(MiuixTheme.colorScheme.primary.copy(alpha = 0.12f))
-            .padding(horizontal = 8.dp, vertical = 2.dp)
-    )
-}
-
-object ScriptPluginSettingsMiuixContent {
-
 @Composable
-fun ScriptPluginSettingsContent(
-    context: Context,
-    onOpenReadme: (ScriptPluginRuntime.ScriptPlugin) -> Unit,
-    onOpenMarket: () -> Unit,
-    onOpenAgent: () -> Unit,
-    onOpenManager: () -> Unit
+internal fun RedPacketTemplateListPage(
+    templates: List<RedPacketRuleTemplate>,
+    onBack: () -> Unit,
+    onOpenTemplate: (Int, RedPacketRuleTemplate) -> Unit,
+    onAddTemplate: () -> Unit
 ) {
-    val scope = rememberCoroutineScope()
-    val sp = remember { HchatStorage.preferences(context, ScriptPluginSettings.PREFS_NAME) }
-    val pluginRootPath = remember(context) { ScriptPluginRuntime.scriptDir(context).absolutePath }
-    var pluginListVersion by remember { mutableStateOf(0) }
-    val managedPlugins = remember(pluginListVersion) { ScriptPluginManager.listForDisplay(context) }
-    val plugins = remember(managedPlugins) { managedPlugins.map { it.plugin } }
-    val pinnedIds = remember(managedPlugins) {
-        managedPlugins.filter { it.pinned }.mapTo(LinkedHashSet()) { it.plugin.id }
-    }
-    var globalEnabled by remember {
-        mutableStateOf(sp.getBoolean(ScriptPluginSettings.KEY_ENABLE, ScriptPluginSettings.DEFAULT_ENABLE))
-    }
-    var pluginEnabledStates by remember(plugins) {
-        mutableStateOf(plugins.associate { it.id to ScriptPluginRuntime.isPluginEnabled(context, it.id) })
-    }
-    var showPluginRootDialog by remember { mutableStateOf(false) }
-    var actionPlugin by remember { mutableStateOf<ScriptPluginRuntime.ScriptPlugin?>(null) }
-    var renamePlugin by remember { mutableStateOf<ScriptPluginRuntime.ScriptPlugin?>(null) }
-    var deletePlugin by remember { mutableStateOf<ScriptPluginRuntime.ScriptPlugin?>(null) }
-    DisposableEffect(context) {
-        val subscription = ScriptPluginRuntime.subscribePluginCatalog(context) {
-            Handler(Looper.getMainLooper()).post {
-                pluginEnabledStates = ScriptPluginRuntime.listPlugins(context)
-                    .associate { it.id to ScriptPluginRuntime.isPluginEnabled(context, it.id) }
-                globalEnabled = sp.getBoolean(
-                    ScriptPluginSettings.KEY_ENABLE,
-                    ScriptPluginSettings.DEFAULT_ENABLE
-                )
-                pluginListVersion++
-            }
-        }
-        onDispose { subscription.unsubscribe() }
-    }
-
-    Column {
-        SettingsCard {
-            PathSwitchRow(
-                globalEnabled,
-                "插件总开关",
-                "启动时自动加载已启用插件\n相关说明:\n请确认插件安全再进行加载,\n否则造成的后果需自行承担。",
-                onInfoClick = { showPluginRootDialog = true },
-            ) { next ->
-                val old = globalEnabled
-                globalEnabled = next
-                Thread({
-                    val result = ScriptPluginRuntime.setGlobalEnabled(context, next)
-                    Handler(Looper.getMainLooper()).post {
-                        if (result.isFailure) {
-                            globalEnabled = old
-                            Toast.makeText(
-                                context,
-                                "切换失败: ${result.exceptionOrNull()?.message}",
-                                Toast.LENGTH_SHORT
-                            ).show()
-                        } else {
-                            pluginListVersion++
-                        }
-                    }
-                }, "Hchat-Script-Global").start()
-            }
-        }
-        if (showPluginRootDialog) {
-            ScriptPluginPathDialog(
-                context = context,
-                title = "插件目录",
-                path = pluginRootPath,
-                onClose = { showPluginRootDialog = false }
-            )
-        }
-        SettingsCard(modifier = Modifier.padding(top = 10.dp)) {
-            ActionRow("插件 Agent", "按需求生成或修改脚本插件") {
-                onOpenAgent()
-            }
-        }
-        SettingsCard(modifier = Modifier.padding(top = 10.dp)) {
-            ActionRow("在线插件", "浏览、安装或上传社区脚本插件") {
-                onOpenMarket()
-            }
-        }
-        SettingsCard(modifier = Modifier.padding(top = 10.dp)) {
-            ActionRow("本地插件管理", "排序、置顶、导入、导出或批量管理插件") {
-                onOpenManager()
-            }
-        }
-        SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "本地插件(${plugins.size})")
-        SettingsCard {
-            if (plugins.isEmpty()) {
-                Text(
-                    text = "暂无插件",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 13.sp,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp)
-                )
-            } else {
-                plugins.forEachIndexed { index, plugin ->
-                    val checked = pluginEnabledStates[plugin.id]
-                        ?: ScriptPluginRuntime.isPluginEnabled(context, plugin.id)
-                    val summary = buildString {
-                        append(plugin.dir.name)
-                        append("\n")
-                        append("作者: ")
-                        append(plugin.author.ifBlank { "未知" })
-                        append(" | 更新于: ")
-                        append(plugin.updateTime.ifBlank { "未知" })
-                    }
-                    val title = buildString {
-                        append(plugin.displayName ?: "未知")
-                        append("(")
-                        append(plugin.version.ifBlank { "未知" })
-                        append(")")
-                    }
-                    ScriptPluginRow(
-                        checked = checked,
-                        title = title,
-                        summary = summary,
-                        showSettings = ScriptPluginRuntime.canOpenSettings(plugin),
-                        onOpenReadme = { onOpenReadme(plugin) },
-                        onOpenSettings = {
-                            val result = ScriptPluginRuntime.callOpenSettings(plugin.id)
-                            if (result.isFailure) {
-                                Toast.makeText(
-                                    context,
-                                    result.exceptionOrNull()?.message ?: "打开设置失败",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                        },
-                        onOpenManager = { actionPlugin = plugin },
-                        onCheckedChange = { next ->
-                            val oldMap = pluginEnabledStates
-                            pluginEnabledStates = pluginEnabledStates + (plugin.id to next)
-                            Thread({
-                                val result = ScriptPluginRuntime.setPluginEnabled(context, plugin.id, next)
-                                Handler(Looper.getMainLooper()).post {
-                                    if (result.isFailure) {
-                                        pluginEnabledStates = oldMap
-                                        Toast.makeText(
-                                            context,
-                                            "加载[${plugin.displayName ?: "未知"}]失败，已自动关闭",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-                                    }
-                                }
-                            }, "Hchat-Script-${plugin.id}").start()
-                        }
-                    )
-                    if (index != plugins.lastIndex) InsetDivider()
-                }
-            }
-        }
-        actionPlugin?.let { plugin ->
-            ScriptPluginActionDialog(
-                plugin = plugin,
-                pinned = plugin.id in pinnedIds,
-                onDismiss = { actionPlugin = null },
-                onPinChanged = { pinned ->
-                    actionPlugin = null
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            ScriptPluginManager.setPinned(context, listOf(plugin.id), pinned)
-                        }
-                        result.fold(
-                            onSuccess = {
-                                pluginListVersion++
-                                Toast.makeText(
-                                    context,
-                                    if (pinned) "已置顶" else "已取消置顶",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            },
-                            onFailure = { showScriptPluginManagerError(context, it) }
-                        )
-                    }
-                },
-                onRename = {
-                    actionPlugin = null
-                    showAfterDialogDismiss(context) { renamePlugin = plugin }
-                },
-                onExport = {
-                    actionPlugin = null
-                    showAfterDialogDismiss(context) {
-                        launchScriptPluginExport(
-                            context = context,
-                            plugins = listOf(plugin)
-                        )
-                    }
-                },
-                onDelete = {
-                    actionPlugin = null
-                    showAfterDialogDismiss(context) { deletePlugin = plugin }
-                }
-            )
-        }
-        renamePlugin?.let { plugin ->
-            ScriptPluginRenameDialog(
-                plugin = plugin,
-                onDismiss = { renamePlugin = null },
-                onConfirm = { name ->
-                    renamePlugin = null
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            ScriptPluginManager.renamePlugin(context, plugin.id, name)
-                        }
-                        result.fold(
-                            onSuccess = {
-                                pluginListVersion++
-                                Toast.makeText(context, "已重命名", Toast.LENGTH_SHORT).show()
-                            },
-                            onFailure = { showScriptPluginManagerError(context, it) }
-                        )
-                    }
-                }
-            )
-        }
-        deletePlugin?.let { plugin ->
-            ScriptPluginDeleteDialog(
-                pluginNames = listOf(plugin.displayName ?: plugin.name.ifBlank { plugin.id }),
-                onDismiss = { deletePlugin = null },
-                onConfirm = {
-                    deletePlugin = null
-                    scope.launch {
-                        val result = withContext(Dispatchers.IO) {
-                            ScriptPluginManager.deletePlugin(context, plugin.id)
-                        }
-                        result.fold(
-                            onSuccess = {
-                                pluginListVersion++
-                                Toast.makeText(context, "插件已删除", Toast.LENGTH_SHORT).show()
-                            },
-                            onFailure = { showScriptPluginManagerError(context, it) }
-                        )
-                    }
-                }
-            )
-        }
-    }
-}
-
-@Composable
-fun ScriptPluginManagerPage(
-    context: Context,
-    onBack: () -> Unit
-) {
-    val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
-    var query by rememberSaveable { mutableStateOf("") }
-    var refreshVersion by remember { mutableStateOf(0) }
-    var loading by remember { mutableStateOf(true) }
-    var managedPlugins by remember {
-        mutableStateOf<List<ScriptPluginManager.ManagedPlugin>>(emptyList())
-    }
-    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var draggedPluginId by remember { mutableStateOf<String?>(null) }
-    var dragOrderChanged by remember { mutableStateOf(false) }
-    var actionPlugin by remember { mutableStateOf<ScriptPluginManager.ManagedPlugin?>(null) }
-    var renamePlugin by remember { mutableStateOf<ScriptPluginRuntime.ScriptPlugin?>(null) }
-    var deletePlugins by remember { mutableStateOf<List<ScriptPluginRuntime.ScriptPlugin>>(emptyList()) }
-    var importInspection by remember { mutableStateOf<ScriptPluginManager.ImportInspection?>(null) }
-    var importOverwriteIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var busyText by remember { mutableStateOf("") }
-    val pageActive = remember { AtomicBoolean(true) }
-    val activeImportSessionId = remember { AtomicReference<String?>(null) }
-
-    LaunchedEffect(refreshVersion) {
-        loading = true
-        val result = withContext(Dispatchers.IO) {
-            runCatching {
-                ScriptPluginManager.cleanupStaleDisplayIds(context).getOrThrow()
-                ScriptPluginManager.listForDisplay(context)
-            }
-        }
-        result.fold(
-            onSuccess = { plugins ->
-                managedPlugins = plugins
-                selectedIds = selectedIds.intersect(plugins.mapTo(LinkedHashSet()) { it.plugin.id })
-            },
-            onFailure = { showScriptPluginManagerError(context, it) }
-        )
-        loading = false
-    }
-    DisposableEffect(context) {
-        val subscription = ScriptPluginRuntime.subscribePluginCatalog(context) {
-            Handler(Looper.getMainLooper()).post { refreshVersion++ }
-        }
-        onDispose { subscription.unsubscribe() }
-    }
-    DisposableEffect(Unit) {
-        pageActive.set(true)
-        onDispose {
-            pageActive.set(false)
-            activeImportSessionId.getAndSet(null)?.let { sessionId ->
-                Thread({ ScriptPluginManager.discardImport(context, sessionId) }, "Hchat-Plugin-Import-Cleanup").start()
-            }
-        }
-    }
-
-    val normalizedQuery = query.trim().lowercase(Locale.ROOT)
-    val visiblePlugins = managedPlugins.filter { item ->
-        val plugin = item.plugin
-        normalizedQuery.isEmpty() ||
-            plugin.id.lowercase(Locale.ROOT).contains(normalizedQuery) ||
-            plugin.name.lowercase(Locale.ROOT).contains(normalizedQuery) ||
-            plugin.author.lowercase(Locale.ROOT).contains(normalizedQuery) ||
-            plugin.version.lowercase(Locale.ROOT).contains(normalizedQuery)
-    }
-    val pinnedPlugins = visiblePlugins.filter { it.pinned }
-    val normalPlugins = visiblePlugins.filterNot { it.pinned }
-    val visibleIds = visiblePlugins.mapTo(LinkedHashSet()) { it.plugin.id }
-    val allVisibleSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
-
-    fun refresh() {
-        refreshVersion++
-    }
-
-    fun setPinned(ids: Set<String>, pinned: Boolean) {
-        if (ids.isEmpty() || busyText.isNotEmpty()) return
-        busyText = if (pinned) "正在置顶" else "正在取消置顶"
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                ScriptPluginManager.setPinned(context, ids, pinned)
-            }
-            busyText = ""
-            result.fold(
-                onSuccess = {
-                    refresh()
-                    Toast.makeText(
-                        context,
-                        if (pinned) "已置顶 ${ids.size} 个插件" else "已取消置顶 ${ids.size} 个插件",
-                        Toast.LENGTH_SHORT
-                    ).show()
-                },
-                onFailure = { showScriptPluginManagerError(context, it) }
+    PageScaffold(
+        title = "红包模板",
+        largeTitle = "红包模板",
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "新增模板",
+                onPrimaryClick = onAddTemplate,
+                secondaryText = "返回",
+                onSecondaryClick = onBack
             )
         }
-    }
-
-    fun commitOrder() {
-        val ids = managedPlugins.map { it.plugin.id }
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                ScriptPluginManager.saveDisplayOrder(context, ids)
-            }
-            result.onFailure { showScriptPluginManagerError(context, it) }
-        }
-    }
-
-    fun movePlugin(item: ScriptPluginManager.ManagedPlugin, delta: Int): Boolean {
-        if (query.isNotBlank()) return false
-        val index = managedPlugins.indexOfFirst { it.plugin.id == item.plugin.id }
-        val targetIndex = index + delta
-        if (index < 0 || targetIndex !in managedPlugins.indices) return false
-        if (managedPlugins[targetIndex].pinned != item.pinned) return false
-        val next = managedPlugins.toMutableList()
-        val moved = next.removeAt(index)
-        next.add(targetIndex, moved)
-        managedPlugins = next
-        return true
-    }
-
-    fun launchImportPicker() {
-        val activity = context as? Activity
-        if (activity == null) {
-            Toast.makeText(context, "无法打开文件选择器", Toast.LENGTH_SHORT).show()
-            return
-        }
-        ScriptPluginDocumentBridge.launchImport(activity) { uri ->
-            if (!pageActive.get()) return@launchImport
-            busyText = "正在检查导入包"
-            Thread({
-                val result = runCatching {
-                    context.contentResolver.openInputStream(uri)?.use { input ->
-                        ScriptPluginManager.inspectImport(context, input).getOrThrow()
-                    } ?: error("无法读取所选文件")
-                }
-                if (!pageActive.get()) {
-                    result.getOrNull()?.let { inspection ->
-                        ScriptPluginManager.discardImport(context, inspection.sessionId)
-                    }
-                    return@Thread
-                }
-                Handler(Looper.getMainLooper()).post {
-                    if (!pageActive.get()) {
-                        result.getOrNull()?.let { inspection ->
-                            Thread(
-                                { ScriptPluginManager.discardImport(context, inspection.sessionId) },
-                                "Hchat-Plugin-Import-Late-Cleanup"
-                            ).start()
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "模板") }
+            item {
+                SettingsCard {
+                    if (templates.isEmpty()) {
+                        EmptyText("暂无模板。模板只配置抢包策略，适用聊天在“适用聊天”里分配。")
+                    } else {
+                        templates.forEachIndexed { index, template ->
+                            SelectRow(
+                                title = template.name.ifBlank { "模板 ${index + 1}" },
+                                summary = describeRedPacketTemplate(template),
+                                onClick = { onOpenTemplate(index, template) }
+                            )
+                            if (index < templates.lastIndex) InsetDivider()
                         }
-                        return@post
                     }
-                    busyText = ""
-                    result.fold(
-                        onSuccess = { inspection ->
-                            activeImportSessionId.set(inspection.sessionId)
-                            importInspection = inspection
-                            importOverwriteIds = emptySet()
-                        },
-                        onFailure = { showScriptPluginManagerError(context, it) }
-                    )
                 }
-            }, "Hchat-Plugin-Import-Inspect").start()
+            }
         }
     }
+}
 
+@Composable
+internal fun RedPacketBindingListPage(
+    bindings: List<RedPacketRuleBinding>,
+    templates: List<RedPacketRuleTemplate>,
+    onBack: () -> Unit,
+    onOpenBinding: (Int, RedPacketRuleBinding) -> Unit,
+    onAddBinding: () -> Unit,
+    onDeleteBindings: (List<RedPacketRuleBinding>) -> Unit
+) {
+    val context = LocalContext.current
+    var category by remember { mutableStateOf(ConversationRuleCategory.ALL) }
+    var query by remember { mutableStateOf("") }
+    var batchDeleteMode by remember { mutableStateOf(false) }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var showDeleteConfirm by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    val lower = query.trim().lowercase(Locale.US)
+    val visibleBindings = bindings.mapIndexed { index, binding -> index to binding }
+        .filter { (_, binding) ->
+            conversationRuleCategoryMatches(binding, category) &&
+                (lower.isEmpty() || redPacketBindingMatchesQuery(binding, templates, lower))
+        }
+    val listTitle = when {
+        bindings.isEmpty() -> "适用聊天"
+        lower.isEmpty() -> "适用聊天 · ${bindings.size} 项"
+        else -> "适用聊天 · ${visibleBindings.size}/${bindings.size} 项"
+    }
+    val visibleIds = visibleBindings.mapTo(LinkedHashSet()) { it.second.id }
+    val allVisibleSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
+    val selectedBindings = bindings.filter { it.id in selectedIds }
     PageScaffold(
-        title = "本地插件管理",
-        largeTitle = "本地插件管理",
+        title = "适用聊天",
+        largeTitle = "适用聊天",
         scrollBehavior = scrollBehavior,
-        onBack = onBack,
-        bottomBar = { BottomActionBar("返回", onBack) }
+        bottomBar = {
+            if (batchDeleteMode) {
+                BottomActionBar(
+                    primaryText = "删除所选（${selectedBindings.size}）",
+                    onPrimaryClick = {
+                        if (selectedBindings.isEmpty()) {
+                            Toast.makeText(context, "请先选择适用聊天", Toast.LENGTH_SHORT).show()
+                        } else {
+                            showDeleteConfirm = true
+                        }
+                    },
+                    secondaryText = "取消",
+                    onSecondaryClick = {
+                        batchDeleteMode = false
+                        selectedIds = emptySet()
+                    },
+                    middleText = if (visibleIds.isEmpty()) null else if (allVisibleSelected) "取消全选" else "全选",
+                    onMiddleClick = if (visibleIds.isEmpty()) null else {
+                        {
+                            selectedIds = if (allVisibleSelected) {
+                                selectedIds - visibleIds
+                            } else {
+                                selectedIds + visibleIds
+                            }
+                        }
+                    }
+                )
+            } else {
+                BottomActionBar(
+                    primaryText = "添加聊天",
+                    onPrimaryClick = onAddBinding,
+                    secondaryText = "返回",
+                    onSecondaryClick = onBack,
+                    middleText = if (bindings.isEmpty()) null else "批量删除",
+                    onMiddleClick = if (bindings.isEmpty()) null else {
+                        {
+                            batchDeleteMode = true
+                            selectedIds = emptySet()
+                        }
+                    }
+                )
+            }
+        }
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -988,1521 +679,1079 @@ fun ScriptPluginManagerPage(
             )
         ) {
             item {
-                SearchBarSurface(
-                    query = query,
-                    placeholder = "搜索本地插件",
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    onQueryChange = { query = it }
-                )
+                SettingsCard {
+                    ConversationRuleCategoryTabs(
+                        selected = category,
+                        onSelected = { category = it },
+                        includeOfficial = false
+                    )
+                }
             }
-            item { SmallTitle(modifier = Modifier.padding(top = 6.dp), text = "管理") }
             item {
                 SettingsCard {
-                    ScriptPluginManagerCommandRow(
-                        icon = NavIcons.Import,
-                        title = "导入插件",
-                        summary = "从 ZIP 文件导入，导入后默认关闭",
-                        enabled = busyText.isEmpty(),
-                        onClick = ::launchImportPicker
+                    InputRow(
+                        title = "搜索聊天",
+                        summary = "昵称 / wxid / 群号 / 模板名",
+                        value = query,
+                        onValueChange = { query = it }
+                    )
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = listTitle) }
+            item {
+                SettingsCard {
+                    if (bindings.isEmpty()) {
+                        EmptyText("暂无适用聊天。添加群聊或好友后，再给它分配红包模板。")
+                    } else if (visibleBindings.isEmpty()) {
+                        EmptyText("没有匹配结果。可按昵称、ID 或模板名搜索。")
+                    } else {
+                        visibleBindings.forEachIndexed { rowIndex, (index, binding) ->
+                            if (batchDeleteMode) {
+                                OptionChoiceRow(
+                                    item = OptionItem(
+                                        label = binding.label.ifBlank { binding.targetId },
+                                        value = index,
+                                        summary = describeRedPacketBinding(binding, templates)
+                                    ),
+                                    selected = binding.id in selectedIds,
+                                    onClick = {
+                                        selectedIds = if (binding.id in selectedIds) {
+                                            selectedIds - binding.id
+                                        } else {
+                                            selectedIds + binding.id
+                                        }
+                                    }
+                                )
+                            } else {
+                                SelectRow(
+                                    title = binding.label.ifBlank { binding.targetId },
+                                    summary = describeRedPacketBinding(binding, templates),
+                                    onClick = { onOpenBinding(index, binding) }
+                                )
+                            }
+                            if (rowIndex < visibleBindings.lastIndex) InsetDivider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (showDeleteConfirm) {
+        WindowDialog(
+            show = true,
+            title = "确认批量删除",
+            onDismissRequest = { showDeleteConfirm = false },
+            content = {
+                Column {
+                    Text(
+                        text = buildString {
+                            append("将删除已选的 ${selectedBindings.size} 个适用聊天，此操作不可撤销。")
+                            val names = selectedBindings.take(6).joinToString("、") {
+                                it.label.ifBlank { it.targetId }
+                            }
+                            if (names.isNotBlank()) append("\n\n$names")
+                            if (selectedBindings.size > 6) append(" 等")
+                        },
+                        color = MiuixTheme.colorScheme.onSurface,
+                        fontSize = 14.sp
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        TextButton(
+                            text = "取消",
+                            onClick = { showDeleteConfirm = false },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                        TextButton(
+                            text = "确认删除",
+                            onClick = {
+                                val targets = selectedBindings
+                                showDeleteConfirm = false
+                                batchDeleteMode = false
+                                selectedIds = emptySet()
+                                onDeleteBindings(targets)
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+internal fun RedPacketTemplatePage(
+    context: Context,
+    request: RedPacketTemplateEditorRequest,
+    onBack: () -> Unit,
+    onSave: (RedPacketRuleTemplate) -> Unit,
+    onDelete: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, RedPacketSettings.PREFS_NAME) }
+    var name by remember(request) { mutableStateOf(request.template.name) }
+    var enabled by remember(request) { mutableStateOf(request.template.enabled) }
+    var grabMode by remember(request) { mutableStateOf(request.template.grabMode) }
+    var delayMode by remember(request) { mutableStateOf(normalizeRedPacketDelayModeForUi(request.template)) }
+    var delayMs by remember(request) { mutableStateOf(request.template.delayMs.coerceAtLeast(0L).toString()) }
+    var randomMinMs by remember(request) { mutableStateOf(request.template.randomMinMs.coerceAtLeast(0L).toString()) }
+    var randomMaxMs by remember(request) { mutableStateOf(request.template.randomMaxMs.coerceAtLeast(0L).toString()) }
+    var skipSelf by remember(request) { mutableStateOf(request.template.skipSelf) }
+    var keywordMode by remember(request) { mutableStateOf(request.template.keywordMode) }
+    var keywords by remember(request) { mutableStateOf(request.template.keywords) }
+    var quietEnabled by remember(request) { mutableStateOf(request.template.quietEnabled) }
+    var quietStart by remember(request) { mutableStateOf(formatRedPacketSecond(request.template.quietStartSecond)) }
+    var quietEnd by remember(request) { mutableStateOf(formatRedPacketSecond(request.template.quietEndSecond)) }
+    val initialPrivateReplySteps = remember(request) {
+        normalizeRedPacketReplyStepsForUi(
+            request.template.replySteps,
+            request.template.replyMode,
+            request.template.replyText,
+            request.template.replyDelayMs,
+            request.template.replyRandom
+        )
+    }
+    var privateReplySteps by remember(request) {
+        mutableStateOf(initialPrivateReplySteps)
+    }
+    var groupReplySteps by remember(request) {
+        mutableStateOf(
+            request.template.groupReplySteps
+                ?.map(::normalizeRedPacketReplyStepForUi)
+                ?: initialPrivateReplySteps
+        )
+    }
+    var notifySystemEnabled by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifySystemEnabled
+            } else {
+                sp.getBoolean(RedPacketSettings.KEY_NOTIFY_SYSTEM_ENABLE, false)
+            }
+        )
+    }
+    var notifyToastEnabled by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifyToastEnabled
+            } else {
+                sp.getBoolean(RedPacketSettings.KEY_NOTIFY_TOAST_ENABLE, false)
+            }
+        )
+    }
+    var notifySoundEnabled by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifySoundEnabled
+            } else {
+                sp.getBoolean(RedPacketSettings.KEY_NOTIFY_SOUND_ENABLE, false)
+            }
+        )
+    }
+    var notifySoundMode by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifySoundMode
+            } else {
+                sp.getInt(RedPacketSettings.KEY_NOTIFY_SOUND_MODE, RedPacketSettings.NOTIFY_SOUND_MODE_SYSTEM)
+            }
+        )
+    }
+    var notifyVibrateEnabled by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifyVibrateEnabled
+            } else {
+                sp.getBoolean(RedPacketSettings.KEY_NOTIFY_VIBRATE_ENABLE, false)
+            }
+        )
+    }
+    var notifySoundUri by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifySoundUri
+            } else {
+                sp.getString(RedPacketSettings.KEY_NOTIFY_SOUND_URI, "") ?: ""
+            }
+        )
+    }
+    var notifyText by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifyText
+            } else {
+                sp.getString(RedPacketSettings.KEY_NOTIFY_TEXT, "抢到红包 {amount} 元") ?: "抢到红包 {amount} 元"
+            }
+        )
+    }
+    var notifyToastText by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifyToastText
+            } else {
+                sp.getString(
+                    RedPacketSettings.KEY_NOTIFY_TOAST_TEXT,
+                    sp.getString(RedPacketSettings.KEY_NOTIFY_TEXT, "抢到红包 {amount} 元") ?: "抢到红包 {amount} 元"
+                ) ?: "抢到红包 {amount} 元"
+            }
+        )
+    }
+    var notifyFailedSystemEnabled by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifyFailedSystemEnabled
+            } else {
+                sp.getBoolean(RedPacketSettings.KEY_NOTIFY_FAILED_SYSTEM_ENABLE, false)
+            }
+        )
+    }
+    var notifyFailedToastEnabled by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifyFailedToastEnabled
+            } else {
+                sp.getBoolean(RedPacketSettings.KEY_NOTIFY_FAILED_TOAST_ENABLE, false)
+            }
+        )
+    }
+    var notifyFailedText by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifyFailedText
+            } else {
+                sp.getString(RedPacketSettings.KEY_NOTIFY_FAILED_TEXT, "未抢到红包") ?: "未抢到红包"
+            }
+        )
+    }
+    var notifyFailedToastText by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.notifyFailedToastText
+            } else {
+                sp.getString(
+                    RedPacketSettings.KEY_NOTIFY_FAILED_TOAST_TEXT,
+                    sp.getString(RedPacketSettings.KEY_NOTIFY_FAILED_TEXT, "未抢到红包") ?: "未抢到红包"
+                ) ?: "未抢到红包"
+            }
+        )
+    }
+    var announceEnabled by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.announceEnabled
+            } else {
+                sp.getBoolean(RedPacketSettings.KEY_ANNOUNCE_ENABLE, false)
+            }
+        )
+    }
+    var announceText by remember(request) {
+        mutableStateOf(
+            if (request.template.notificationConfigured) {
+                request.template.announceText
+            } else {
+                sp.getString(RedPacketSettings.KEY_ANNOUNCE_TEXT, "抢到红包 {amount} 元") ?: "抢到红包 {amount} 元"
+            }
+        )
+    }
+    var editingReplyStepsForGroup by remember(request) { mutableStateOf<Boolean?>(null) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    editingReplyStepsForGroup?.let { group ->
+        RedPacketReplyStepsPage(
+            context = context,
+            title = if (group) "群红包回复" else "私聊红包回复",
+            initialSteps = if (group) groupReplySteps else privateReplySteps,
+            onBack = { editingReplyStepsForGroup = null },
+            onSave = { steps ->
+                if (group) groupReplySteps = steps else privateReplySteps = steps
+                editingReplyStepsForGroup = null
+                Toast.makeText(context, "回复步骤已更新", Toast.LENGTH_SHORT).show()
+            }
+        )
+        return
+    }
+
+    PageScaffold(
+        title = name.ifBlank { "红包模板" },
+        largeTitle = name.ifBlank { "红包模板" },
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存模板",
+                onPrimaryClick = {
+                    val customDelay = if (delayMode == RedPacketRuleConfig.DELAY_CUSTOM) {
+                        delayMs.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L
+                    } else {
+                        0L
+                    }
+                    val minDelay = randomMinMs.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L
+                    val maxDelay = randomMaxMs.toLongOrNull()?.coerceIn(minDelay, 600000L) ?: minDelay
+                    val cleanPrivateReplySteps = cleanRedPacketReplySteps(privateReplySteps)
+                    val cleanGroupReplySteps = cleanRedPacketReplySteps(groupReplySteps)
+                    val firstReply = cleanPrivateReplySteps.firstOrNull()
+                    onSave(
+                        RedPacketRuleTemplate(
+                            id = request.template.id,
+                            name = name.trim().ifBlank { "模板 ${request.index + 1}" },
+                            enabled = enabled,
+                            grabMode = grabMode,
+                            delayMode = delayMode,
+                            delayMs = customDelay,
+                            randomMinMs = minDelay,
+                            randomMaxMs = maxDelay,
+                            skipSelf = skipSelf,
+                            listMode = request.template.listMode,
+                            whitelist = request.template.whitelist,
+                            blacklist = request.template.blacklist,
+                            keywordMode = keywordMode,
+                            keywords = if (keywordMode == 0) "" else keywords.trim(),
+                            quietEnabled = quietEnabled,
+                            quietStartSecond = parseRedPacketSecond(quietStart, request.template.quietStartSecond),
+                            quietEndSecond = parseRedPacketSecond(quietEnd, request.template.quietEndSecond),
+                            replyMode = firstReply?.mode ?: RedPacketRuleConfig.REPLY_OFF,
+                            replyText = firstReply?.content.orEmpty(),
+                            replyDelayMs = firstReply?.delayMs ?: 0L,
+                            replyRandom = firstReply?.random ?: false,
+                            replySteps = cleanPrivateReplySteps,
+                            groupReplySteps = cleanGroupReplySteps,
+                            notificationConfigured = true,
+                            notifySystemEnabled = notifySystemEnabled,
+                            notifyToastEnabled = notifyToastEnabled,
+                            notifySoundEnabled = notifySoundEnabled,
+                            notifySoundMode = notifySoundMode,
+                            notifyVibrateEnabled = notifyVibrateEnabled,
+                            notifySoundUri = notifySoundUri.trim(),
+                            notifyText = notifyText,
+                            notifyToastText = notifyToastText,
+                            notifyFailedSystemEnabled = notifyFailedSystemEnabled,
+                            notifyFailedToastEnabled = notifyFailedToastEnabled,
+                            notifyFailedText = notifyFailedText,
+                            notifyFailedToastText = notifyFailedToastText,
+                            announceEnabled = announceEnabled,
+                            announceText = announceText
+                        )
+                    )
+                    Toast.makeText(context, "模板已保存", Toast.LENGTH_SHORT).show()
+                },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "模板") }
+            item {
+                SettingsCard {
+                    InputRow("模板名称", "例如：慢抢红包群、只抢口令红包", name) { name = it }
+                    InsetDivider()
+                    SwitchRow(
+                        checked = enabled,
+                        title = "启用模板",
+                        summary = "关闭后使用该模板的聊天不会自动抢",
+                        onCheckedChange = { enabled = it }
+                    )
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "抢包") }
+            item {
+                SettingsCard {
+                    PopupOptionRow(
+                        title = "抢包模式",
+                        summary = if (grabMode == 1) "静默抢包" else "打开红包页面",
+                        options = optionItems("打开红包页面" to 0, "静默抢包" to 1),
+                        currentValue = grabMode,
+                        onValueChanged = { grabMode = it }
                     )
                     InsetDivider()
-                    ScriptPluginSelectionToolbar(
-                        selectedCount = selectedIds.size,
-                        allVisibleSelected = allVisibleSelected,
-                        enabled = visibleIds.isNotEmpty() && busyText.isEmpty(),
-                        onSelectAll = {
-                            selectedIds = if (allVisibleSelected) {
-                                selectedIds - visibleIds
-                            } else {
-                                selectedIds + visibleIds
-                            }
-                        },
-                        onInvert = {
-                            selectedIds = (selectedIds - visibleIds) + (visibleIds - selectedIds)
-                        }
+                    SwitchRow(
+                        checked = skipSelf,
+                        title = "跳过自己的红包",
+                        summary = "自己发出的红包不会抢",
+                        onCheckedChange = { skipSelf = it }
                     )
-                    if (selectedIds.isNotEmpty()) {
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "延迟") }
+            item {
+                SettingsCard {
+                    PopupOptionRow(
+                        title = "抢包延迟",
+                        summary = redPacketDelayModeLabel(delayMode),
+                        options = redPacketDelayModeOptions(includeRandom = true),
+                        currentValue = delayMode,
+                        onValueChanged = { delayMode = it }
+                    )
+                    if (delayMode == RedPacketRuleConfig.DELAY_CUSTOM) {
                         InsetDivider()
-                        ScriptPluginBatchActions(
-                            enabled = busyText.isEmpty(),
-                            onPin = { setPinned(selectedIds, true) },
-                            onUnpin = { setPinned(selectedIds, false) },
-                            onExport = {
-                                val selected = managedPlugins.filter { it.plugin.id in selectedIds }.map { it.plugin }
-                                launchScriptPluginExport(context, selected)
-                            },
-                            onDelete = {
-                                deletePlugins = managedPlugins
-                                    .filter { it.plugin.id in selectedIds }
-                                    .map { it.plugin }
-                            }
+                        NumberInputRow("自定义延迟", "单位 ms，0 表示不延迟", delayMs) { delayMs = it }
+                    } else if (delayMode == RedPacketRuleConfig.DELAY_RANDOM) {
+                        InsetDivider()
+                        NumberInputRow("最小延迟", "单位 ms", randomMinMs) { randomMinMs = it }
+                        InsetDivider()
+                        NumberInputRow("最大延迟", "单位 ms，不能小于最小延迟", randomMaxMs) { randomMaxMs = it }
+                    }
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "过滤") }
+            item {
+                SettingsCard {
+                    PopupOptionRow(
+                        title = "关键词过滤",
+                        summary = when (keywordMode) {
+                            1 -> "只抢含关键词"
+                            2 -> "屏蔽含关键词"
+                            else -> "不限关键词"
+                        },
+                        options = optionItems("不限关键词" to 0, "只抢含关键词" to 1, "屏蔽含关键词" to 2),
+                        currentValue = keywordMode,
+                        onValueChanged = {
+                            if (it == 0) keywords = ""
+                            keywordMode = it
+                        }
+                    )
+                    if (keywordMode != 0) {
+                        InsetDivider()
+                        InputRow(
+                            title = "关键词",
+                            summary = "多个用 |、逗号或换行分隔",
+                            value = keywords,
+                            minLines = 2,
+                            onValueChange = { keywords = it }
                         )
                     }
+                    InsetDivider()
+                    SwitchRow(
+                        checked = quietEnabled,
+                        title = "禁抢时段",
+                        summary = "在指定时间段内不抢红包",
+                        onCheckedChange = { quietEnabled = it }
+                    )
+                    if (quietEnabled) {
+                        InsetDivider()
+                        TimeOfDayPickerRow("开始时间", quietStart) { quietStart = it }
+                        InsetDivider()
+                        TimeOfDayPickerRow("结束时间", quietEnd) { quietEnd = it }
+                    }
                 }
             }
-            if (busyText.isNotEmpty()) {
-                item {
-                    Text(
-                        text = busyText,
-                        color = MiuixTheme.colorScheme.primary,
-                        fontSize = 13.sp,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp)
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "抢后回复") }
+            item {
+                SettingsCard {
+                    SelectRow(
+                        title = "私聊红包回复",
+                        summary = describeRedPacketReplySteps(privateReplySteps),
+                        onClick = { editingReplyStepsForGroup = false }
+                    )
+                    InsetDivider()
+                    SelectRow(
+                        title = "群红包回复",
+                        summary = describeRedPacketReplySteps(groupReplySteps),
+                        onClick = { editingReplyStepsForGroup = true }
                     )
                 }
             }
-            when {
-                loading -> item { EmptyText("正在加载插件") }
-                managedPlugins.isEmpty() -> item { EmptyText("暂无本地插件") }
-                visiblePlugins.isEmpty() -> item { EmptyText("没有匹配的插件") }
-                else -> {
-                    if (pinnedPlugins.isNotEmpty()) {
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "已置顶(${pinnedPlugins.size})") }
-                        item {
-                            SettingsCard {
-                                pinnedPlugins.forEachIndexed { index, item ->
-                                    key(item.plugin.id) {
-                                        ScriptPluginManagerRow(
-                                            modifier = Modifier,
-                                            item = item,
-                                            selected = item.plugin.id in selectedIds,
-                                            dragEnabled = query.isBlank() && busyText.isEmpty(),
-                                            onSelectedChange = { selected ->
-                                                selectedIds = if (selected) {
-                                                    selectedIds + item.plugin.id
-                                                } else {
-                                                    selectedIds - item.plugin.id
-                                                }
-                                            },
-                                            onOpenActions = { actionPlugin = item },
-                                            onDragMove = { delta -> movePlugin(item, delta) },
-                                            onDragStateChange = { dragging ->
-                                                if (dragging) {
-                                                    draggedPluginId = item.plugin.id
-                                                    dragOrderChanged = false
-                                                } else if (draggedPluginId == item.plugin.id) {
-                                                    draggedPluginId = null
-                                                    if (dragOrderChanged) commitOrder()
-                                                }
-                                            },
-                                            onOrderChanged = { dragOrderChanged = true }
-                                        )
-                                        if (index != pinnedPlugins.lastIndex) InsetDivider()
-                                    }
-                                }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "通知提醒") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        checked = notifySystemEnabled,
+                        title = "通知栏提醒",
+                        summary = "抢到红包时提醒",
+                        onCheckedChange = { notifySystemEnabled = it }
+                    )
+                    if (notifySystemEnabled) {
+                        InsetDivider()
+                        VariableInputRow(
+                            title = "通知栏文案",
+                            summary = "支持下方变量",
+                            value = notifyText,
+                            variables = redPacketTemplateVariables,
+                            onValueChange = { notifyText = it }
+                        )
+                    }
+                    InsetDivider()
+                    SwitchRow(
+                        checked = notifyToastEnabled,
+                        title = "浮窗提醒",
+                        summary = "抢到红包时短暂提示",
+                        onCheckedChange = { notifyToastEnabled = it }
+                    )
+                    if (notifyToastEnabled) {
+                        InsetDivider()
+                        VariableInputRow(
+                            title = "浮窗文案",
+                            summary = "支持下方变量",
+                            value = notifyToastText,
+                            variables = redPacketTemplateVariables,
+                            onValueChange = { notifyToastText = it }
+                        )
+                    }
+                    InsetDivider()
+                    SwitchRow(
+                        checked = notifySoundEnabled,
+                        title = "通知铃声",
+                        summary = "开启后播放通知铃声",
+                        onCheckedChange = { notifySoundEnabled = it }
+                    )
+                    if (notifySoundEnabled) {
+                        InsetDivider()
+                        PopupOptionRow(
+                            title = "铃声模式",
+                            summary = if (notifySoundMode == RedPacketSettings.NOTIFY_SOUND_MODE_CUSTOM) "从文件选择铃声" else "选择系统铃声",
+                            options = optionItems(
+                                "选择系统铃声" to RedPacketSettings.NOTIFY_SOUND_MODE_SYSTEM,
+                                "从文件选择铃声" to RedPacketSettings.NOTIFY_SOUND_MODE_CUSTOM
+                            ),
+                            currentValue = notifySoundMode,
+                            onValueChanged = {
+                                notifySoundMode = it
+                                notifySoundUri = ""
                             }
-                        }
-                    }
-                    if (normalPlugins.isNotEmpty()) {
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "其他插件(${normalPlugins.size})") }
-                        item {
-                            SettingsCard {
-                                normalPlugins.forEachIndexed { index, item ->
-                                    key(item.plugin.id) {
-                                        ScriptPluginManagerRow(
-                                            modifier = Modifier,
-                                            item = item,
-                                            selected = item.plugin.id in selectedIds,
-                                            dragEnabled = query.isBlank() && busyText.isEmpty(),
-                                            onSelectedChange = { selected ->
-                                                selectedIds = if (selected) {
-                                                    selectedIds + item.plugin.id
-                                                } else {
-                                                    selectedIds - item.plugin.id
-                                                }
-                                            },
-                                            onOpenActions = { actionPlugin = item },
-                                            onDragMove = { delta -> movePlugin(item, delta) },
-                                            onDragStateChange = { dragging ->
-                                                if (dragging) {
-                                                    draggedPluginId = item.plugin.id
-                                                    dragOrderChanged = false
-                                                } else if (draggedPluginId == item.plugin.id) {
-                                                    draggedPluginId = null
-                                                    if (dragOrderChanged) commitOrder()
-                                                }
-                                            },
-                                            onOrderChanged = { dragOrderChanged = true }
-                                        )
-                                        if (index != normalPlugins.lastIndex) InsetDivider()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    actionPlugin?.let { item ->
-        ScriptPluginActionDialog(
-            plugin = item.plugin,
-            pinned = item.pinned,
-            onDismiss = { actionPlugin = null },
-            onPinChanged = { pinned ->
-                actionPlugin = null
-                setPinned(setOf(item.plugin.id), pinned)
-            },
-            onRename = {
-                actionPlugin = null
-                showAfterDialogDismiss(context) { renamePlugin = item.plugin }
-            },
-            onExport = {
-                actionPlugin = null
-                showAfterDialogDismiss(context) {
-                    launchScriptPluginExport(context, listOf(item.plugin))
-                }
-            },
-            onDelete = {
-                actionPlugin = null
-                showAfterDialogDismiss(context) { deletePlugins = listOf(item.plugin) }
-            }
-        )
-    }
-    renamePlugin?.let { plugin ->
-        ScriptPluginRenameDialog(
-            plugin = plugin,
-            onDismiss = { renamePlugin = null },
-            onConfirm = { name ->
-                renamePlugin = null
-                busyText = "正在重命名"
-                scope.launch {
-                    val result = withContext(Dispatchers.IO) {
-                        ScriptPluginManager.renamePlugin(context, plugin.id, name)
-                    }
-                    busyText = ""
-                    result.fold(
-                        onSuccess = {
-                            refresh()
-                            Toast.makeText(context, "已重命名", Toast.LENGTH_SHORT).show()
-                        },
-                        onFailure = { showScriptPluginManagerError(context, it) }
-                    )
-                }
-            }
-        )
-    }
-    if (deletePlugins.isNotEmpty()) {
-        val pendingDelete = deletePlugins
-        ScriptPluginDeleteDialog(
-            pluginNames = pendingDelete.map { it.displayName ?: it.name.ifBlank { it.id } },
-            onDismiss = { deletePlugins = emptyList() },
-            onConfirm = {
-                deletePlugins = emptyList()
-                busyText = "正在删除插件"
-                scope.launch {
-                    val result = withContext(Dispatchers.IO) {
-                        ScriptPluginManager.deletePlugins(context, pendingDelete.map { it.id })
-                    }
-                    busyText = ""
-                    result.fold(
-                        onSuccess = {
-                            selectedIds = selectedIds - pendingDelete.mapTo(LinkedHashSet()) { it.id }
-                            refresh()
-                            Toast.makeText(context, "已删除 ${pendingDelete.size} 个插件", Toast.LENGTH_SHORT).show()
-                        },
-                        onFailure = { showScriptPluginManagerError(context, it) }
-                    )
-                }
-            }
-        )
-    }
-    importInspection?.let { inspection ->
-        ScriptPluginImportDialog(
-            inspection = inspection,
-            overwriteIds = importOverwriteIds,
-            applying = busyText == "正在导入插件",
-            onOverwriteChanged = { pluginId, overwrite ->
-                importOverwriteIds = if (overwrite) {
-                    importOverwriteIds + pluginId
-                } else {
-                    importOverwriteIds - pluginId
-                }
-            },
-            onDismiss = {
-                activeImportSessionId.set(null)
-                importInspection = null
-                Thread(
-                    { ScriptPluginManager.discardImport(context, inspection.sessionId) },
-                    "Hchat-Plugin-Import-Discard"
-                ).start()
-            },
-            onConfirm = {
-                busyText = "正在导入插件"
-                scope.launch {
-                    val actions = inspection.conflicts.associateWith { pluginId ->
-                        if (pluginId in importOverwriteIds) {
-                            ScriptPluginManager.ImportConflictAction.OVERWRITE
-                        } else {
-                            ScriptPluginManager.ImportConflictAction.SKIP
-                        }
-                    }
-                    val result = withContext(Dispatchers.IO) {
-                        ScriptPluginManager.applyImport(context, inspection.sessionId, actions)
-                    }
-                    busyText = ""
-                    result.fold(
-                        onSuccess = { imported ->
-                            activeImportSessionId.set(null)
-                            importInspection = null
-                            importOverwriteIds = emptySet()
-                            refresh()
-                            Toast.makeText(
-                                context,
-                                "已导入 ${imported.importedPluginIds.size} 个插件，保持关闭状态",
-                                Toast.LENGTH_LONG
-                            ).show()
-                        },
-                        onFailure = { showScriptPluginManagerError(context, it) }
-                    )
-                }
-            }
-        )
-    }
-}
-
-@Composable
-internal fun ScriptPluginSelectionToolbar(
-    selectedCount: Int,
-    allVisibleSelected: Boolean,
-    enabled: Boolean,
-    onSelectAll: () -> Unit,
-    onInvert: () -> Unit
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        Text(
-            text = if (selectedCount == 0) "未选择插件" else "已选择 $selectedCount 个",
-            color = MiuixTheme.colorScheme.onSurface,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f)
-        )
-        TextButton(
-            text = if (allVisibleSelected) "取消全选" else "全选",
-            enabled = enabled,
-            onClick = onSelectAll,
-            colors = ButtonDefaults.textButtonColorsPrimary()
-        )
-        TextButton(
-            text = "反选",
-            enabled = enabled,
-            onClick = onInvert,
-            colors = ButtonDefaults.textButtonColorsPrimary()
-        )
-    }
-}
-
-@Composable
-internal fun ScriptPluginBatchActions(
-    enabled: Boolean,
-    onPin: () -> Unit,
-    onUnpin: () -> Unit,
-    onExport: () -> Unit,
-    onDelete: () -> Unit
-) {
-    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp)) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ScriptPluginCompactAction("置顶", enabled, Modifier.weight(1f), onPin)
-            ScriptPluginCompactAction("取消置顶", enabled, Modifier.weight(1f), onUnpin)
-        }
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            ScriptPluginCompactAction("导出", enabled, Modifier.weight(1f), onExport)
-            ScriptPluginCompactAction("删除", enabled, Modifier.weight(1f), onDelete, destructive = true)
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginCompactAction(
-    text: String,
-    enabled: Boolean,
-    modifier: Modifier,
-    onClick: () -> Unit,
-    destructive: Boolean = false
-) {
-    val color = when {
-        !enabled -> MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f)
-        destructive -> Color(0xFFD93025)
-        else -> MiuixTheme.colorScheme.primary
-    }
-    Box(
-        modifier = modifier.height(40.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(color.copy(alpha = 0.10f))
-            .clickable(enabled = enabled, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(text = text, color = color, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    }
-}
-
-@Composable
-internal fun ScriptPluginManagerCommandRow(
-    icon: ImageVector,
-    title: String,
-    summary: String,
-    enabled: Boolean,
-    onClick: () -> Unit
-) {
-    val color = if (enabled) MiuixTheme.colorScheme.onSurface else {
-        MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.45f)
-    }
-    Row(
-        modifier = Modifier.fillMaxWidth().clickable(enabled = enabled, onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Image(
-            imageVector = icon,
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(color),
-            modifier = Modifier.size(22.dp)
-        )
-        Column(modifier = Modifier.weight(1f).padding(start = 14.dp)) {
-            Text(text = title, color = color, fontWeight = FontWeight.Medium)
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-        }
-    }
-}
-
-@Composable
-internal fun ScriptPluginManagerRow(
-    modifier: Modifier,
-    item: ScriptPluginManager.ManagedPlugin,
-    selected: Boolean,
-    dragEnabled: Boolean,
-    onSelectedChange: (Boolean) -> Unit,
-    onOpenActions: () -> Unit,
-    onDragMove: (Int) -> Boolean,
-    onDragStateChange: (Boolean) -> Unit,
-    onOrderChanged: () -> Unit
-) {
-    val plugin = item.plugin
-    val density = LocalDensity.current
-    var itemHeightPx by remember(plugin.id) { mutableStateOf(0f) }
-    var dragDistanceY by remember(plugin.id) { mutableStateOf(0f) }
-    var dragging by remember(plugin.id) { mutableStateOf(false) }
-    val currentOnDragMove by rememberUpdatedState(onDragMove)
-    val currentOnDragStateChange by rememberUpdatedState(onDragStateChange)
-    val currentOnOrderChanged by rememberUpdatedState(onOrderChanged)
-    val visualDragY by animateFloatAsState(
-        targetValue = dragDistanceY,
-        animationSpec = tween(durationMillis = if (dragging) 0 else 160),
-        label = "ScriptPluginDragOffset"
-    )
-    Row(
-        modifier = modifier.zIndex(if (dragging) 1f else 0f)
-            .graphicsLayer {
-                translationY = visualDragY
-                shadowElevation = if (dragging) with(density) { 7.dp.toPx() } else 0f
-                shape = RoundedCornerShape(8.dp)
-            }
-            .fillMaxWidth()
-            .onSizeChanged { itemHeightPx = it.height.toFloat() }
-            .clickable { onSelectedChange(!selected) }
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        SelectionMark(selected = selected, multiSelect = true)
-        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = plugin.displayName ?: plugin.name.ifBlank { plugin.id },
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Medium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                if (item.pinned) {
-                    Image(
-                        imageVector = NavIcons.Pin,
-                        contentDescription = "已置顶",
-                        colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.primary),
-                        modifier = Modifier.padding(start = 6.dp).size(16.dp)
-                    )
-                }
-            }
-            Text(
-                text = buildString {
-                    append(plugin.id)
-                    append(" · ").append(plugin.author.ifBlank { "未知作者" })
-                    append(" · ").append(plugin.version.ifBlank { "未知版本" })
-                },
-                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                fontSize = 12.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        Image(
-            imageVector = NavIcons.More,
-            contentDescription = "管理插件",
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-            modifier = Modifier.padding(start = 8.dp).size(32.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .clickable {
-                    onOpenActions()
-                }
-                .padding(5.dp)
-        )
-        Image(
-            imageVector = NavIcons.Drag,
-            contentDescription = if (dragEnabled) "长按拖动排序" else "搜索时不可排序",
-            colorFilter = ColorFilter.tint(
-                MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = if (dragEnabled) 1f else 0.35f)
-            ),
-            modifier = Modifier.padding(start = 4.dp).size(32.dp)
-                .pointerInput(plugin.id, dragEnabled, itemHeightPx) {
-                    if (!dragEnabled) return@pointerInput
-                    detectDragGesturesAfterLongPress(
-                        onDragStart = {
-                            dragDistanceY = 0f
-                            dragging = true
-                            currentOnDragStateChange(true)
-                        },
-                        onDragEnd = {
-                            dragging = false
-                            dragDistanceY = 0f
-                            currentOnDragStateChange(false)
-                        },
-                        onDragCancel = {
-                            dragging = false
-                            dragDistanceY = 0f
-                            currentOnDragStateChange(false)
-                        },
-                        onDrag = { change, dragAmount ->
-                            change.consume()
-                            dragDistanceY += dragAmount.y
-                            val step = itemHeightPx.takeIf { it > 0f } ?: with(density) { 62.dp.toPx() }
-                            while (dragDistanceY <= -step * 0.5f) {
-                                if (currentOnDragMove(-1)) {
-                                    dragDistanceY += step
-                                    currentOnOrderChanged()
-                                } else {
-                                    dragDistanceY = -step * 0.45f
-                                    break
-                                }
-                            }
-                            while (dragDistanceY >= step * 0.5f) {
-                                if (currentOnDragMove(1)) {
-                                    dragDistanceY -= step
-                                    currentOnOrderChanged()
-                                } else {
-                                    dragDistanceY = step * 0.45f
-                                    break
-                                }
-                            }
-                        }
-                    )
-                }
-                .padding(5.dp)
-        )
-    }
-}
-
-@Composable
-internal fun ScriptPluginActionDialog(
-    plugin: ScriptPluginRuntime.ScriptPlugin,
-    pinned: Boolean,
-    onDismiss: () -> Unit,
-    onPinChanged: (Boolean) -> Unit,
-    onRename: () -> Unit,
-    onExport: () -> Unit,
-    onDelete: () -> Unit
-) {
-    WindowDialog(
-        show = true,
-        title = plugin.displayName ?: plugin.name.ifBlank { plugin.id },
-        onDismissRequest = onDismiss,
-        content = {
-            Column {
-                ScriptPluginDialogActionRow(
-                    icon = NavIcons.Pin,
-                    text = if (pinned) "取消置顶" else "置顶",
-                    onClick = { onPinChanged(!pinned) }
-                )
-                ScriptPluginDialogActionRow(NavIcons.Edit, "重命名", onClick = onRename)
-                ScriptPluginDialogActionRow(NavIcons.Export, "导出", onClick = onExport)
-                ScriptPluginDialogActionRow(NavIcons.Delete, "删除", destructive = true, onClick = onDelete)
-            }
-        }
-    )
-}
-
-@Composable
-internal fun ScriptPluginDialogActionRow(
-    icon: ImageVector,
-    text: String,
-    destructive: Boolean = false,
-    onClick: () -> Unit
-) {
-    val color = if (destructive) Color(0xFFD93025) else MiuixTheme.colorScheme.onSurface
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(
-                if (destructive) Color(0xFFD93025).copy(alpha = 0.08f)
-                else MiuixTheme.colorScheme.secondaryVariant
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 18.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Image(
-            imageVector = icon,
-            contentDescription = null,
-            colorFilter = ColorFilter.tint(color),
-            modifier = Modifier.size(22.dp)
-        )
-        Text(text = text, color = color, fontSize = 15.sp, modifier = Modifier.padding(start = 18.dp))
-    }
-}
-
-@Composable
-internal fun ScriptPluginRenameDialog(
-    plugin: ScriptPluginRuntime.ScriptPlugin,
-    onDismiss: () -> Unit,
-    onConfirm: (String) -> Unit
-) {
-    var name by remember(plugin.id) {
-        mutableStateOf(plugin.displayName ?: plugin.name.ifBlank { plugin.id })
-    }
-    WindowDialog(
-        show = true,
-        title = "重命名插件",
-        onDismissRequest = onDismiss,
-        content = {
-            Column {
-                Text(
-                    text = "仅修改展示名称，插件目录和 ID 保持不变",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 12.sp
-                )
-                BasicTextField(
-                    value = name,
-                    onValueChange = { name = it.take(100) },
-                    singleLine = true,
-                    textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 15.sp),
-                    cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MiuixTheme.colorScheme.secondaryVariant)
-                        .padding(horizontal = 12.dp, vertical = 11.dp)
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    TextButton(
-                        text = "取消",
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                    TextButton(
-                        text = "确定",
-                        onClick = { onConfirm(name.trim()) },
-                        enabled = name.trim().isNotEmpty(),
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                }
-            }
-        }
-    )
-}
-
-@Composable
-internal fun ScriptPluginDeleteDialog(
-    pluginNames: List<String>,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    WindowDialog(
-        show = true,
-        title = if (pluginNames.size == 1) "删除插件" else "批量删除插件",
-        onDismissRequest = onDismiss,
-        content = {
-            Column {
-                Text(
-                    text = if (pluginNames.size == 1) {
-                        "确定删除“${pluginNames.first()}”吗？插件会先停止运行，删除后无法恢复。"
-                    } else {
-                        "确定删除已选的 ${pluginNames.size} 个插件吗？插件会先停止运行，删除后无法恢复。"
-                    },
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontSize = 14.sp
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    TextButton(
-                        text = "取消",
-                        onClick = onDismiss,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                    TextButton(
-                        text = "删除",
-                        onClick = onConfirm,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                }
-            }
-        }
-    )
-}
-
-@Composable
-internal fun ScriptPluginImportDialog(
-    inspection: ScriptPluginManager.ImportInspection,
-    overwriteIds: Set<String>,
-    applying: Boolean,
-    onOverwriteChanged: (String, Boolean) -> Unit,
-    onDismiss: () -> Unit,
-    onConfirm: () -> Unit
-) {
-    WindowDialog(
-        show = true,
-        title = "导入插件",
-        onDismissRequest = { if (!applying) onDismiss() },
-        content = {
-            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
-                Text(
-                    text = "共 ${inspection.plugins.size} 个插件。已有同 ID 插件默认跳过，可单独选择覆盖。",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 12.sp
-                )
-                LazyColumn(
-                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false).padding(top = 10.dp)
-                ) {
-                    items(inspection.plugins, key = { it.pluginId }) { plugin ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable(enabled = !applying && plugin.conflict) {
-                                    onOverwriteChanged(plugin.pluginId, plugin.pluginId !in overwriteIds)
-                                }
-                                .padding(horizontal = 10.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = plugin.name.ifBlank { plugin.pluginId },
-                                    color = MiuixTheme.colorScheme.onSurface,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                                Text(
-                                    text = if (plugin.conflict) {
-                                        if (plugin.pluginId in overwriteIds) "覆盖已有插件" else "跳过已有插件"
-                                    } else {
-                                        "新增插件"
-                                    },
-                                    color = if (plugin.conflict && plugin.pluginId in overwriteIds) {
-                                        Color(0xFFD93025)
-                                    } else {
-                                        MiuixTheme.colorScheme.onSurfaceVariantSummary
-                                    },
-                                    fontSize = 12.sp
-                                )
-                            }
-                            if (plugin.conflict) {
-                                SelectionMark(
-                                    selected = plugin.pluginId in overwriteIds,
-                                    multiSelect = true
-                                )
-                            }
-                        }
-                    }
-                }
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    TextButton(
-                        text = "取消",
-                        onClick = onDismiss,
-                        enabled = !applying,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                    TextButton(
-                        text = if (applying) "正在导入" else "导入",
-                        onClick = onConfirm,
-                        enabled = !applying,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                }
-            }
-        }
-    )
-}
-
-internal fun launchScriptPluginExport(
-    context: Context,
-    plugins: List<ScriptPluginRuntime.ScriptPlugin>
-) {
-    if (plugins.isEmpty()) {
-        Toast.makeText(context, "未选择插件", Toast.LENGTH_SHORT).show()
-        return
-    }
-    val activity = context as? Activity
-    if (activity == null) {
-        Toast.makeText(context, "无法打开文件选择器", Toast.LENGTH_SHORT).show()
-        return
-    }
-    val fileName = scriptPluginExportFileName(plugins)
-    ScriptPluginDocumentBridge.launchExport(activity, fileName) { uri ->
-        Thread({
-            val result = runCatching {
-                context.contentResolver.openOutputStream(uri, "w")?.use { output ->
-                    ScriptPluginManager.exportPlugins(context, plugins.map { it.id }, output).getOrThrow()
-                } ?: error("无法写入所选文件")
-            }
-            if (result.isFailure) runCatching { context.contentResolver.delete(uri, null, null) }
-            Handler(Looper.getMainLooper()).post {
-                result.fold(
-                    onSuccess = { exported ->
-                        Toast.makeText(
-                            context,
-                            "已导出 ${exported.exportedPluginIds.size} 个插件",
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    },
-                    onFailure = { showScriptPluginManagerError(context, it) }
-                )
-            }
-        }, "Hchat-Plugin-Export").start()
-    }
-}
-
-internal fun scriptPluginExportFileName(plugins: List<ScriptPluginRuntime.ScriptPlugin>): String {
-    val base = if (plugins.size == 1) {
-        plugins.first().displayName ?: plugins.first().name.ifBlank { plugins.first().id }
-    } else {
-        "Hchat_脚本插件_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())}"
-    }
-    val safe = base.removeSuffix(".zip")
-        .replace(Regex("""[\\/:*?\"<>|]"""), "_")
-        .trim()
-        .ifBlank { "Hchat_脚本插件" }
-    return "$safe.zip"
-}
-
-internal fun showAfterDialogDismiss(context: Context, action: () -> Unit) {
-    val activity = context as? Activity
-    if (activity != null) {
-        activity.window.decorView.postOnAnimation(action)
-    } else {
-        Handler(Looper.getMainLooper()).post(action)
-    }
-}
-
-internal fun showScriptPluginManagerError(context: Context, error: Throwable) {
-    h.Hchat.utils.HLog.e("[Hchat:ScriptManager] ${error.message ?: "操作失败"}", error)
-    Toast.makeText(context, error.message ?: "操作失败", Toast.LENGTH_LONG).show()
-}
-
-@Composable
-internal fun PathSwitchRow(
-    checked: Boolean,
-    title: String,
-    summary: String,
-    onInfoClick: () -> Unit,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    var pressed by remember { mutableStateOf(false) }
-    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .clip(RoundedCornerShape(12.dp))
-                .background(pressFeedbackColor)
-                .responsiveTap(
-                    onClick = onInfoClick,
-                    onPressedChange = { pressed = it }
-                )
-                .padding(horizontal = 12.dp, vertical = 10.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = title,
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                ClickHintTag()
-            }
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-        }
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            modifier = Modifier.padding(start = 12.dp)
-        )
-    }
-}
-
-@Composable
-internal fun ScriptPluginRow(
-    checked: Boolean,
-    title: String,
-    summary: String,
-    showSettings: Boolean,
-    onOpenReadme: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onOpenManager: () -> Unit,
-    onCheckedChange: (Boolean) -> Unit
-) {
-    var pressed by remember { mutableStateOf(false) }
-    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(pressFeedbackColor)
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Column(
-            modifier = Modifier.weight(1f)
-                .responsiveTap(
-                    onClick = onOpenReadme,
-                    onPressedChange = { pressed = it }
-                )
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = title,
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-                ClickHintTag()
-            }
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-        }
-        if (showSettings) {
-            Image(
-                imageVector = NavIcons.Settings,
-                contentDescription = "插件设置",
-                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                modifier = Modifier
-                    .padding(start = 10.dp, end = 8.dp)
-                    .size(22.dp)
-                    .responsiveTap(onClick = onOpenSettings)
-            )
-        }
-        Image(
-            imageVector = NavIcons.More,
-            contentDescription = "管理插件",
-            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-            modifier = Modifier
-                .padding(start = if (showSettings) 0.dp else 10.dp, end = 8.dp)
-                .size(22.dp)
-                .responsiveTap(onClick = onOpenManager)
-        )
-        Switch(
-            checked = checked,
-            onCheckedChange = onCheckedChange
-        )
-    }
-}
-
-@Composable
-internal fun ScriptPluginPathDialog(
-    context: Context,
-    title: String,
-    path: String,
-    onClose: () -> Unit
-) {
-    WindowDialog(
-        show = true,
-        title = title,
-        onDismissRequest = onClose,
-        content = {
-            Column {
-                Text(
-                    text = path,
-                    color = MiuixTheme.colorScheme.onSurface,
-                    fontSize = 13.sp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 8.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(MiuixTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 12.dp, vertical = 10.dp)
-                )
-                TextButton(
-                    text = "复制路径",
-                    onClick = {
-                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                        clipboard?.setPrimaryClip(ClipData.newPlainText("HchatScriptDir", path))
-                        Toast.makeText(context, "已复制", Toast.LENGTH_SHORT).show()
-                        onClose()
-                    },
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
-                )
-                TextButton(
-                    text = "关闭",
-                    onClick = onClose,
-                    modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
-                )
-            }
-        }
-    )
-}
-
-@Composable
-fun FirstUseAgreementDialog(
-    context: Context,
-    onCancel: () -> Unit,
-    onAccepted: () -> Unit
-) {
-    var input by remember { mutableStateOf("") }
-    var remainingSeconds by remember { mutableStateOf(30) }
-    val acceptedText = TermsGate.AGREEMENT_TEXT
-    LaunchedEffect(Unit) {
-        while (remainingSeconds > 0) {
-            delay(1000L)
-            remainingSeconds -= 1
-        }
-    }
-    val agreement = remember {
-        """
-        Hchat 使用协议与免责声明
-
-        1. 本模块为免费模块，仅供个人学习、研究、测试、逆向分析和备份用途使用，不提供任何商业授权、售后承诺或稳定性保证。
-        2. 本模块与微信、腾讯及其关联主体无关，不代表官方立场，也不是官方客户端、官方插件或官方服务的一部分。
-        3. 禁止倒卖、付费分发、捆绑销售、二次打包收费、引流售卖、以捐赠名义收费，禁止冒充作者、官方渠道或授权代理发布。
-        4. 请勿在国内公开平台、群组、论坛、短视频平台、网盘分享页、应用市场或其它公开渠道传播、推广、引流、售卖或组织分发本模块。
-        5. 本模块可能会修改微信运行时行为，使用后可能出现功能异常、消息异常、账号风控、限制登录、数据异常、闪退、掉线、模块冲突或其它不可预期问题。
-        6. 使用者应自行确认所在地法律法规、平台协议、设备环境和账号风险；因安装、使用、传播、修改、二次分发或与其它模块共存产生的任何后果均由使用者自行承担。
-        7. 禁止将本模块用于骚扰、欺诈、刷量、营销轰炸、盗取信息、破坏服务稳定性、绕过平台风控、侵犯他人权益或其它违法违规用途。
-        8. 本模块不保证适配所有微信版本、系统版本、设备环境、热更新状态和其它模块共存环境，也不承诺持续维护、及时修复或提供任何形式的服务保障。
-        9. 如果你不同意以上任一条款，请点击取消并停止使用本模块。
-
-        如果你理解并接受以上内容，请在下方输入“$acceptedText”后继续使用。
-        """.trimIndent()
-    }
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-    val dialogMaxHeight = (screenHeight * 0.78f).coerceAtMost(640.dp)
-    val agreementMaxHeight = (screenHeight * 0.42f).coerceIn(220.dp, 430.dp)
-    WindowDialog(
-        show = true,
-        title = "使用协议",
-        onDismissRequest = {},
-        content = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = dialogMaxHeight)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = agreementMaxHeight)
-                        .verticalScroll(rememberScrollState())
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MiuixTheme.colorScheme.surfaceVariant)
-                        .padding(horizontal = 14.dp, vertical = 12.dp)
-                ) {
-                    Text(
-                        text = agreement,
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontSize = 13.sp,
-                        lineHeight = 20.sp
-                    )
-                }
-                Text(
-                    text = "请输入“$acceptedText”确认",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 14.dp)
-                )
-                BasicTextField(
-                    value = input,
-                    onValueChange = { input = it },
-                    singleLine = true,
-                    textStyle = TextStyle(
-                        color = MiuixTheme.colorScheme.onSurface,
-                        fontSize = 15.sp
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(MiuixTheme.colorScheme.secondaryVariant)
-                        .padding(horizontal = 12.dp, vertical = 11.dp)
-                )
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    TextButton(
-                        text = "取消",
-                        onClick = onCancel,
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
-                    )
-                    TextButton(
-                        text = if (remainingSeconds > 0) "继续（${remainingSeconds}s）" else "同意并继续",
-                        onClick = {
-                            if (remainingSeconds > 0) {
-                                Toast.makeText(context, "请等待 ${remainingSeconds} 秒后继续", Toast.LENGTH_SHORT).show()
-                            } else if (input.trim() == acceptedText) {
-                                if (TermsGate.accept(context)) {
-                                    onAccepted()
-                                } else {
-                                    Toast.makeText(context, "协议状态保存失败，请重试", Toast.LENGTH_SHORT).show()
-                                }
+                        )
+                        InsetDivider()
+                        ActionRow("选择铃声", ringtoneDisplayName(context, notifySoundUri, notifySoundMode)) {
+                            val activity = context as? Activity
+                            if (activity == null) {
+                                Toast.makeText(context, "当前页面无法打开铃声选择器", Toast.LENGTH_SHORT).show()
                             } else {
-                                Toast.makeText(context, "请输入“$acceptedText”后继续", Toast.LENGTH_SHORT).show()
+                                val onPicked: (String) -> Unit = { uri ->
+                                    if (uri.isNotBlank()) {
+                                        notifySoundUri = if (notifySoundMode == RedPacketSettings.NOTIFY_SOUND_MODE_CUSTOM) {
+                                            CustomNotificationRuntime.freezeRingtoneUri(context, uri)
+                                        } else {
+                                            uri
+                                        }
+                                    }
+                                }
+                                if (notifySoundMode == RedPacketSettings.NOTIFY_SOUND_MODE_CUSTOM) {
+                                    RingtonePickerBridge.launchFile(activity, onPicked)
+                                } else {
+                                    RingtonePickerBridge.launchSystem(activity, notifySoundUri, onPicked)
+                                }
                             }
-                        },
-                        modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.textButtonColorsPrimary()
+                        }
+                    }
+                    InsetDivider()
+                    SwitchRow(
+                        checked = notifyVibrateEnabled,
+                        title = "通知震动",
+                        summary = "开启后触发通知震动",
+                        onCheckedChange = { notifyVibrateEnabled = it }
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = announceEnabled,
+                        title = "抢到红包播报",
+                        summary = "抢到后用系统语音播报",
+                        onCheckedChange = { announceEnabled = it }
+                    )
+                    if (announceEnabled) {
+                        InsetDivider()
+                        VariableInputRow(
+                            title = "播报文案",
+                            summary = "支持下方变量",
+                            value = announceText,
+                            variables = redPacketTemplateVariables,
+                            onValueChange = { announceText = it }
+                        )
+                    }
+                    InsetDivider()
+                    SwitchRow(
+                        checked = notifyFailedSystemEnabled,
+                        title = "未抢到提醒",
+                        summary = "未抢到红包时通知",
+                        onCheckedChange = { notifyFailedSystemEnabled = it }
+                    )
+                    if (notifyFailedSystemEnabled) {
+                        InsetDivider()
+                        VariableInputRow(
+                            title = "未抢到通知栏文案",
+                            summary = "支持下方变量",
+                            value = notifyFailedText,
+                            variables = redPacketTemplateVariables,
+                            onValueChange = { notifyFailedText = it }
+                        )
+                    }
+                    InsetDivider()
+                    SwitchRow(
+                        checked = notifyFailedToastEnabled,
+                        title = "未抢到浮窗",
+                        summary = "未抢到红包时短暂提示",
+                        onCheckedChange = { notifyFailedToastEnabled = it }
+                    )
+                    if (notifyFailedToastEnabled) {
+                        InsetDivider()
+                        VariableInputRow(
+                            title = "未抢到浮窗文案",
+                            summary = "支持下方变量",
+                            value = notifyFailedToastText,
+                            variables = redPacketTemplateVariables,
+                            onValueChange = { notifyFailedToastText = it }
+                        )
+                    }
+                }
+            }
+            if (request.canDelete) {
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
+                item {
+                    SettingsCard {
+                        ActionRow("删除模板", "删除后使用该模板的聊天会变成未绑定模板") {
+                            onDelete()
+                            Toast.makeText(context, "模板已删除", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun RedPacketBindingPage(
+    context: Context,
+    request: RedPacketBindingEditorRequest,
+    templates: List<RedPacketRuleTemplate>,
+    onBack: () -> Unit,
+    onSave: (RedPacketRuleBinding) -> Unit,
+    onDelete: () -> Unit
+) {
+    var enabled by remember(request) { mutableStateOf(request.binding.enabled) }
+    var templateId by remember(request) { mutableStateOf(request.binding.templateId) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    val targetTitle = request.binding.label.ifBlank { request.binding.targetId }
+
+    PageScaffold(
+        title = targetTitle,
+        largeTitle = targetTitle,
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存聊天",
+                onPrimaryClick = {
+                    onSave(
+                        request.binding.copy(
+                            enabled = enabled,
+                            templateId = templateId,
+                            customRules = false,
+                            overrideRule = null
+                        )
+                    )
+                    Toast.makeText(context, "适用聊天已保存", Toast.LENGTH_SHORT).show()
+                },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "聊天") }
+            item {
+                SettingsCard {
+                    InfoRow("名称", targetTitle)
+                    InsetDivider()
+                    InfoRow("ID", request.binding.targetId)
+                    InsetDivider()
+                    SwitchRow(
+                        checked = enabled,
+                        title = "启用",
+                        summary = "关闭后这个聊天不会按模板自动抢红包",
+                        onCheckedChange = { enabled = it }
                     )
                 }
             }
-        }
-    )
-}
-
-@Composable
-fun ScriptPluginReadmeDialog(
-    context: Context,
-    plugin: ScriptPluginRuntime.ScriptPlugin,
-    onClose: () -> Unit
-) {
-    val readme = remember(plugin.id) {
-        runCatching {
-            val file = File(plugin.dir, "README.md")
-            if (file.isFile) file.readText(Charsets.UTF_8) else ""
-        }.getOrDefault("")
-    }
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-    val dialogMaxHeight = (screenHeight * 0.78f).coerceAtMost(640.dp)
-    val readmeMaxHeight = (screenHeight * 0.58f).coerceIn(240.dp, 520.dp)
-
-    WindowDialog(
-        show = true,
-        title = plugin.displayName ?: "未知",
-        onDismissRequest = onClose,
-        content = {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = dialogMaxHeight)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = readmeMaxHeight)
-                        .verticalScroll(rememberScrollState())
-                ) {
-                    if (readme.isBlank()) {
-                        Text(
-                            text = "暂无说明",
-                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                            fontSize = 13.sp,
-                            modifier = Modifier.padding(vertical = 10.dp)
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模板") }
+            item {
+                SettingsCard {
+                    OptionChoiceRow(
+                        item = OptionItem("跟随默认规则", -1, "启用后按默认规则或旧版全局设置抢红包"),
+                        selected = templateId.isBlank(),
+                        onClick = { templateId = "" }
+                    )
+                    if (templates.isNotEmpty()) InsetDivider()
+                    templates.forEachIndexed { index, template ->
+                        OptionChoiceRow(
+                            item = OptionItem(
+                                label = template.name.ifBlank { "模板 ${index + 1}" },
+                                value = index,
+                                summary = describeRedPacketTemplate(template)
+                            ),
+                            selected = templateId == template.id,
+                            onClick = { templateId = template.id }
                         )
-                    } else {
-                        MarkdownUi.Content(context, readme)
+                        if (index < templates.lastIndex) InsetDivider()
                     }
                 }
-                TextButton(
-                    text = "关闭",
-                    onClick = onClose,
-                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                    colors = ButtonDefaults.textButtonColorsPrimary()
-                )
             }
-        }
-    )
-}
-
-}
-
-internal object MarkdownUi {
-
-@Composable
-fun Content(
-    context: Context,
-    markdown: String,
-    contentPadding: PaddingValues = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
-    bodyFontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
-    onCopyCode: ((String) -> Unit)? = null
-) {
-    val lines = markdown.replace("\r\n", "\n").replace('\r', '\n').lines()
-    var inCodeBlock = false
-    var inlineState = MarkdownInlineState()
-    val codeLines = ArrayList<String>()
-    Column(modifier = Modifier.fillMaxWidth().padding(contentPadding)) {
-        lines.forEach { rawLine ->
-            val line = rawLine.trimEnd()
-            if (line.trimStart().startsWith("```")) {
-                if (inCodeBlock) {
-                    CodeBlock(codeLines.joinToString("\n"), onCopyCode)
-                    codeLines.clear()
-                    inCodeBlock = false
-                } else {
-                    inCodeBlock = true
-                    codeLines.clear()
-                }
-                return@forEach
-            }
-            if (inCodeBlock) {
-                codeLines += rawLine
-                return@forEach
-            }
-            val nextState = MarkdownLine(context, line, inlineState, bodyFontSize)
-            inlineState = nextState
-        }
-        if (inCodeBlock && codeLines.isNotEmpty()) {
-            CodeBlock(codeLines.joinToString("\n"), onCopyCode)
-        }
-    }
-}
-
-@Composable
-internal fun MarkdownLine(
-    context: Context,
-    line: String,
-    inlineState: MarkdownInlineState,
-    bodyFontSize: androidx.compose.ui.unit.TextUnit = 13.sp
-): MarkdownInlineState {
-    val trimmed = line.trim()
-    return when {
-        trimmed.isBlank() -> {
-            Box(modifier = Modifier.height(8.dp))
-            inlineState
-        }
-        trimmed.matches(Regex("""-{3,}|_{3,}|\*{3,}""")) -> {
-            Box(
-                modifier = Modifier.fillMaxWidth()
-                    .padding(vertical = 8.dp)
-                    .height(1.dp)
-                    .background(MiuixTheme.colorScheme.outline)
-            )
-            inlineState
-        }
-        trimmed.startsWith("#") -> {
-            val level = trimmed.takeWhile { it == '#' }.length.coerceIn(1, 6)
-            val text = trimmed.drop(level).trim()
-            MarkdownTextResult(
-                context = context,
-                text = text,
-                inlineState = inlineState,
-                modifier = Modifier.padding(top = if (level <= 2) 10.dp else 8.dp, bottom = 4.dp),
-                color = MiuixTheme.colorScheme.onSurface,
-                fontSize = when (level) {
-                    1 -> 22.sp
-                    2 -> 19.sp
-                    3 -> 17.sp
-                    else -> 15.sp
-                },
-                fontWeight = FontWeight.SemiBold
-            )
-        }
-        trimmed.startsWith(">") -> {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            ) {
-                Box(
-                    modifier = Modifier.padding(end = 8.dp)
-                        .size(width = 3.dp, height = 20.dp)
-                        .background(MiuixTheme.colorScheme.primary)
-                )
-                MarkdownTextResult(
-                    context = context,
-                    text = trimmed.removePrefix(">").trim(),
-                    inlineState = inlineState,
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = bodyFontSize,
-                    modifier = Modifier.weight(1f)
-                )
-            }
-            inlineState
-        }
-        trimmed.startsWith("- ") || trimmed.startsWith("* ") || trimmed.startsWith("+ ") -> {
-            MarkdownBullet(context, trimmed.drop(2).trim(), inlineState, fontSize = bodyFontSize)
-        }
-        Regex("""^\d+[.)]\s+.*""").matches(trimmed) -> {
-            val marker = trimmed.substringBefore(' ').trim()
-            MarkdownBullet(context, trimmed.removePrefix(marker).trim(), inlineState, marker, bodyFontSize)
-        }
-        else -> {
-            MarkdownTextResult(
-                context = context,
-                text = line,
-                inlineState = inlineState,
-                fontSize = bodyFontSize,
-                modifier = Modifier.padding(vertical = 2.dp)
-            )
-        }
-    }
-}
-
-@Composable
-internal fun MarkdownBullet(
-    context: Context,
-    text: String,
-    inlineState: MarkdownInlineState,
-    marker: String = "•",
-    fontSize: androidx.compose.ui.unit.TextUnit = 13.sp
-): MarkdownInlineState {
-    var nextState = inlineState
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-        Text(
-            text = marker,
-            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-            fontSize = fontSize,
-            modifier = Modifier.padding(end = 8.dp)
-        )
-        nextState = MarkdownTextResult(
-            context = context,
-            text = text,
-            inlineState = inlineState,
-            fontSize = fontSize,
-            modifier = Modifier.weight(1f)
-        )
-    }
-    return nextState
-}
-
-@Composable
-fun CodeBlock(code: String, onCopy: ((String) -> Unit)? = null) {
-    Column(
-        modifier = Modifier.fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MiuixTheme.colorScheme.surfaceVariant)
-    ) {
-        if (onCopy != null) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(start = 10.dp, top = 4.dp, end = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "代码",
-                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 11.sp,
-                    modifier = Modifier.weight(1f)
-                )
-                Image(
-                    imageVector = NavIcons.Copy,
-                    contentDescription = "复制代码",
-                    colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurfaceVariantSummary),
-                    modifier = Modifier.size(26.dp).clip(RoundedCornerShape(4.dp))
-                        .clickable { onCopy(code) }
-                        .padding(6.dp)
-                )
-            }
-        }
-        Text(
-            text = code,
-            color = MiuixTheme.colorScheme.onSurface,
-            fontSize = 12.sp,
-            fontFamily = FontFamily.Monospace,
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
-        )
-    }
-}
-
-@Composable
-fun Text(
-    context: Context,
-    text: String,
-    modifier: Modifier = Modifier,
-    color: Color = MiuixTheme.colorScheme.onSurface,
-    fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
-    fontWeight: FontWeight? = null
-) {
-    MarkdownTextResult(context, text, MarkdownInlineState(), modifier, color, fontSize, fontWeight)
-}
-
-@Composable
-internal fun MarkdownTextResult(
-    context: Context,
-    text: String,
-    inlineState: MarkdownInlineState,
-    modifier: Modifier = Modifier,
-    color: Color = MiuixTheme.colorScheme.onSurface,
-    fontSize: androidx.compose.ui.unit.TextUnit = 13.sp,
-    fontWeight: FontWeight? = null
-): MarkdownInlineState {
-    val primary = MiuixTheme.colorScheme.primary
-    val result = remember(text, primary, inlineState.bold) {
-        buildMarkdownAnnotatedString(text, primary, inlineState)
-    }
-    ClickableText(
-        text = result.text,
-        modifier = modifier,
-        style = TextStyle(color = color, fontSize = fontSize, fontWeight = fontWeight),
-        onClick = { offset ->
-            result.text.getStringAnnotations(MARKDOWN_LINK_TAG, offset, offset)
-                .firstOrNull()
-                ?.let { annotation -> openMarkdownLink(context, annotation.item) }
-        }
-    )
-    return result.state
-}
-
-internal data class MarkdownInlineState(val bold: Boolean = false)
-
-internal data class MarkdownInlineResult(
-    val text: AnnotatedString,
-    val state: MarkdownInlineState
-)
-
-internal fun buildMarkdownAnnotatedString(
-    text: String,
-    accent: Color,
-    initialState: MarkdownInlineState
-): MarkdownInlineResult {
-    var state = initialState
-    val annotated = buildAnnotatedString {
-        state = appendInlineMarkdown(text, accent, state)
-    }
-    return MarkdownInlineResult(annotated, state)
-}
-
-internal fun AnnotatedString.Builder.appendInlineMarkdown(
-    text: String,
-    accent: Color,
-    initialState: MarkdownInlineState
-): MarkdownInlineState {
-    var state = initialState
-    var segmentStart = 0
-    MARKDOWN_LINK_REGEX.findAll(text).forEach { match ->
-        if (match.range.first > segmentStart) {
-            state = appendInlineMarkdownSegment(
-                text.substring(segmentStart, match.range.first),
-                accent,
-                state
-            )
-        }
-        val label = match.groupValues[1]
-        val url = match.groupValues[2].trim()
-        if (label.isNotBlank() && url.isNotBlank()) {
-            pushStringAnnotation(MARKDOWN_LINK_TAG, url)
-            appendStyledInline(label, accent, state, link = true)
-            pop()
-        } else {
-            append(match.value)
-        }
-        segmentStart = match.range.last + 1
-    }
-    if (segmentStart < text.length) {
-        state = appendInlineMarkdownSegment(text.substring(segmentStart), accent, state)
-    }
-    return state
-}
-
-internal fun AnnotatedString.Builder.appendInlineMarkdownSegment(
-    text: String,
-    accent: Color,
-    initialState: MarkdownInlineState
-): MarkdownInlineState {
-    var state = initialState
-    var index = 0
-    while (index < text.length) {
-        when {
-            text.startsWith("**", index) -> {
-                state = state.copy(bold = !state.bold)
-                index += 2
-            }
-            text[index] == '`' -> {
-                val end = text.indexOf('`', index + 1)
-                if (end > index) {
-                    withStyle(SpanStyle(color = accent, fontFamily = FontFamily.Monospace)) {
-                        append(text.substring(index + 1, end))
+            if (request.canDelete) {
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
+                item {
+                    SettingsCard {
+                        ActionRow("移除适用聊天", "移除后该聊天回到默认规则") {
+                            onDelete()
+                            Toast.makeText(context, "适用聊天已移除", Toast.LENGTH_SHORT).show()
+                        }
                     }
-                    index = end + 1
-                } else {
-                    append(text[index])
-                    index++
                 }
             }
-            else -> {
-                appendStyledInline(text[index].toString(), accent, state, link = false)
-                index++
-            }
         }
     }
-    return state
-}
-
-internal fun AnnotatedString.Builder.appendStyledInline(
-    value: String,
-    accent: Color,
-    state: MarkdownInlineState,
-    link: Boolean
-) {
-    val style = SpanStyle(
-        color = if (link) accent else Color.Unspecified,
-        fontWeight = when {
-            link -> FontWeight.Medium
-            state.bold -> FontWeight.SemiBold
-            else -> null
-        }
-    )
-    withStyle(style) {
-        append(value)
-    }
-}
-
-internal fun openMarkdownLink(context: Context, url: String) {
-    val value = url.trim()
-    if (value.isBlank()) return
-    runCatching {
-        val normalized = if (value.contains("://")) value else "https://$value"
-        val uri = Uri.parse(normalized)
-        val intent = Intent(Intent.ACTION_VIEW, uri)
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
-    }
-}
-
 }
 
 @Composable
-internal fun WeChatTabletMiuixPage(
+internal fun AntiRecallMiuixPage(
     context: Context,
     provider: FeatureSettingsProvider,
     onBack: () -> Unit
 ) {
-    val sp = remember { HchatStorage.preferences(context, WeChatTabletSettings.PREFS_NAME) }
+    val sp = remember { HchatStorage.preferences(context, AntiRecallSettings.PREFS_NAME) }
+    var noticeText by remember {
+        mutableStateOf(
+            normalizeAntiRecallNoticeText(sp.getString(
+                AntiRecallSettings.KEY_NOTICE_TEXT,
+                AntiRecallSettings.DEFAULT_NOTICE_TEXT
+            ) ?: AntiRecallSettings.DEFAULT_NOTICE_TEXT)
+        )
+    }
+    var noticeTimeFormat by remember {
+        mutableStateOf(
+            sp.getString(
+                AntiRecallSettings.KEY_NOTICE_TIME_FORMAT,
+                AntiRecallSettings.DEFAULT_NOTICE_TIME_FORMAT
+            ) ?: AntiRecallSettings.DEFAULT_NOTICE_TIME_FORMAT
+        )
+    }
+    val usesTimeVariable = noticeText.contains(AntiRecallSettings.VAR_SEND_TIME) ||
+        noticeText.contains(AntiRecallSettings.VAR_RECALL_TIME)
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存设置",
+                onPrimaryClick = save@{
+                    val normalizedTimeFormat = noticeTimeFormat.trim()
+                        .ifBlank { AntiRecallSettings.DEFAULT_NOTICE_TIME_FORMAT }
+                    val timeFormatValid = runCatching {
+                        SimpleDateFormat(normalizedTimeFormat, Locale.getDefault()).format(Date())
+                    }.isSuccess
+                    if (usesTimeVariable && !timeFormatValid) {
+                        Toast.makeText(context, "时间格式无效", Toast.LENGTH_SHORT).show()
+                        return@save
+                    }
+                    sp.edit()
+                        .putString(
+                            AntiRecallSettings.KEY_NOTICE_TEXT,
+                            noticeText.ifBlank { AntiRecallSettings.DEFAULT_NOTICE_TEXT }
+                        )
+                        .putString(
+                            AntiRecallSettings.KEY_NOTICE_TIME_FORMAT,
+                            if (timeFormatValid) {
+                                normalizedTimeFormat
+                            } else {
+                                AntiRecallSettings.DEFAULT_NOTICE_TIME_FORMAT
+                            }
+                        )
+                        .apply()
+                    Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
+                },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 20.dp
+            )
+        ) {
+            item { SmallTitle(text = "防撤回") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        sp,
+                        AntiRecallSettings.KEY_ENABLE,
+                        "防撤回",
+                        "保留被撤回的消息，并在下方插入提示",
+                        AntiRecallSettings.DEFAULT_ENABLE
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        sp,
+                        AntiRecallSettings.KEY_KEEP_SELF_RECALL,
+                        "保留自己撤回",
+                        "开启后自己撤回的消息也会保留",
+                        AntiRecallSettings.DEFAULT_KEEP_SELF_RECALL
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        sp,
+                        AntiRecallSettings.KEY_SHOW_NOTICE,
+                        "显示撤回提示",
+                        "在被撤回消息下方插入提示",
+                        AntiRecallSettings.DEFAULT_SHOW_NOTICE
+                    )
+                    InsetDivider()
+                    VariableInputRow(
+                        title = "提示文案",
+                        summary = "点击下方变量插入到光标位置",
+                        value = noticeText,
+                        variables = antiRecallTemplateVariables,
+                        onValueChange = { noticeText = it }
+                    )
+                    if (usesTimeVariable) {
+                        InsetDivider()
+                        InputRow(
+                            "时间格式",
+                            "使用日期格式，例如 yyyy-MM-dd HH:mm:ss",
+                            noticeTimeFormat
+                        ) { noticeTimeFormat = it }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun CrashReportMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, CrashReportSettings.PREFS_NAME) }
+    var enabled by remember {
+        mutableStateOf(
+            sp.getBoolean(CrashReportSettings.KEY_ENABLE, CrashReportSettings.DEFAULT_ENABLE)
+        )
+    }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar("返回", onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "调试") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        checked = enabled,
+                        title = "捕获异常日志",
+                        summary = if (enabled) {
+                            "记录 Java、Native 和 ANR 异常，并在下次启动时显示日志"
+                        } else {
+                            "关闭后不再捕获或弹出异常日志"
+                        }
+                    ) { checked ->
+                        if (sp.edit().putBoolean(CrashReportSettings.KEY_ENABLE, checked).commit()) {
+                            enabled = checked
+                            CrashReportRuntime.onSettingChanged(context, checked)
+                        } else {
+                            Toast.makeText(context, "保存设置失败", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ProtobufPacketMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, ProtobufPacketSettings.PREFS_NAME) }
+    var blockTypes by remember {
+        mutableStateOf(sp.getString(
+            ProtobufPacketSettings.KEY_BLOCK_TYPES,
+            ProtobufPacketSettings.DEFAULT_BLOCK_TYPES
+        ) ?: ProtobufPacketSettings.DEFAULT_BLOCK_TYPES)
+    }
+    var uri by remember {
+        mutableStateOf(sp.getString(
+            ProtobufPacketSettings.KEY_SEND_URI,
+            ProtobufPacketSettings.DEFAULT_SEND_URI
+        ) ?: ProtobufPacketSettings.DEFAULT_SEND_URI)
+    }
+    var cgiId by remember {
+        mutableStateOf(sp.getString(
+            ProtobufPacketSettings.KEY_SEND_TYPE,
+            ProtobufPacketSettings.DEFAULT_SEND_TYPE
+        ) ?: ProtobufPacketSettings.DEFAULT_SEND_TYPE)
+    }
+    var funcId by remember {
+        mutableStateOf(sp.getString(
+            ProtobufPacketSettings.KEY_SEND_FUNC_ID,
+            ProtobufPacketSettings.DEFAULT_SEND_FUNC_ID
+        ) ?: ProtobufPacketSettings.DEFAULT_SEND_FUNC_ID)
+    }
+    var routeId by remember {
+        mutableStateOf(sp.getString(
+            ProtobufPacketSettings.KEY_SEND_ROUTE_ID,
+            ProtobufPacketSettings.DEFAULT_SEND_ROUTE_ID
+        ) ?: ProtobufPacketSettings.DEFAULT_SEND_ROUTE_ID)
+    }
+    var payload by remember {
+        mutableStateOf(sp.getString(
+            ProtobufPacketSettings.KEY_SEND_PAYLOAD,
+            ProtobufPacketSettings.DEFAULT_SEND_PAYLOAD
+        ) ?: ProtobufPacketSettings.DEFAULT_SEND_PAYLOAD)
+    }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存设置",
+                onPrimaryClick = {
+                    sp.edit()
+                        .putString(ProtobufPacketSettings.KEY_BLOCK_TYPES, blockTypes)
+                        .putString(ProtobufPacketSettings.KEY_SEND_URI, uri.trim())
+                        .putString(ProtobufPacketSettings.KEY_SEND_TYPE, cgiId.trim())
+                        .putString(ProtobufPacketSettings.KEY_SEND_FUNC_ID, funcId.trim())
+                        .putString(ProtobufPacketSettings.KEY_SEND_ROUTE_ID, routeId.trim())
+                        .putString(ProtobufPacketSettings.KEY_SEND_PAYLOAD, payload)
+                        .apply()
+                    Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
+                },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "抓包") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        sp,
+                        ProtobufPacketSettings.KEY_ENABLE,
+                        "Protobuf 抓包",
+                        "开启后输出请求和响应到 LSPosed 日志",
+                        ProtobufPacketSettings.DEFAULT_ENABLE
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        sp,
+                        ProtobufPacketSettings.KEY_CAPTURE_REQUEST,
+                        "抓请求",
+                        "记录请求 URI、Type 和 PB JSON",
+                        ProtobufPacketSettings.DEFAULT_CAPTURE_REQUEST
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        sp,
+                        ProtobufPacketSettings.KEY_CAPTURE_RESPONSE,
+                        "抓响应",
+                        "记录响应 URI、Type 和 PB JSON",
+                        ProtobufPacketSettings.DEFAULT_CAPTURE_RESPONSE
+                    )
+                    InsetDivider()
+                    InputRow(
+                        "过滤 Type",
+                        "多个 Type 用逗号或空格分隔",
+                        blockTypes,
+                        minLines = 3
+                    ) { blockTypes = it }
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "自定义发包") }
+            item {
+                SettingsCard {
+                    InputRow("URI", "例如 /cgi-bin/micromsg-bin/oplog", uri) { uri = it }
+                    InsetDivider()
+                    InputRow("Type", "CGI ID，例如 681", cgiId) { cgiId = it.filter { ch -> ch.isDigit() } }
+                    InsetDivider()
+                    InputRow("FuncId", "默认 0", funcId) { funcId = it.filter { ch -> ch.isDigit() } }
+                    InsetDivider()
+                    InputRow("RouteId", "默认 0", routeId) { routeId = it.filter { ch -> ch.isDigit() } }
+                    InsetDivider()
+                    InputRow(
+                        "JSON 载荷",
+                        "字段号作为 key；字符串按 UTF-8，hex-> 表示原始字节",
+                        payload,
+                        minLines = 8
+                    ) { payload = it }
+                    InsetDivider()
+                    ActionRow("发送", "优先通用发包，未就绪时使用同类请求编辑重放") {
+                        val type = cgiId.toIntOrNull()
+                        val func = funcId.toIntOrNull() ?: 0
+                        val route = routeId.toIntOrNull() ?: 0
+                        if (type == null) {
+                            Toast.makeText(context, "Type 必须是数字", Toast.LENGTH_SHORT).show()
+                            return@ActionRow
+                        }
+                        ProtobufPacketRuntime.send(uri.trim(), type, func, route, payload) { success, message ->
+                            Handler(Looper.getMainLooper()).post {
+                                Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ScriptPluginMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit,
+    onOpenMarket: () -> Unit = {},
+    onOpenAgent: () -> Unit = {},
+    onOpenManager: () -> Unit = {}
+) {
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
 
@@ -2522,437 +1771,2078 @@ internal fun WeChatTabletMiuixPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
-            item { SmallTitle(text = "平板模式") }
+            item { SmallTitle(text = "脚本插件") }
+            item {
+                ScriptPluginSettingsMiuixContent.ScriptPluginSettingsContent(
+                    context,
+                    {},
+                    onOpenMarket,
+                    onOpenAgent,
+                    onOpenManager
+                )
+            }
+        }
+    }
+}
+
+internal object PluginMarketUi {
+
+internal enum class PluginMarketUploadPhase {
+    QUEUED,
+    UPLOADING,
+    SUCCESS,
+    PENDING_REVIEW,
+    FAILED
+}
+
+internal data class PluginMarketUploadStatus(
+    val phase: PluginMarketUploadPhase,
+    val message: String
+)
+
+@Composable
+fun ScriptPluginMarketPage(
+    context: Context,
+    onBack: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    var query by rememberSaveable { mutableStateOf("") }
+    var sort by rememberSaveable { mutableStateOf("latest") }
+    var refreshVersion by remember { mutableStateOf(0) }
+    var loading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf("") }
+    var plugins by remember { mutableStateOf<List<PluginMarketPlugin>>(emptyList()) }
+    var pluginCount by remember { mutableStateOf(0) }
+    var selectedPlugin by remember { mutableStateOf<PluginMarketPlugin?>(null) }
+    var detailPlugin by remember { mutableStateOf<PluginMarketPlugin?>(null) }
+    var detailLoading by remember { mutableStateOf(false) }
+    var detailError by remember { mutableStateOf("") }
+    var detailRetryVersion by remember { mutableStateOf(0) }
+    var historyVersions by remember { mutableStateOf<List<PluginMarketHistoryVersion>>(emptyList()) }
+    var historyLoading by remember { mutableStateOf(false) }
+    var historyError by remember { mutableStateOf("") }
+    var historyInstallVersionId by remember { mutableStateOf<String?>(null) }
+    var comments by remember { mutableStateOf<List<PluginMarketComment>>(emptyList()) }
+    var commentsLoading by remember { mutableStateOf(false) }
+    var commentsError by remember { mutableStateOf("") }
+    var commentsRetryVersion by remember { mutableStateOf(0) }
+    var currentUserIdentity by remember { mutableStateOf<PluginMarketUserIdentity?>(null) }
+    var interactionError by remember { mutableStateOf("") }
+    var likedByCurrentUser by remember { mutableStateOf(false) }
+    var likeCountLoaded by remember { mutableStateOf(false) }
+    var commentCountLoaded by remember { mutableStateOf(false) }
+    var updatingLike by remember { mutableStateOf(false) }
+    var commentDraft by remember { mutableStateOf("") }
+    var submittingComment by remember { mutableStateOf(false) }
+    var deletingCommentId by remember { mutableStateOf<String?>(null) }
+    var detailTargetExists by remember { mutableStateOf(false) }
+    var installingRemoteId by remember { mutableStateOf<String?>(null) }
+    var deletingRemoteId by remember { mutableStateOf<String?>(null) }
+    var installMessage by remember { mutableStateOf("") }
+    var pendingOverwrite by remember { mutableStateOf<PluginMarketPlugin?>(null) }
+    var showUploadDialog by remember { mutableStateOf(false) }
+    var notifications by remember { mutableStateOf<List<PluginMarketNotification>>(emptyList()) }
+    var notificationUnreadCount by remember { mutableStateOf(0L) }
+    var notificationsLoading by remember { mutableStateOf(true) }
+    var notificationsError by remember { mutableStateOf("") }
+    var notificationRefreshVersion by remember { mutableStateOf(0) }
+    var showNotifications by remember { mutableStateOf(false) }
+
+    fun updateSocialCounts(
+        remotePluginId: String,
+        likeCount: Long? = null,
+        commentCount: Long? = null
+    ) {
+        fun updated(plugin: PluginMarketPlugin): PluginMarketPlugin = plugin.copy(
+            likeCount = likeCount ?: plugin.likeCount,
+            commentCount = commentCount ?: plugin.commentCount
+        )
+        detailPlugin = detailPlugin?.let { if (it.remotePluginId == remotePluginId) updated(it) else it }
+        selectedPlugin = selectedPlugin?.let { if (it.remotePluginId == remotePluginId) updated(it) else it }
+        plugins = plugins.map { if (it.remotePluginId == remotePluginId) updated(it) else it }
+    }
+
+    LaunchedEffect(query, sort, refreshVersion) {
+        delay(250L)
+        loading = true
+        loadError = ""
+        val result = withContext(Dispatchers.IO) {
+            PluginMarketRepository.list(
+                context = context,
+                query = query.trim(),
+                sort = sort,
+                limit = 100
+            )
+        }
+        result.fold(
+            onSuccess = { page ->
+                plugins = page.items
+                pluginCount = page.count
+            },
+            onFailure = { error ->
+                loadError = pluginMarketErrorMessage(error)
+                if (plugins.isEmpty()) pluginCount = 0
+            }
+        )
+        loading = false
+    }
+
+    LaunchedEffect(notificationRefreshVersion) {
+        notificationsLoading = true
+        notificationsError = ""
+        val result = withContext(Dispatchers.IO) {
+            PluginMarketRepository.notifications(context, limit = 100)
+        }
+        result.fold(
+            onSuccess = { page ->
+                notifications = page.items
+                notificationUnreadCount = page.unreadCount
+            },
+            onFailure = { error ->
+                notificationsError = pluginMarketErrorMessage(error)
+                if (notifications.isEmpty()) notificationUnreadCount = 0L
+            }
+        )
+        notificationsLoading = false
+    }
+
+    LaunchedEffect(showNotifications, notificationsLoading) {
+        if (!showNotifications || notificationsLoading) return@LaunchedEffect
+        val unreadIds = notifications.filterNot { it.read }.map { it.notificationId }
+        if (unreadIds.isEmpty()) return@LaunchedEffect
+        val result = withContext(Dispatchers.IO) {
+            PluginMarketRepository.markNotificationsRead(context, unreadIds)
+        }
+        result.onSuccess { readResult ->
+            notificationUnreadCount = readResult.unreadCount
+            val markedIds = unreadIds.toHashSet()
+            notifications = notifications.map { item ->
+                if (item.notificationId in markedIds) item.copy(read = true) else item
+            }
+        }
+    }
+
+    LaunchedEffect(selectedPlugin?.remotePluginId, detailRetryVersion) {
+        val selected = selectedPlugin ?: return@LaunchedEffect
+        detailLoading = true
+        detailError = ""
+        detailPlugin = null
+        historyLoading = true
+        historyError = ""
+        historyVersions = emptyList()
+        detailTargetExists = false
+        installMessage = ""
+        val (detailResult, historyResult) = withContext(Dispatchers.IO) {
+            val loadedDetail = PluginMarketRepository.detail(context, selected.remotePluginId).map { detail ->
+                val exists = PluginMarketInstaller.existingLocalPluginId(context, detail) != null
+                detail to exists
+            }
+            loadedDetail to PluginMarketRepository.history(context, selected.remotePluginId)
+        }
+        detailResult.fold(
+            onSuccess = { (detail, exists) ->
+                val currentSummary = selectedPlugin?.takeIf {
+                    it.remotePluginId == selected.remotePluginId
+                }
+                detailPlugin = detail.copy(
+                    likeCount = if (likeCountLoaded) {
+                        currentSummary?.likeCount ?: detail.likeCount
+                    } else {
+                        detail.likeCount
+                    },
+                    commentCount = if (commentCountLoaded) {
+                        currentSummary?.commentCount ?: detail.commentCount
+                    } else {
+                        detail.commentCount
+                    }
+                )
+                detailTargetExists = exists
+            },
+            onFailure = { error ->
+                detailError = pluginMarketErrorMessage(error)
+                detailTargetExists = false
+            }
+        )
+        historyResult.fold(
+            onSuccess = { historyVersions = it },
+            onFailure = { historyError = pluginMarketErrorMessage(it) }
+        )
+        detailLoading = false
+        historyLoading = false
+    }
+
+    LaunchedEffect(selectedPlugin?.remotePluginId, commentsRetryVersion) {
+        val selected = selectedPlugin ?: return@LaunchedEffect
+        commentsLoading = true
+        commentsError = ""
+        interactionError = ""
+        comments = emptyList()
+        currentUserIdentity = null
+        likedByCurrentUser = false
+        likeCountLoaded = false
+        commentCountLoaded = false
+        val (identityResult, commentsResult, likedResult) = withContext(Dispatchers.IO) {
+            val identity = PluginMarketRepository.currentUserIdentity(context)
+            val liked = if (identity.isSuccess) {
+                PluginMarketRepository.likeStatus(context, selected.remotePluginId)
+            } else {
+                Result.failure(identity.exceptionOrNull() ?: IllegalStateException("当前微信账号资料未就绪"))
+            }
+            Triple(
+                identity,
+                PluginMarketRepository.comments(context, selected.remotePluginId),
+                liked
+            )
+        }
+        identityResult.fold(
+            onSuccess = { currentUserIdentity = it },
+            onFailure = { interactionError = pluginMarketErrorMessage(it) }
+        )
+        commentsResult.fold(
+            onSuccess = { page ->
+                comments = page.items
+                commentCountLoaded = true
+                updateSocialCounts(selected.remotePluginId, commentCount = page.total)
+            },
+            onFailure = { commentsError = pluginMarketErrorMessage(it) }
+        )
+        likedResult.fold(
+            onSuccess = { likeResult ->
+                likedByCurrentUser = likeResult.liked
+                likeCountLoaded = true
+                updateSocialCounts(selected.remotePluginId, likeCount = likeResult.likeCount)
+            },
+            onFailure = {
+                if (interactionError.isBlank()) interactionError = pluginMarketErrorMessage(it)
+            }
+        )
+        commentsLoading = false
+    }
+
+    fun performInstall(plugin: PluginMarketPlugin, overwrite: Boolean) {
+        if (installingRemoteId != null) return
+        installingRemoteId = plugin.remotePluginId
+        installMessage = ""
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                PluginMarketRepository.install(context, plugin, overwrite)
+            }
+            result.fold(
+                onSuccess = { installed ->
+                    detailTargetExists = true
+                    installed.downloadCount?.let { count ->
+                        detailPlugin = detailPlugin?.copy(downloadCount = count)
+                        selectedPlugin = selectedPlugin?.copy(downloadCount = count)
+                        plugins = plugins.map { item ->
+                            if (item.remotePluginId == plugin.remotePluginId) {
+                                item.copy(downloadCount = count)
+                            } else {
+                                item
+                            }
+                        }
+                    }
+                    installMessage = if (installed.replacedExisting) {
+                        "更新成功，插件已保持禁用"
+                    } else {
+                        "安装成功，插件默认禁用"
+                    }
+                    Toast.makeText(context, installMessage, Toast.LENGTH_SHORT).show()
+                },
+                onFailure = { error ->
+                    installMessage = "安装失败: ${pluginMarketErrorMessage(error)}"
+                }
+            )
+            installingRemoteId = null
+        }
+    }
+
+    fun requestInstall(plugin: PluginMarketPlugin) {
+        if (installingRemoteId != null) return
+        installingRemoteId = plugin.remotePluginId
+        installMessage = ""
+        scope.launch {
+            val exists = withContext(Dispatchers.IO) {
+                PluginMarketInstaller.existingLocalPluginId(context, plugin) != null
+            }
+            installingRemoteId = null
+            if (exists) {
+                pendingOverwrite = plugin
+            } else {
+                performInstall(plugin, overwrite = false)
+            }
+        }
+    }
+
+    fun requestHistoryInstall(version: PluginMarketHistoryVersion) {
+        val selected = selectedPlugin ?: return
+        if (historyInstallVersionId != null || installingRemoteId != null) return
+        historyInstallVersionId = version.versionId
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                PluginMarketRepository.historyDetail(
+                    context,
+                    selected.remotePluginId,
+                    version.versionId
+                )
+            }
+            historyInstallVersionId = null
+            result.fold(
+                onSuccess = ::requestInstall,
+                onFailure = {
+                    Toast.makeText(
+                        context,
+                        "读取历史版本失败: ${pluginMarketErrorMessage(it)}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            )
+        }
+    }
+
+    fun deleteOwnedPlugin(plugin: PluginMarketPlugin) {
+        if (deletingRemoteId != null || installingRemoteId != null) return
+        deletingRemoteId = plugin.remotePluginId
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                PluginMarketRepository.deleteOwnedRemote(context, plugin.remotePluginId)
+            }
+            deletingRemoteId = null
+            result.fold(
+                onSuccess = {
+                    selectedPlugin = null
+                    detailPlugin = null
+                    historyVersions = emptyList()
+                    plugins = plugins.filterNot { it.remotePluginId == plugin.remotePluginId }
+                    pluginCount = (pluginCount - 1).coerceAtLeast(0)
+                    refreshVersion++
+                    Toast.makeText(context, "线上插件已删除，本地插件不受影响", Toast.LENGTH_SHORT).show()
+                },
+                onFailure = { error ->
+                    Toast.makeText(
+                        context,
+                        "删除失败: ${pluginMarketErrorMessage(error)}",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            )
+        }
+    }
+
+    fun togglePluginLike(plugin: PluginMarketPlugin) {
+        if (updatingLike) return
+        if (currentUserIdentity == null) {
+            Toast.makeText(
+                context,
+                interactionError.ifBlank { "当前微信账号资料尚未就绪" },
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        val removeLike = likedByCurrentUser
+        updatingLike = true
+        interactionError = ""
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                if (removeLike) {
+                    PluginMarketRepository.unlike(context, plugin.remotePluginId)
+                } else {
+                    PluginMarketRepository.like(context, plugin.remotePluginId)
+                }
+            }
+            result.fold(
+                onSuccess = { likeResult ->
+                    likedByCurrentUser = likeResult.liked
+                    likeCountLoaded = true
+                    updateSocialCounts(plugin.remotePluginId, likeCount = likeResult.likeCount)
+                },
+                onFailure = { error ->
+                    interactionError = pluginMarketErrorMessage(error)
+                    Toast.makeText(context, "操作失败: $interactionError", Toast.LENGTH_LONG).show()
+                }
+            )
+            updatingLike = false
+        }
+    }
+
+    fun submitPluginComment(plugin: PluginMarketPlugin) {
+        if (submittingComment) return
+        val content = commentDraft.trim()
+        if (content.isBlank()) {
+            Toast.makeText(context, "评论内容不能为空", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (currentUserIdentity == null) {
+            Toast.makeText(
+                context,
+                interactionError.ifBlank { "当前微信账号资料尚未就绪" },
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+        submittingComment = true
+        interactionError = ""
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                PluginMarketRepository.addComment(context, plugin.remotePluginId, content)
+            }
+            result.fold(
+                onSuccess = { mutation ->
+                    mutation.comment?.let { added ->
+                        comments = (listOf(added) + comments.filterNot { it.commentId == added.commentId })
+                    }
+                    commentDraft = ""
+                    commentCountLoaded = true
+                    updateSocialCounts(plugin.remotePluginId, commentCount = mutation.commentCount)
+                },
+                onFailure = { error ->
+                    interactionError = pluginMarketErrorMessage(error)
+                    Toast.makeText(context, "评论失败: $interactionError", Toast.LENGTH_LONG).show()
+                }
+            )
+            submittingComment = false
+        }
+    }
+
+    fun submitPluginReply(
+        plugin: PluginMarketPlugin,
+        parentComment: PluginMarketComment,
+        content: String,
+        onCompleted: (Boolean) -> Unit
+    ) {
+        if (submittingComment) {
+            onCompleted(false)
+            return
+        }
+        if (currentUserIdentity == null) {
+            Toast.makeText(
+                context,
+                interactionError.ifBlank { "当前微信账号资料尚未就绪" },
+                Toast.LENGTH_LONG
+            ).show()
+            onCompleted(false)
+            return
+        }
+        submittingComment = true
+        interactionError = ""
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                PluginMarketRepository.replyComment(
+                    context,
+                    plugin.remotePluginId,
+                    parentComment,
+                    content
+                )
+            }
+            var succeeded = false
+            result.fold(
+                onSuccess = { mutation ->
+                    mutation.comment?.let { added ->
+                        comments = (listOf(added) + comments.filterNot {
+                            it.commentId == added.commentId
+                        })
+                    }
+                    commentCountLoaded = true
+                    updateSocialCounts(plugin.remotePluginId, commentCount = mutation.commentCount)
+                    succeeded = true
+                },
+                onFailure = { error ->
+                    interactionError = pluginMarketErrorMessage(error)
+                    Toast.makeText(context, "回复失败: $interactionError", Toast.LENGTH_LONG).show()
+                }
+            )
+            submittingComment = false
+            onCompleted(succeeded)
+        }
+    }
+
+    fun openNotifications() {
+        showNotifications = true
+        notificationRefreshVersion++
+    }
+
+    fun deletePluginComment(plugin: PluginMarketPlugin, comment: PluginMarketComment) {
+        if (deletingCommentId != null) return
+        if (!comment.canDelete) {
+            Toast.makeText(context, "只能删除自己的评论", Toast.LENGTH_SHORT).show()
+            return
+        }
+        deletingCommentId = comment.commentId
+        interactionError = ""
+        scope.launch {
+            val result = withContext(Dispatchers.IO) {
+                PluginMarketRepository.deleteOwnComment(context, plugin.remotePluginId, comment)
+            }
+            result.fold(
+                onSuccess = { mutation ->
+                    comments = comments.filterNot { it.commentId == comment.commentId }
+                    commentCountLoaded = true
+                    updateSocialCounts(plugin.remotePluginId, commentCount = mutation.commentCount)
+                    if (mutation.commentCount != comments.size.toLong()) commentsRetryVersion++
+                },
+                onFailure = { error ->
+                    interactionError = pluginMarketErrorMessage(error)
+                    Toast.makeText(context, "删除评论失败: $interactionError", Toast.LENGTH_LONG).show()
+                }
+            )
+            deletingCommentId = null
+        }
+    }
+
+    PageScaffold(
+        title = "在线插件",
+        largeTitle = "在线插件",
+        scrollBehavior = scrollBehavior,
+        topBarActions = {
+            PluginMarketNotificationBell(
+                unreadCount = notificationUnreadCount,
+                onClick = ::openNotifications
+            )
+        },
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "上传本地插件",
+                onPrimaryClick = { showUploadDialog = true },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item {
+                SearchBarSurface(
+                    query = query,
+                    placeholder = "搜索插件、作者或目录名",
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    onQueryChange = { query = it }
+                )
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "浏览") }
             item {
                 SettingsCard {
-                    SwitchRow(
-                        sp,
-                        WeChatTabletSettings.KEY_ENABLE,
-                        "平板模式",
-                        "开启平板模式，退出微信登陆生效",
-                        WeChatTabletSettings.DEFAULT_ENABLE
+                    PopupChoiceRow(
+                        title = "排序方式",
+                        summary = if (sort == "downloads") "热门（按下载量）" else "最新发布",
+                        options = listOf(
+                            PopupChoice("最新", "latest"),
+                            PopupChoice("热门", "downloads")
+                        ),
+                        currentValue = sort,
+                        onValueChanged = { sort = it }
+                    )
+                    InsetDivider()
+                    ActionRow(
+                        title = "刷新",
+                        summary = if (loading) "正在加载在线插件" else "重新获取当前列表"
+                    ) {
+                        refreshVersion++
+                    }
+                }
+            }
+            item {
+                SettingsCard(modifier = Modifier.padding(top = 10.dp)) {
+                    Text(
+                        text = "社区插件由用户上传，安装前请核对作者、说明和文件内容。下载后的插件默认禁用。",
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        fontSize = 13.sp,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)
                     )
                 }
+            }
+            item {
+                SmallTitle(
+                    modifier = Modifier.padding(top = 10.dp),
+                    text = "在线插件(${if (loading && plugins.isEmpty()) "-" else pluginCount})"
+                )
+            }
+            if (loadError.isNotBlank()) {
+                item {
+                    SettingsCard {
+                        Column {
+                            EmptyText(loadError)
+                            TextButton(
+                                text = "重试",
+                                onClick = { refreshVersion++ },
+                                modifier = Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp),
+                                colors = ButtonDefaults.textButtonColorsPrimary()
+                            )
+                        }
+                    }
+                }
+            } else if (loading && plugins.isEmpty()) {
+                item { SettingsCard { EmptyText("正在加载在线插件...") } }
+            } else if (plugins.isEmpty()) {
+                item {
+                    SettingsCard {
+                        EmptyText(if (query.isBlank()) "暂无在线插件" else "没有匹配的在线插件")
+                    }
+                }
+            } else {
+                item {
+                    SettingsCard {
+                        plugins.forEachIndexed { index, plugin ->
+                            PluginMarketListRow(plugin) {
+                                selectedPlugin = plugin
+                            }
+                            if (index != plugins.lastIndex) InsetDivider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    selectedPlugin?.let { summary ->
+        PluginMarketDetailDialog(
+            summary = summary,
+            detail = detailPlugin,
+            loading = detailLoading,
+            error = detailError,
+            historyVersions = historyVersions,
+            historyLoading = historyLoading,
+            historyError = historyError,
+            historyInstallVersionId = historyInstallVersionId,
+            installed = detailTargetExists,
+            installing = installingRemoteId == summary.remotePluginId,
+            deleting = deletingRemoteId == summary.remotePluginId,
+            owned = PluginMarketRepository.ownsRemotePlugin(context, summary.remotePluginId),
+            installMessage = installMessage,
+            likedByCurrentUser = likedByCurrentUser,
+            updatingLike = updatingLike,
+            comments = comments,
+            commentsLoading = commentsLoading,
+            commentsError = commentsError,
+            currentUserWxId = currentUserIdentity?.wxId.orEmpty(),
+            interactionError = interactionError,
+            commentDraft = commentDraft,
+            submittingComment = submittingComment,
+            deletingCommentId = deletingCommentId,
+            onRetry = { detailRetryVersion++ },
+            onRetryComments = { commentsRetryVersion++ },
+            onInstall = ::requestInstall,
+            onInstallHistory = ::requestHistoryInstall,
+            onToggleLike = { togglePluginLike(summary) },
+            onCommentDraftChanged = { value -> commentDraft = value.take(1000) },
+            onSubmitComment = { submitPluginComment(summary) },
+            onDeleteComment = { comment -> deletePluginComment(summary, comment) },
+            onSubmitReply = { comment, content, onCompleted ->
+                submitPluginReply(summary, comment, content, onCompleted)
+            },
+            onDelete = { deleteOwnedPlugin(summary) },
+            onDismiss = {
+                if (
+                    installingRemoteId == null &&
+                    deletingRemoteId == null &&
+                    !updatingLike &&
+                    !submittingComment &&
+                    deletingCommentId == null
+                ) {
+                    selectedPlugin = null
+                    detailPlugin = null
+                    detailError = ""
+                    historyVersions = emptyList()
+                    historyError = ""
+                    comments = emptyList()
+                    commentsError = ""
+                    currentUserIdentity = null
+                    interactionError = ""
+                    commentDraft = ""
+                    installMessage = ""
+                }
+            }
+        )
+    }
+
+    pendingOverwrite?.let { plugin ->
+        WindowDialog(
+            show = true,
+            title = "覆盖本地插件",
+            onDismissRequest = { pendingOverwrite = null },
+            content = {
+                Column {
+                    Text(
+                        text = "本地已存在目录“${PluginMarketInstaller.defaultLocalPluginId(plugin)}”。更新会覆盖 main.java、main.java.bshs、info.prop 和 README.md，并保留其它本地配置文件。更新后插件保持禁用。",
+                        color = MiuixTheme.colorScheme.onSurface,
+                        fontSize = 14.sp
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        TextButton(
+                            text = "取消",
+                            onClick = { pendingOverwrite = null },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                        TextButton(
+                            text = "确认覆盖",
+                            onClick = {
+                                pendingOverwrite = null
+                                performInstall(plugin, overwrite = true)
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                    }
+                }
+            }
+        )
+    }
+
+    if (showUploadDialog) {
+        PluginMarketUploadDialog(
+            context = context,
+            onDismiss = { uploaded ->
+                showUploadDialog = false
+                if (uploaded) refreshVersion++
+            }
+        )
+    }
+
+    if (showNotifications) {
+        PluginMarketNotificationDialog(
+            notifications = notifications,
+            loading = notificationsLoading,
+            error = notificationsError,
+            onRetry = { notificationRefreshVersion++ },
+            onNotificationClick = { notification ->
+                showNotifications = false
+                val target = plugins.firstOrNull {
+                    it.remotePluginId == notification.remotePluginId
+                } ?: PluginMarketPlugin(
+                    remotePluginId = notification.remotePluginId,
+                    sourcePluginId = "",
+                    name = notification.pluginName,
+                    author = "",
+                    version = "",
+                    versionId = "",
+                    updateTime = "",
+                    downloadCount = 0L,
+                    likeCount = 0L,
+                    commentCount = 0L,
+                    description = "",
+                    files = emptyList()
+                )
+                val activity = context as? Activity
+                    ?: WeChatApis.currentActivity()?.currentActivity() as? Activity
+                if (activity == null) {
+                    selectedPlugin = target
+                } else {
+                    activity.window?.decorView?.postOnAnimation {
+                        if (!activity.isFinishing && !activity.isDestroyed) selectedPlugin = target
+                    }
+                }
+            },
+            onDismiss = { showNotifications = false }
+        )
+    }
+}
+
+@Composable
+internal fun PluginMarketNotificationBell(
+    unreadCount: Long,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier.size(40.dp).responsiveTap(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            imageVector = NavIcons.Bell,
+            contentDescription = "回复通知",
+            colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSurface),
+            modifier = Modifier.size(24.dp)
+        )
+        if (unreadCount > 0L) {
+            Box(
+                modifier = Modifier.align(Alignment.TopEnd)
+                    .height(16.dp)
+                    .sizeIn(minWidth = 16.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFFD93025))
+                    .padding(horizontal = 4.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (unreadCount > 99L) "99+" else unreadCount.toString(),
+                    color = Color.White,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1
+                )
             }
         }
     }
 }
 
 @Composable
-internal fun AutoTransferMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
+internal fun PluginMarketNotificationDialog(
+    notifications: List<PluginMarketNotification>,
+    loading: Boolean,
+    error: String,
+    onRetry: () -> Unit,
+    onNotificationClick: (PluginMarketNotification) -> Unit,
+    onDismiss: () -> Unit
 ) {
-    val sp = remember { HchatStorage.preferences(context, AutoTransferSettings.PREFS_NAME) }
-    var templates by remember {
-        mutableStateOf(TransferRuleConfig.parseTemplates(sp.getString(TransferRuleConfig.KEY_TEMPLATES, "")))
-    }
-    var bindings by remember {
-        mutableStateOf(TransferRuleConfig.parseBindings(sp.getString(TransferRuleConfig.KEY_BINDINGS, "")))
-    }
-    var defaultTemplateId by remember {
-        mutableStateOf(sp.getString(TransferRuleConfig.KEY_DEFAULT_TEMPLATE_ID, "") ?: "")
-    }
-    var whitelist by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_WHITELIST, "") ?: "") }
-    var blacklist by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_BLACKLIST, "") ?: "") }
-    var listMode by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_MODE, 0)) }
-    var delayMs by remember { mutableStateOf(sp.getLong(AutoTransferSettings.KEY_DELAY_MS, 0L).toString()) }
-    var delayMode by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_DELAY_MODE, TransferRuleConfig.DELAY_CUSTOM)) }
-    var randomMinMs by remember { mutableStateOf(sp.getLong(AutoTransferSettings.KEY_DELAY_RANDOM_MIN, 500L).toString()) }
-    var randomMaxMs by remember { mutableStateOf(sp.getLong(AutoTransferSettings.KEY_DELAY_RANDOM_MAX, 3000L).toString()) }
-    var amountEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_AMOUNT_ENABLE, false)) }
-    var amountCondition by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_AMOUNT_COND, 1)) }
-    var amountAction by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_AMOUNT_ACTION, 0)) }
-    var amountValue by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_AMOUNT_VALUE, "0") ?: "0") }
-    var keywords by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_KEYWORDS, "") ?: "") }
-    var keywordMode by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_KEYWORD_MODE, 0)) }
-    var quietEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_QUIET_ENABLE, false)) }
-    var quietStart by remember { mutableStateOf(formatRedPacketSecond(sp.getInt(AutoTransferSettings.KEY_QUIET_START_SECOND, 0))) }
-    var quietEnd by remember { mutableStateOf(formatRedPacketSecond(sp.getInt(AutoTransferSettings.KEY_QUIET_END_SECOND, 0))) }
-    var replySteps by remember { mutableStateOf(loadGlobalTransferReplySteps(sp)) }
-    var groupReplySteps by remember { mutableStateOf(loadGlobalGroupTransferReplySteps(sp)) }
-    var notifySystemEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_NOTIFY_SYSTEM_ENABLE, false)) }
-    var notifyToastEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_NOTIFY_TOAST_ENABLE, false)) }
-    var notifySoundEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_NOTIFY_SOUND_ENABLE, false)) }
-    var notifySoundMode by remember { mutableStateOf(sp.getInt(AutoTransferSettings.KEY_NOTIFY_SOUND_MODE, AutoTransferSettings.NOTIFY_SOUND_MODE_SYSTEM)) }
-    var notifyVibrateEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_NOTIFY_VIBRATE_ENABLE, false)) }
-    var notifySoundUri by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_NOTIFY_SOUND_URI, "") ?: "") }
-    var notifyText by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_NOTIFY_TEXT, "已收款 {amount} 元") ?: "") }
-    var notifyToastText by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_NOTIFY_TOAST_TEXT, "已收款 {amount} 元") ?: "") }
-    var announceEnabled by remember { mutableStateOf(sp.getBoolean(AutoTransferSettings.KEY_ANNOUNCE_ENABLE, false)) }
-    var announceText by remember { mutableStateOf(sp.getString(AutoTransferSettings.KEY_ANNOUNCE_TEXT, "收到转账 {amount} 元") ?: "") }
-    var timeFormat by remember {
-        mutableStateOf(
-            PaymentTemplateTimeFormatter.normalizePattern(
-                sp.getString(AutoTransferSettings.KEY_TIME_FORMAT, AutoTransferSettings.DEFAULT_TIME_FORMAT)
-            )
-        )
-    }
-    var receiveAccount by remember {
-        mutableStateOf(
-            sp.getString(
-                AutoTransferSettings.KEY_RECEIVE_ACCOUNT,
-                TransferReceiveAccountStore.DEFAULT_KEY
-            ) ?: TransferReceiveAccountStore.DEFAULT_KEY
-        )
-    }
-    val receiveAccountOptions = remember { transferReceiveAccountOptions(context) }
-    if (receiveAccountOptions.none { it.value == receiveAccount }) {
-        receiveAccount = TransferReceiveAccountStore.DEFAULT_KEY
-    }
-    var picker by remember { mutableStateOf<ContactPickerRequest?>(null) }
-    var templateEditor by remember { mutableStateOf<TransferTemplateEditorRequest?>(null) }
-    var bindingEditor by remember { mutableStateOf<TransferBindingEditorRequest?>(null) }
-    var showTemplates by remember { mutableStateOf(false) }
-    var showBindings by remember { mutableStateOf(false) }
-    var showBatchApply by remember { mutableStateOf(false) }
-    var showReplySteps by remember { mutableStateOf(false) }
-    var replyTarget by remember { mutableStateOf(TransferReplyTarget.PRIVATE) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    fun persistRules(
-        nextTemplates: List<TransferRuleTemplate> = templates,
-        nextBindings: List<TransferRuleBinding> = bindings,
-        nextDefault: String = defaultTemplateId
-    ) {
-        sp.edit()
-            .putString(TransferRuleConfig.KEY_TEMPLATES, TransferRuleConfig.encodeTemplates(nextTemplates))
-            .putString(TransferRuleConfig.KEY_BINDINGS, TransferRuleConfig.encodeBindings(nextBindings))
-            .putString(TransferRuleConfig.KEY_DEFAULT_TEMPLATE_ID, nextDefault)
-            .commit()
-    }
-
-    val route: AutoTransferRoute = when {
-        templateEditor != null -> AutoTransferRoute.TemplateEditor(templateEditor!!)
-        bindingEditor != null -> AutoTransferRoute.BindingEditor(bindingEditor!!)
-        picker != null -> AutoTransferRoute.ContactPicker(picker!!)
-        showReplySteps -> AutoTransferRoute.GlobalReplySteps(replyTarget)
-        showTemplates -> AutoTransferRoute.TemplateManager
-        showBindings -> AutoTransferRoute.BindingManager
-        showBatchApply -> AutoTransferRoute.BatchApply
-        else -> AutoTransferRoute.Main
-    }
-
-    SettingsRouteTransition(
-        targetState = route,
-        label = "AutoTransferRouteTransition",
-        depthOf = { it.depth() }
-    ) { currentRoute ->
-        when (currentRoute) {
-            is AutoTransferRoute.ContactPicker -> {
-                val request = currentRoute.request
-                ContactPickerPage(
-                    context = context,
-                    request = request,
-                    onBack = { picker = null },
-                    onConfirm = { selected ->
-                        request.onValue(formatIds(selected.map { it.id }))
-                        picker = null
+    WindowDialog(
+        show = true,
+        title = "回复通知",
+        onDismissRequest = onDismiss,
+        content = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 520.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "共 ${notifications.size} 条",
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        fontSize = 12.sp
+                    )
+                    TextButton(
+                        text = if (loading) "正在刷新" else "刷新",
+                        onClick = onRetry,
+                        enabled = !loading,
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                }
+                Column(
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    when {
+                        loading && notifications.isEmpty() -> EmptyText("正在加载回复通知...")
+                        error.isNotBlank() && notifications.isEmpty() -> {
+                            EmptyText(error)
+                            TextButton(
+                                text = "重试",
+                                onClick = onRetry,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.textButtonColorsPrimary()
+                            )
+                        }
+                        notifications.isEmpty() -> EmptyText("暂无回复通知")
+                        else -> notifications.forEachIndexed { index, notification ->
+                            PluginMarketNotificationRow(
+                                notification = notification,
+                                onClick = { onNotificationClick(notification) }
+                            )
+                            if (index != notifications.lastIndex) Spacer(Modifier.height(8.dp))
+                        }
                     }
+                }
+                TextButton(
+                    text = "关闭",
+                    onClick = onDismiss,
+                    modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                    colors = ButtonDefaults.textButtonColorsPrimary()
                 )
             }
-            is AutoTransferRoute.TemplateEditor -> TransferTemplateEditorPage(
-                context = context,
-                request = currentRoute.request,
-                onBack = { templateEditor = null },
-                onSave = { updated ->
-                    val request = currentRoute.request
-                    val next = if (request.index in templates.indices) {
-                        templates.toMutableList().also { it[request.index] = updated }
-                    } else templates + updated
-                    templates = next
-                    if (defaultTemplateId.isBlank()) defaultTemplateId = updated.id
-                    persistRules(nextTemplates = next, nextDefault = defaultTemplateId)
-                    templateEditor = null
+        }
+    )
+}
+
+@Composable
+internal fun PluginMarketNotificationRow(
+    notification: PluginMarketNotification,
+    onClick: () -> Unit
+) {
+    var pressed by remember(notification.notificationId) { mutableStateOf(false) }
+    val feedbackColor = rememberPressFeedbackColor(pressed)
+    Column(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(
+                if (pressed) feedbackColor else MiuixTheme.colorScheme.secondaryVariant
+            )
+            .responsiveTap(onClick = onClick, onPressedChange = { pressed = it })
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Text(
+            text = "${notification.actorNickname.ifBlank { "微信用户" }} 回复了你的评论",
+            color = MiuixTheme.colorScheme.onSurface,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            text = notification.pluginName.ifBlank { notification.remotePluginId },
+            color = MiuixTheme.colorScheme.primary,
+            fontSize = 12.sp,
+            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+        )
+        Text(
+            text = notification.content,
+            color = MiuixTheme.colorScheme.onSurface,
+            fontSize = 13.sp,
+            modifier = Modifier.fillMaxWidth().padding(top = 7.dp)
+        )
+        Text(
+            text = "原评论：${notification.originalContent}",
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = 12.sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth().padding(top = 5.dp)
+        )
+        Text(
+            text = formatPluginMarketTime(notification.createdAt),
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = 11.sp,
+            modifier = Modifier.padding(top = 4.dp)
+        )
+    }
+}
+
+@Composable
+internal fun PluginMarketListRow(
+    plugin: PluginMarketPlugin,
+    onClick: () -> Unit
+) {
+    var pressed by remember { mutableStateOf(false) }
+    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
+    Row(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(pressFeedbackColor)
+            .responsiveTap(onClick = onClick, onPressedChange = { pressed = it })
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = plugin.name.ifBlank { plugin.remotePluginId },
+                color = MiuixTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = buildString {
+                    append("作者: ").append(plugin.author.ifBlank { "未知" })
+                    append(" | 版本: ").append(plugin.version.ifBlank { "未知" })
+                    append(" | 下载: ").append(plugin.downloadCount)
+                    append("\n点赞: ").append(plugin.likeCount)
+                    append(" | 评论: ").append(plugin.commentCount)
+                    append("\n更新: ").append(formatPluginMarketTime(plugin.updateTime))
                 },
-                onDelete = {
-                    val request = currentRoute.request
-                    if (request.index in templates.indices) {
-                        val deleted = templates[request.index].id
-                        templates = templates.toMutableList().also { it.removeAt(request.index) }
-                        bindings = bindings.map { if (it.templateId == deleted) it.copy(templateId = "") else it }
-                        if (defaultTemplateId == deleted) defaultTemplateId = templates.firstOrNull()?.id.orEmpty()
-                        persistRules()
-                    }
-                    templateEditor = null
-                }
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 12.sp,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis
             )
-            is AutoTransferRoute.BindingEditor -> TransferBindingEditorPage(
-                context = context,
-                request = currentRoute.request,
-                templates = templates,
-                onBack = { bindingEditor = null },
-                onSave = { updated ->
-                    val base = bindings.toMutableList()
-                    if (currentRoute.request.index in base.indices) base.removeAt(currentRoute.request.index)
-                    bindings = upsertTransferBindings(base, listOf(updated))
-                    persistRules(nextBindings = bindings)
-                    bindingEditor = null
-                },
-                onDelete = {
-                    if (currentRoute.request.index in bindings.indices) {
-                        bindings = bindings.toMutableList().also { it.removeAt(currentRoute.request.index) }
-                        persistRules(nextBindings = bindings)
-                    }
-                    bindingEditor = null
-                }
-            )
-            AutoTransferRoute.TemplateManager -> TransferTemplateListPage(
-                templates = templates,
-                onBack = { showTemplates = false },
-                onOpen = { index, value -> templateEditor = TransferTemplateEditorRequest(index, value, true) },
-                onAdd = { templateEditor = TransferTemplateEditorRequest(templates.size, newTransferTemplate(templates.size + 1, sp), false) }
-            )
-            AutoTransferRoute.BindingManager -> TransferBindingListPage(
-                bindings = bindings,
-                templates = templates,
-                onBack = { showBindings = false },
-                onOpen = { index, value -> bindingEditor = TransferBindingEditorRequest(index, value, true) },
-                onDeleteBindings = { targets ->
-                    val targetIds = targets.mapTo(HashSet()) { it.id }
-                    bindings = bindings.filterNot { it.id in targetIds }
-                    persistRules(nextBindings = bindings)
-                    Toast.makeText(context, "已删除 ${targets.size} 个适用聊天", Toast.LENGTH_SHORT).show()
-                },
-                onAdd = {
-                    picker = ContactPickerRequest(
-                        title = "选择适用聊天",
-                        mode = ContactPickerMode.BOTH,
-                        multiSelect = true,
-                        existingValue = "",
-                        enableLabels = true,
-                        onValue = { value ->
-                            val additions = parseIds(value).map { id ->
-                                bindings.firstOrNull { it.targetId == id }
-                                    ?: TransferRuleBinding(id, id, transferContactLabel(id), false, if (templates.size == 1) templates.first().id else "")
-                            }
-                            if (additions.size == 1) {
-                                val item = additions.first()
-                                val index = bindings.indexOfFirst { it.targetId == item.targetId }
-                                bindingEditor = TransferBindingEditorRequest(index.takeIf { it >= 0 } ?: bindings.size, item, index >= 0)
-                            } else if (additions.isNotEmpty()) {
-                                bindings = upsertTransferBindings(bindings, additions)
-                                persistRules(nextBindings = bindings)
-                            }
-                        }
-                    )
-                }
-            )
-            AutoTransferRoute.BatchApply -> TransferBatchApplyPage(
-                templates = templates,
-                bindings = bindings,
-                onBack = { showBatchApply = false },
-                onPickChats = { templateId ->
-                    picker = ContactPickerRequest(
-                        title = "批量套用收款模板",
-                        mode = ContactPickerMode.BOTH,
-                        multiSelect = true,
-                        existingValue = formatIds(bindings.filter { it.templateId == templateId }.map { it.targetId }),
-                        enableLabels = true,
-                        onValue = { value ->
-                            val selected = parseIds(value)
-                            val retained = bindings.filterNot { it.templateId == templateId && it.targetId !in selected }
-                            val additions = selected.map { id ->
-                                TransferRuleBinding(id, id, transferContactLabel(id), true, templateId)
-                            }
-                            bindings = upsertTransferBindings(retained, additions)
-                            persistRules(nextBindings = bindings)
-                            Toast.makeText(context, "模板已套用到 ${selected.size} 个聊天", Toast.LENGTH_SHORT).show()
-                        }
-                    )
-                }
-            )
-            is AutoTransferRoute.GlobalReplySteps -> RedPacketReplyStepsPage(
-                context = context,
-                title = if (currentRoute.target == TransferReplyTarget.GROUP) "群聊收款回复" else "私聊收款回复",
-                initialSteps = if (currentRoute.target == TransferReplyTarget.GROUP) groupReplySteps else replySteps,
-                templateVariables = transferTemplateVariables,
-                onBack = { showReplySteps = false },
-                onSave = {
-                    if (currentRoute.target == TransferReplyTarget.GROUP) groupReplySteps = it else replySteps = it
-                    showReplySteps = false
-                }
-            )
-            AutoTransferRoute.Main -> PageScaffold(
-                title = provider.title(),
-                largeTitle = provider.title(),
-                scrollBehavior = scrollBehavior,
-                bottomBar = {
-                    BottomActionBar(
-                        primaryText = "保存设置",
-                        onPrimaryClick = save@{
-                            if (!PaymentTemplateTimeFormatter.isValidPattern(timeFormat)) {
-                                Toast.makeText(context, "时间格式无效", Toast.LENGTH_SHORT).show()
-                                return@save
-                            }
-                            val normalizedTimeFormat = PaymentTemplateTimeFormatter.normalizePattern(timeFormat)
-                            val minDelay = randomMinMs.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L
-                            val maxDelay = randomMaxMs.toLongOrNull()?.coerceIn(minDelay, 600000L) ?: minDelay
-                            val cleanSteps = cleanRedPacketReplySteps(replySteps)
-                            val cleanGroupSteps = cleanRedPacketReplySteps(groupReplySteps)
-                            sp.edit()
-                                .putString(AutoTransferSettings.KEY_WHITELIST, whitelist)
-                                .putString(AutoTransferSettings.KEY_BLACKLIST, blacklist)
-                                .putInt(AutoTransferSettings.KEY_MODE, listMode)
-                                .putLong(AutoTransferSettings.KEY_DELAY_MS, delayMs.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L)
-                                .putInt(AutoTransferSettings.KEY_DELAY_MODE, delayMode)
-                                .putLong(AutoTransferSettings.KEY_DELAY_RANDOM_MIN, minDelay)
-                                .putLong(AutoTransferSettings.KEY_DELAY_RANDOM_MAX, maxDelay)
-                                .putString(AutoTransferSettings.KEY_AMOUNT_VALUE, amountValue)
-                                .putBoolean(AutoTransferSettings.KEY_AMOUNT_ENABLE, amountEnabled)
-                                .putInt(AutoTransferSettings.KEY_AMOUNT_COND, amountCondition)
-                                .putInt(AutoTransferSettings.KEY_AMOUNT_ACTION, amountAction)
-                                .putInt(AutoTransferSettings.KEY_KEYWORD_MODE, keywordMode)
-                                .putString(AutoTransferSettings.KEY_KEYWORDS, if (keywordMode == 0) "" else keywords)
-                                .putString(AutoTransferSettings.KEY_RECEIVE_ACCOUNT, receiveAccount)
-                                .putBoolean(AutoTransferSettings.KEY_QUIET_ENABLE, quietEnabled)
-                                .putInt(AutoTransferSettings.KEY_QUIET_START_SECOND, parseRedPacketSecond(quietStart, 0))
-                                .putInt(AutoTransferSettings.KEY_QUIET_END_SECOND, parseRedPacketSecond(quietEnd, 0))
-                                .putString(AutoTransferSettings.KEY_REPLY_ITEMS, RedPacketRuleConfig.encodeReplySteps(cleanSteps))
-                                .putString(AutoTransferSettings.KEY_REPLY_GROUP_ITEMS, RedPacketRuleConfig.encodeReplySteps(cleanGroupSteps))
-                                .putBoolean(AutoTransferSettings.KEY_REPLY_ENABLE, cleanSteps.isNotEmpty())
-                                .putString(AutoTransferSettings.KEY_REPLY_TEXT, cleanSteps.firstOrNull()?.content.orEmpty())
-                                .putBoolean(AutoTransferSettings.KEY_NOTIFY_SYSTEM_ENABLE, notifySystemEnabled)
-                                .putBoolean(AutoTransferSettings.KEY_NOTIFY_TOAST_ENABLE, notifyToastEnabled)
-                                .putBoolean(AutoTransferSettings.KEY_NOTIFY_SOUND_ENABLE, notifySoundEnabled)
-                                .putInt(AutoTransferSettings.KEY_NOTIFY_SOUND_MODE, notifySoundMode)
-                                .putBoolean(AutoTransferSettings.KEY_NOTIFY_VIBRATE_ENABLE, notifyVibrateEnabled)
-                                .putString(AutoTransferSettings.KEY_NOTIFY_SOUND_URI, notifySoundUri)
-                                .putString(AutoTransferSettings.KEY_NOTIFY_TEXT, notifyText)
-                                .putString(AutoTransferSettings.KEY_NOTIFY_TOAST_TEXT, notifyToastText)
-                                .putBoolean(AutoTransferSettings.KEY_ANNOUNCE_ENABLE, announceEnabled)
-                                .putString(AutoTransferSettings.KEY_ANNOUNCE_TEXT, announceText)
-                                .putString(AutoTransferSettings.KEY_TIME_FORMAT, normalizedTimeFormat)
-                                .apply()
-                            replySteps = cleanSteps
-                            groupReplySteps = cleanGroupSteps
-                            timeFormat = normalizedTimeFormat
-                            Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
-                        },
-                        secondaryText = "返回",
-                        onSecondaryClick = onBack
-                    )
-                }
-            ) { padding ->
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                    state = listState,
-                    contentPadding = PaddingValues(
-                        top = padding.calculateTopPadding() + 8.dp,
-                        bottom = padding.calculateBottomPadding() + 84.dp
-                    )
+        }
+        Text(
+            text = "›",
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = 22.sp,
+            modifier = Modifier.padding(start = 8.dp)
+        )
+    }
+}
+
+@Composable
+internal fun PluginMarketDetailDialog(
+    summary: PluginMarketPlugin,
+    detail: PluginMarketPlugin?,
+    loading: Boolean,
+    error: String,
+    historyVersions: List<PluginMarketHistoryVersion>,
+    historyLoading: Boolean,
+    historyError: String,
+    historyInstallVersionId: String?,
+    installed: Boolean,
+    installing: Boolean,
+    deleting: Boolean,
+    owned: Boolean,
+    installMessage: String,
+    likedByCurrentUser: Boolean,
+    updatingLike: Boolean,
+    comments: List<PluginMarketComment>,
+    commentsLoading: Boolean,
+    commentsError: String,
+    currentUserWxId: String,
+    interactionError: String,
+    commentDraft: String,
+    submittingComment: Boolean,
+    deletingCommentId: String?,
+    onRetry: () -> Unit,
+    onRetryComments: () -> Unit,
+    onInstall: (PluginMarketPlugin) -> Unit,
+    onInstallHistory: (PluginMarketHistoryVersion) -> Unit,
+    onToggleLike: () -> Unit,
+    onCommentDraftChanged: (String) -> Unit,
+    onSubmitComment: () -> Unit,
+    onDeleteComment: (PluginMarketComment) -> Unit,
+    onSubmitReply: (PluginMarketComment, String, (Boolean) -> Unit) -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val context = LocalContext.current
+    var confirmDelete by remember(summary.remotePluginId) { mutableStateOf(false) }
+    var pendingDeleteComment by remember(summary.remotePluginId) {
+        mutableStateOf<PluginMarketComment?>(null)
+    }
+    var replyTarget by remember(summary.remotePluginId) {
+        mutableStateOf<PluginMarketComment?>(null)
+    }
+    var replyDraft by remember(summary.remotePluginId) { mutableStateOf("") }
+    WindowDialog(
+        show = true,
+        title = summary.name.ifBlank { "插件详情" },
+        onDismissRequest = onDismiss,
+        content = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp).imePadding()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().weight(1f, fill = false)
+                        .verticalScroll(rememberScrollState())
                 ) {
-                    item { SmallTitle(text = "规则") }
-                    item {
-                        SettingsCard {
-                            SwitchRow(sp, AutoTransferSettings.KEY_ENABLE, "自动收款", "自动领取待收款转账", false)
-                            InsetDivider()
-                            ActionRow("收款规则模板", if (templates.isEmpty()) "暂无模板" else "${templates.size} 个模板") { showTemplates = true }
-                            InsetDivider()
-                            PopupChoiceRow(
-                                title = "默认规则",
-                                summary = describeTransferDefault(defaultTemplateId, templates),
-                                options = listOf(PopupChoice("旧版全局设置", "")) + templates.map { PopupChoice(it.name, it.id) },
-                                currentValue = defaultTemplateId,
-                                onValueChanged = {
-                                    defaultTemplateId = it
-                                    persistRules(nextDefault = it)
+                    val shownPlugin = detail ?: summary
+                    PluginMarketDialogInfoRow("作者", shownPlugin.author.ifBlank { "未知" })
+                    PluginMarketDialogInfoRow("版本", shownPlugin.version.ifBlank { "未知" })
+                    PluginMarketDialogInfoRow("更新时间", formatPluginMarketTime(shownPlugin.updateTime))
+                    PluginMarketDialogInfoRow("下载量", shownPlugin.downloadCount.toString())
+                    PluginMarketDialogInfoRow("点赞数", shownPlugin.likeCount.toString())
+                    PluginMarketDialogInfoRow("评论数", shownPlugin.commentCount.toString())
+                    PluginMarketDialogInfoRow("插件 ID", summary.remotePluginId)
+                    if (detail?.description?.isNotBlank() == true) {
+                        Text(
+                            text = detail.description,
+                            color = MiuixTheme.colorScheme.onSurface,
+                            fontSize = 14.sp,
+                            modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
+                        )
+                    }
+                    if (detail != null) {
+                        Text(
+                            text = "包含文件",
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(top = 12.dp)
+                        )
+                        Text(
+                            text = detail.files.joinToString("、") { it.name }.ifBlank { "未知" },
+                            color = MiuixTheme.colorScheme.onSurface,
+                            fontSize = 13.sp,
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                        )
+                        detail.files.firstOrNull { it.name.equals("README.md", ignoreCase = true) }
+                            ?.content?.takeIf { it.isNotBlank() }
+                            ?.let { readme ->
+                                Text(
+                                    text = "插件说明",
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    fontSize = 12.sp,
+                                    modifier = Modifier.padding(top = 12.dp)
+                                )
+                                Box(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                                    MarkdownUi.Content(
+                                        context = context,
+                                        markdown = readme,
+                                        contentPadding = PaddingValues(0.dp)
+                                    )
                                 }
+                            }
+                    }
+                    PluginMarketSocialSection(
+                        likeCount = shownPlugin.likeCount,
+                        commentCount = shownPlugin.commentCount,
+                        likedByCurrentUser = likedByCurrentUser,
+                        updatingLike = updatingLike,
+                        comments = comments,
+                        commentsLoading = commentsLoading,
+                        commentsError = commentsError,
+                        currentUserWxId = currentUserWxId,
+                        interactionError = interactionError,
+                        commentDraft = commentDraft,
+                        submittingComment = submittingComment,
+                        deletingCommentId = deletingCommentId,
+                        enabled = !installing && !deleting,
+                        onToggleLike = onToggleLike,
+                        onCommentDraftChanged = onCommentDraftChanged,
+                        onSubmitComment = onSubmitComment,
+                        onRetryComments = onRetryComments,
+                        onDeleteComment = { pendingDeleteComment = it },
+                        onReplyComment = { comment ->
+                            replyTarget = comment
+                            replyDraft = ""
+                        }
+                    )
+                    PluginMarketHistoryUi.HistoryList(
+                        versions = historyVersions,
+                        loading = historyLoading,
+                        error = historyError,
+                        installingVersionId = historyInstallVersionId,
+                        enabled = !installing,
+                        onRetry = onRetry,
+                        onInstall = onInstallHistory
+                    )
+                    Text(
+                        text = "社区插件可能执行敏感操作，请确认来源可信。安装或更新完成后插件保持禁用。",
+                        color = Color(0xFFD93025),
+                        fontSize = 13.sp,
+                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp)
+                    )
+                    when {
+                        loading -> EmptyText("正在加载插件详情...")
+                        error.isNotBlank() -> {
+                            EmptyText(error)
+                            TextButton(
+                                text = "重新加载",
+                                onClick = onRetry,
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.textButtonColorsPrimary()
                             )
-                            InsetDivider()
-                            ActionRow("适用聊天", if (bindings.isEmpty()) "暂无单独配置" else "${bindings.size} 个聊天") { showBindings = true }
-                            InsetDivider()
-                            ActionRow("批量套用模板", "一次给多个聊天分配同一规则") { showBatchApply = true }
                         }
                     }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "全局收款") }
-                    item {
-                        SettingsCard {
-                            PopupChoiceRow("收款位置", "使用微信当前账号提供的收款账户", receiveAccountOptions, receiveAccount, onValueChanged = { receiveAccount = it })
-                            InsetDivider()
-                            SwitchRow(sp, AutoTransferSettings.KEY_REFUND_REJECTED, "拒收时退回", "规则不通过时原路退回", false)
-                            InsetDivider()
-                            PopupOptionRow("收款延迟", transferDelayModeLabel(delayMode), redPacketDelayModeOptions(true), delayMode, onValueChanged = { delayMode = it })
-                            if (delayMode == TransferRuleConfig.DELAY_CUSTOM) {
-                                InsetDivider(); NumberInputRow("自定义延迟", "单位 ms", delayMs) { delayMs = it }
-                            } else if (delayMode == TransferRuleConfig.DELAY_RANDOM) {
-                                InsetDivider(); NumberInputRow("最小延迟", "单位 ms", randomMinMs) { randomMinMs = it }
-                                InsetDivider(); NumberInputRow("最大延迟", "单位 ms", randomMaxMs) { randomMaxMs = it }
+                    if (installMessage.isNotBlank()) {
+                        Text(
+                            text = installMessage,
+                            color = if (installMessage.startsWith("安装失败")) {
+                                Color(0xFFD93025)
+                            } else {
+                                MiuixTheme.colorScheme.primary
+                            },
+                            fontSize = 13.sp,
+                            modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+                val activeReply = replyTarget
+                if (activeReply != null) {
+                    val focusRequester = remember(activeReply.commentId) { FocusRequester() }
+                    val keyboardController = LocalSoftwareKeyboardController.current
+                    LaunchedEffect(activeReply.commentId) {
+                        focusRequester.requestFocus()
+                        keyboardController?.show()
+                    }
+                    Column(
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(MiuixTheme.colorScheme.secondaryVariant)
+                            .padding(horizontal = 12.dp, vertical = 10.dp)
+                    ) {
+                        Text(
+                            text = "回复 ${activeReply.userNickname.ifBlank { "微信用户" }}",
+                            color = MiuixTheme.colorScheme.onSurface,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            text = activeReply.content.replace('\n', ' ').trim(),
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().padding(top = 2.dp)
+                        )
+                        Box(
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MiuixTheme.colorScheme.background)
+                                .padding(horizontal = 10.dp, vertical = 9.dp)
+                        ) {
+                            if (replyDraft.isBlank()) {
+                                Text(
+                                    text = "回复 ${activeReply.userNickname.ifBlank { "微信用户" }}",
+                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                    fontSize = 14.sp
+                                )
+                            }
+                            BasicTextField(
+                                value = replyDraft,
+                                onValueChange = { replyDraft = it.take(1000) },
+                                enabled = !submittingComment,
+                                minLines = 1,
+                                maxLines = 4,
+                                textStyle = TextStyle(
+                                    color = MiuixTheme.colorScheme.onSurface,
+                                    fontSize = 14.sp
+                                ),
+                                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                                modifier = Modifier.fillMaxWidth().focusRequester(focusRequester)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${replyDraft.length}/1000",
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                fontSize = 11.sp
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                TextButton(
+                                    text = "取消",
+                                    onClick = {
+                                        replyTarget = null
+                                        replyDraft = ""
+                                    },
+                                    enabled = !submittingComment,
+                                    colors = ButtonDefaults.textButtonColorsPrimary()
+                                )
+                                TextButton(
+                                    text = if (submittingComment) "正在回复" else "发送",
+                                    onClick = {
+                                        val content = replyDraft.trim()
+                                        if (content.isNotBlank()) {
+                                            onSubmitReply(activeReply, content) { succeeded ->
+                                                if (succeeded) {
+                                                    replyTarget = null
+                                                    replyDraft = ""
+                                                }
+                                            }
+                                        }
+                                    },
+                                    enabled = replyDraft.isNotBlank() && !submittingComment,
+                                    colors = ButtonDefaults.textButtonColorsPrimary()
+                                )
                             }
                         }
                     }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "全局过滤") }
-                    item {
-                        SettingsCard {
-                            PopupOptionRow("收款范围", transferListModeLabel(listMode), optionItems("全部接收" to 0, "只接收白名单" to 1, "拒收黑名单" to 2), listMode, onValueChanged = { listMode = it; sp.edit().putInt(AutoTransferSettings.KEY_MODE, it).apply() })
-                            if (listMode == 1 || listMode == 2) {
-                                InsetDivider()
-                                ActionRow(if (listMode == 1) "白名单" else "黑名单", autoReplySelectedIdSummary(if (listMode == 1) whitelist else blacklist)) {
-                                    picker = ContactPickerRequest(if (listMode == 1) "选择白名单" else "选择黑名单", ContactPickerMode.BOTH, true, if (listMode == 1) whitelist else blacklist, {
-                                        if (listMode == 1) whitelist = it else blacklist = it
-                                    }, true)
-                                }
-                            }
-                            InsetDivider()
-                            SwitchRow(amountEnabled, "启用金额规则", "按转账金额决定接收或拒收") { amountEnabled = it; sp.edit().putBoolean(AutoTransferSettings.KEY_AMOUNT_ENABLE, it).apply() }
-                            if (amountEnabled) {
-                                InsetDivider(); PopupOptionRow("金额条件", transferAmountConditionLabel(amountCondition), optionItems("大于" to 0, "小于" to 1, "等于" to 2), amountCondition, onValueChanged = { amountCondition = it; sp.edit().putInt(AutoTransferSettings.KEY_AMOUNT_COND, it).apply() })
-                                InsetDivider(); InputRow("金额数值", "单位元，例如 10.5", amountValue) { amountValue = it.filter { ch -> ch.isDigit() || ch == '.' } }
-                                InsetDivider(); PopupOptionRow("命中后动作", transferAmountActionLabel(amountAction), optionItems("拒收/忽略" to 0, "仅接收满足条件" to 1), amountAction, onValueChanged = { amountAction = it; sp.edit().putInt(AutoTransferSettings.KEY_AMOUNT_ACTION, it).apply() })
-                            }
-                            InsetDivider()
-                            PopupOptionRow("关键词规则", transferKeywordModeLabel(keywordMode), optionItems("不启用" to 0, "必须包含关键词" to 1, "包含则拒收" to 2), keywordMode, onValueChanged = { keywordMode = it; sp.edit().putInt(AutoTransferSettings.KEY_KEYWORD_MODE, it).apply() })
-                            if (keywordMode != 0) {
-                                InsetDivider(); InputRow("关键词", "多个关键词用 |、逗号或换行分隔", keywords, minLines = 2) { keywords = it }
-                            }
-                            InsetDivider()
-                            SwitchRow(quietEnabled, "禁收时段", "指定时段内不自动收款") { quietEnabled = it }
-                            if (quietEnabled) {
-                                InsetDivider(); TimeOfDayPickerRow("开始时间", quietStart) { quietStart = it }
-                                InsetDivider(); TimeOfDayPickerRow("结束时间", quietEnd) { quietEnd = it }
-                            }
+                } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        TextButton(
+                            text = "关闭",
+                            onClick = onDismiss,
+                            enabled = !installing && !deleting && !updatingLike &&
+                                !submittingComment && deletingCommentId == null,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                        if (owned) {
+                            TextButton(
+                                text = if (deleting) "正在删除" else "删除",
+                                onClick = { confirmDelete = true },
+                                enabled = !installing && !deleting && !updatingLike &&
+                                    !submittingComment && deletingCommentId == null,
+                                modifier = Modifier.weight(1f),
+                                colors = ButtonDefaults.textButtonColorsPrimary()
+                            )
                         }
-                    }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模板变量") }
-                    item {
-                        SettingsCard {
-                            InputRow(
-                                "时间变量格式",
-                                "用于 {time}，例如 yyyy-MM-dd HH:mm:ss",
-                                timeFormat
-                            ) { timeFormat = it }
-                        }
-                    }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "收款后回复") }
-                    item {
-                        SettingsCard {
-                            SelectRow("私聊收款回复", describeRedPacketReplySteps(replySteps)) {
-                                replyTarget = TransferReplyTarget.PRIVATE
-                                showReplySteps = true
-                            }
-                            InsetDivider()
-                            SelectRow("群聊收款回复", describeRedPacketReplySteps(groupReplySteps)) {
-                                replyTarget = TransferReplyTarget.GROUP
-                                showReplySteps = true
-                            }
-                        }
-                    }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "成功提醒") }
-                    item {
-                        TransferNotificationSettingsCard(
-                            context, notifySystemEnabled, { notifySystemEnabled = it }, notifyToastEnabled, { notifyToastEnabled = it },
-                            notifySoundEnabled, { notifySoundEnabled = it }, notifySoundMode, { notifySoundMode = it; notifySoundUri = "" },
-                            notifyVibrateEnabled, { notifyVibrateEnabled = it }, notifySoundUri, { notifySoundUri = it },
-                            notifyText, { notifyText = it }, notifyToastText, { notifyToastText = it },
-                            announceEnabled, { announceEnabled = it }, announceText, { announceText = it }
+                        TextButton(
+                            text = when {
+                                installing -> "正在处理"
+                                installed -> "更新"
+                                else -> "安装"
+                            },
+                            onClick = { detail?.let(onInstall) },
+                            enabled = detail != null && !loading && error.isBlank() && !installing &&
+                                !deleting && !updatingLike && !submittingComment && deletingCommentId == null,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
                         )
                     }
                 }
             }
         }
+    )
+    if (confirmDelete) {
+        WindowDialog(
+            show = true,
+            title = "删除线上插件",
+            onDismissRequest = { confirmDelete = false },
+            content = {
+                Column {
+                    Text(
+                        text = "确定删除“${summary.name.ifBlank { summary.remotePluginId }}”吗？线上插件及全部历史版本都会被删除，本地插件不会删除。此操作无法撤销。",
+                        color = MiuixTheme.colorScheme.onSurface,
+                        fontSize = 14.sp
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        TextButton(
+                            text = "取消",
+                            onClick = { confirmDelete = false },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                        TextButton(
+                            text = "确认删除",
+                            onClick = {
+                                confirmDelete = false
+                                onDelete()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                    }
+                }
+            }
+        )
+    }
+    pendingDeleteComment?.let { comment ->
+        WindowDialog(
+            show = true,
+            title = "删除评论",
+            onDismissRequest = { pendingDeleteComment = null },
+            content = {
+                Column {
+                    Text(
+                        text = "确定删除这条评论吗？此操作无法撤销。",
+                        color = MiuixTheme.colorScheme.onSurface,
+                        fontSize = 14.sp
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        TextButton(
+                            text = "取消",
+                            onClick = { pendingDeleteComment = null },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                        TextButton(
+                            text = "确认删除",
+                            onClick = {
+                                pendingDeleteComment = null
+                                onDeleteComment(comment)
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                    }
+                }
+            }
+        )
     }
 }
 
 @Composable
+internal fun PluginMarketSocialSection(
+    likeCount: Long,
+    commentCount: Long,
+    likedByCurrentUser: Boolean,
+    updatingLike: Boolean,
+    comments: List<PluginMarketComment>,
+    commentsLoading: Boolean,
+    commentsError: String,
+    currentUserWxId: String,
+    interactionError: String,
+    commentDraft: String,
+    submittingComment: Boolean,
+    deletingCommentId: String?,
+    enabled: Boolean,
+    onToggleLike: () -> Unit,
+    onCommentDraftChanged: (String) -> Unit,
+    onSubmitComment: () -> Unit,
+    onRetryComments: () -> Unit,
+    onDeleteComment: (PluginMarketComment) -> Unit,
+    onReplyComment: (PluginMarketComment) -> Unit
+) {
+    Text(
+        text = "互动",
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(top = 16.dp)
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        TextButton(
+            text = when {
+                updatingLike -> "正在处理"
+                likedByCurrentUser -> "取消点赞"
+                else -> "点赞"
+            },
+            onClick = onToggleLike,
+            enabled = enabled && currentUserWxId.isNotBlank() && !updatingLike,
+            modifier = Modifier.weight(1f),
+            colors = ButtonDefaults.textButtonColorsPrimary()
+        )
+        Text(
+            text = "$likeCount 个赞 · $commentCount 条评论",
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = 13.sp,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f)
+        )
+    }
+    Text(
+        text = "发表评论",
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(top = 10.dp)
+    )
+    BasicTextField(
+        value = commentDraft,
+        onValueChange = onCommentDraftChanged,
+        enabled = enabled && currentUserWxId.isNotBlank() && !submittingComment,
+        minLines = 2,
+        maxLines = 4,
+        textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
+        cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+        decorationBox = { innerTextField ->
+            Box(contentAlignment = Alignment.TopStart) {
+                if (commentDraft.isBlank()) {
+                    Text(
+                        text = if (currentUserWxId.isBlank()) "当前微信账号资料尚未就绪" else "填写评论内容",
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        fontSize = 14.sp
+                    )
+                }
+                innerTextField()
+            }
+        },
+        modifier = Modifier.fillMaxWidth().padding(top = 5.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MiuixTheme.colorScheme.secondaryVariant)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    )
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "${commentDraft.length}/1000",
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = 12.sp
+        )
+        TextButton(
+            text = if (submittingComment) "正在发表" else "发表",
+            onClick = onSubmitComment,
+            enabled = enabled && currentUserWxId.isNotBlank() &&
+                commentDraft.isNotBlank() && !submittingComment,
+            colors = ButtonDefaults.textButtonColorsPrimary()
+        )
+    }
+    if (interactionError.isNotBlank()) {
+        Text(
+            text = interactionError,
+            color = Color(0xFFD93025),
+            fontSize = 12.sp,
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+        )
+    }
+    Text(
+        text = "评论 ($commentCount)",
+        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+        fontSize = 12.sp,
+        modifier = Modifier.padding(top = 10.dp)
+    )
+    val commentThreads = remember(comments) { buildPluginMarketCommentThreads(comments) }
+    when {
+        commentsLoading -> EmptyText("正在加载评论...")
+        commentsError.isNotBlank() -> {
+            EmptyText(commentsError)
+            TextButton(
+                text = "重试",
+                onClick = onRetryComments,
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.textButtonColorsPrimary()
+            )
+        }
+        comments.isEmpty() -> EmptyText("暂无评论")
+        else -> commentThreads.forEachIndexed { index, thread ->
+            PluginMarketCommentRow(
+                comment = thread.root,
+                deleting = deletingCommentId == thread.root.commentId,
+                enabled = enabled && deletingCommentId == null,
+                onDelete = { onDeleteComment(thread.root) },
+                onReply = { onReplyComment(thread.root) }
+            )
+            if (thread.replies.isNotEmpty()) {
+                Column(
+                    modifier = Modifier.fillMaxWidth().padding(start = 14.dp, bottom = 8.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MiuixTheme.colorScheme.secondaryVariant)
+                        .padding(horizontal = 10.dp, vertical = 3.dp)
+                ) {
+                    thread.replies.forEachIndexed { replyIndex, reply ->
+                        PluginMarketReplyRow(
+                            comment = reply,
+                            deleting = deletingCommentId == reply.commentId,
+                            enabled = enabled && deletingCommentId == null,
+                            onDelete = { onDeleteComment(reply) },
+                            onReply = { onReplyComment(reply) }
+                        )
+                        if (replyIndex != thread.replies.lastIndex) InsetDivider()
+                    }
+                }
+            }
+            if (index != commentThreads.lastIndex) InsetDivider()
+        }
+    }
+}
+
+@Composable
+internal fun PluginMarketCommentRow(
+    comment: PluginMarketComment,
+    deleting: Boolean,
+    enabled: Boolean,
+    onDelete: () -> Unit,
+    onReply: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Column(
+            modifier = Modifier.weight(1f)
+                .clip(RoundedCornerShape(6.dp))
+                .clickable(enabled = enabled, onClick = onReply)
+                .padding(vertical = 7.dp)
+        ) {
+            Text(
+                text = comment.userNickname.ifBlank { "微信用户" },
+                color = MiuixTheme.colorScheme.onSurface,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = formatPluginMarketTime(comment.createdAt),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 11.sp
+            )
+            Text(
+                text = comment.content,
+                color = MiuixTheme.colorScheme.onSurface,
+                fontSize = 14.sp,
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+            )
+        }
+        if (comment.canDelete) {
+            TextButton(
+                text = if (deleting) "正在删除" else "删除",
+                onClick = onDelete,
+                enabled = enabled && !deleting,
+                colors = ButtonDefaults.textButtonColorsPrimary()
+            )
+        }
+    }
+}
+
+@Composable
+internal fun PluginMarketReplyRow(
+    comment: PluginMarketComment,
+    deleting: Boolean,
+    enabled: Boolean,
+    onDelete: () -> Unit,
+    onReply: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 1.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        Column(
+            modifier = Modifier.weight(1f)
+                .clip(RoundedCornerShape(4.dp))
+                .clickable(enabled = enabled, onClick = onReply)
+                .padding(vertical = 6.dp)
+        ) {
+            Text(
+                text = buildAnnotatedString {
+                    withStyle(SpanStyle(fontWeight = FontWeight.Medium)) {
+                        append(comment.userNickname.ifBlank { "微信用户" })
+                    }
+                    append(" 回复 ")
+                    withStyle(SpanStyle(fontWeight = FontWeight.Medium)) {
+                        append(comment.replyToNickname.ifBlank { "微信用户" })
+                    }
+                    append("：")
+                    append(comment.content)
+                },
+                color = MiuixTheme.colorScheme.onSurface,
+                fontSize = 13.sp,
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                text = formatPluginMarketTime(comment.createdAt),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+        if (comment.canDelete) {
+            TextButton(
+                text = if (deleting) "正在删除" else "删除",
+                onClick = onDelete,
+                enabled = enabled && !deleting,
+                colors = ButtonDefaults.textButtonColorsPrimary()
+            )
+        }
+    }
+}
+
+internal data class PluginMarketCommentThread(
+    val root: PluginMarketComment,
+    val replies: List<PluginMarketComment>
+)
+
+internal fun buildPluginMarketCommentThreads(
+    comments: List<PluginMarketComment>
+): List<PluginMarketCommentThread> {
+    val commentsById = comments.associateBy { it.commentId }
+    val roots = comments.filter { comment ->
+        comment.parentCommentId.isBlank() || comment.parentCommentId !in commentsById
+    }.sortedWith(
+        compareByDescending<PluginMarketComment> { it.createdAt }
+            .thenByDescending { it.commentId }
+    )
+    val repliesByRoot = linkedMapOf<String, MutableList<PluginMarketComment>>()
+    comments.filter { it.parentCommentId.isNotBlank() }.forEach { comment ->
+        var cursor = comment
+        val visited = mutableSetOf(comment.commentId)
+        while (cursor.parentCommentId.isNotBlank()) {
+            val parent = commentsById[cursor.parentCommentId] ?: break
+            if (!visited.add(parent.commentId)) break
+            cursor = parent
+        }
+        if (cursor.commentId != comment.commentId) {
+            repliesByRoot.getOrPut(cursor.commentId) { mutableListOf() }.add(comment)
+        }
+    }
+    return roots.map { root ->
+        PluginMarketCommentThread(
+            root = root,
+            replies = repliesByRoot[root.commentId].orEmpty().sortedWith(
+                compareBy<PluginMarketComment> { it.createdAt }.thenBy { it.commentId }
+            )
+        )
+    }
+}
+
+@Composable
+internal fun PluginMarketDialogInfoRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top
+    ) {
+        Text(
+            text = label,
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = 13.sp
+        )
+        Text(
+            text = value,
+            color = MiuixTheme.colorScheme.onSurface,
+            fontSize = 13.sp,
+            textAlign = TextAlign.End,
+            modifier = Modifier.weight(1f).padding(start = 16.dp)
+        )
+    }
+}
+
+@Composable
+internal fun PluginMarketUploadDialog(
+    context: Context,
+    onDismiss: (Boolean) -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var loading by remember { mutableStateOf(true) }
+    var loadError by remember { mutableStateOf("") }
+    var localPlugins by remember { mutableStateOf<List<ScriptPluginRuntime.ScriptPlugin>>(emptyList()) }
+    var query by rememberSaveable { mutableStateOf("") }
+    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var remoteNames by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var releaseNotes by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var extraFiles by remember { mutableStateOf<Map<String, List<PluginMarketFile>>>(emptyMap()) }
+    var statuses by remember { mutableStateOf<Map<String, PluginMarketUploadStatus>>(emptyMap()) }
+    var uploading by remember { mutableStateOf(false) }
+    var uploadedAny by remember { mutableStateOf(false) }
+    var reloadVersion by remember { mutableStateOf(0) }
+
+    LaunchedEffect(reloadVersion) {
+        loading = true
+        loadError = ""
+        val result = runCatching {
+            withContext(Dispatchers.IO) { ScriptPluginRuntime.listPlugins(context) }
+        }
+        result.fold(
+            onSuccess = { plugins ->
+                localPlugins = plugins
+                remoteNames = plugins.associate { plugin ->
+                    plugin.id to (plugin.displayName ?: plugin.name).ifBlank { plugin.id }
+                }
+                releaseNotes = plugins.associate { plugin ->
+                    plugin.id to releaseNotes[plugin.id].orEmpty()
+                }
+                extraFiles = extraFiles.filterKeys { id -> plugins.any { it.id == id } }
+                selectedIds = selectedIds.intersect(plugins.mapTo(LinkedHashSet()) { it.id })
+            },
+            onFailure = { error -> loadError = pluginMarketErrorMessage(error) }
+        )
+        loading = false
+    }
+
+    val normalizedQuery = query.trim().lowercase(Locale.US)
+    val filteredPlugins = localPlugins.filter { plugin ->
+        normalizedQuery.isEmpty() ||
+            plugin.id.lowercase(Locale.US).contains(normalizedQuery) ||
+            plugin.name.lowercase(Locale.US).contains(normalizedQuery) ||
+            plugin.author.lowercase(Locale.US).contains(normalizedQuery)
+    }
+    val allFilteredSelected = filteredPlugins.isNotEmpty() && filteredPlugins.all { it.id in selectedIds }
+
+    fun startUpload() {
+        if (uploading || selectedIds.isEmpty()) return
+        val ordered = localPlugins.filter { it.id in selectedIds }
+        if (ordered.any { remoteNames[it.id].orEmpty().trim().isBlank() }) {
+            Toast.makeText(context, "在线插件名不能为空", Toast.LENGTH_SHORT).show()
+            return
+        }
+        statuses = ordered.associate { plugin ->
+            plugin.id to PluginMarketUploadStatus(PluginMarketUploadPhase.QUEUED, "等待上传")
+        }
+        uploading = true
+        scope.launch {
+            var publishedCount = 0
+            var pendingCount = 0
+            ordered.forEach { plugin ->
+                statuses = statuses + (
+                    plugin.id to PluginMarketUploadStatus(PluginMarketUploadPhase.UPLOADING, "正在上传")
+                )
+                val result = withContext(Dispatchers.IO) {
+                    PluginMarketRepository.upload(
+                        context = context,
+                        localPluginId = plugin.id,
+                        remoteName = remoteNames[plugin.id].orEmpty().trim(),
+                        releaseNotes = releaseNotes[plugin.id].orEmpty().trim(),
+                        extraFiles = extraFiles[plugin.id].orEmpty()
+                    )
+                }
+                result.fold(
+                    onSuccess = { ownership ->
+                        uploadedAny = true
+                        when (ownership.reviewStatus) {
+                            PluginMarketReviewStatus.PENDING -> {
+                                pendingCount++
+                                statuses = statuses + (
+                                    plugin.id to PluginMarketUploadStatus(
+                                        PluginMarketUploadPhase.PENDING_REVIEW,
+                                        "上传成功，待审核 · ${ownership.remotePluginId}"
+                                    )
+                                )
+                            }
+                            PluginMarketReviewStatus.APPROVED -> {
+                                publishedCount++
+                                statuses = statuses + (
+                                    plugin.id to PluginMarketUploadStatus(
+                                        PluginMarketUploadPhase.SUCCESS,
+                                        "上传成功 · ${ownership.remotePluginId}"
+                                    )
+                                )
+                            }
+                        }
+                    },
+                    onFailure = { error ->
+                        statuses = statuses + (
+                            plugin.id to PluginMarketUploadStatus(
+                                PluginMarketUploadPhase.FAILED,
+                                "上传失败: ${pluginMarketErrorMessage(error)}"
+                            )
+                        )
+                    }
+                )
+            }
+            uploading = false
+            Toast.makeText(
+                context,
+                "上传完成：已发布 $publishedCount，待审核 $pendingCount，失败 ${ordered.size - publishedCount - pendingCount}",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    WindowDialog(
+        show = true,
+        title = "上传本地插件",
+        onDismissRequest = { if (!uploading) onDismiss(uploadedAny) },
+        content = {
+            Column(modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp)) {
+                SearchBarSurface(
+                    query = query,
+                    placeholder = "搜索本地插件",
+                    onQueryChange = { if (!uploading) query = it }
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "已选 ${selectedIds.size} / ${localPlugins.size}",
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        fontSize = 12.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = if (allFilteredSelected) "取消当前筛选" else "全选当前筛选",
+                        color = if (filteredPlugins.isEmpty() || uploading) {
+                            MiuixTheme.colorScheme.onSurfaceVariantSummary
+                        } else {
+                            MiuixTheme.colorScheme.primary
+                        },
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickable(enabled = filteredPlugins.isNotEmpty() && !uploading) {
+                            val filteredIds = filteredPlugins.mapTo(LinkedHashSet()) { it.id }
+                            selectedIds = if (allFilteredSelected) {
+                                selectedIds - filteredIds
+                            } else {
+                                selectedIds + filteredIds
+                            }
+                        }.padding(horizontal = 8.dp, vertical = 6.dp)
+                    )
+                }
+                LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f, fill = false)) {
+                    when {
+                        loading -> item { EmptyText("正在读取本地插件...") }
+                        loadError.isNotBlank() -> item {
+                            Column {
+                                EmptyText(loadError)
+                                TextButton(
+                                    text = "重试",
+                                    onClick = { reloadVersion++ },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = ButtonDefaults.textButtonColorsPrimary()
+                                )
+                            }
+                        }
+                        localPlugins.isEmpty() -> item { EmptyText("没有可运行的本地插件") }
+                        filteredPlugins.isEmpty() -> item { EmptyText("没有匹配的本地插件") }
+                        else -> items(filteredPlugins.size, key = { filteredPlugins[it].id }) { index ->
+                            val plugin = filteredPlugins[index]
+                            if (index > 0) InsetDivider(start = 0.dp)
+                            PluginMarketUploadRow(
+                                plugin = plugin,
+                                selected = plugin.id in selectedIds,
+                                remoteName = remoteNames[plugin.id].orEmpty(),
+                                releaseNotes = releaseNotes[plugin.id].orEmpty(),
+                                extraFiles = extraFiles[plugin.id].orEmpty(),
+                                status = statuses[plugin.id],
+                                enabled = !uploading,
+                                onSelectedChange = { selected ->
+                                    selectedIds = if (selected) selectedIds + plugin.id else selectedIds - plugin.id
+                                },
+                                onRemoteNameChange = { name ->
+                                    remoteNames = remoteNames + (plugin.id to name.take(100))
+                                },
+                                onReleaseNotesChange = { notes ->
+                                    releaseNotes = releaseNotes + (plugin.id to notes.take(500))
+                                },
+                                onPickExtraFiles = {
+                                    ScriptPluginAgentUi.findAgentActivity(context)?.let { activity ->
+                                        PluginMarketExtraFilePickerBridge.launch(activity) { files ->
+                                            val existing = extraFiles[plugin.id].orEmpty()
+                                            val merged = (files + existing).distinctBy {
+                                                it.name.lowercase(Locale.ROOT)
+                                            }
+                                            extraFiles = extraFiles + (plugin.id to merged)
+                                        }
+                                    } ?: Toast.makeText(
+                                        context,
+                                        "无法打开文件选择器",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                },
+                                onClearExtraFiles = {
+                                    extraFiles = extraFiles - plugin.id
+                                }
+                            )
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    TextButton(
+                        text = "关闭",
+                        onClick = { onDismiss(uploadedAny) },
+                        enabled = !uploading,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                    TextButton(
+                        text = if (uploading) "正在上传" else "上传已选",
+                        onClick = ::startUpload,
+                        enabled = !uploading && selectedIds.isNotEmpty(),
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                }
+            }
+        }
+    )
+}
+
+@Composable
+internal fun PluginMarketUploadRow(
+    plugin: ScriptPluginRuntime.ScriptPlugin,
+    selected: Boolean,
+    remoteName: String,
+    releaseNotes: String,
+    extraFiles: List<PluginMarketFile>,
+    status: PluginMarketUploadStatus?,
+    enabled: Boolean,
+    onSelectedChange: (Boolean) -> Unit,
+    onRemoteNameChange: (String) -> Unit,
+    onReleaseNotesChange: (String) -> Unit,
+    onPickExtraFiles: () -> Unit,
+    onClearExtraFiles: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable(enabled = enabled) { onSelectedChange(!selected) }
+                .padding(horizontal = 4.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = plugin.name.ifBlank { plugin.id },
+                    color = MiuixTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = buildString {
+                        append(plugin.id)
+                        append(" · ").append(plugin.author.ifBlank { "未知作者" })
+                        append(" · ").append(plugin.version.ifBlank { "未知版本" })
+                    },
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            SelectionMark(selected = selected, multiSelect = true)
+        }
+        if (selected) {
+            Text(
+                text = "在线名称",
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+            )
+            BasicTextField(
+                value = remoteName,
+                onValueChange = onRemoteNameChange,
+                enabled = enabled,
+                singleLine = true,
+                textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
+                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                modifier = Modifier.fillMaxWidth().padding(top = 5.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MiuixTheme.colorScheme.secondaryVariant)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            )
+            Text(
+                text = "更新说明",
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 4.dp, top = 8.dp)
+            )
+            BasicTextField(
+                value = releaseNotes,
+                onValueChange = onReleaseNotesChange,
+                enabled = enabled,
+                minLines = 2,
+                maxLines = 3,
+                textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
+                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                decorationBox = { innerTextField ->
+                    Box(contentAlignment = Alignment.TopStart) {
+                        if (releaseNotes.isBlank()) {
+                            Text(
+                                text = "填写本次版本的更新内容",
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                fontSize = 14.sp
+                            )
+                        }
+                        innerTextField()
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = 5.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MiuixTheme.colorScheme.secondaryVariant)
+                    .padding(horizontal = 12.dp, vertical = 10.dp)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "附加文件${if (extraFiles.isEmpty()) "" else " (${extraFiles.size})"}",
+                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                        fontSize = 12.sp
+                    )
+                    if (extraFiles.isNotEmpty()) {
+                        Text(
+                            text = extraFiles.joinToString("、") { it.name },
+                            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                            fontSize = 12.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 2.dp)
+                        )
+                    }
+                }
+                TextButton(
+                    text = "选择",
+                    onClick = onPickExtraFiles,
+                    enabled = enabled,
+                    colors = ButtonDefaults.textButtonColorsPrimary()
+                )
+                if (extraFiles.isNotEmpty()) {
+                    TextButton(
+                        text = "清空",
+                        onClick = onClearExtraFiles,
+                        enabled = enabled,
+                        colors = ButtonDefaults.textButtonColorsPrimary()
+                    )
+                }
+            }
+        }
+        if (status != null) {
+            val color = when (status.phase) {
+                PluginMarketUploadPhase.SUCCESS -> MiuixTheme.colorScheme.primary
+                PluginMarketUploadPhase.PENDING_REVIEW -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+                PluginMarketUploadPhase.FAILED -> Color(0xFFD93025)
+                else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+            }
+            Text(
+                text = status.message,
+                color = color,
+                fontSize = 12.sp,
+                modifier = Modifier.fillMaxWidth().padding(start = 4.dp, top = 6.dp)
+            )
+        }
+    }
+}
+
+internal fun pluginMarketErrorMessage(error: Throwable): String {
+    if (error is PluginMarketException && error.errorCode == "UPLOADER_BLACKLISTED") {
+        return "当前微信账号已被禁止上传在线插件"
+    }
+    return error.message?.trim().takeUnless { it.isNullOrBlank() } ?: error.javaClass.simpleName
+}
+
+}

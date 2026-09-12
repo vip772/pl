@@ -540,94 +540,48 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.random.Random
 
-internal fun GroupMemberGroupManagerPage(
+@Composable
+internal fun MessageBlockBatchBindingPage(
     context: Context,
-    listenGroups: String,
-    templates: List<GroupLeaveReplyTemplate>,
-    templateBindings: List<GroupLeaveReplyTemplateBinding>,
+    request: MessageBlockBatchBindingEditorRequest,
+    templates: List<MessageBlockTemplate>,
     onBack: () -> Unit,
-    onOpenTemplates: () -> Unit,
-    onBatchApplyTemplate: () -> Unit,
-    onDeleteGroups: (List<ContactOption>) -> Unit,
-    onPickGroups: () -> Unit,
-    onOpenGroup: (String, String) -> Unit
+    onSave: (List<MessageBlockBinding>) -> Unit
 ) {
-    var loading by remember(listenGroups) { mutableStateOf(true) }
-    var error by remember(listenGroups) { mutableStateOf("") }
-    var groups by remember(listenGroups) { mutableStateOf(emptyList<ContactOption>()) }
-    var query by remember { mutableStateOf("") }
-    var batchDeleteMode by remember { mutableStateOf(false) }
-    var selectedForDelete by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    val selectedIds = remember(listenGroups) { parseIds(listenGroups).toList() }
+    var enabled by remember(request) { mutableStateOf(true) }
+    var action by remember(request) { mutableStateOf(MessageBlockSettings.ACTION_BLOCK) }
+    var templateIds by remember(request) { mutableStateOf(defaultMessageBlockTemplateIds(templates)) }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
-
-    LaunchedEffect(listenGroups) {
-        loadContacts(context, ContactPickerMode.GROUPS) { result, throwable ->
-            loading = false
-            if (throwable != null) {
-                error = throwable.message ?: "读取群聊失败"
-            } else {
-                val byId = result.associateBy { it.id }
-                groups = selectedIds.map { id ->
-                    byId[id] ?: ContactOption(id, id, group = true, avatarUrl = "", avatarBackupUrl = "")
-                }
-            }
-        }
-    }
-
-    val lower = query.trim().lowercase(Locale.US)
-    val visible = groups.filter { it.matchesSearch(lower) }
-    val visibleIds = visible.mapTo(LinkedHashSet()) { it.id }
-    val allVisibleSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedForDelete }
-    val selectedGroups = groups.filter { it.id in selectedForDelete }
     PageScaffold(
-        title = "监听群",
-        largeTitle = "监听群",
+        title = request.title,
+        largeTitle = request.title,
         scrollBehavior = scrollBehavior,
         bottomBar = {
-            if (batchDeleteMode) {
-                BottomActionBar(
-                    primaryText = "删除所选（${selectedGroups.size}）",
-                    onPrimaryClick = {
-                        if (selectedGroups.isEmpty()) {
-                            Toast.makeText(context, "请先选择监听群", Toast.LENGTH_SHORT).show()
-                        } else {
-                            showDeleteConfirm = true
-                        }
-                    },
-                    secondaryText = "取消",
-                    onSecondaryClick = {
-                        batchDeleteMode = false
-                        selectedForDelete = emptySet()
-                    },
-                    middleText = if (visibleIds.isEmpty()) null else if (allVisibleSelected) "取消全选" else "全选",
-                    onMiddleClick = if (visibleIds.isEmpty()) null else {
-                        {
-                            selectedForDelete = if (allVisibleSelected) {
-                                selectedForDelete - visibleIds
-                            } else {
-                                selectedForDelete + visibleIds
+            BottomActionBar(
+                primaryText = "保存名单",
+                onPrimaryClick = {
+                    if (templateIds.isEmpty()) {
+                        Toast.makeText(context, "请先选择模板", Toast.LENGTH_SHORT).show()
+                    } else {
+                        onSave(
+                            request.bindings.map {
+                                it.copy(
+                                    enabled = enabled,
+                                    action = action,
+                                    templateIds = templateIds,
+                                    customRules = false,
+                                    typeAll = false,
+                                    types = emptySet(),
+                                    textKeywords = ""
+                                )
                             }
-                        }
+                        )
                     }
-                )
-            } else {
-                BottomActionBar(
-                    primaryText = "选择监听群",
-                    onPrimaryClick = onPickGroups,
-                    secondaryText = "返回",
-                    onSecondaryClick = onBack,
-                    middleText = if (selectedIds.isEmpty()) null else "批量删除",
-                    onMiddleClick = if (selectedIds.isEmpty()) null else {
-                        {
-                            batchDeleteMode = true
-                            selectedForDelete = emptySet()
-                        }
-                    }
-                )
-            }
+                },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
         }
     ) { padding ->
         LazyColumn(
@@ -638,103 +592,286 @@ internal fun GroupMemberGroupManagerPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
+            item { SmallTitle(text = "批量配置") }
             item {
                 SettingsCard {
-                    InputRow("搜索监听群", "群名称 / 群聊备注 / 群号", query) { query = it }
+                    SelectRow(
+                        title = "已选择",
+                        summary = "${request.bindings.size} 个名单项",
+                        onClick = {}
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = enabled,
+                        title = "启用名单",
+                        summary = "关闭后保留名单但不参与匹配",
+                        onCheckedChange = { enabled = it }
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = action == MessageBlockSettings.ACTION_EXCLUDE,
+                        title = "排除名单",
+                        summary = "开启后这些名单命中时跳过屏蔽",
+                        onCheckedChange = {
+                            action = if (it) MessageBlockSettings.ACTION_EXCLUDE else MessageBlockSettings.ACTION_BLOCK
+                        }
+                    )
                 }
             }
-            if (!batchDeleteMode) {
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模板") }
-                item {
-                    SettingsCard {
-                        ActionRow(
-                            "回复模板管理",
-                            if (templates.isEmpty()) "暂无模板，进入后添加" else "${templates.size} 个模板"
-                        ) {
-                            onOpenTemplates()
-                        }
-                        InsetDivider()
-                        ActionRow(
-                            "批量套用模板",
-                            if (templates.isEmpty()) "先新增模板，再批量绑定监听群" else groupLeaveTemplateBindingSummary(templateBindings, templates)
-                        ) {
-                            onBatchApplyTemplate()
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模板") }
+            item {
+                SettingsCard {
+                    if (templates.isEmpty()) {
+                        EmptyText("暂无模板。先新增模板，再回来批量添加名单。")
+                    } else {
+                        templates.forEachIndexed { index, template ->
+                            SwitchRow(
+                                checked = templateIds.contains(template.id),
+                                title = template.name.ifBlank { "模板 ${index + 1}" },
+                                summary = describeMessageBlockTemplate(template),
+                                onCheckedChange = { checked ->
+                                    templateIds = if (checked) {
+                                        templateIds + template.id
+                                    } else {
+                                        templateIds - template.id
+                                    }
+                                }
+                            )
+                            if (index < templates.lastIndex) InsetDivider()
                         }
                     }
                 }
             }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "已监听群 · ${selectedIds.size} 项") }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "名单") }
             item {
                 SettingsCard {
-                    when {
-                        loading -> EmptyText("正在载入监听群...")
-                        error.isNotEmpty() -> EmptyText(error)
-                        selectedIds.isEmpty() -> EmptyText("暂无监听群。点击底部“选择监听群”添加。")
-                        visible.isEmpty() -> EmptyText("没有匹配结果")
-                        else -> visible.forEachIndexed { index, option ->
-                            if (batchDeleteMode) {
-                                OptionChoiceRow(
-                                    item = OptionItem(
-                                        label = option.label.ifBlank { option.id },
-                                        value = index,
-                                        summary = groupLeaveGroupBindingSummary(option.id, option.id, templateBindings, templates)
-                                    ),
-                                    selected = option.id in selectedForDelete,
-                                    onClick = {
-                                        selectedForDelete = if (option.id in selectedForDelete) {
-                                            selectedForDelete - option.id
+                    request.bindings.take(30).forEachIndexed { index, binding ->
+                        SelectRow(
+                            title = binding.label.ifBlank { binding.targetId },
+                            summary = messageBlockBindingTargetSummary(binding),
+                            onClick = {}
+                        )
+                        if (index < minOf(request.bindings.size, 30) - 1) InsetDivider()
+                    }
+                    if (request.bindings.size > 30) {
+                        InsetDivider()
+                        EmptyText("还有 ${request.bindings.size - 30} 个名单项未展开显示")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun MessageBlockDefaultRulePage(
+    context: Context,
+    rule: MessageBlockDefaultRule,
+    templates: List<MessageBlockTemplate>,
+    onBack: () -> Unit,
+    onSave: (MessageBlockDefaultRule) -> Unit
+) {
+    var enabled by remember(rule) { mutableStateOf(rule.enabled) }
+    var templateIds by remember(rule) { mutableStateOf(rule.templateIds) }
+    var customRules by remember(rule) { mutableStateOf(rule.customRules) }
+    var typeAll by remember(rule) { mutableStateOf(rule.typeAll) }
+    var types by remember(rule) { mutableStateOf(rule.types) }
+    var textKeywords by remember(rule) { mutableStateOf(rule.textKeywords) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    val title = when {
+        rule.official -> "默认公众号规则"
+        rule.group -> "默认群聊规则"
+        else -> "默认私聊规则"
+    }
+    val scopeSummary = when {
+        rule.official -> "未配置名单的公众号按此规则屏蔽"
+        rule.group -> "未配置名单的群聊按此规则屏蔽"
+        else -> "未配置名单的私聊按此规则屏蔽"
+    }
+    fun copySelectedTemplateRules() {
+        val rules = messageBlockRuleStateFromTemplates(templateIds, templates)
+        typeAll = rules.typeAll
+        types = rules.types
+        textKeywords = rules.textKeywords
+    }
+
+    PageScaffold(
+        title = title,
+        largeTitle = title,
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存规则",
+                onPrimaryClick = {
+                    if (enabled && !customRules && templateIds.isEmpty()) {
+                        Toast.makeText(context, "请先选择模板", Toast.LENGTH_SHORT).show()
+                    } else {
+                        onSave(
+                            rule.copy(
+                                enabled = enabled,
+                                templateIds = templateIds,
+                                customRules = customRules,
+                                typeAll = typeAll,
+                                types = types,
+                                textKeywords = if (customRules && !typeAll && types.contains(MessageBlockSettings.TYPE_TEXT)) textKeywords else ""
+                            )
+                        )
+                    }
+                },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "默认规则") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        checked = enabled,
+                        title = "启用默认规则",
+                        summary = scopeSummary,
+                        onCheckedChange = { enabled = it }
+                    )
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模板") }
+            item {
+                SettingsCard {
+                    if (templates.isEmpty()) {
+                        EmptyText("暂无模板。先新增模板，或开启下方专属规则。")
+                    } else {
+                        templates.forEachIndexed { index, template ->
+                            SwitchRow(
+                                checked = templateIds.contains(template.id),
+                                title = template.name.ifBlank { "模板 ${index + 1}" },
+                                summary = describeMessageBlockTemplate(template),
+                                onCheckedChange = { checked ->
+                                    templateIds = if (checked) {
+                                        templateIds + template.id
+                                    } else {
+                                        templateIds - template.id
+                                    }
+                                    if (!customRules) copySelectedTemplateRules()
+                                }
+                            )
+                            if (index < templates.lastIndex) InsetDivider()
+                        }
+                    }
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "规则") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        checked = customRules,
+                        title = "默认专属规则",
+                        summary = "开启后不依赖模板，直接按下方类型和关键词屏蔽",
+                        onCheckedChange = { checked ->
+                            customRules = checked
+                            if (checked && !typeAll && types.isEmpty() && textKeywords.isBlank()) {
+                                copySelectedTemplateRules()
+                            }
+                        }
+                    )
+                    if (customRules) {
+                        InsetDivider()
+                        ActionRow("套用已选模板规则", "把上方模板的类型和关键词复制到这里") {
+                            copySelectedTemplateRules()
+                        }
+                        InsetDivider()
+                        SwitchRow(
+                            checked = typeAll,
+                            title = "所有消息",
+                            summary = "开启后默认范围内全部类型生效",
+                            onCheckedChange = {
+                                typeAll = it
+                                if (it) textKeywords = ""
+                            }
+                        )
+                        if (!typeAll) {
+                            messageBlockTypeOptions().forEach { option ->
+                                InsetDivider()
+                                SwitchRow(
+                                    checked = types.contains(option.key),
+                                    title = option.title,
+                                    summary = option.summary,
+                                    onCheckedChange = { checked ->
+                                        types = if (checked) {
+                                            types + option.key
                                         } else {
-                                            selectedForDelete + option.id
+                                            if (option.key == MessageBlockSettings.TYPE_TEXT) textKeywords = ""
+                                            types - option.key
                                         }
                                     }
                                 )
-                            } else {
-                                SelectRow(
-                                    title = option.label.ifBlank { option.id },
-                                    summary = groupLeaveGroupBindingSummary(option.id, option.id, templateBindings, templates),
-                                    onClick = { onOpenGroup(option.id, option.label.ifBlank { option.id }) }
-                                )
                             }
-                            if (index < visible.lastIndex) InsetDivider()
+                            if (types.contains(MessageBlockSettings.TYPE_TEXT)) {
+                                InsetDivider()
+                                InputRow(
+                                    "文字关键词",
+                                    "文字和文字引用消息生效；多个用 |、逗号或换行分隔，留空则全部命中",
+                                    textKeywords,
+                                    minLines = 2
+                                ) { textKeywords = it }
+                            }
                         }
                     }
                 }
             }
         }
     }
-    BatchDeleteConfirmDialog(
-        show = showDeleteConfirm,
-        message = "将删除已选的 ${selectedGroups.size} 个进退群监听群及其专属配置，此操作不可撤销。",
-        labels = selectedGroups.map { it.label.ifBlank { it.id } },
-        onDismiss = { showDeleteConfirm = false },
-        onConfirm = {
-            val targets = selectedGroups
-            showDeleteConfirm = false
-            batchDeleteMode = false
-            selectedForDelete = emptySet()
-            onDeleteGroups(targets)
-        }
-    )
 }
 
 @Composable
-internal fun GroupLeaveTemplateListPage(
-    templates: List<GroupLeaveReplyTemplate>,
-    bindings: List<GroupLeaveReplyTemplateBinding>,
+internal fun MessageBlockTemplatePage(
+    context: Context,
+    request: MessageBlockTemplateEditorRequest,
     onBack: () -> Unit,
-    onOpenTemplate: (Int, GroupLeaveReplyTemplate) -> Unit,
-    onAddTemplate: () -> Unit
+    onSave: (MessageBlockTemplate) -> Unit,
+    onDelete: () -> Unit
 ) {
+    var name by remember(request) { mutableStateOf(request.template.name) }
+    var enabled by remember(request) { mutableStateOf(request.template.enabled) }
+    var typeAll by remember(request) { mutableStateOf(request.template.typeAll) }
+    var types by remember(request) { mutableStateOf(request.template.types) }
+    var textKeywords by remember(request) { mutableStateOf(request.template.textKeywords) }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
+
     PageScaffold(
-        title = "回复模板",
-        largeTitle = "回复模板",
+        title = name.ifBlank { "模板" },
+        largeTitle = name.ifBlank { "模板" },
         scrollBehavior = scrollBehavior,
         bottomBar = {
             BottomActionBar(
-                primaryText = "新增模板",
-                onPrimaryClick = onAddTemplate,
+                primaryText = "保存模板",
+                onPrimaryClick = {
+                    onSave(
+                        MessageBlockTemplate(
+                            id = request.template.id,
+                            name = name.trim().ifBlank { "模板 ${request.index + 1}" },
+                            enabled = enabled,
+                            mode = MessageBlockSettings.MODE_TARGETS,
+                            targets = "",
+                            targetGroupMembers = "",
+                            excludes = "",
+                            excludeGroupMembers = "",
+                            typeAll = typeAll,
+                            types = types,
+                            textKeywords = if (!typeAll && types.contains(MessageBlockSettings.TYPE_TEXT)) textKeywords else ""
+                        )
+                    )
+                    Toast.makeText(context, "模板已保存", Toast.LENGTH_SHORT).show()
+                },
                 secondaryText = "返回",
                 onSecondaryClick = onBack
             )
@@ -751,17 +888,64 @@ internal fun GroupLeaveTemplateListPage(
             item { SmallTitle(text = "模板") }
             item {
                 SettingsCard {
-                    if (templates.isEmpty()) {
-                        EmptyText("暂无模板。模板保存一整套进退群回复配置，再批量套用到监听群。")
-                    } else {
-                        templates.forEachIndexed { index, template ->
-                            val count = bindings.count { it.templateId == template.id }
-                            SelectRow(
-                                title = template.name.ifBlank { "模板 ${index + 1}" },
-                                summary = "${describeGroupLeaveTemplate(template)} · 已绑定 $count 个群",
-                                onClick = { onOpenTemplate(index, template) }
+                    InputRow("模板名称", "用于区分不同屏蔽模板", name) { name = it }
+                    InsetDivider()
+                    SwitchRow(
+                        checked = enabled,
+                        title = "启用模板",
+                        summary = "关闭后使用该模板的名单不会按此规则屏蔽",
+                        onCheckedChange = { enabled = it }
+                    )
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "类型") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        checked = typeAll,
+                        title = "所有消息",
+                        summary = "开启后该模板命中范围内全部类型生效",
+                        onCheckedChange = {
+                            typeAll = it
+                            if (it) textKeywords = ""
+                        }
+                    )
+                    if (!typeAll) {
+                        messageBlockTypeOptions().forEach { option ->
+                            InsetDivider()
+                            SwitchRow(
+                                checked = types.contains(option.key),
+                                title = option.title,
+                                summary = option.summary,
+                                onCheckedChange = { checked ->
+                                    types = if (checked) {
+                                        types + option.key
+                                    } else {
+                                        if (option.key == MessageBlockSettings.TYPE_TEXT) textKeywords = ""
+                                        types - option.key
+                                    }
+                                }
                             )
-                            if (index < templates.lastIndex) InsetDivider()
+                        }
+                        if (types.contains(MessageBlockSettings.TYPE_TEXT)) {
+                            InsetDivider()
+                            InputRow(
+                                "文字关键词",
+                                "文字和文字引用消息生效；多个用 |、逗号或换行分隔，留空则全部命中",
+                                textKeywords,
+                                minLines = 2
+                            ) { textKeywords = it }
+                        }
+                    }
+                }
+            }
+            if (request.canDelete) {
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
+                item {
+                    SettingsCard {
+                        ActionRow("删除模板", "删除后立即从模板列表移除") {
+                            onDelete()
+                            Toast.makeText(context, "模板已删除", Toast.LENGTH_SHORT).show()
                         }
                     }
                 }
@@ -771,90 +955,54 @@ internal fun GroupLeaveTemplateListPage(
 }
 
 @Composable
-internal fun GroupLeaveBatchTemplateBindingPage(
+internal fun MessageBlockBindingPage(
     context: Context,
-    listenGroups: String,
-    templates: List<GroupLeaveReplyTemplate>,
-    bindings: List<GroupLeaveReplyTemplateBinding>,
+    request: MessageBlockBindingEditorRequest,
+    templates: List<MessageBlockTemplate>,
     onBack: () -> Unit,
-    onSave: (List<GroupLeaveReplyTemplateBinding>) -> Unit
+    onSave: (MessageBlockBinding) -> Unit,
+    onDelete: () -> Unit
 ) {
-    var loading by remember(listenGroups) { mutableStateOf(true) }
-    var error by remember(listenGroups) { mutableStateOf("") }
-    var groups by remember(listenGroups) { mutableStateOf(emptyList<ContactOption>()) }
-    var query by remember { mutableStateOf("") }
-    var selectedTemplateId by remember(templates) { mutableStateOf(templates.firstOrNull()?.id.orEmpty()) }
-    var selectedGroups by remember(listenGroups) { mutableStateOf(parseIds(listenGroups)) }
-    val selectedIds = remember(listenGroups) { parseIds(listenGroups).toList() }
+    var enabled by remember(request) { mutableStateOf(request.binding.enabled) }
+    var action by remember(request) { mutableStateOf(request.binding.action) }
+    var templateIds by remember(request) { mutableStateOf(request.binding.templateIds) }
+    var customRules by remember(request) { mutableStateOf(request.binding.customRules) }
+    var typeAll by remember(request) { mutableStateOf(request.binding.typeAll) }
+    var types by remember(request) { mutableStateOf(request.binding.types) }
+    var textKeywords by remember(request) { mutableStateOf(request.binding.textKeywords) }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
-
-    LaunchedEffect(listenGroups) {
-        loadContacts(context, ContactPickerMode.GROUPS) { result, throwable ->
-            loading = false
-            if (throwable != null) {
-                error = throwable.message ?: "读取群聊失败"
-            } else {
-                val byId = result.associateBy { it.id }
-                groups = selectedIds.map { id ->
-                    byId[id] ?: ContactOption(id, id, group = true, avatarUrl = "", avatarBackupUrl = "")
-                }
-            }
-        }
+    val targetTitle = request.binding.label.ifBlank { request.binding.targetId }
+    fun copySelectedTemplateRules() {
+        val rules = messageBlockRuleStateFromTemplates(templateIds, templates)
+        typeAll = rules.typeAll
+        types = rules.types
+        textKeywords = rules.textKeywords
     }
 
-    val templateOptions = templates.map { template ->
-        PopupChoice(template.name.ifBlank { template.id }, template.id)
-    }
-    val lower = query.trim().lowercase(Locale.US)
-    val visible = groups.filter { it.matchesSearch(lower) }
-    val visibleIds = visible.map { it.id }.toSet()
-    val visibleAllSelected = visibleIds.isNotEmpty() && visibleIds.all { selectedGroups.contains(it) }
     PageScaffold(
-        title = "批量套用模板",
-        largeTitle = "批量套用模板",
+        title = targetTitle,
+        largeTitle = targetTitle,
         scrollBehavior = scrollBehavior,
         bottomBar = {
             BottomActionBar(
-                primaryText = "套用模板",
+                primaryText = "保存名单",
                 onPrimaryClick = {
-                    if (templates.isEmpty()) {
-                        Toast.makeText(context, "请先新增模板", Toast.LENGTH_SHORT).show()
-                    } else if (selectedTemplateId.isBlank()) {
-                        Toast.makeText(context, "请先选择模板", Toast.LENGTH_SHORT).show()
-                    } else if (selectedGroups.isEmpty()) {
-                        Toast.makeText(context, "请先选择群", Toast.LENGTH_SHORT).show()
-                    } else {
-                        val labels = groups.associate { it.id to it.label.ifBlank { it.id } }
-                        onSave(
-                            selectedGroups.map { groupId ->
-                                GroupLeaveReplyTemplateBinding(
-                                    groupId = groupId,
-                                    label = labels[groupId] ?: bindings.firstOrNull { it.groupId == groupId }?.label ?: groupId,
-                                    templateId = selectedTemplateId
-                                )
-                            }
+                    onSave(
+                        request.binding.copy(
+                            enabled = enabled,
+                            action = action,
+                            templateIds = templateIds,
+                            customRules = customRules,
+                            typeAll = typeAll,
+                            types = types,
+                            textKeywords = if (customRules && !typeAll && types.contains(MessageBlockSettings.TYPE_TEXT)) textKeywords else ""
                         )
-                    }
+                    )
+                    Toast.makeText(context, "名单已保存", Toast.LENGTH_SHORT).show()
                 },
                 secondaryText = "返回",
-                onSecondaryClick = onBack,
-                middleText = if (visibleIds.isNotEmpty()) {
-                    if (visibleAllSelected) "取消全选" else "全选"
-                } else {
-                    null
-                },
-                onMiddleClick = if (visibleIds.isNotEmpty()) {
-                    {
-                        selectedGroups = if (visibleAllSelected) {
-                            selectedGroups - visibleIds
-                        } else {
-                            selectedGroups + visibleIds
-                        }
-                    }
-                } else {
-                    null
-                }
+                onSecondaryClick = onBack
             )
         }
     ) { padding ->
@@ -866,43 +1014,415 @@ internal fun GroupLeaveBatchTemplateBindingPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
-            item { SmallTitle(text = "模板") }
+            item { SmallTitle(text = "名单信息") }
+            item {
+                SettingsCard {
+                    SelectRow(
+                        title = targetTitle,
+                        summary = messageBlockBindingTargetSummary(request.binding),
+                        onClick = {}
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = enabled,
+                        title = "启用名单",
+                        summary = "关闭后该名单不参与屏蔽消息匹配",
+                        onCheckedChange = { enabled = it }
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = action == MessageBlockSettings.ACTION_EXCLUDE,
+                        title = "排除名单",
+                        summary = "开启后命中该名单时跳过屏蔽；关闭时按下方模板屏蔽",
+                        onCheckedChange = {
+                            action = if (it) MessageBlockSettings.ACTION_EXCLUDE else MessageBlockSettings.ACTION_BLOCK
+                        }
+                    )
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模板") }
             item {
                 SettingsCard {
                     if (templates.isEmpty()) {
-                        EmptyText("暂无模板。先进入“回复模板管理”新增模板。")
+                        EmptyText("暂无模板。先新增模板，再回到这里选择。")
                     } else {
-                        PopupChoiceRow(
-                            title = "选择模板",
-                            summary = templates.firstOrNull { it.id == selectedTemplateId }?.let { describeGroupLeaveTemplate(it) } ?: "未选择",
-                            options = templateOptions,
-                            currentValue = selectedTemplateId,
-                            onValueChanged = { selectedTemplateId = it }
-                        )
+                        templates.forEachIndexed { index, template ->
+                            SwitchRow(
+                                checked = templateIds.contains(template.id),
+                                title = template.name.ifBlank { "模板 ${index + 1}" },
+                                summary = describeMessageBlockTemplate(template),
+                                onCheckedChange = { checked ->
+                                    templateIds = if (checked) {
+                                        templateIds + template.id
+                                    } else {
+                                        templateIds - template.id
+                                    }
+                                    if (!customRules) copySelectedTemplateRules()
+                                }
+                            )
+                            if (index < templates.lastIndex) InsetDivider()
+                        }
                     }
                 }
             }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "监听群") }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "规则") }
             item {
                 SettingsCard {
-                    InputRow("搜索监听群", "群名称 / 群聊备注 / 群号", query) { query = it }
+                    SwitchRow(
+                        checked = customRules,
+                        title = "本名单专属规则",
+                        summary = if (customRules) {
+                            "开启后只按下方勾选屏蔽，不改动模板本身"
+                        } else {
+                            "关闭时跟随上方模板；开启后可直接给这个名单勾选文字、红包等类型"
+                        },
+                        onCheckedChange = { checked ->
+                            customRules = checked
+                            if (checked && !typeAll && types.isEmpty() && textKeywords.isBlank()) {
+                                copySelectedTemplateRules()
+                            }
+                        }
+                    )
+                    if (customRules) {
+                        InsetDivider()
+                        ActionRow("套用已选模板规则", "把上方模板的类型和关键词复制到这里") {
+                            copySelectedTemplateRules()
+                        }
+                        InsetDivider()
+                        SwitchRow(
+                            checked = typeAll,
+                            title = "所有消息",
+                            summary = "开启后该名单命中范围内全部类型生效",
+                            onCheckedChange = {
+                                typeAll = it
+                                if (it) textKeywords = ""
+                            }
+                        )
+                        if (!typeAll) {
+                            messageBlockTypeOptions().forEach { option ->
+                                InsetDivider()
+                                SwitchRow(
+                                    checked = types.contains(option.key),
+                                    title = option.title,
+                                    summary = option.summary,
+                                    onCheckedChange = { checked ->
+                                        types = if (checked) {
+                                            types + option.key
+                                        } else {
+                                            if (option.key == MessageBlockSettings.TYPE_TEXT) textKeywords = ""
+                                            types - option.key
+                                        }
+                                    }
+                                )
+                            }
+                            if (types.contains(MessageBlockSettings.TYPE_TEXT)) {
+                                InsetDivider()
+                                InputRow(
+                                    "文字关键词",
+                                    "文字和文字引用消息生效；多个用 |、逗号或换行分隔，留空则全部命中",
+                                    textKeywords,
+                                    minLines = 2
+                                ) { textKeywords = it }
+                            }
+                        }
+                    }
+                }
+            }
+            if (request.canDelete) {
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
+                item {
+                    SettingsCard {
+                        ActionRow("删除名单", "删除后该名单不再套用模板") {
+                            onDelete()
+                            Toast.makeText(context, "名单已删除", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ConversationGroupMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    ConversationGroupSettingsUi.Page(context, provider, onBack)
+}
+
+internal object ConversationGroupSettingsUi {
+@Composable
+fun Page(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    var enabled by remember { mutableStateOf(ConversationGroupStore.isEnabled(context)) }
+    var groups by remember { mutableStateOf(ConversationGroupStore.load(context)) }
+    var route by remember { mutableStateOf<ConversationGroupRoute>(ConversationGroupRoute.Main) }
+
+    fun reload() {
+        groups = ConversationGroupStore.load(context)
+        ConversationGroupRuntime.syncAsync(context)
+    }
+
+    fun saveGroup(group: ConversationGroup, existing: Boolean): Boolean {
+        val duplicate = groups.any {
+            it.id != group.id && it.parentId == group.parentId &&
+                it.name.equals(group.name.trim(), ignoreCase = true)
+        }
+        if (duplicate) {
+            Toast.makeText(context, "同一层级已存在同名分组", Toast.LENGTH_SHORT).show()
+            return false
+        }
+        val success = if (existing) {
+            ConversationGroupStore.updateGroup(context, group)
+        } else {
+            ConversationGroupStore.addGroup(context, group)
+        }
+        Toast.makeText(context, if (success) "聊天分组已保存" else "聊天分组保存失败", Toast.LENGTH_SHORT).show()
+        if (success) reload()
+        return success
+    }
+
+    SettingsRouteTransition(
+        targetState = route,
+        label = "ConversationGroupRoute",
+        depthOf = {
+            when (it) {
+                ConversationGroupRoute.Main -> 0
+                is ConversationGroupRoute.Editor -> 1
+                is ConversationGroupRoute.AutomaticGrouping -> 1
+                is ConversationGroupRoute.ConversationPicker,
+                is ConversationGroupRoute.ParentPicker,
+                is ConversationGroupRoute.AutomaticPicker -> 2
+            }
+        }
+    ) { currentRoute ->
+        when (currentRoute) {
+            ConversationGroupRoute.Main -> ConversationGroupListPage(
+                title = provider.title(),
+                enabled = enabled,
+                groups = groups,
+                onEnabledChange = {
+                    enabled = it
+                    ConversationGroupStore.setEnabled(context, it)
+                    ConversationGroupRuntime.syncAsync(context)
+                },
+                onBack = onBack,
+                onAdd = {
+                    route = ConversationGroupRoute.Editor(
+                        ConversationGroupStore.newGroup(parentId = null),
+                        existing = false
+                    )
+                },
+                onOpenAutomatic = {
+                    val target = groups.firstOrNull { it.automaticGroupingEnabled } ?: groups.firstOrNull()
+                    if (target == null) {
+                        Toast.makeText(context, "请先新增一个聊天分组", Toast.LENGTH_SHORT).show()
+                    } else {
+                        route = ConversationGroupRoute.AutomaticGrouping(target)
+                    }
+                },
+                onOpen = { route = ConversationGroupRoute.Editor(it, existing = true) }
+            )
+            is ConversationGroupRoute.Editor -> ConversationGroupEditorPage(
+                context = context,
+                group = currentRoute.group,
+                groups = groups,
+                existing = currentRoute.existing,
+                onBack = { route = ConversationGroupRoute.Main },
+                onPickParent = {
+                    route = ConversationGroupRoute.ParentPicker(it, currentRoute.existing)
+                },
+                onPickConversations = {
+                    route = ConversationGroupRoute.ConversationPicker(it, currentRoute.existing)
+                },
+                onSave = { draft ->
+                    if (saveGroup(draft, currentRoute.existing)) route = ConversationGroupRoute.Main
+                },
+                onReorder = { action, draft ->
+                    val success = ConversationGroupStore.reorderGroup(
+                        context,
+                        currentRoute.group.id,
+                        action
+                    )
+                    Toast.makeText(
+                        context,
+                        if (success) "分组顺序已更新" else "分组排序失败",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    if (success) {
+                        reload()
+                        ConversationGroupStore.load(context)
+                            .firstOrNull { it.id == currentRoute.group.id }
+                            ?.let { latest ->
+                                route = ConversationGroupRoute.Editor(
+                                    draft.copy(order = latest.order),
+                                    existing = true
+                                )
+                            }
+                    }
+                },
+                onDelete = {
+                    val success = ConversationGroupStore.deleteGroup(context, currentRoute.group.id)
+                    Toast.makeText(context, if (success) "分组已删除" else "分组删除失败", Toast.LENGTH_SHORT).show()
+                    if (success) {
+                        reload()
+                        route = ConversationGroupRoute.Main
+                    }
+                }
+            )
+            is ConversationGroupRoute.ConversationPicker -> ConversationGroupConversationPickerPage(
+                context = context,
+                group = currentRoute.group,
+                groups = groups,
+                onBack = {
+                    route = ConversationGroupRoute.Editor(currentRoute.group, currentRoute.existing)
+                },
+                onConfirm = { selected ->
+                    route = ConversationGroupRoute.Editor(
+                        currentRoute.group.copy(conversationIds = selected),
+                        currentRoute.existing
+                    )
+                }
+            )
+            is ConversationGroupRoute.ParentPicker -> ConversationGroupParentPickerPage(
+                group = currentRoute.group,
+                groups = groups,
+                onBack = {
+                    route = ConversationGroupRoute.Editor(currentRoute.group, currentRoute.existing)
+                },
+                onSelected = { parentId ->
+                    route = ConversationGroupRoute.Editor(
+                        currentRoute.group.copy(parentId = parentId),
+                        currentRoute.existing
+                    )
+                }
+            )
+            is ConversationGroupRoute.AutomaticGrouping -> ConversationGroupAutomaticGroupingPage(
+                context = context,
+                group = currentRoute.group,
+                groups = groups,
+                onBack = { route = ConversationGroupRoute.Main },
+                onTargetChanged = { group ->
+                    route = ConversationGroupRoute.AutomaticGrouping(group)
+                },
+                onPick = { group, kind ->
+                    route = ConversationGroupRoute.AutomaticPicker(group, kind)
+                },
+                onSave = { group ->
+                    if (saveGroup(group, existing = true)) {
+                        route = ConversationGroupRoute.Main
+                    }
+                }
+            )
+            is ConversationGroupRoute.AutomaticPicker -> ConversationGroupAutomaticPickerPage(
+                context = context,
+                group = currentRoute.group,
+                kind = currentRoute.kind,
+                onBack = {
+                    route = ConversationGroupRoute.AutomaticGrouping(currentRoute.group)
+                },
+                onConfirm = { selected ->
+                    val updated = when (currentRoute.kind) {
+                        ConversationGroupAutomaticPickerKind.GROUPS -> {
+                            currentRoute.group.copy(automaticGroupIds = selected)
+                        }
+                        ConversationGroupAutomaticPickerKind.OFFICIAL_INCLUDE -> {
+                            currentRoute.group.copy(automaticOfficialIncludeIds = selected)
+                        }
+                        ConversationGroupAutomaticPickerKind.OFFICIAL_EXCLUDE -> {
+                            currentRoute.group.copy(automaticOfficialExcludeIds = selected)
+                        }
+                    }
+                    route = ConversationGroupRoute.AutomaticGrouping(updated)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+internal fun ConversationGroupListPage(
+    title: String,
+    enabled: Boolean,
+    groups: List<ConversationGroup>,
+    onEnabledChange: (Boolean) -> Unit,
+    onBack: () -> Unit,
+    onAdd: () -> Unit,
+    onOpenAutomatic: () -> Unit,
+    onOpen: (ConversationGroup) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    val flattened = remember(groups) { flattenConversationGroups(groups) }
+    val lower = query.trim().lowercase(Locale.US)
+    val visible = flattened.filter { row ->
+        lower.isEmpty() || row.group.name.lowercase(Locale.US).contains(lower) ||
+            row.path.lowercase(Locale.US).contains(lower)
+    }
+    PageScaffold(
+        title = title,
+        largeTitle = title,
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "新增分组",
+                onPrimaryClick = onAdd,
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "功能") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        checked = enabled,
+                        title = "聊天分组",
+                        summary = if (enabled) "已归拢会话从微信首页隐藏" else "分组配置保留，会话恢复在微信首页显示",
+                        onCheckedChange = onEnabledChange
+                    )
+                    InsetDivider()
+                    ActionRow(
+                        title = "群聊归拢",
+                        summary = "按规则自动归拢群聊和公众号到指定分组"
+                    ) { onOpenAutomatic() }
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "分组") }
+            item {
+                SettingsCard {
+                    InputRow("搜索", "分组名称 / 所属路径", query) { query = it }
                 }
             }
             item {
                 SettingsCard {
                     when {
-                        loading -> EmptyText("正在载入监听群...")
-                        error.isNotEmpty() -> EmptyText(error)
-                        selectedIds.isEmpty() -> EmptyText("暂无监听群。先选择需要监听的群。")
-                        visible.isEmpty() -> EmptyText("没有匹配结果")
-                        else -> visible.forEachIndexed { index, option ->
-                            SwitchRow(
-                                checked = selectedGroups.contains(option.id),
-                                title = option.label.ifBlank { option.id },
-                                summary = groupLeaveGroupBindingSummary(option.id, option.id, bindings, templates),
-                                onCheckedChange = { checked ->
-                                    selectedGroups = if (checked) selectedGroups + option.id else selectedGroups - option.id
-                                }
+                        groups.isEmpty() -> EmptyText("暂无聊天分组")
+                        visible.isEmpty() -> EmptyText("没有匹配的聊天分组")
+                        else -> visible.forEachIndexed { index, row ->
+                            SelectRow(
+                                title = "${"  ".repeat(row.depth)}${row.group.name}",
+                                summary = buildString {
+                                    append(row.group.conversationIds.size).append(" 个直属会话")
+                                    val childCount = groups.count { it.parentId == row.group.id }
+                                    if (childCount > 0) append(" · ").append(childCount).append(" 个子分组")
+                                    if (row.depth > 0) append("\n").append(row.path)
+                                },
+                                onClick = { onOpen(row.group) }
                             )
                             if (index < visible.lastIndex) InsetDivider()
                         }
@@ -914,1320 +1434,35 @@ internal fun GroupLeaveBatchTemplateBindingPage(
 }
 
 @Composable
-internal fun GroupLeaveTemplateEditorPage(
+internal fun ConversationGroupAutomaticGroupingPage(
     context: Context,
-    request: GroupLeaveTemplateEditorRequest,
+    group: ConversationGroup,
+    groups: List<ConversationGroup>,
     onBack: () -> Unit,
-    onSave: (GroupLeaveReplyTemplate) -> Unit,
-    onDelete: () -> Unit
+    onTargetChanged: (ConversationGroup) -> Unit,
+    onPick: (ConversationGroup, ConversationGroupAutomaticPickerKind) -> Unit,
+    onSave: (ConversationGroup) -> Unit
 ) {
-    var favoritePicker by remember { mutableStateOf<FavoritePickerRequest?>(null) }
-    var name by remember(request) { mutableStateOf(request.template.name) }
-    var enabled by remember(request) { mutableStateOf(request.template.enabled) }
-    var joinEnabled by remember(request) { mutableStateOf(request.template.joinEnabled) }
-    var leftEnabled by remember(request) { mutableStateOf(request.template.leftEnabled) }
-    var promptType by remember(request) { mutableStateOf(request.template.promptType) }
-    var bothOrder by remember(request) { mutableStateOf(request.template.bothOrder) }
-    var joinText by remember(request) { mutableStateOf(request.template.joinText) }
-    var leftText by remember(request) { mutableStateOf(request.template.leftText) }
-    var joinCardTitle by remember(request) { mutableStateOf(request.template.joinCardTitle) }
-    var joinCardDesc by remember(request) { mutableStateOf(request.template.joinCardDesc) }
-    var leftCardTitle by remember(request) { mutableStateOf(request.template.leftCardTitle) }
-    var leftCardDesc by remember(request) { mutableStateOf(request.template.leftCardDesc) }
-    var mediaMode by remember(request) { mutableStateOf(request.template.mediaMode) }
-    var mediaOrder by remember(request) { mutableStateOf(request.template.mediaOrder) }
-    var mediaSequence by remember(request) { mutableStateOf(request.template.mediaSequence) }
-    var joinImages by remember(request) { mutableStateOf(request.template.joinImages) }
-    var leftImages by remember(request) { mutableStateOf(request.template.leftImages) }
-    var joinVoices by remember(request) { mutableStateOf(request.template.joinVoices) }
-    var leftVoices by remember(request) { mutableStateOf(request.template.leftVoices) }
-    var joinEmojis by remember(request) { mutableStateOf(request.template.joinEmojis) }
-    var leftEmojis by remember(request) { mutableStateOf(request.template.leftEmojis) }
-    var joinVideos by remember(request) { mutableStateOf(request.template.joinVideos) }
-    var leftVideos by remember(request) { mutableStateOf(request.template.leftVideos) }
-    var joinFiles by remember(request) { mutableStateOf(request.template.joinFiles) }
-    var leftFiles by remember(request) { mutableStateOf(request.template.leftFiles) }
-    var joinFavorites by remember(request) { mutableStateOf(request.template.joinFavorites) }
-    var leftFavorites by remember(request) { mutableStateOf(request.template.leftFavorites) }
-    var delayMode by remember(request) { mutableStateOf(request.template.delayMode) }
-    var promptDelay by remember(request) { mutableStateOf(request.template.promptDelayMs.coerceAtLeast(0).toString()) }
-    var imageDelay by remember(request) { mutableStateOf(request.template.imageDelayMs.coerceAtLeast(0).toString()) }
-    var voiceDelay by remember(request) { mutableStateOf(request.template.voiceDelayMs.coerceAtLeast(0).toString()) }
-    var emojiDelay by remember(request) { mutableStateOf(request.template.emojiDelayMs.coerceAtLeast(0).toString()) }
-    var videoDelay by remember(request) { mutableStateOf(request.template.videoDelayMs.coerceAtLeast(0).toString()) }
-    var fileDelay by remember(request) { mutableStateOf(request.template.fileDelayMs.coerceAtLeast(0).toString()) }
-    var favoriteDelay by remember(request) { mutableStateOf(request.template.favoriteDelayMs.coerceAtLeast(0).toString()) }
+    var draft by remember(group) { mutableStateOf(group) }
+    val labels = remember(context) { GroupChatLabelStore.load(context) }
+    val targetChoices = remember(groups) {
+        groups.map { item ->
+            PopupChoice(item.name, item.id)
+        }
+    }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
-
-    SettingsRouteTransition(
-        targetState = favoritePicker,
-        label = "GroupLeaveTemplateFavoriteRoute",
-        depthOf = { if (it == null) 0 else 1 }
-    ) { currentFavoritePicker ->
-        if (currentFavoritePicker != null) {
-            FavoritePickerPage(
-                request = currentFavoritePicker,
-                onBack = { favoritePicker = null }
-            )
-        } else PageScaffold(
-            title = name.ifBlank { "回复模板" },
-            largeTitle = name.ifBlank { "回复模板" },
-            scrollBehavior = scrollBehavior,
-            bottomBar = {
-                BottomActionBar(
-                    primaryText = "保存模板",
-                    onPrimaryClick = {
-                        onSave(
-                            GroupLeaveReplyTemplate(
-                                id = request.template.id,
-                                name = name.trim().ifBlank { "模板 ${request.index + 1}" },
-                                enabled = enabled,
-                                joinEnabled = joinEnabled,
-                                leftEnabled = leftEnabled,
-                                promptType = GroupLeaveMonitorSettings.normalizePromptType(promptType),
-                                bothOrder = GroupLeaveMonitorSettings.normalizeBothOrder(bothOrder),
-                                joinText = joinText,
-                                leftText = leftText,
-                                joinCardTitle = joinCardTitle,
-                                joinCardDesc = joinCardDesc,
-                                leftCardTitle = leftCardTitle,
-                                leftCardDesc = leftCardDesc,
-                                mediaMode = GroupLeaveMonitorSettings.normalizeMediaMode(mediaMode),
-                                mediaOrder = GroupLeaveMonitorSettings.normalizeMediaOrder(mediaOrder),
-                                mediaSequence = mediaSequence,
-                                joinImages = joinImages,
-                                leftImages = leftImages,
-                                joinVoices = joinVoices,
-                                leftVoices = leftVoices,
-                                joinEmojis = joinEmojis,
-                                leftEmojis = leftEmojis,
-                                joinVideos = joinVideos,
-                                leftVideos = leftVideos,
-                                joinFiles = joinFiles,
-                                leftFiles = leftFiles,
-                                joinFavorites = joinFavorites,
-                                leftFavorites = leftFavorites,
-                                delayMode = GroupLeaveMonitorSettings.normalizeMode(delayMode),
-                                promptDelayMs = promptDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_PROMPT_DELAY_MS,
-                                imageDelayMs = imageDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS,
-                                voiceDelayMs = voiceDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS,
-                                emojiDelayMs = emojiDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS,
-                                videoDelayMs = videoDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS,
-                                fileDelayMs = fileDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS,
-                                favoriteDelayMs = favoriteDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS
-                            )
-                        )
-                    },
-                    secondaryText = "返回",
-                    onSecondaryClick = onBack
-                )
-            }
-        ) { padding ->
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                state = listState,
-                contentPadding = PaddingValues(
-                    top = padding.calculateTopPadding() + 8.dp,
-                    bottom = padding.calculateBottomPadding() + 84.dp
-                )
-            ) {
-                item { SmallTitle(text = "模板") }
-                item {
-                    SettingsCard {
-                        InputRow("模板名称", "用于区分不同群回复配置", name) { name = it }
-                        InsetDivider()
-                        SwitchRow(enabled, "启用模板", "关闭后绑定此模板的群不会按模板回复", onCheckedChange = { enabled = it })
-                    }
-                }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "事件") }
-                item {
-                    SettingsCard {
-                        SwitchRow(joinEnabled, "进群回复", "绑定群检测到成员进群时发送", onCheckedChange = { joinEnabled = it })
-                        InsetDivider()
-                        SwitchRow(leftEnabled, "退群回复", "绑定群检测到成员退群时发送", onCheckedChange = { leftEnabled = it })
-                    }
-                }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "提示模板") }
-                item {
-                    SettingsCard {
-                        PopupChoiceRow(
-                            title = "提示设置",
-                            summary = groupPromptTypeWithGlobalLabel(promptType),
-                            options = groupPromptTypeWithGlobalChoices(),
-                            currentValue = promptType,
-                            onValueChanged = { promptType = it }
-                        )
-                        if (promptType != GroupLeaveMonitorSettings.MODE_GLOBAL) {
-                            if (promptType == GroupLeaveMonitorSettings.PROMPT_BOTH) {
-                                InsetDivider()
-                                PopupChoiceRow(
-                                    title = "文本+卡片顺序",
-                                    summary = groupBothOrderLabel(bothOrder),
-                                    options = groupBothOrderChoices(),
-                                    currentValue = bothOrder,
-                                    onValueChanged = { bothOrder = it }
-                                )
-                            }
-                            InsetDivider()
-                            VariableInputRow("进群文本", "多个模板用 || 分隔随机选择", joinText, groupMemberTemplateVariables, minLines = 4) { joinText = it }
-                            InsetDivider()
-                            VariableInputRow("退群文本", "多个模板用 || 分隔随机选择", leftText, groupMemberTemplateVariables, minLines = 4) { leftText = it }
-                            InsetDivider()
-                            VariableInputRow("进群卡片标题", "支持变量", joinCardTitle, groupMemberTemplateVariables) { joinCardTitle = it }
-                            InsetDivider()
-                            VariableInputRow("进群卡片描述", "支持变量", joinCardDesc, groupMemberTemplateVariables, minLines = 3) { joinCardDesc = it }
-                            InsetDivider()
-                            VariableInputRow("退群卡片标题", "支持变量", leftCardTitle, groupMemberTemplateVariables) { leftCardTitle = it }
-                            InsetDivider()
-                            VariableInputRow("退群卡片描述", "支持变量", leftCardDesc, groupMemberTemplateVariables, minLines = 3) { leftCardDesc = it }
-                        }
-                    }
-                }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "媒体") }
-                item {
-                    SettingsCard {
-                        PopupChoiceRow(
-                            title = "媒体设置",
-                            summary = groupMediaModeLabel(mediaMode),
-                            options = groupMediaModeChoices(),
-                            currentValue = mediaMode,
-                            onValueChanged = { mediaMode = it }
-                        )
-                        if (mediaMode == GroupLeaveMonitorSettings.MODE_CUSTOM) {
-                            InsetDivider()
-                            PopupChoiceRow(
-                                title = "媒体顺序",
-                                summary = groupMediaOrderLabel(mediaOrder),
-                                options = groupMediaOrderChoices(),
-                                currentValue = mediaOrder,
-                                onValueChanged = { mediaOrder = it }
-                            )
-                            InsetDivider()
-                            InputRow("媒体类型顺序", "英文逗号分隔：image,voice,emoji,video,file,favorite", mediaSequence) { mediaSequence = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(context, "进群图片", joinImages, RedPacketRuleConfig.REPLY_IMAGE) { joinImages = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(context, "退群图片", leftImages, RedPacketRuleConfig.REPLY_IMAGE) { leftImages = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(context, "进群语音", joinVoices, RedPacketRuleConfig.REPLY_VOICE) { joinVoices = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(context, "退群语音", leftVoices, RedPacketRuleConfig.REPLY_VOICE) { leftVoices = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(context, "进群表情", joinEmojis, RedPacketRuleConfig.REPLY_EMOJI) { joinEmojis = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(context, "退群表情", leftEmojis, RedPacketRuleConfig.REPLY_EMOJI) { leftEmojis = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(context, "进群视频", joinVideos, RedPacketRuleConfig.REPLY_VIDEO) { joinVideos = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(context, "退群视频", leftVideos, RedPacketRuleConfig.REPLY_VIDEO) { leftVideos = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(context, "进群文件", joinFiles, RedPacketRuleConfig.REPLY_FILE) { joinFiles = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(context, "退群文件", leftFiles, RedPacketRuleConfig.REPLY_FILE) { leftFiles = it }
-                            InsetDivider()
-                            GroupMemberMediaRow(
-                                context,
-                                "进群收藏",
-                                joinFavorites,
-                                RedPacketRuleConfig.REPLY_FAVORITE,
-                                onValueChange = { joinFavorites = it },
-                                onFavoritePicker = { favoritePicker = it }
-                            )
-                            InsetDivider()
-                            GroupMemberMediaRow(
-                                context,
-                                "退群收藏",
-                                leftFavorites,
-                                RedPacketRuleConfig.REPLY_FAVORITE,
-                                onValueChange = { leftFavorites = it },
-                                onFavoritePicker = { favoritePicker = it }
-                            )
-                        }
-                    }
-                }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "延迟") }
-                item {
-                    SettingsCard {
-                        PopupChoiceRow(
-                            title = "精细延迟",
-                            summary = groupModeLabel(delayMode),
-                            options = groupModeChoices(),
-                            currentValue = delayMode,
-                            onValueChanged = { delayMode = it }
-                        )
-                        if (delayMode == GroupLeaveMonitorSettings.MODE_CUSTOM) {
-                            InsetDivider()
-                            NumberInputRow("提示延迟", "单位 ms", promptDelay) { promptDelay = it }
-                            InsetDivider()
-                            NumberInputRow("图片延迟", "单位 ms", imageDelay) { imageDelay = it }
-                            InsetDivider()
-                            NumberInputRow("语音延迟", "单位 ms", voiceDelay) { voiceDelay = it }
-                            InsetDivider()
-                            NumberInputRow("表情延迟", "单位 ms", emojiDelay) { emojiDelay = it }
-                            InsetDivider()
-                            NumberInputRow("视频延迟", "单位 ms", videoDelay) { videoDelay = it }
-                            InsetDivider()
-                            NumberInputRow("文件延迟", "单位 ms", fileDelay) { fileDelay = it }
-                            InsetDivider()
-                            NumberInputRow("收藏延迟", "单位 ms", favoriteDelay) { favoriteDelay = it }
-                        }
-                    }
-                }
-                if (request.canDelete) {
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
-                    item {
-                        SettingsCard {
-                            ActionRow("删除模板", "删除后绑定关系也会移除") {
-                                onDelete()
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun GroupMemberGroupEditorPage(
-    context: Context,
-    sp: SharedPreferences,
-    groupId: String,
-    groupLabel: String,
-    templates: List<GroupLeaveReplyTemplate>,
-    templateBindings: List<GroupLeaveReplyTemplateBinding>,
-    listState: LazyListState,
-    onTemplateBindingsChanged: (List<GroupLeaveReplyTemplateBinding>) -> Unit,
-    onDelete: () -> Unit,
-    onBack: () -> Unit
-) {
-    val title = groupLabel.ifBlank { groupId }
-    val boundBinding = templateBindings.firstOrNull { it.groupId == groupId }
-    val boundTemplate = templates.firstOrNull { it.id == boundBinding?.templateId }
-    val templateOptions = listOf(PopupChoice("不使用模板", "")) + templates.map { template ->
-        PopupChoice(template.name.ifBlank { template.id }, template.id)
-    }
-    var favoritePicker by remember { mutableStateOf<FavoritePickerRequest?>(null) }
-    var joinEnabled by rememberSaveable(groupId) {
-        mutableStateOf(!parseIds(sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_DISABLED_GROUPS, "").orEmpty()).contains(groupId))
-    }
-    var leftEnabled by rememberSaveable(groupId) {
-        mutableStateOf(!parseIds(sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_DISABLED_GROUPS, "").orEmpty()).contains(groupId))
-    }
-    val globalJoinText = groupMemberGlobalString(sp, GroupLeaveMonitorSettings.KEY_JOIN_TEXT, GroupLeaveMonitorSettings.DEFAULT_JOIN_TEXT)
-    val globalLeftText = groupMemberGlobalString(sp, GroupLeaveMonitorSettings.KEY_LEFT_TEXT, GroupLeaveMonitorSettings.DEFAULT_LEFT_TEXT)
-    val globalJoinCardTitle = groupMemberGlobalString(sp, GroupLeaveMonitorSettings.KEY_JOIN_CARD_TITLE, GroupLeaveMonitorSettings.DEFAULT_JOIN_CARD_TITLE)
-    val globalJoinCardDesc = groupMemberGlobalString(sp, GroupLeaveMonitorSettings.KEY_JOIN_CARD_DESC, GroupLeaveMonitorSettings.DEFAULT_JOIN_CARD_DESC)
-    val globalLeftCardTitle = groupMemberGlobalString(sp, GroupLeaveMonitorSettings.KEY_LEFT_CARD_TITLE, GroupLeaveMonitorSettings.DEFAULT_LEFT_CARD_TITLE)
-    val globalLeftCardDesc = groupMemberGlobalString(sp, GroupLeaveMonitorSettings.KEY_LEFT_CARD_DESC, GroupLeaveMonitorSettings.DEFAULT_LEFT_CARD_DESC)
-    var promptType by rememberSaveable(groupId) {
-        mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_PROMPT_TYPE, groupId), GroupLeaveMonitorSettings.MODE_GLOBAL) ?: GroupLeaveMonitorSettings.MODE_GLOBAL)
-    }
-    var bothOrder by rememberSaveable(groupId) {
-        mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_BOTH_ORDER, groupId), groupBothOrderGlobal(sp)) ?: groupBothOrderGlobal(sp))
-    }
-    var joinText by rememberSaveable(groupId) {
-        mutableStateOf(groupMemberString(sp, GroupLeaveMonitorSettings.KEY_JOIN_TEXT, groupId, globalJoinText))
-    }
-    var leftText by rememberSaveable(groupId) {
-        mutableStateOf(groupMemberString(sp, GroupLeaveMonitorSettings.KEY_LEFT_TEXT, groupId, globalLeftText))
-    }
-    var joinCardTitle by rememberSaveable(groupId) {
-        mutableStateOf(groupMemberString(sp, GroupLeaveMonitorSettings.KEY_JOIN_CARD_TITLE, groupId, globalJoinCardTitle))
-    }
-    var joinCardDesc by rememberSaveable(groupId) {
-        mutableStateOf(groupMemberString(sp, GroupLeaveMonitorSettings.KEY_JOIN_CARD_DESC, groupId, globalJoinCardDesc))
-    }
-    var leftCardTitle by rememberSaveable(groupId) {
-        mutableStateOf(groupMemberString(sp, GroupLeaveMonitorSettings.KEY_LEFT_CARD_TITLE, groupId, globalLeftCardTitle))
-    }
-    var leftCardDesc by rememberSaveable(groupId) {
-        mutableStateOf(groupMemberString(sp, GroupLeaveMonitorSettings.KEY_LEFT_CARD_DESC, groupId, globalLeftCardDesc))
-    }
-    var mediaMode by rememberSaveable(groupId) {
-        mutableStateOf(sp.getString(groupMemberMediaModeKey(groupId), GroupLeaveMonitorSettings.MODE_GLOBAL) ?: GroupLeaveMonitorSettings.MODE_GLOBAL)
-    }
-    var mediaOrder by rememberSaveable(groupId) {
-        mutableStateOf(groupMemberString(sp, GroupLeaveMonitorSettings.KEY_MEDIA_ORDER, groupId, sp.getString(GroupLeaveMonitorSettings.KEY_MEDIA_ORDER, GroupLeaveMonitorSettings.DEFAULT_MEDIA_ORDER) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_ORDER))
-    }
-    var mediaSequence by rememberSaveable(groupId) {
-        mutableStateOf(groupMemberString(sp, GroupLeaveMonitorSettings.KEY_MEDIA_SEQUENCE, groupId, sp.getString(GroupLeaveMonitorSettings.KEY_MEDIA_SEQUENCE, GroupLeaveMonitorSettings.DEFAULT_MEDIA_SEQUENCE) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_SEQUENCE))
-    }
-    var joinImages by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_IMAGE_PATHS, groupId), "").orEmpty()) }
-    var leftImages by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_IMAGE_PATHS, groupId), "").orEmpty()) }
-    var joinVoices by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_VOICE_PATHS, groupId), "").orEmpty()) }
-    var leftVoices by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_VOICE_PATHS, groupId), "").orEmpty()) }
-    var joinEmojis by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_EMOJI_PATHS, groupId), "").orEmpty()) }
-    var leftEmojis by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_EMOJI_PATHS, groupId), "").orEmpty()) }
-    var joinVideos by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_VIDEO_PATHS, groupId), "").orEmpty()) }
-    var leftVideos by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_VIDEO_PATHS, groupId), "").orEmpty()) }
-    var joinFiles by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_FILE_PATHS, groupId), "").orEmpty()) }
-    var leftFiles by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_FILE_PATHS, groupId), "").orEmpty()) }
-    var joinFavorites by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_FAVORITE_PATHS, groupId), "").orEmpty()) }
-    var leftFavorites by rememberSaveable(groupId) { mutableStateOf(sp.getString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_FAVORITE_PATHS, groupId), "").orEmpty()) }
-    var delayMode by rememberSaveable(groupId) {
-        mutableStateOf(sp.getString(groupMemberDelayModeKey(groupId), GroupLeaveMonitorSettings.MODE_GLOBAL) ?: GroupLeaveMonitorSettings.MODE_GLOBAL)
-    }
-    var promptDelay by rememberSaveable(groupId) { mutableStateOf(groupMemberIntString(sp, GroupLeaveMonitorSettings.KEY_PROMPT_DELAY_MS, groupId, GroupLeaveMonitorSettings.DEFAULT_PROMPT_DELAY_MS)) }
-    var imageDelay by rememberSaveable(groupId) { mutableStateOf(groupMemberIntString(sp, GroupLeaveMonitorSettings.KEY_IMAGE_DELAY_MS, groupId, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)) }
-    var voiceDelay by rememberSaveable(groupId) { mutableStateOf(groupMemberIntString(sp, GroupLeaveMonitorSettings.KEY_VOICE_DELAY_MS, groupId, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)) }
-    var emojiDelay by rememberSaveable(groupId) { mutableStateOf(groupMemberIntString(sp, GroupLeaveMonitorSettings.KEY_EMOJI_DELAY_MS, groupId, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)) }
-    var videoDelay by rememberSaveable(groupId) { mutableStateOf(groupMemberIntString(sp, GroupLeaveMonitorSettings.KEY_VIDEO_DELAY_MS, groupId, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)) }
-    var fileDelay by rememberSaveable(groupId) { mutableStateOf(groupMemberIntString(sp, GroupLeaveMonitorSettings.KEY_FILE_DELAY_MS, groupId, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)) }
-    var favoriteDelay by rememberSaveable(groupId) { mutableStateOf(groupMemberIntString(sp, GroupLeaveMonitorSettings.KEY_FAVORITE_DELAY_MS, groupId, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)) }
-    val scrollBehavior = MiuixScrollBehavior()
-
-    SettingsRouteTransition(
-        targetState = favoritePicker,
-        label = "GroupLeaveFavoriteRoute",
-        depthOf = { if (it == null) 0 else 1 }
-    ) { currentFavoritePicker ->
-        if (currentFavoritePicker != null) {
-            FavoritePickerPage(
-                request = currentFavoritePicker,
-                onBack = { favoritePicker = null }
-            )
-        } else PageScaffold(
-            title = title,
-            largeTitle = "群专属设置",
-            scrollBehavior = scrollBehavior,
-            bottomBar = {
-                if (boundTemplate != null) {
-                    BottomActionBar("返回", onBack)
-                } else {
-                    BottomActionBar(
-                        primaryText = "保存设置",
-                        onPrimaryClick = {
-                            sp.edit()
-                                .putString(GroupLeaveMonitorSettings.KEY_JOIN_DISABLED_GROUPS, formatIds(updateGroupToggle(sp, GroupLeaveMonitorSettings.KEY_JOIN_DISABLED_GROUPS, groupId, joinEnabled)))
-                                .putString(GroupLeaveMonitorSettings.KEY_LEFT_DISABLED_GROUPS, formatIds(updateGroupToggle(sp, GroupLeaveMonitorSettings.KEY_LEFT_DISABLED_GROUPS, groupId, leftEnabled)))
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_PROMPT_TYPE, groupId), promptType)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_BOTH_ORDER, groupId), bothOrder)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_TEXT, groupId), joinText)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_TEXT, groupId), leftText)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_CARD_TITLE, groupId), joinCardTitle)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_CARD_DESC, groupId), joinCardDesc)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_CARD_TITLE, groupId), leftCardTitle)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_CARD_DESC, groupId), leftCardDesc)
-                                .putString(groupMemberMediaModeKey(groupId), mediaMode)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_MEDIA_ORDER, groupId), mediaOrder)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_MEDIA_SEQUENCE, groupId), mediaSequence)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_IMAGE_PATHS, groupId), joinImages)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_IMAGE_PATHS, groupId), leftImages)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_VOICE_PATHS, groupId), joinVoices)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_VOICE_PATHS, groupId), leftVoices)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_EMOJI_PATHS, groupId), joinEmojis)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_EMOJI_PATHS, groupId), leftEmojis)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_VIDEO_PATHS, groupId), joinVideos)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_VIDEO_PATHS, groupId), leftVideos)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_FILE_PATHS, groupId), joinFiles)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_FILE_PATHS, groupId), leftFiles)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_JOIN_FAVORITE_PATHS, groupId), joinFavorites)
-                                .putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_LEFT_FAVORITE_PATHS, groupId), leftFavorites)
-                                .putString(groupMemberDelayModeKey(groupId), delayMode)
-                                .putInt(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_PROMPT_DELAY_MS, groupId), promptDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_PROMPT_DELAY_MS)
-                                .putInt(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_IMAGE_DELAY_MS, groupId), imageDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)
-                                .putInt(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_VOICE_DELAY_MS, groupId), voiceDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)
-                                .putInt(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_EMOJI_DELAY_MS, groupId), emojiDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)
-                                .putInt(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_VIDEO_DELAY_MS, groupId), videoDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)
-                                .putInt(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_FILE_DELAY_MS, groupId), fileDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)
-                                .putInt(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_FAVORITE_DELAY_MS, groupId), favoriteDelay.toIntOrNull()?.coerceAtLeast(0) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)
-                                .apply()
-                            Toast.makeText(context, "群专属设置已保存", Toast.LENGTH_SHORT).show()
-                        },
-                        secondaryText = "返回",
-                        onSecondaryClick = onBack
-                    )
-                }
-            }
-        ) { padding ->
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                state = listState,
-                contentPadding = PaddingValues(
-                    top = padding.calculateTopPadding() + 8.dp,
-                    bottom = padding.calculateBottomPadding() + 84.dp
-                )
-            ) {
-                item { SmallTitle(text = "模板") }
-                item {
-                    SettingsCard {
-                        if (templates.isEmpty()) {
-                            EmptyText("暂无模板。先返回回复模板管理新增模板。")
-                        } else {
-                            PopupChoiceRow(
-                                title = "选择模板",
-                                summary = boundTemplate?.let { describeGroupLeaveTemplate(it) }
-                                    ?: "不使用模板，配置本群专属设置",
-                                options = templateOptions,
-                                currentValue = boundTemplate?.id.orEmpty(),
-                                onValueChanged = { templateId ->
-                                    val next = if (templateId.isBlank()) {
-                                        templateBindings.filterNot { it.groupId == groupId }
-                                    } else {
-                                        upsertGroupLeaveTemplateBindings(
-                                            templateBindings,
-                                            listOf(GroupLeaveReplyTemplateBinding(groupId, title, templateId))
-                                        )
-                                    }
-                                    onTemplateBindingsChanged(next)
-                                    Toast.makeText(
-                                        context,
-                                        if (templateId.isBlank()) "已取消模板绑定" else "模板已绑定",
-                                        Toast.LENGTH_SHORT
-                                    ).show()
-                                }
-                            )
-                        }
-                    }
-                }
-                if (boundTemplate != null) {
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "群号") }
-                    item {
-                        SettingsCard {
-                            SelectRow(title = title, summary = groupId, onClick = {})
-                        }
-                    }
-                } else {
-                    item { SmallTitle(text = "事件") }
-            item {
-                SettingsCard {
-                    SwitchRow(joinEnabled, "进群回复", "该群检测到成员进群时发送", onCheckedChange = { joinEnabled = it })
-                    InsetDivider()
-                    SwitchRow(leftEnabled, "退群回复", "该群检测到成员退群时发送", onCheckedChange = { leftEnabled = it })
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "提示模板") }
-            item {
-                SettingsCard {
-                    PopupChoiceRow(
-                        title = "提示设置",
-                        summary = groupPromptTypeWithGlobalLabel(promptType),
-                        options = groupPromptTypeWithGlobalChoices(),
-                        currentValue = promptType,
-                        onValueChanged = {
-                            promptType = it
-                            sp.edit().putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_PROMPT_TYPE, groupId), it).apply()
-                        }
-                    )
-                    if (promptType != GroupLeaveMonitorSettings.MODE_GLOBAL) {
-                        if (promptType == GroupLeaveMonitorSettings.PROMPT_BOTH) {
-                            InsetDivider()
-                            PopupChoiceRow(
-                                title = "文本+卡片顺序",
-                                summary = groupBothOrderLabel(bothOrder),
-                                options = groupBothOrderChoices(),
-                                currentValue = bothOrder,
-                                onValueChanged = {
-                                    bothOrder = it
-                                    sp.edit().putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_BOTH_ORDER, groupId), it).apply()
-                                }
-                            )
-                        }
-                        InsetDivider()
-                        VariableInputRow("进群文本", "多个模板用 || 分隔随机选择", joinText, groupMemberTemplateVariables, minLines = 4) { joinText = it }
-                        InsetDivider()
-                        VariableInputRow("退群文本", "多个模板用 || 分隔随机选择", leftText, groupMemberTemplateVariables, minLines = 4) { leftText = it }
-                        InsetDivider()
-                        ActionRow("随机填充文本", "随机生成本群进群和退群文本") {
-                            joinText = groupRandomJoinTexts[Random.nextInt(groupRandomJoinTexts.size)]
-                            leftText = groupRandomLeftTexts[Random.nextInt(groupRandomLeftTexts.size)]
-                            Toast.makeText(context, "已随机填充本群文本", Toast.LENGTH_SHORT).show()
-                        }
-                        InsetDivider()
-                        ActionRow("恢复全局文本", "用当前全局文本覆盖本群文本") {
-                            joinText = globalJoinText
-                            leftText = globalLeftText
-                            Toast.makeText(context, "已恢复为全局文本", Toast.LENGTH_SHORT).show()
-                        }
-                        InsetDivider()
-                        VariableInputRow("进群卡片标题", "支持变量", joinCardTitle, groupMemberTemplateVariables) { joinCardTitle = it }
-                        InsetDivider()
-                        VariableInputRow("进群卡片描述", "支持变量", joinCardDesc, groupMemberTemplateVariables, minLines = 3) { joinCardDesc = it }
-                        InsetDivider()
-                        VariableInputRow("退群卡片标题", "支持变量", leftCardTitle, groupMemberTemplateVariables) { leftCardTitle = it }
-                        InsetDivider()
-                        VariableInputRow("退群卡片描述", "支持变量", leftCardDesc, groupMemberTemplateVariables, minLines = 3) { leftCardDesc = it }
-                        InsetDivider()
-                        ActionRow("随机填充卡片", "随机生成本群进群和退群卡片") {
-                            joinCardTitle = groupRandomJoinCardTitles[Random.nextInt(groupRandomJoinCardTitles.size)]
-                            joinCardDesc = groupRandomJoinCardDescs[Random.nextInt(groupRandomJoinCardDescs.size)]
-                            leftCardTitle = groupRandomLeftCardTitles[Random.nextInt(groupRandomLeftCardTitles.size)]
-                            leftCardDesc = groupRandomLeftCardDescs[Random.nextInt(groupRandomLeftCardDescs.size)]
-                            Toast.makeText(context, "已随机填充本群卡片", Toast.LENGTH_SHORT).show()
-                        }
-                        InsetDivider()
-                        ActionRow("恢复全局卡片", "用当前全局卡片覆盖本群卡片") {
-                            joinCardTitle = globalJoinCardTitle
-                            joinCardDesc = globalJoinCardDesc
-                            leftCardTitle = globalLeftCardTitle
-                            leftCardDesc = globalLeftCardDesc
-                            Toast.makeText(context, "已恢复为全局卡片", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "媒体") }
-            item {
-                SettingsCard {
-                    PopupChoiceRow(
-                        title = "媒体设置",
-                        summary = groupMediaModeLabel(mediaMode),
-                        options = groupMediaModeChoices(),
-                        currentValue = mediaMode,
-                        onValueChanged = {
-                            mediaMode = it
-                            sp.edit().putString(groupMemberMediaModeKey(groupId), it).apply()
-                        }
-                    )
-                    if (mediaMode == GroupLeaveMonitorSettings.MODE_CUSTOM) {
-                        InsetDivider()
-                        PopupChoiceRow(
-                            title = "媒体顺序",
-                            summary = groupMediaOrderLabel(mediaOrder),
-                            options = groupMediaOrderChoices(),
-                            currentValue = mediaOrder,
-                            onValueChanged = {
-                                mediaOrder = it
-                                sp.edit().putString(groupMemberGroupKey(GroupLeaveMonitorSettings.KEY_MEDIA_ORDER, groupId), it).apply()
-                            }
-                        )
-                        InsetDivider()
-                        InputRow("媒体类型顺序", "英文逗号分隔：image,voice,emoji,video,file,favorite", mediaSequence) { mediaSequence = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(context, "进群图片", joinImages, RedPacketRuleConfig.REPLY_IMAGE) { joinImages = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(context, "退群图片", leftImages, RedPacketRuleConfig.REPLY_IMAGE) { leftImages = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(context, "进群语音", joinVoices, RedPacketRuleConfig.REPLY_VOICE) { joinVoices = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(context, "退群语音", leftVoices, RedPacketRuleConfig.REPLY_VOICE) { leftVoices = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(context, "进群表情", joinEmojis, RedPacketRuleConfig.REPLY_EMOJI) { joinEmojis = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(context, "退群表情", leftEmojis, RedPacketRuleConfig.REPLY_EMOJI) { leftEmojis = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(context, "进群视频", joinVideos, RedPacketRuleConfig.REPLY_VIDEO) { joinVideos = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(context, "退群视频", leftVideos, RedPacketRuleConfig.REPLY_VIDEO) { leftVideos = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(context, "进群文件", joinFiles, RedPacketRuleConfig.REPLY_FILE) { joinFiles = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(context, "退群文件", leftFiles, RedPacketRuleConfig.REPLY_FILE) { leftFiles = it }
-                        InsetDivider()
-                        GroupMemberMediaRow(
-                            context,
-                            "进群收藏",
-                            joinFavorites,
-                            RedPacketRuleConfig.REPLY_FAVORITE,
-                            onValueChange = { joinFavorites = it },
-                            onFavoritePicker = { favoritePicker = it }
-                        )
-                        InsetDivider()
-                        GroupMemberMediaRow(
-                            context,
-                            "退群收藏",
-                            leftFavorites,
-                            RedPacketRuleConfig.REPLY_FAVORITE,
-                            onValueChange = { leftFavorites = it },
-                            onFavoritePicker = { favoritePicker = it }
-                        )
-                    }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "延迟") }
-            item {
-                SettingsCard {
-                    PopupChoiceRow(
-                        title = "精细延迟",
-                        summary = groupModeLabel(delayMode),
-                        options = groupModeChoices(),
-                        currentValue = delayMode,
-                        onValueChanged = {
-                            delayMode = it
-                            sp.edit().putString(groupMemberDelayModeKey(groupId), it).apply()
-                        }
-                    )
-                    if (delayMode == GroupLeaveMonitorSettings.MODE_CUSTOM) {
-                        InsetDivider()
-                        NumberInputRow("提示延迟", "单位 ms", promptDelay) { promptDelay = it }
-                        InsetDivider()
-                        NumberInputRow("图片延迟", "单位 ms", imageDelay) { imageDelay = it }
-                        InsetDivider()
-                        NumberInputRow("语音延迟", "单位 ms", voiceDelay) { voiceDelay = it }
-                        InsetDivider()
-                        NumberInputRow("表情延迟", "单位 ms", emojiDelay) { emojiDelay = it }
-                        InsetDivider()
-                        NumberInputRow("视频延迟", "单位 ms", videoDelay) { videoDelay = it }
-                        InsetDivider()
-                        NumberInputRow("文件延迟", "单位 ms", fileDelay) { fileDelay = it }
-                        InsetDivider()
-                        NumberInputRow("收藏延迟", "单位 ms", favoriteDelay) { favoriteDelay = it }
-                    }
-                }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
-            item {
-                SettingsCard {
-                    ActionRow("删除当前群", "移除监听、模板绑定和本群专属设置") {
-                        onDelete()
-                    }
-                }
-            }
-        }
-    }
-}
-}
-
-internal fun deleteGroupMemberConfiguration(
-    sp: SharedPreferences,
-    groupId: String,
-    nextListenGroups: String,
-    nextBindings: List<GroupLeaveReplyTemplateBinding>
-) {
-    val groupKeys = listOf(
-        GroupLeaveMonitorSettings.KEY_PROMPT_TYPE,
-        GroupLeaveMonitorSettings.KEY_BOTH_ORDER,
-        GroupLeaveMonitorSettings.KEY_JOIN_TEXT,
-        GroupLeaveMonitorSettings.KEY_LEFT_TEXT,
-        GroupLeaveMonitorSettings.KEY_JOIN_CARD_TITLE,
-        GroupLeaveMonitorSettings.KEY_JOIN_CARD_DESC,
-        GroupLeaveMonitorSettings.KEY_LEFT_CARD_TITLE,
-        GroupLeaveMonitorSettings.KEY_LEFT_CARD_DESC,
-        GroupLeaveMonitorSettings.KEY_MEDIA_ORDER,
-        GroupLeaveMonitorSettings.KEY_MEDIA_SEQUENCE,
-        GroupLeaveMonitorSettings.KEY_JOIN_IMAGE_PATHS,
-        GroupLeaveMonitorSettings.KEY_LEFT_IMAGE_PATHS,
-        GroupLeaveMonitorSettings.KEY_JOIN_VOICE_PATHS,
-        GroupLeaveMonitorSettings.KEY_LEFT_VOICE_PATHS,
-        GroupLeaveMonitorSettings.KEY_JOIN_EMOJI_PATHS,
-        GroupLeaveMonitorSettings.KEY_LEFT_EMOJI_PATHS,
-        GroupLeaveMonitorSettings.KEY_JOIN_VIDEO_PATHS,
-        GroupLeaveMonitorSettings.KEY_LEFT_VIDEO_PATHS,
-        GroupLeaveMonitorSettings.KEY_JOIN_FILE_PATHS,
-        GroupLeaveMonitorSettings.KEY_LEFT_FILE_PATHS,
-        GroupLeaveMonitorSettings.KEY_JOIN_FAVORITE_PATHS,
-        GroupLeaveMonitorSettings.KEY_LEFT_FAVORITE_PATHS,
-        GroupLeaveMonitorSettings.KEY_PROMPT_DELAY_MS,
-        GroupLeaveMonitorSettings.KEY_IMAGE_DELAY_MS,
-        GroupLeaveMonitorSettings.KEY_VOICE_DELAY_MS,
-        GroupLeaveMonitorSettings.KEY_EMOJI_DELAY_MS,
-        GroupLeaveMonitorSettings.KEY_VIDEO_DELAY_MS,
-        GroupLeaveMonitorSettings.KEY_FILE_DELAY_MS,
-        GroupLeaveMonitorSettings.KEY_FAVORITE_DELAY_MS
-    )
-    val joinDisabled = formatIds(
-        parseIds(sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_DISABLED_GROUPS, "").orEmpty()) - groupId
-    )
-    val leftDisabled = formatIds(
-        parseIds(sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_DISABLED_GROUPS, "").orEmpty()) - groupId
-    )
-    val editor = sp.edit()
-        .putString(GroupLeaveMonitorSettings.KEY_LISTEN_GROUPS, nextListenGroups)
-        .putString(GroupLeaveMonitorSettings.KEY_JOIN_DISABLED_GROUPS, joinDisabled)
-        .putString(GroupLeaveMonitorSettings.KEY_LEFT_DISABLED_GROUPS, leftDisabled)
-        .putString(
-            GroupLeaveMonitorSettings.KEY_REPLY_TEMPLATE_BINDINGS,
-            GroupLeaveMonitorSettings.encodeBindings(nextBindings)
-        )
-        .remove(groupMemberMediaModeKey(groupId))
-        .remove(groupMemberDelayModeKey(groupId))
-    groupKeys.forEach { key -> editor.remove(groupMemberGroupKey(key, groupId)) }
-    sp.all.keys
-        .filter { it.startsWith(GroupLeaveMonitorSettings.KEY_INVITE_COUNT_PREFIX + groupId + "|") }
-        .forEach { key -> editor.remove(key) }
-    editor.apply()
-}
-
-@Composable
-internal fun GroupMemberMediaRow(
-    context: Context,
-    title: String,
-    value: String,
-    replyMode: Int,
-    onFavoritePicker: ((FavoritePickerRequest) -> Unit)? = null,
-    onValueChange: (String) -> Unit
-) {
-    ActionRow(title, redPacketReplyContentSummary(replyMode, value)) {
-        if (replyMode == RedPacketRuleConfig.REPLY_FAVORITE) {
-            onFavoritePicker?.invoke(
-                FavoritePickerRequest(
-                    title = title,
-                    existingValue = value,
-                    onValue = onValueChange,
-                    multiSelect = true,
-                    delimiter = "|"
-                )
-            )
-            return@ActionRow
-        }
-        val activity = context as? Activity
-        if (activity == null) {
-            Toast.makeText(context, "当前页面无法打开文件选择器", Toast.LENGTH_SHORT).show()
-            return@ActionRow
-        }
-        RedPacketReplyFilePickerBridge.launch(activity, replyMode) { paths ->
-            if (paths.isNotEmpty()) {
-                onValueChange(paths.joinToString("|"))
-                Toast.makeText(context, "已选择 ${paths.size} 个文件", Toast.LENGTH_SHORT).show()
-            }
-        }
-    }
-    if (value.isNotBlank()) {
-        InsetDivider()
-        ActionRow(
-            "清空$title",
-            if (replyMode == RedPacketRuleConfig.REPLY_FAVORITE) "移除已选择收藏" else "移除已选择文件"
-        ) {
-            onValueChange("")
-        }
-    }
-}
-
-internal fun groupSelectionSummary(value: String): String {
-    val count = parseIds(value).size
-    return if (count == 0) "未选择监听群" else "已选择 $count 个群"
-}
-
-internal fun systemNoticeScopeChoices(allValue: String, specificValue: String): List<PopupChoice<String>> = listOf(
-    PopupChoice("全部群聊", allValue),
-    PopupChoice("指定群聊", specificValue)
-)
-
-internal fun systemNoticeScopeLabel(value: String, specificValue: String): String {
-    return if (value == specificValue) "指定群聊" else "全部群聊"
-}
-
-internal fun systemNoticeGroupSummary(value: String): String {
-    val count = parseIds(value).size
-    return if (count == 0) "未选择群聊" else "已选择 $count 个群"
-}
-
-internal fun describeGroupLeaveTemplate(template: GroupLeaveReplyTemplate): String {
-    val join = if (template.joinEnabled) "进群" else ""
-    val left = if (template.leftEnabled) "退群" else ""
-    val scope = listOf(join, left).filter { it.isNotBlank() }.joinToString("、").ifBlank { "未启用事件" }
-    val media = when (template.mediaMode) {
-        GroupLeaveMonitorSettings.MEDIA_NONE -> "不发媒体"
-        GroupLeaveMonitorSettings.MODE_CUSTOM -> "自定义媒体"
-        else -> "跟随全局媒体"
-    }
-    val delay = when (template.delayMode) {
-        GroupLeaveMonitorSettings.MODE_CUSTOM -> "自定义延迟"
-        else -> "跟随全局延迟"
-    }
-    return "$scope · ${groupPromptTypeWithGlobalLabel(template.promptType)} · $media · $delay"
-}
-
-internal fun groupLeaveTemplateBindingSummary(
-    bindings: List<GroupLeaveReplyTemplateBinding>,
-    templates: List<GroupLeaveReplyTemplate>
-): String {
-    if (templates.isEmpty()) return "暂无模板"
-    val count = bindings.size
-    return if (count == 0) "暂无群已绑定模板" else "已绑定 $count 个群"
-}
-
-internal fun groupLeaveGroupBindingSummary(
-    groupId: String,
-    defaultLabel: String,
-    bindings: List<GroupLeaveReplyTemplateBinding>,
-    templates: List<GroupLeaveReplyTemplate>
-): String {
-    val binding = bindings.firstOrNull { it.groupId == groupId } ?: return "未绑定模板"
-    val template = templates.firstOrNull { it.id == binding.templateId } ?: return "模板已不存在"
-    return "模板：${template.name.ifBlank { binding.label.ifBlank { defaultLabel } }}"
-}
-
-internal fun newGroupLeaveTemplate(index: Int, sp: SharedPreferences): GroupLeaveReplyTemplate {
-    return GroupLeaveReplyTemplate(
-        id = System.currentTimeMillis().toString() + "_" + index,
-        name = "模板 $index",
-        enabled = true,
-        joinEnabled = sp.getBoolean(GroupLeaveMonitorSettings.KEY_JOIN_REPLY_ENABLE, GroupLeaveMonitorSettings.DEFAULT_JOIN_REPLY_ENABLE),
-        leftEnabled = sp.getBoolean(GroupLeaveMonitorSettings.KEY_LEFT_REPLY_ENABLE, GroupLeaveMonitorSettings.DEFAULT_LEFT_REPLY_ENABLE),
-        promptType = sp.getString(GroupLeaveMonitorSettings.KEY_PROMPT_TYPE, GroupLeaveMonitorSettings.DEFAULT_PROMPT_TYPE) ?: GroupLeaveMonitorSettings.DEFAULT_PROMPT_TYPE,
-        bothOrder = sp.getString(GroupLeaveMonitorSettings.KEY_BOTH_ORDER, GroupLeaveMonitorSettings.DEFAULT_BOTH_ORDER) ?: GroupLeaveMonitorSettings.DEFAULT_BOTH_ORDER,
-        joinText = sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_TEXT, GroupLeaveMonitorSettings.DEFAULT_JOIN_TEXT) ?: GroupLeaveMonitorSettings.DEFAULT_JOIN_TEXT,
-        leftText = sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_TEXT, GroupLeaveMonitorSettings.DEFAULT_LEFT_TEXT) ?: GroupLeaveMonitorSettings.DEFAULT_LEFT_TEXT,
-        joinCardTitle = sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_CARD_TITLE, GroupLeaveMonitorSettings.DEFAULT_JOIN_CARD_TITLE) ?: GroupLeaveMonitorSettings.DEFAULT_JOIN_CARD_TITLE,
-        joinCardDesc = sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_CARD_DESC, GroupLeaveMonitorSettings.DEFAULT_JOIN_CARD_DESC) ?: GroupLeaveMonitorSettings.DEFAULT_JOIN_CARD_DESC,
-        leftCardTitle = sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_CARD_TITLE, GroupLeaveMonitorSettings.DEFAULT_LEFT_CARD_TITLE) ?: GroupLeaveMonitorSettings.DEFAULT_LEFT_CARD_TITLE,
-        leftCardDesc = sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_CARD_DESC, GroupLeaveMonitorSettings.DEFAULT_LEFT_CARD_DESC) ?: GroupLeaveMonitorSettings.DEFAULT_LEFT_CARD_DESC,
-        mediaMode = GroupLeaveMonitorSettings.MODE_CUSTOM,
-        mediaOrder = sp.getString(GroupLeaveMonitorSettings.KEY_MEDIA_ORDER, GroupLeaveMonitorSettings.DEFAULT_MEDIA_ORDER) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_ORDER,
-        mediaSequence = sp.getString(GroupLeaveMonitorSettings.KEY_MEDIA_SEQUENCE, GroupLeaveMonitorSettings.DEFAULT_MEDIA_SEQUENCE) ?: GroupLeaveMonitorSettings.DEFAULT_MEDIA_SEQUENCE,
-        joinImages = sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_IMAGE_PATHS, "").orEmpty(),
-        leftImages = sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_IMAGE_PATHS, "").orEmpty(),
-        joinVoices = sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_VOICE_PATHS, "").orEmpty(),
-        leftVoices = sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_VOICE_PATHS, "").orEmpty(),
-        joinEmojis = sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_EMOJI_PATHS, "").orEmpty(),
-        leftEmojis = sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_EMOJI_PATHS, "").orEmpty(),
-        joinVideos = sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_VIDEO_PATHS, "").orEmpty(),
-        leftVideos = sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_VIDEO_PATHS, "").orEmpty(),
-        joinFiles = sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_FILE_PATHS, "").orEmpty(),
-        leftFiles = sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_FILE_PATHS, "").orEmpty(),
-        joinFavorites = sp.getString(GroupLeaveMonitorSettings.KEY_JOIN_FAVORITE_PATHS, "").orEmpty(),
-        leftFavorites = sp.getString(GroupLeaveMonitorSettings.KEY_LEFT_FAVORITE_PATHS, "").orEmpty(),
-        delayMode = GroupLeaveMonitorSettings.MODE_CUSTOM,
-        promptDelayMs = sp.getInt(GroupLeaveMonitorSettings.KEY_PROMPT_DELAY_MS, GroupLeaveMonitorSettings.DEFAULT_PROMPT_DELAY_MS),
-        imageDelayMs = sp.getInt(GroupLeaveMonitorSettings.KEY_IMAGE_DELAY_MS, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS),
-        voiceDelayMs = sp.getInt(GroupLeaveMonitorSettings.KEY_VOICE_DELAY_MS, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS),
-        emojiDelayMs = sp.getInt(GroupLeaveMonitorSettings.KEY_EMOJI_DELAY_MS, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS),
-        videoDelayMs = sp.getInt(GroupLeaveMonitorSettings.KEY_VIDEO_DELAY_MS, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS),
-        fileDelayMs = sp.getInt(GroupLeaveMonitorSettings.KEY_FILE_DELAY_MS, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS),
-        favoriteDelayMs = sp.getInt(GroupLeaveMonitorSettings.KEY_FAVORITE_DELAY_MS, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS)
-    )
-}
-
-internal fun upsertGroupLeaveTemplateBindings(
-    current: List<GroupLeaveReplyTemplateBinding>,
-    additions: List<GroupLeaveReplyTemplateBinding>
-): List<GroupLeaveReplyTemplateBinding> {
-    val result = linkedMapOf<String, GroupLeaveReplyTemplateBinding>()
-    current.forEach { binding ->
-        if (binding.groupId.isNotBlank() && binding.templateId.isNotBlank()) {
-            result[binding.groupId] = binding.copy(
-                groupId = binding.groupId.trim(),
-                label = binding.label.trim().ifBlank { binding.groupId.trim() },
-                templateId = binding.templateId.trim()
-            )
-        }
-    }
-    additions.forEach { binding ->
-        if (binding.groupId.isNotBlank() && binding.templateId.isNotBlank()) {
-            result[binding.groupId.trim()] = binding.copy(
-                groupId = binding.groupId.trim(),
-                label = binding.label.trim().ifBlank { binding.groupId.trim() },
-                templateId = binding.templateId.trim()
-            )
-        }
-    }
-    return result.values.toList()
-}
-
-internal fun groupPromptTypeLabel(value: String): String {
-    return when (value) {
-        GroupLeaveMonitorSettings.PROMPT_CARD -> "卡片"
-        GroupLeaveMonitorSettings.PROMPT_BOTH -> "文本+卡片"
-        else -> "文本"
-    }
-}
-
-internal fun groupPromptTypeChoices(): List<PopupChoice<String>> {
-    return listOf(
-        PopupChoice("文本", GroupLeaveMonitorSettings.PROMPT_TEXT),
-        PopupChoice("文本+卡片", GroupLeaveMonitorSettings.PROMPT_BOTH),
-        PopupChoice("卡片", GroupLeaveMonitorSettings.PROMPT_CARD)
-    )
-}
-
-internal fun groupBothOrderLabel(value: String): String {
-    return if (value == GroupLeaveMonitorSettings.BOTH_CARD_FIRST) "先卡片后文本" else "先文本后卡片"
-}
-
-internal fun groupBothOrderChoices(): List<PopupChoice<String>> {
-    return listOf(
-        PopupChoice("先文本后卡片", GroupLeaveMonitorSettings.BOTH_TEXT_FIRST),
-        PopupChoice("先卡片后文本", GroupLeaveMonitorSettings.BOTH_CARD_FIRST)
-    )
-}
-
-internal fun groupMediaOrderLabel(value: String): String {
-    return when (value) {
-        GroupLeaveMonitorSettings.MEDIA_BEFORE -> "先媒体后提示"
-        GroupLeaveMonitorSettings.MEDIA_AFTER -> "先提示后媒体"
-        else -> "不发送媒体"
-    }
-}
-
-internal fun groupMediaOrderChoices(): List<PopupChoice<String>> {
-    return listOf(
-        PopupChoice("不发送媒体", GroupLeaveMonitorSettings.MEDIA_NONE),
-        PopupChoice("先提示后媒体", GroupLeaveMonitorSettings.MEDIA_AFTER),
-        PopupChoice("先媒体后提示", GroupLeaveMonitorSettings.MEDIA_BEFORE)
-    )
-}
-
-internal fun groupPromptTypeWithGlobalLabel(value: String): String {
-    return when (value) {
-        GroupLeaveMonitorSettings.MODE_GLOBAL -> "跟随全局"
-        GroupLeaveMonitorSettings.PROMPT_CARD -> "卡片"
-        GroupLeaveMonitorSettings.PROMPT_BOTH -> "文本+卡片"
-        else -> "文本"
-    }
-}
-
-internal fun groupPromptTypeWithGlobalChoices(): List<PopupChoice<String>> {
-    return listOf(PopupChoice("跟随全局", GroupLeaveMonitorSettings.MODE_GLOBAL)) + groupPromptTypeChoices()
-}
-
-internal fun groupModeLabel(value: String): String {
-    return if (value == GroupLeaveMonitorSettings.MODE_CUSTOM) "单独设置" else "跟随全局"
-}
-
-internal fun groupModeChoices(): List<PopupChoice<String>> {
-    return listOf(
-        PopupChoice("跟随全局", GroupLeaveMonitorSettings.MODE_GLOBAL),
-        PopupChoice("单独设置", GroupLeaveMonitorSettings.MODE_CUSTOM)
-    )
-}
-
-internal fun groupMediaModeLabel(value: String): String {
-    return when (value) {
-        GroupLeaveMonitorSettings.MODE_CUSTOM -> "单独设置"
-        GroupLeaveMonitorSettings.MEDIA_NONE -> "不发媒体"
-        else -> "跟随全局"
-    }
-}
-
-internal fun groupMediaModeChoices(): List<PopupChoice<String>> {
-    return listOf(
-        PopupChoice("跟随全局", GroupLeaveMonitorSettings.MODE_GLOBAL),
-        PopupChoice("单独设置", GroupLeaveMonitorSettings.MODE_CUSTOM),
-        PopupChoice("不发媒体", GroupLeaveMonitorSettings.MEDIA_NONE)
-    )
-}
-
-internal fun groupMemberGroupKey(key: String, groupId: String): String = "${key}_${groupId}"
-
-internal fun groupMemberMediaModeKey(groupId: String): String = GroupLeaveMonitorSettings.KEY_MEDIA_MODE_PREFIX + groupId
-
-internal fun groupMemberDelayModeKey(groupId: String): String = GroupLeaveMonitorSettings.KEY_DELAY_MODE_PREFIX + groupId
-
-internal fun groupBothOrderGlobal(sp: SharedPreferences): String {
-    return sp.getString(
-        GroupLeaveMonitorSettings.KEY_BOTH_ORDER,
-        GroupLeaveMonitorSettings.DEFAULT_BOTH_ORDER
-    ) ?: GroupLeaveMonitorSettings.DEFAULT_BOTH_ORDER
-}
-
-internal fun groupMemberGlobalString(
-    sp: SharedPreferences,
-    key: String,
-    fallback: String
-): String {
-    return sp.getString(key, fallback) ?: fallback
-}
-
-internal fun groupMemberString(
-    sp: SharedPreferences,
-    key: String,
-    groupId: String,
-    fallback: String
-): String {
-    return sp.getString(groupMemberGroupKey(key, groupId), null) ?: fallback
-}
-
-internal fun groupMemberIntString(
-    sp: SharedPreferences,
-    key: String,
-    groupId: String,
-    fallback: Int
-): String {
-    val global = sp.getInt(key, fallback)
-    return sp.getInt(groupMemberGroupKey(key, groupId), global).toString()
-}
-
-internal fun updateGroupToggle(
-    sp: SharedPreferences,
-    key: String,
-    groupId: String,
-    enabled: Boolean
-): Set<String> {
-    val disabled = parseIds(sp.getString(key, "").orEmpty()).toMutableSet()
-    if (enabled) {
-        disabled.remove(groupId)
-    } else {
-        disabled.add(groupId)
-    }
-    return disabled
-}
-
-private sealed class TextVoiceRoute {
-    object Main : TextVoiceRoute()
-    object VoicePicker : TextVoiceRoute()
-}
-
-@Composable
-internal fun TextVoiceMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, TextVoiceSettings.PREFS_NAME) }
-    var route by remember { mutableStateOf<TextVoiceRoute>(TextVoiceRoute.Main) }
-    var selectedVoice by remember {
-        mutableStateOf(TextVoiceSettings.selectedVoiceKey(context))
-    }
-    var selectedEngine by remember {
-        mutableStateOf(TextVoiceSettings.selectedEngine(context))
-    }
-    var selectedTtsVoice by remember {
-        mutableStateOf(
-            sp.getString(TextVoiceSettings.KEY_TTS_VOICE, TextVoiceSettings.DEFAULT_TTS_VOICE)
-                ?: TextVoiceSettings.DEFAULT_TTS_VOICE
-        )
-    }
-    SettingsRouteTransition(
-        targetState = route,
-        label = "TextVoiceRoute",
-        depthOf = { if (it is TextVoiceRoute.Main) 0 else 1 }
-    ) { currentRoute ->
-        when (currentRoute) {
-            TextVoiceRoute.Main -> TextVoiceMainPage(
-                provider = provider,
-                sp = sp,
-                selectedVoice = selectedVoice,
-                selectedEngine = selectedEngine,
-                selectedTtsVoice = selectedTtsVoice,
-                onBack = onBack,
-                onPickVoice = { route = TextVoiceRoute.VoicePicker },
-                onEngineChanged = { value ->
-                    selectedEngine = value
-                    selectedTtsVoice = TextVoiceSettings.DEFAULT_TTS_VOICE
-                    sp.edit()
-                        .putString(TextVoiceSettings.KEY_ENGINE, value)
-                        .putString(TextVoiceSettings.KEY_TTS_VOICE, TextVoiceSettings.DEFAULT_TTS_VOICE)
-                        .apply()
-                },
-                onTtsVoiceChanged = { value ->
-                    selectedTtsVoice = value
-                    sp.edit().putString(TextVoiceSettings.KEY_TTS_VOICE, value).apply()
-                }
-            )
-            TextVoiceRoute.VoicePicker -> OptionPickerPage(
-                request = OptionPickerRequest(
-                    title = "选择在线语音",
-                    options = TextVoiceSettings.voiceOptions.mapIndexed { index, option ->
-                        OptionItem(option.label, index, option.voiceId)
-                    },
-                    currentValue = TextVoiceSettings.voiceOptions
-                        .indexOfFirst { it.key == selectedVoice }
-                        .coerceAtLeast(0),
-                    onSelected = {}
-                ),
-                onBack = { route = TextVoiceRoute.Main },
-                onSelected = { item ->
-                    val option = TextVoiceSettings.voiceOptions.getOrNull(item.value)
-                        ?: return@OptionPickerPage
-                    selectedVoice = option.key
-                    sp.edit().putString(TextVoiceSettings.KEY_VOICE, option.key).apply()
-                }
-            )
-        }
-    }
-}
-
-@Composable
-internal fun TextVoiceMainPage(
-    provider: FeatureSettingsProvider,
-    sp: SharedPreferences,
-    selectedVoice: String,
-    selectedEngine: String,
-    selectedTtsVoice: String,
-    onBack: () -> Unit,
-    onPickVoice: () -> Unit,
-    onEngineChanged: (String) -> Unit,
-    onTtsVoiceChanged: (String) -> Unit
-) {
-    val context = LocalContext.current
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-    val installedTtsEngines = remember(context) { TextSpeechEngineCatalog.installed(context) }
-    val engineOptions = remember(installedTtsEngines, selectedEngine) {
-        buildList {
-            add(PopupChoice("在线语音", TextVoiceSettings.ENGINE_ONLINE))
-            add(PopupChoice("跟随系统默认 TTS", TextVoiceSettings.ENGINE_TTS_PREFIX))
-            installedTtsEngines.forEach { option ->
-                add(PopupChoice(option.label, TextVoiceSettings.ENGINE_TTS_PREFIX + option.packageName))
-            }
-            val selectedPackage = TextVoiceSettings.ttsPackage(selectedEngine)
-            if (TextVoiceSettings.isTtsEngine(selectedEngine) &&
-                selectedPackage.isNotBlank() &&
-                installedTtsEngines.none { it.packageName == selectedPackage }
-            ) {
-                add(PopupChoice("已不可用（$selectedPackage）", selectedEngine))
-            }
-        }
-    }
-    var ttsVoiceChoices by remember { mutableStateOf<List<PopupChoice<String>>>(emptyList()) }
-    var ttsVoiceLoading by remember { mutableStateOf(false) }
-    var ttsVoiceError by remember { mutableStateOf("") }
-    var ttsFallbackEnginePackage by remember { mutableStateOf("") }
-    val ttsFallbackEngineLabel = remember(installedTtsEngines, ttsFallbackEnginePackage) {
-        installedTtsEngines.firstOrNull { it.packageName == ttsFallbackEnginePackage }
-            ?.label
-            ?: ttsFallbackEnginePackage
-    }
-    DisposableEffect(context, selectedEngine) {
-        val useTts = TextVoiceSettings.isTtsEngine(selectedEngine)
-        ttsVoiceLoading = useTts
-        ttsVoiceError = ""
-        ttsFallbackEnginePackage = ""
-        ttsVoiceChoices = emptyList()
-        val handle = if (useTts) {
-            TextSpeechVoiceCatalog.load(
-                context,
-                TextVoiceSettings.ttsPackage(selectedEngine)
-            ) { result ->
-                ttsVoiceChoices = result.options.map { PopupChoice(it.label, it.name) }
-                ttsVoiceError = result.error
-                ttsFallbackEnginePackage = if (result.usedFallback) {
-                    result.activeEnginePackage.ifBlank { "其它可用引擎" }
-                } else {
-                    ""
-                }
-                ttsVoiceLoading = false
-            }
-        } else {
-            null
-        }
-        onDispose { handle?.cancel() }
-    }
-    val ttsVoiceOptions = remember(ttsVoiceChoices, selectedTtsVoice) {
-        buildList {
-            add(PopupChoice("跟随引擎默认", TextVoiceSettings.DEFAULT_TTS_VOICE))
-            addAll(ttsVoiceChoices)
-            if (selectedTtsVoice.isNotBlank() && ttsVoiceChoices.none { it.value == selectedTtsVoice }) {
-                add(PopupChoice("已不可用（$selectedTtsVoice）", selectedTtsVoice))
-            }
-        }
-    }
-    var sendEnabled by remember {
-        mutableStateOf(
-            sp.getBoolean(TextVoiceSettings.KEY_SEND_ENABLE, TextVoiceSettings.DEFAULT_SEND_ENABLE)
-        )
-    }
-    var playEnabled by remember {
-        mutableStateOf(
-            sp.getBoolean(TextVoiceSettings.KEY_PLAY_ENABLE, TextVoiceSettings.DEFAULT_PLAY_ENABLE)
-        )
-    }
-    var speechRate by remember {
-        mutableStateOf(
-            TextVoiceSettings.normalizeSpeechRate(
-                sp.getFloat(TextVoiceSettings.KEY_SPEECH_RATE, TextVoiceSettings.DEFAULT_SPEECH_RATE)
-            )
-        )
-    }
     PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "文本转语音") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        checked = sendEnabled,
-                        title = "文本转换语音模式（发送文字转语音）",
-                        summary = "聊天输入 #tts 开启或关闭当前会话，输入 #tts e 使用英文模式"
-                    ) {
-                        sendEnabled = it
-                        sp.edit().putBoolean(TextVoiceSettings.KEY_SEND_ENABLE, it).apply()
-                    }
-                    InsetDivider()
-                    SwitchRow(
-                        checked = playEnabled,
-                        title = "文字转换语音播放",
-                        summary = "长按文字消息后选择“转语音播放[H]”"
-                    ) {
-                        playEnabled = it
-                        sp.edit().putBoolean(TextVoiceSettings.KEY_PLAY_ENABLE, it).apply()
-                    }
-                    if (sendEnabled || playEnabled) {
-                        InsetDivider()
-                        PopupChoiceRow(
-                            title = "转换引擎",
-                            summary = "选择在线语音或设备上已安装的 TTS 引擎",
-                            options = engineOptions,
-                            currentValue = selectedEngine,
-                            onValueChanged = onEngineChanged
-                        )
-                        InsetDivider()
-                        if (TextVoiceSettings.isTtsEngine(selectedEngine)) {
-                            PopupChoiceRow(
-                                title = "TTS 角色",
-                                summary = when {
-                                    ttsVoiceLoading -> "正在读取所选引擎的角色"
-                                    ttsVoiceError.isNotBlank() -> "读取失败：$ttsVoiceError"
-                                    ttsFallbackEnginePackage.isNotBlank() ->
-                                        "系统默认不可用，已临时使用 $ttsFallbackEngineLabel"
-                                    ttsVoiceChoices.isEmpty() -> "所选引擎未提供可选角色，将跟随引擎默认"
-                                    else -> "选择所选 TTS 引擎提供的角色"
-                                },
-                                options = ttsVoiceOptions,
-                                currentValue = selectedTtsVoice,
-                                enabled = !ttsVoiceLoading,
-                                onValueChanged = onTtsVoiceChanged
-                            )
-                        } else {
-                            ActionRow(
-                                title = "在线语音",
-                                summary = TextVoiceSettings.voiceLabel(selectedVoice),
-                                onClick = onPickVoice
-                            )
-                        }
-                        InsetDivider()
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-                            Text(
-                                text = "语速 ${String.format(Locale.ROOT, "%.1f", speechRate)}x",
-                                color = MiuixTheme.colorScheme.onSurface,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Slider(
-                                value = speechRate,
-                                onValueChange = {
-                                    speechRate = TextVoiceSettings.normalizeSpeechRate(it)
-                                },
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-                                valueRange = TextVoiceSettings.MIN_SPEECH_RATE..TextVoiceSettings.MAX_SPEECH_RATE,
-                                steps = 28,
-                                onValueChangeFinished = {
-                                    sp.edit()
-                                        .putFloat(TextVoiceSettings.KEY_SPEECH_RATE, speechRate)
-                                        .apply()
-                                },
-                                showKeyPoints = true,
-                                keyPoints = listOf(0.1f, 1.0f, 2.0f, 3.0f)
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun VoiceForwardMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, VoiceForwardSettings.PREFS_NAME) }
-    val legacyDefault = remember { sp.getBoolean(VoiceForwardSettings.KEY_ENABLE, VoiceForwardSettings.DEFAULT_ENABLE) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
+        title = "群聊归拢",
+        largeTitle = "群聊归拢",
         scrollBehavior = scrollBehavior,
         bottomBar = {
-            BottomActionBar("返回", onBack)
+            BottomActionBar(
+                primaryText = "保存设置",
+                onPrimaryClick = { onSave(draft) },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
         }
     ) { padding ->
         LazyColumn(
@@ -2238,63 +1473,806 @@ internal fun VoiceForwardMiuixPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
-            item { SmallTitle(text = "聊天语音") }
+            item { SmallTitle(text = "归拢目标") }
             item {
                 SettingsCard {
-                    SwitchRow(
-                        sp,
-                        VoiceForwardSettings.KEY_CHAT_FORWARD_ENABLE,
-                        "聊天语音转发",
-                        "长按聊天语音后显示转发入口",
-                        legacyDefault
+                    PopupChoiceRow(
+                        title = "目标聊天分组",
+                        summary = "匹配到的会话会自动放入此分组",
+                        options = targetChoices,
+                        currentValue = group.id,
+                        onValueChanged = { id ->
+                            groups.firstOrNull { it.id == id }?.let(onTargetChanged)
+                        }
                     )
                     InsetDivider()
                     SwitchRow(
-                        sp,
-                        VoiceForwardSettings.KEY_CHAT_SAVE_ENABLE,
-                        "聊天语音保存",
-                        "长按聊天语音后显示保存入口",
-                        legacyDefault
-                    )
-                    InsetDivider()
-                    SwitchRow(
-                        sp,
-                        VoiceForwardSettings.KEY_CHAT_MULTI_FORWARD_ENABLE,
-                        "多选语音转发",
-                        "多选语音后显示逐条转发入口",
-                        legacyDefault
-                    )
-                    InsetDivider()
-                    SwitchRow(
-                        sp,
-                        VoiceForwardSettings.KEY_CHAT_MULTI_MERGE_ENABLE,
-                        "多选语音合并",
-                        "多选语音后合成为一条语音，可转发或保存为 MP3",
-                        false
+                        checked = draft.automaticGroupingEnabled,
+                        title = "启用群聊归拢",
+                        summary = "关闭后自动归拢的会话立即恢复原位置",
+                        onCheckedChange = { draft = draft.copy(automaticGroupingEnabled = it) }
                     )
                 }
             }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "收藏语音") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        sp,
-                        VoiceForwardSettings.KEY_FAVORITE_FORWARD_ENABLE,
-                        "收藏语音转发",
-                        "长按收藏语音后显示转发入口",
-                        legacyDefault
-                    )
-                    InsetDivider()
-                    SwitchRow(
-                        sp,
-                        VoiceForwardSettings.KEY_FAVORITE_SAVE_ENABLE,
-                        "收藏语音保存",
-                        "长按收藏语音后显示保存入口",
-                        legacyDefault
-                    )
+            if (draft.automaticGroupingEnabled) {
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "群聊规则") }
+                item {
+                    SettingsCard {
+                        SwitchRow(
+                            checked = draft.automaticAllGroups,
+                            title = "自动归拢所有群聊",
+                            summary = "包含普通群和企业微信群"
+                        ) { draft = draft.copy(automaticAllGroups = it) }
+                        InsetDivider()
+                        SwitchRow(
+                            checked = draft.automaticNewGroups,
+                            title = "自动归拢新群聊",
+                            summary = "首次发现的新群聊自动加入目标分组"
+                        ) { draft = draft.copy(automaticNewGroups = it) }
+                        InsetDivider()
+                        ActionRow(
+                            title = "选择群聊",
+                            summary = if (draft.automaticGroupIds.isEmpty()) {
+                                "未选择群聊"
+                            } else {
+                                "已选择 ${draft.automaticGroupIds.size} 个群聊"
+                            }
+                        ) { onPick(draft, ConversationGroupAutomaticPickerKind.GROUPS) }
+                        InsetDivider()
+                        SwitchRow(
+                            checked = draft.automaticMutedGroups,
+                            title = "自动归拢免打扰群聊",
+                            summary = "仅归拢已开启微信消息免打扰的群聊"
+                        ) { draft = draft.copy(automaticMutedGroups = it) }
+                        InsetDivider()
+                        SwitchRow(
+                            checked = draft.automaticOwnedGroups,
+                            title = "自动归拢自己创建的群聊",
+                            summary = "按群资料中的群主账号识别"
+                        ) { draft = draft.copy(automaticOwnedGroups = it) }
+                        InsetDivider()
+                        SwitchRow(
+                            checked = draft.automaticEnterpriseGroups,
+                            title = "自动归拢企业微信群聊",
+                            summary = "仅归拢企业微信互通群"
+                        ) { draft = draft.copy(automaticEnterpriseGroups = it) }
+                    }
+                }
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "群聊标签") }
+                item {
+                    SettingsCard {
+                        if (labels.isEmpty()) {
+                            EmptyText("暂无群聊标签")
+                        } else {
+                            labels.forEachIndexed { index, label ->
+                                SwitchRow(
+                                    checked = label.id in draft.automaticGroupLabelIds,
+                                    title = label.name,
+                                    summary = "归拢该标签中的 ${label.groupIds.size} 个群聊"
+                                ) { checked ->
+                                    draft = draft.copy(
+                                        automaticGroupLabelIds = if (checked) {
+                                            (draft.automaticGroupLabelIds + label.id).distinct()
+                                        } else {
+                                            draft.automaticGroupLabelIds.filterNot { it == label.id }
+                                        }
+                                    )
+                                }
+                                if (index < labels.lastIndex) InsetDivider()
+                            }
+                        }
+                    }
+                }
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "公众号") }
+                item {
+                    SettingsCard {
+                        SwitchRow(
+                            checked = draft.automaticOfficialAccounts,
+                            title = "自动归拢公众号",
+                            summary = "归拢当前账号可识别的公众号会话"
+                        ) { draft = draft.copy(automaticOfficialAccounts = it) }
+                        InsetDivider()
+                        ActionRow(
+                            title = "包含公众号",
+                            summary = if (draft.automaticOfficialIncludeIds.isEmpty()) {
+                                "未额外包含公众号"
+                            } else {
+                                "已包含 ${draft.automaticOfficialIncludeIds.size} 个公众号"
+                            }
+                        ) { onPick(draft, ConversationGroupAutomaticPickerKind.OFFICIAL_INCLUDE) }
+                        InsetDivider()
+                        ActionRow(
+                            title = "排除公众号",
+                            summary = if (draft.automaticOfficialExcludeIds.isEmpty()) {
+                                "未排除公众号"
+                            } else {
+                                "已排除 ${draft.automaticOfficialExcludeIds.size} 个公众号"
+                            }
+                        ) { onPick(draft, ConversationGroupAutomaticPickerKind.OFFICIAL_EXCLUDE) }
+                    }
                 }
             }
         }
     }
 }
 
+@Composable
+internal fun ConversationGroupAutomaticPickerPage(
+    context: Context,
+    group: ConversationGroup,
+    kind: ConversationGroupAutomaticPickerKind,
+    onBack: () -> Unit,
+    onConfirm: (List<String>) -> Unit
+) {
+    val initialSelected = remember(group, kind) {
+        when (kind) {
+            ConversationGroupAutomaticPickerKind.GROUPS -> group.automaticGroupIds.toSet()
+            ConversationGroupAutomaticPickerKind.OFFICIAL_INCLUDE -> {
+                group.automaticOfficialIncludeIds.toSet()
+            }
+            ConversationGroupAutomaticPickerKind.OFFICIAL_EXCLUDE -> {
+                group.automaticOfficialExcludeIds.toSet()
+            }
+        }
+    }
+    var selectedIds by remember(group, kind) { mutableStateOf(initialSelected) }
+    var options by remember(kind) { mutableStateOf(emptyList<ContactOption>()) }
+    var loading by remember(kind) { mutableStateOf(true) }
+    var error by remember(kind) { mutableStateOf("") }
+    var query by remember(kind) { mutableStateOf("") }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    LaunchedEffect(kind) {
+        loading = true
+        error = ""
+        val result = withContext(Dispatchers.IO) {
+            runCatching { loadConversationGroupAutomaticOptions(kind) }
+        }
+        loading = false
+        result.onSuccess { options = it }
+            .onFailure { error = it.message ?: "读取联系人失败" }
+    }
+    val visible = options.filter { it.matchesSearch(query.trim().lowercase(Locale.US)) }
+        .selectedFirst { it.id in initialSelected }
+    val visibleIds = visible.mapTo(linkedSetOf()) { it.id }
+    val visibleAllSelected = visibleIds.isNotEmpty() && visibleIds.all(selectedIds::contains)
+    PageScaffold(
+        title = kind.title,
+        largeTitle = kind.title,
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存选择",
+                onPrimaryClick = { onConfirm(selectedIds.toList()) },
+                secondaryText = "返回",
+                onSecondaryClick = onBack,
+                middleText = if (visibleIds.isEmpty()) null else if (visibleAllSelected) "取消全选" else "全选",
+                onMiddleClick = if (visibleIds.isEmpty()) null else {
+                    {
+                        selectedIds = if (visibleAllSelected) {
+                            selectedIds - visibleIds
+                        } else {
+                            selectedIds + visibleIds
+                        }
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item {
+                SettingsCard {
+                    InputRow("搜索", "名称 / 备注 / wxid", query) { query = it }
+                }
+            }
+            item {
+                PickerSectionHeader(
+                    text = if (visible.isEmpty()) kind.title else "${kind.title} · ${visible.size} 项"
+                )
+            }
+            when {
+                loading -> item { SettingsCard { EmptyText("正在载入...") } }
+                error.isNotBlank() -> item { SettingsCard { EmptyText(error) } }
+                visible.isEmpty() -> item { SettingsCard { EmptyText(kind.emptyText) } }
+                else -> visible.forEach { option ->
+                    item {
+                        ContactListCard(
+                            option = option,
+                            selected = option.id in selectedIds,
+                            multiSelect = true,
+                            onClick = {
+                                selectedIds = if (option.id in selectedIds) {
+                                    selectedIds - option.id
+                                } else {
+                                    selectedIds + option.id
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+internal fun loadConversationGroupAutomaticOptions(
+    kind: ConversationGroupAutomaticPickerKind
+): List<ContactOption> {
+    val contacts = WeChatApis.contacts() ?: throw IllegalStateException("联系人列表不可用")
+    val rows = when (kind) {
+        ConversationGroupAutomaticPickerKind.GROUPS -> {
+            contacts.getPickerGroups().mapNotNull { it.toOption(group = true) }
+        }
+        ConversationGroupAutomaticPickerKind.OFFICIAL_INCLUDE,
+        ConversationGroupAutomaticPickerKind.OFFICIAL_EXCLUDE -> {
+            contacts.getPickerOfficialAccounts().mapNotNull { it.toOption(group = false, official = true) }
+        }
+    }
+    return rows.distinctBy { it.id }
+        .sortedBy { it.label.lowercase(Locale.US) }
+}
+
+@Composable
+internal fun ConversationGroupEditorPage(
+    context: Context,
+    group: ConversationGroup,
+    groups: List<ConversationGroup>,
+    existing: Boolean,
+    onBack: () -> Unit,
+    onPickParent: (ConversationGroup) -> Unit,
+    onPickConversations: (ConversationGroup) -> Unit,
+    onSave: (ConversationGroup) -> Unit,
+    onReorder: (ConversationGroupStore.ReorderAction, ConversationGroup) -> Unit,
+    onDelete: () -> Unit
+) {
+    var name by remember(group) { mutableStateOf(group.name) }
+    var pinned by remember(group) { mutableStateOf(group.pinned) }
+    var showDeleteConfirm by remember(group.id) { mutableStateOf(false) }
+    var showReorderChoices by remember(group.id) { mutableStateOf(false) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    val draft = group.copy(name = name.trim(), pinned = pinned)
+    val parentPath = group.parentId?.let { conversationGroupPath(groups, it) }.orEmpty()
+    val siblings = remember(groups, group.parentId) {
+        groups.filter { it.parentId == group.parentId && it.pinned == group.pinned }
+            .sortedBy { it.order }
+    }
+    val siblingIndex = siblings.indexOfFirst { it.id == group.id }
+    PageScaffold(
+        title = if (existing) "编辑聊天分组" else "新增聊天分组",
+        largeTitle = if (existing) "编辑聊天分组" else "新增聊天分组",
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存分组",
+                onPrimaryClick = {
+                    if (draft.name.isBlank()) {
+                        Toast.makeText(context, "请输入分组名称", Toast.LENGTH_SHORT).show()
+                    } else {
+                        onSave(draft)
+                    }
+                },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "分组内容") }
+            item {
+                SettingsCard {
+                    InputRow("分组名称", "同一层级内不能重名", name) { name = it }
+                    if (!existing) {
+                        InsetDivider()
+                        SwitchRow(
+                            checked = pinned,
+                            title = "主页置顶",
+                            summary = "新建后显示在当前层级的置顶分组区域",
+                            onCheckedChange = { pinned = it }
+                        )
+                    }
+                    InsetDivider()
+                    ActionRow(
+                        title = "上级分组",
+                        summary = parentPath.ifBlank { "微信首页" }
+                    ) { onPickParent(draft) }
+                    InsetDivider()
+                    ActionRow(
+                        title = "会话",
+                        summary = if (group.conversationIds.isEmpty()) "未选择会话" else "已选择 ${group.conversationIds.size} 个会话"
+                    ) { onPickConversations(draft) }
+                }
+            }
+            if (existing) {
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
+                item {
+                    SettingsCard {
+                        if (siblings.size > 1 && siblingIndex >= 0) {
+                            ActionRow(
+                                title = "分组位置",
+                                summary = "当前${if (group.pinned) "置顶" else "普通"}分组第 " +
+                                    "${siblingIndex + 1} 个，共 ${siblings.size} 个"
+                            ) { showReorderChoices = true }
+                            InsetDivider()
+                        }
+                        ActionRow(
+                            title = "删除分组",
+                            summary = "子分组移到上一级，直属会话移到上级分组或微信首页"
+                        ) { showDeleteConfirm = true }
+                    }
+                }
+            }
+        }
+    }
+    if (showReorderChoices) {
+        val actions = buildList {
+            if (siblingIndex > 0) {
+                add(Triple("移到顶部", "设为当前层级的第一个分组", ConversationGroupStore.ReorderAction.TOP))
+                add(Triple("上移", "向前移动一个位置", ConversationGroupStore.ReorderAction.UP))
+            }
+            if (siblingIndex in 0 until siblings.lastIndex) {
+                add(Triple("下移", "向后移动一个位置", ConversationGroupStore.ReorderAction.DOWN))
+                add(Triple("移到底部", "设为当前层级的最后一个分组", ConversationGroupStore.ReorderAction.BOTTOM))
+            }
+        }
+        WindowDialog(
+            show = true,
+            title = "分组位置",
+            onDismissRequest = { showReorderChoices = false },
+            content = {
+                Column {
+                    actions.forEachIndexed { index, (title, summary, action) ->
+                        SelectRow(title = title, summary = summary) {
+                            showReorderChoices = false
+                            onReorder(action, draft)
+                        }
+                        if (index < actions.lastIndex) InsetDivider()
+                    }
+                }
+            }
+        )
+    }
+    if (showDeleteConfirm) {
+        WindowDialog(
+            show = true,
+            title = "删除聊天分组",
+            onDismissRequest = { showDeleteConfirm = false },
+            content = {
+                Column {
+                    Text(
+                        text = "确定删除“${group.name}”？聊天记录、联系人和群聊不会被删除。",
+                        color = MiuixTheme.colorScheme.onSurface,
+                        fontSize = 14.sp
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        TextButton(
+                            text = "取消",
+                            onClick = { showDeleteConfirm = false },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                        TextButton(
+                            text = "确认删除",
+                            onClick = {
+                                showDeleteConfirm = false
+                                onDelete()
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+internal fun ConversationGroupConversationPickerPage(
+    context: Context,
+    group: ConversationGroup,
+    groups: List<ConversationGroup>,
+    onBack: () -> Unit,
+    onConfirm: (List<String>) -> Unit
+) {
+    var loading by remember(group.id) { mutableStateOf(true) }
+    var error by remember(group.id) { mutableStateOf("") }
+    var pickerData by remember(group.id) { mutableStateOf(ConversationGroupPickerData()) }
+    var query by remember(group.id) { mutableStateOf("") }
+    var contactFilter by remember(group.id) { mutableStateOf(ContactPickerFilter.ALL) }
+    var selectedLabel by remember(group.id) { mutableStateOf("") }
+    var selectedConversationGroupId by remember(group.id) { mutableStateOf("") }
+    val initialSelected = remember(group) { group.conversationIds.toSet() }
+    var selectedIds by remember(group) { mutableStateOf(initialSelected) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    LaunchedEffect(group.id, groups) {
+        loading = true
+        error = ""
+        val result = withContext(Dispatchers.IO) {
+            runCatching { loadConversationGroupOptions(groups, group.id) }
+        }
+        loading = false
+        result.onSuccess { pickerData = it }
+            .onFailure { error = it.message ?: "读取会话列表失败" }
+    }
+    val conversations = pickerData.options
+    val conversationGroupFilters = remember(groups, conversations) {
+        ConversationGroupPickerSupport.filters(groups, conversations.map { it.id })
+    }
+    val conversationGroupChoices = remember(conversationGroupFilters) {
+        listOf(PopupChoice("全部会话", "")) + conversationGroupFilters.map {
+            PopupChoice(it.name, it.id)
+        }
+    }
+    LaunchedEffect(conversationGroupFilters) {
+        if (selectedConversationGroupId.isNotBlank() &&
+            conversationGroupFilters.none { it.id == selectedConversationGroupId }
+        ) {
+            selectedConversationGroupId = ""
+        }
+    }
+    val selectedConversationIds = remember(conversationGroupFilters, selectedConversationGroupId) {
+        conversationGroupFilters.firstOrNull { it.id == selectedConversationGroupId }?.conversationIds
+    }
+    val scopedConversations = remember(conversations, selectedConversationIds) {
+        selectedConversationIds?.let { ids -> conversations.filter { it.id in ids } } ?: conversations
+    }
+    val labels = remember(scopedConversations) {
+        scopedConversations.flatMap { it.labels }
+            .distinct()
+            .sortedWith(compareBy { it.lowercase(Locale.US) })
+    }
+    LaunchedEffect(contactFilter, labels) {
+        if (contactFilter == ContactPickerFilter.LABELS) {
+            if (selectedLabel.isBlank() || selectedLabel !in labels) {
+                selectedLabel = labels.firstOrNull().orEmpty()
+            }
+        } else if (selectedLabel.isNotBlank()) {
+            selectedLabel = ""
+        }
+    }
+    val lower = query.trim().lowercase(Locale.US)
+    val filtered = scopedConversations.filter {
+        when (contactFilter) {
+            ContactPickerFilter.FRIENDS -> it.id in pickerData.friendIds
+            ContactPickerFilter.GROUPS -> it.group
+            ContactPickerFilter.OFFICIALS -> it.id in pickerData.officialIds
+            ContactPickerFilter.LABELS -> selectedLabel.isNotBlank() &&
+                it.id in pickerData.friendIds &&
+                selectedLabel in it.labels
+            ContactPickerFilter.ALL -> true
+        }
+    }
+    val visible = filtered.filter { it.matchesSearch(lower) }
+        .selectedFirst { initialSelected.contains(it.id) }
+    val visibleIds = visible.map { it.id }.toSet()
+    val visibleAllSelected = visibleIds.isNotEmpty() && visibleIds.all(selectedIds::contains)
+    PageScaffold(
+        title = "选择分组会话",
+        largeTitle = "选择分组会话",
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存选择",
+                onPrimaryClick = { onConfirm(selectedIds.toList()) },
+                secondaryText = "返回",
+                onSecondaryClick = onBack,
+                middleText = if (visibleIds.isNotEmpty()) {
+                    if (visibleAllSelected) "取消全选" else "全选"
+                } else null,
+                onMiddleClick = if (visibleIds.isNotEmpty()) {
+                    {
+                        selectedIds = if (visibleAllSelected) selectedIds - visibleIds else selectedIds + visibleIds
+                    }
+                } else null
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item {
+                SettingsCard {
+                    ContactFilterRow(
+                        selected = contactFilter,
+                        enableLabels = true,
+                        enableOfficials = true,
+                        onSelected = {
+                            contactFilter = it
+                            query = ""
+                        }
+                    )
+                }
+            }
+            if (contactFilter == ContactPickerFilter.LABELS) {
+                item {
+                    SettingsCard {
+                        ContactLabelFilterRow(
+                            labels = labels,
+                            selected = selectedLabel,
+                            onSelected = {
+                                selectedLabel = it
+                                query = ""
+                            }
+                        )
+                    }
+                }
+            }
+            if (conversationGroupChoices.size > 1) {
+                item {
+                    SettingsCard {
+                        PopupChoiceRow(
+                            title = "聊天分组",
+                            summary = "只显示所选分组及其子分组中的会话",
+                            options = conversationGroupChoices,
+                            currentValue = selectedConversationGroupId,
+                            onValueChanged = {
+                                selectedConversationGroupId = it
+                                query = ""
+                            }
+                        )
+                    }
+                }
+            }
+            item {
+                SettingsCard {
+                    InputRow("搜索", "会话名称 / 备注 / wxid", query) { query = it }
+                }
+            }
+            item {
+                PickerSectionHeader(
+                    text = if (visible.isNotEmpty()) {
+                        "${contactFilter.title} · ${visible.size} 项"
+                    } else {
+                        contactFilter.title
+                    }
+                )
+            }
+            when {
+                loading -> item { SettingsCard { EmptyText("正在载入会话...") } }
+                error.isNotBlank() -> item { SettingsCard { EmptyText(error) } }
+                visible.isEmpty() -> item { SettingsCard { EmptyText("没有匹配的会话") } }
+                else -> visible.forEach { option ->
+                    item {
+                        ContactListCard(
+                            option = option,
+                            selected = selectedIds.contains(option.id),
+                            multiSelect = true,
+                            onClick = {
+                                selectedIds = if (selectedIds.contains(option.id)) {
+                                    selectedIds - option.id
+                                } else {
+                                    selectedIds + option.id
+                                }
+                            }
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ConversationGroupParentPickerPage(
+    group: ConversationGroup,
+    groups: List<ConversationGroup>,
+    onBack: () -> Unit,
+    onSelected: (String?) -> Unit
+) {
+    val excluded = remember(groups, group.id) {
+        ConversationGroupStore.descendantIds(groups, group.id) + group.id
+    }
+    val candidates = remember(groups, excluded) {
+        flattenConversationGroups(groups).filterNot { it.group.id in excluded }
+    }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    PageScaffold(
+        title = "选择上级分组",
+        largeTitle = "选择上级分组",
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "微信首页",
+                onPrimaryClick = { onSelected(null) },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "可用分组") }
+            item {
+                SettingsCard {
+                    if (candidates.isEmpty()) {
+                        EmptyText("没有其它可用分组")
+                    } else {
+                        candidates.forEachIndexed { index, row ->
+                            SelectRow(
+                                title = "${"  ".repeat(row.depth)}${row.group.name}",
+                                summary = row.path,
+                                onClick = { onSelected(row.group.id) }
+                            )
+                            if (index < candidates.lastIndex) InsetDivider()
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+internal data class FlattenedConversationGroup(
+    val group: ConversationGroup,
+    val depth: Int,
+    val path: String
+)
+
+internal fun flattenConversationGroups(groups: List<ConversationGroup>): List<FlattenedConversationGroup> {
+    val normalized = ConversationGroupStore.normalize(groups)
+    val byParent = normalized.groupBy { it.parentId }
+    val result = arrayListOf<FlattenedConversationGroup>()
+    val visited = hashSetOf<String>()
+    fun visit(parentId: String?, depth: Int, path: List<String>) {
+        byParent[parentId].orEmpty().sortedBy { it.order }.forEach { group ->
+            if (!visited.add(group.id)) return@forEach
+            val nextPath = path + group.name
+            result += FlattenedConversationGroup(group, depth, nextPath.joinToString(" / "))
+            visit(group.id, depth + 1, nextPath)
+        }
+    }
+    visit(null, 0, emptyList())
+    return result
+}
+
+internal fun conversationGroupPath(groups: List<ConversationGroup>, groupId: String): String {
+    return flattenConversationGroups(groups).firstOrNull { it.group.id == groupId }?.path.orEmpty()
+}
+
+internal data class ConversationGroupPickerData(
+    val options: List<ContactOption> = emptyList(),
+    val friendIds: Set<String> = emptySet(),
+    val officialIds: Set<String> = emptySet()
+)
+
+internal fun loadConversationGroupOptions(
+    groups: List<ConversationGroup>,
+    currentGroupId: String
+): ConversationGroupPickerData {
+    val conversationApi = WeChatApis.conversations() ?: throw IllegalStateException("会话列表不可用")
+    val contactApi = WeChatApis.contact().contacts()
+    val assignedIds = groups.flatMap { it.conversationIds }.toSet()
+    val friendIds = runCatching {
+        contactApi?.getPickerContacts().orEmpty()
+            .map { it.wxId.trim() }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }.getOrDefault(emptySet())
+    val officialIds = runCatching {
+        contactApi?.getPickerOfficialAccounts().orEmpty()
+            .map { it.wxId.trim() }
+            .filter { it.isNotBlank() }
+            .toSet()
+    }.getOrDefault(emptySet())
+    val labelsByUser = linkedMapOf<String, MutableList<String>>()
+    runCatching { contactApi?.getContactLabelList().orEmpty() }
+        .getOrDefault(emptyList())
+        .forEach { label ->
+            val labelName = label.labelName.ifBlank { label.labelId }
+            if (labelName.isBlank()) return@forEach
+            label.userNameList.forEach { wxId ->
+                if (wxId.isNotBlank()) {
+                    labelsByUser.getOrPut(wxId) { arrayListOf() }.add(labelName)
+                }
+            }
+        }
+    val paths = flattenConversationGroups(groups).associate { it.group.id to it.path }
+    val ownerLabels = buildMap {
+        groups.filterNot { it.id == currentGroupId }.forEach { owner ->
+            owner.conversationIds.forEach { talker ->
+                paths[owner.id]?.takeIf(String::isNotBlank)?.let { put(talker, "已在：$it") }
+            }
+        }
+    }
+    val rows = conversationApi.getRecentConversationUsernames(10000)
+    val result = linkedMapOf<String, ContactOption>()
+    rows.forEach { username ->
+        val talker = username.trim()
+        if (talker.isBlank() || ConversationGroupRuntime.isVirtualTalker(talker) ||
+            talker in CONVERSATION_GROUP_EXCLUDED_TALKERS
+        ) return@forEach
+        val contact = runCatching { contactApi?.getContact(talker) }.getOrNull()
+        if (contact == null && talker != "filehelper" && talker !in assignedIds) return@forEach
+        val group = contact?.isGroup() == true
+        result[talker] = ContactOption(
+            id = talker,
+            label = contact?.pickerDisplayName(group)
+                .orEmpty()
+                .ifBlank { conversationApi.getConversationTitle(talker).ifBlank { talker } },
+            group = group,
+            avatarUrl = contact?.avatarUrl.orEmpty(),
+            avatarBackupUrl = contact?.avatarBackupUrl.orEmpty(),
+            labels = labelsByUser[talker].orEmpty().distinct(),
+            official = contact?.isOfficialAccount() == true,
+            extraSummary = ownerLabels[talker].orEmpty(),
+            searchAliases = listOfNotNull(
+                contact?.remarkName,
+                contact?.nickname,
+                contact?.customWxId,
+                talker
+            ).filter { it.isNotBlank() }.distinct()
+        )
+    }
+    assignedIds.filterNot(result::containsKey).forEach { talker ->
+        val contact = runCatching { contactApi?.getContact(talker) }.getOrNull()
+        val group = contact?.isGroup() == true ||
+            talker.endsWith("@chatroom") ||
+            talker.endsWith("@im.chatroom")
+        result[talker] = ContactOption(
+            id = talker,
+            label = contact?.pickerDisplayName(group)
+                .orEmpty()
+                .ifBlank { conversationApi.getConversationTitle(talker).ifBlank { talker } },
+            group = group,
+            avatarUrl = contact?.avatarUrl.orEmpty(),
+            avatarBackupUrl = contact?.avatarBackupUrl.orEmpty(),
+            labels = labelsByUser[talker].orEmpty().distinct(),
+            official = contact?.isOfficialAccount() == true || talker.startsWith("gh_"),
+            extraSummary = ownerLabels[talker].orEmpty(),
+            searchAliases = listOfNotNull(
+                contact?.remarkName,
+                contact?.nickname,
+                contact?.customWxId,
+                talker
+            ).filter { it.isNotBlank() }.distinct()
+        )
+    }
+    return ConversationGroupPickerData(
+        options = result.values.toList(),
+        friendIds = friendIds,
+        officialIds = officialIds + result.values.filter { it.official }.map { it.id }
+    )
+}
+
+internal val CONVERSATION_GROUP_EXCLUDED_TALKERS = setOf(
+    "message_fold",
+    "conversationboxservice",
+    "officialaccounts",
+    "appbrand_notify_message",
+    "notifymessage",
+    "qmessage",
+    "floatbottle"
+)
+}

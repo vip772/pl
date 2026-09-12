@@ -540,24 +540,258 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.random.Random
 
-internal fun AutoReplyMainPage(
+internal fun cleanMessageDetailsColor(value: String, fallback: String): String {
+    return MemberTitleStore.cleanColor(value).ifEmpty { fallback }
+}
+
+internal fun messageDetailsTimeFormatChoices(current: String): List<PopupChoice<String>> {
+    val choices = listOf(
+        PopupChoice(label = "时分秒 · 14:30:05", value = "HH:mm:ss"),
+        PopupChoice(label = "月日 时分秒 · 09-11 14:30:05", value = "MM-dd HH:mm:ss"),
+        PopupChoice(label = "年月日 时分秒 · 2026-09-11 14:30:05", value = "yyyy-MM-dd HH:mm:ss"),
+        PopupChoice(label = "中文年月日 · 2026年9月11日 14:30:05", value = "yyyy年M月d日 HH:mm:ss"),
+        PopupChoice(label = "仅年月日 · 2026-09-11", value = "yyyy-MM-dd")
+    )
+    return if (choices.any { it.value == current }) choices
+    else choices + PopupChoice(label = "自定义 · "+ current.ifBlank { "默认时分秒" }, value = current)
+}
+
+internal fun messageDetailsPositionValues(): Set<String> = setOf(
+    HchatExtraSettings.POSITION_MESSAGE_BOTTOM,
+    HchatExtraSettings.POSITION_AVATAR_ABOVE,
+    HchatExtraSettings.POSITION_AVATAR_BELOW
+)
+
+internal fun messageDetailsPositionChoices(): List<PopupChoice<String>> = listOf(
+    PopupChoice(label = "消息下方", value = HchatExtraSettings.POSITION_MESSAGE_BOTTOM),
+    PopupChoice(label = "头像上方", value = HchatExtraSettings.POSITION_AVATAR_ABOVE),
+    PopupChoice(label = "头像下方", value = HchatExtraSettings.POSITION_AVATAR_BELOW)
+)
+
+internal fun messageDetailsPositionLabel(value: String): String = when (value) {
+    HchatExtraSettings.POSITION_AVATAR_ABOVE -> "头像上方"
+    HchatExtraSettings.POSITION_AVATAR_BELOW -> "头像下方"
+    else -> "消息下方"
+}
+
+internal fun messageDetailsVariables(): List<TemplateVariable> {
+    return listOf(
+        TemplateVariable("\${time}", "时间"),
+        TemplateVariable("\${relativeTime}", "相对时间"),
+        TemplateVariable("\${type}", "消息类型（含文件、红包、小程序等）"),
+        TemplateVariable("\${appType}", "卡片子类型编号（非卡片为空）"),
+        TemplateVariable("\${baseType}", "基础消息类型编号"),
+        TemplateVariable("\${direction}", "收发方向"),
+        TemplateVariable("\${talker}", "会话 ID"),
+        TemplateVariable("\${createTime}", "消息时间戳（毫秒）"),
+        TemplateVariable("\${rawAtUserList}", "原始艾特名单"),
+        TemplateVariable("\${typeDec}", "类型编号（十进制）"),
+        TemplateVariable("\${typeHex}", "类型编号（十六进制）"),
+        TemplateVariable("\${msgId}", "本地消息编号"),
+        TemplateVariable("\${msgSvrId}", "服务端消息编号"),
+        TemplateVariable("\${atUserList}", "艾特对象"),
+        TemplateVariable("\${mentionedUsers}", "提及摘要")
+    )
+}
+
+@Composable
+internal fun ProfileIdMiuixPage(
+    context: Context,
     provider: FeatureSettingsProvider,
-    sp: SharedPreferences,
-    rules: List<AutoReplyRule>,
-    onBack: () -> Unit,
-    onOpenRules: () -> Unit,
-    onOpenAutoAccept: () -> Unit,
-    onOpenGreetAccepted: () -> Unit,
-    onOpenAi: () -> Unit
+    onBack: () -> Unit
 ) {
-    var excludedTalkersEnabled by remember {
-        mutableStateOf(sp.getBoolean(AutoReplySettings.KEY_EXCLUDED_TALKERS_ENABLE, false))
-    }
-    var excludedTalkers by remember {
-        mutableStateOf(sp.getString(AutoReplySettings.KEY_EXCLUDED_TALKERS, "").orEmpty())
+    val idSp = remember { HchatStorage.preferences(context, ProfileIdSettings.PREFS_NAME) }
+    val addTimeSp = remember { HchatStorage.preferences(context, ProfileAddTimeSettings.PREFS_NAME) }
+    var addTimeColor by remember {
+        mutableStateOf(addTimeSp.getString(ProfileAddTimeSettings.KEY_COLOR, ProfileAddTimeSettings.DEFAULT_COLOR) ?: ProfileAddTimeSettings.DEFAULT_COLOR)
     }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar("返回", onBack)
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "资料页") }
+            item {
+                SettingsCard {
+                    SwitchRow(idSp, ProfileIdSettings.KEY_ENABLE, "显示微信 ID", "在资料页头部显示可点击复制的 ID", ProfileIdSettings.DEFAULT_ENABLE)
+                    InsetDivider()
+                    SwitchRow(addTimeSp, ProfileAddTimeSettings.KEY_ENABLE, "显示添加时间", "格式：yyyy-MM-dd HH:mm:ss", ProfileAddTimeSettings.DEFAULT_ENABLE)
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "添加时间颜色") }
+            item { SettingsCard {
+                ColorPickerRow("添加时间渐变颜色", "支持单色或左右渐变", addTimeColor, onReset = {
+                    addTimeColor = ProfileAddTimeSettings.DEFAULT_COLOR
+                    addTimeSp.edit().remove(ProfileAddTimeSettings.KEY_COLOR).apply()
+                }) { value ->
+                    addTimeColor = ProfileAddTimeSettings.cleanColorSpec(value)
+                    addTimeSp.edit().putString(ProfileAddTimeSettings.KEY_COLOR, addTimeColor).apply()
+                }
+            } }
+        }
+    }
+}
+
+@Composable
+internal fun HideChatMenuMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HideChatMenuSettings.preferences(context) }
+    var enabled by remember {
+        mutableStateOf(
+            sp.getBoolean(HideChatMenuSettings.KEY_ENABLE, HideChatMenuSettings.DEFAULT_ENABLE)
+        )
+    }
+    var titles by remember {
+        mutableStateOf(
+            sp.getString(HideChatMenuSettings.KEY_TITLES, HideChatMenuSettings.DEFAULT_TITLES)
+                .orEmpty()
+        )
+    }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    fun save() {
+        val normalized = HideChatMenuSettings.parseTitles(titles).joinToString(",")
+        titles = normalized
+        sp.edit()
+            .putBoolean(HideChatMenuSettings.KEY_ENABLE, enabled)
+            .putString(HideChatMenuSettings.KEY_TITLES, normalized)
+            .apply()
+        Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
+    }
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "保存设置",
+                onPrimaryClick = { save() },
+                secondaryText = "返回",
+                onSecondaryClick = onBack
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "聊天菜单") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        checked = enabled,
+                        title = "隐藏长按菜单",
+                        summary = "隐藏聊天消息长按菜单中的指定项目",
+                        onCheckedChange = { enabled = it }
+                    )
+                    if (enabled) {
+                        InsetDivider()
+                        InputRow(
+                            "隐藏菜单项",
+                            "输入菜单显示名称，多个项目用逗号、分号或换行分隔",
+                            titles,
+                            minLines = 2,
+                            onValueChange = { titles = it }
+                        )
+                    }
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
+            item {
+                SettingsCard {
+                    ActionRow("恢复默认", "恢复初始菜单名称示例") {
+                        titles = HideChatMenuSettings.DEFAULT_TITLES
+                        Toast.makeText(context, "已恢复默认，保存后生效", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SettingsEntryMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, SettingsEntrySettings.PREFS_NAME) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar("返回", onBack)
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "入口") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        sp,
+                        SettingsEntrySettings.KEY_PLUS_MENU_ENABLE,
+                        "注入加号菜单",
+                        "在微信右上角加号菜单中显示 Hchat 入口，重启微信后生效",
+                        SettingsEntrySettings.DEFAULT_PLUS_MENU_ENABLE
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        sp,
+                        SettingsEntrySettings.KEY_PLUS_LONG_PRESS_ENABLE,
+                        "长按加号入口",
+                        "长按微信右上角加号打开 Hchat 设置，重启微信后生效",
+                        SettingsEntrySettings.DEFAULT_PLUS_LONG_PRESS_ENABLE
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun PluginAgentEntryMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, SettingsEntrySettings.PREFS_NAME) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -572,1847 +806,1045 @@ internal fun AutoReplyMainPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
-            item { SmallTitle(text = "聊天自动回复") }
+            item { SmallTitle(text = "加号菜单") }
             item {
                 SettingsCard {
-                    SwitchRow(sp, AutoReplySettings.KEY_ENABLE, "启用自动回复", "开启后按规则回复收到的消息", AutoReplySettings.DEFAULT_ENABLE)
-                    InsetDivider()
-                    SwitchRow(excludedTalkersEnabled, "排除指定会话", "开启后不回复指定会话的消息") {
-                        excludedTalkersEnabled = it
-                        sp.edit().putBoolean(AutoReplySettings.KEY_EXCLUDED_TALKERS_ENABLE, it).apply()
-                    }
-                    if (excludedTalkersEnabled) {
-                        InsetDivider()
-                        InputRow("排除会话 ID", "多个 ID 用逗号、分号或换行分隔", excludedTalkers, minLines = 2) {
-                            excludedTalkers = it
-                            sp.edit().putString(AutoReplySettings.KEY_EXCLUDED_TALKERS, it).apply()
-                        }
-                    }
-                    InsetDivider()
-                    ActionRow("回复规则", if (rules.isEmpty()) "暂无规则" else "${rules.size} 条规则，${rules.count { it.enabled }} 条启用", onOpenRules)
-                    InsetDivider()
-                    ActionRow("好友请求处理", "自动同意好友申请并按步骤发送欢迎内容", onOpenAutoAccept)
-                    InsetDivider()
-                    ActionRow("通过后欢迎语", "对方通过你的好友请求后发送欢迎内容", onOpenGreetAccepted)
-                    InsetDivider()
-                    ActionRow("AI 配置", "配置小智AI和智聊AI，多智聊模型可切换", onOpenAi)
+                    SwitchRow(
+                        sp,
+                        SettingsEntrySettings.KEY_PLUGIN_AGENT_PLUS_MENU_ENABLE,
+                        "插件 Agent 入口",
+                        "在微信右上角加号菜单中显示插件 Agent，重启微信后生效",
+                        SettingsEntrySettings.DEFAULT_PLUGIN_AGENT_PLUS_MENU_ENABLE
+                    )
                 }
             }
         }
     }
 }
 
-@Composable
-internal fun AutoReplyRuleListPage(
-    rules: List<AutoReplyRule>,
-    query: String,
-    onQueryChange: (String) -> Unit,
-    listState: LazyListState,
-    onBack: () -> Unit,
-    onAdd: () -> Unit,
-    onEdit: (AutoReplyRule) -> Unit,
-    onToggle: (AutoReplyRule, Boolean) -> Unit,
-    onDelete: (AutoReplyRule) -> Unit,
-    onBatchDelete: (List<AutoReplyRule>) -> Unit
-) {
-    val context = LocalContext.current
-    var batchDeleteMode by remember { mutableStateOf(false) }
-    var selectedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
-    var showDeleteConfirm by remember { mutableStateOf(false) }
-    val visible = rules.filter {
-        val lower = query.trim().lowercase(Locale.US)
-        lower.isBlank() ||
-            it.name.lowercase(Locale.US).contains(lower) ||
-            it.keyword.lowercase(Locale.US).contains(lower) ||
-            it.excludedKeywords.lowercase(Locale.US).contains(lower)
-    }
-    val visibleIds = visible.mapTo(LinkedHashSet()) { it.id }
-    val allVisibleSelected = visibleIds.isNotEmpty() && visibleIds.all { it in selectedIds }
-    val selectedRules = rules.filter { it.id in selectedIds }
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = "回复规则",
-        largeTitle = "回复规则",
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            if (batchDeleteMode) {
-                BottomActionBar(
-                    primaryText = "删除所选（${selectedRules.size}）",
-                    onPrimaryClick = {
-                        if (selectedRules.isEmpty()) {
-                            Toast.makeText(context, "请先选择规则", Toast.LENGTH_SHORT).show()
-                        } else {
-                            showDeleteConfirm = true
-                        }
-                    },
-                    secondaryText = "取消",
-                    onSecondaryClick = {
-                        batchDeleteMode = false
-                        selectedIds = emptySet()
-                    },
-                    middleText = if (visibleIds.isEmpty()) null else if (allVisibleSelected) "取消全选" else "全选",
-                    onMiddleClick = if (visibleIds.isEmpty()) null else {
-                        {
-                            selectedIds = if (allVisibleSelected) {
-                                selectedIds - visibleIds
-                            } else {
-                                selectedIds + visibleIds
-                            }
-                        }
-                    }
-                )
-            } else {
-                BottomActionBar(
-                    primaryText = "新增规则",
-                    onPrimaryClick = onAdd,
-                    secondaryText = "返回",
-                    onSecondaryClick = onBack,
-                    middleText = if (rules.isEmpty()) null else "批量删除",
-                    onMiddleClick = if (rules.isEmpty()) null else {
-                        {
-                            batchDeleteMode = true
-                            selectedIds = emptySet()
-                        }
-                    }
-                )
-            }
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
-        ) {
-            item {
-                SettingsCard {
-                    InputRow("搜索", "按规则名或关键词筛选", query, onValueChange = onQueryChange)
-                }
-            }
-            if (visible.isEmpty()) {
-                item { SettingsCard { EmptyText("暂无规则") } }
-            } else {
-                visible.forEachIndexed { index, rule ->
-                    item {
-                        SmallTitle(
-                            modifier = Modifier.padding(top = if (index == 0) 10.dp else 18.dp),
-                            text = "规则 ${index + 1}"
-                        )
-                    }
-                    item {
-                        SettingsCard {
-                            if (batchDeleteMode) {
-                                OptionChoiceRow(
-                                    item = OptionItem(
-                                        label = rule.name.ifBlank { "未命名规则" },
-                                        value = index,
-                                        summary = describeAutoReplyRule(rule)
-                                    ),
-                                    selected = rule.id in selectedIds,
-                                    onClick = {
-                                        selectedIds = if (rule.id in selectedIds) {
-                                            selectedIds - rule.id
-                                        } else {
-                                            selectedIds + rule.id
-                                        }
-                                    }
-                                )
-                            } else {
-                                SwitchRow(
-                                    checked = rule.enabled,
-                                    title = rule.name.ifBlank { "未命名规则" },
-                                    summary = describeAutoReplyRule(rule),
-                                    onCheckedChange = { onToggle(rule, it) }
-                                )
-                                InsetDivider()
-                                ActionRow("编辑", "修改触发条件和回复步骤") { onEdit(rule) }
-                                InsetDivider()
-                                ActionRow("删除", "移除此规则") { onDelete(rule) }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    BatchDeleteConfirmDialog(
-        show = showDeleteConfirm,
-        message = "将删除已选的 ${selectedRules.size} 条回复规则，此操作不可撤销。",
-        labels = selectedRules.map { it.name.ifBlank { "未命名规则" } },
-        onDismiss = { showDeleteConfirm = false },
-        onConfirm = {
-            val targets = selectedRules
-            showDeleteConfirm = false
-            batchDeleteMode = false
-            selectedIds = emptySet()
-            onBatchDelete(targets)
-        }
-    )
+internal data class FloatingShortcutEditorRequest(
+    val original: FloatingShortcutItem?,
+    val draft: FloatingShortcutItem
+)
+
+internal enum class FloatingShortcutRoute {
+    MAIN,
+    APPEARANCE
 }
 
 @Composable
-internal fun AutoReplyRuleEditorPage(
-    rule: AutoReplyRule,
-    listState: LazyListState,
-    onBack: () -> Unit,
-    onSave: (AutoReplyRule) -> Unit,
-    onDraftChange: (AutoReplyRule) -> Unit,
-    onEditSteps: (AutoReplyRule) -> Unit
-) {
-    val context = LocalContext.current
-    var current by remember(rule) { mutableStateOf(rule) }
-    var optionPicker by remember { mutableStateOf<OptionPickerRequest?>(null) }
-    var contactPicker by remember { mutableStateOf<ContactPickerRequest?>(null) }
-    var groupMemberPicker by remember { mutableStateOf<GroupMemberPickerRequest?>(null) }
-    val editorRoute = when {
-        optionPicker != null -> AutoReplyEditorRoute.OptionPicker(optionPicker!!)
-        contactPicker != null -> AutoReplyEditorRoute.ContactPicker(contactPicker!!)
-        groupMemberPicker != null -> AutoReplyEditorRoute.GroupMemberPicker(groupMemberPicker!!)
-        else -> AutoReplyEditorRoute.Main
-    }
-    SettingsRouteTransition(
-        targetState = editorRoute,
-        label = "AutoReplyEditorRoute",
-        depthOf = { it.depth() }
-    ) { route ->
-        when (route) {
-            is AutoReplyEditorRoute.OptionPicker -> {
-                val request = route.request
-                OptionPickerPage(
-                    request = request,
-                    onBack = { optionPicker = null },
-                    onSelected = { request.onSelected(it); optionPicker = null }
-                )
-            }
-            is AutoReplyEditorRoute.ContactPicker -> {
-                val request = route.request
-                ContactPickerPage(
-                    context = context,
-                    request = request,
-                    onBack = { contactPicker = null },
-                    onConfirm = { selected ->
-                        request.onValue(formatIds(selected.map { it.id }))
-                        Toast.makeText(context, "已选择 ${selected.size} 项", Toast.LENGTH_SHORT).show()
-                        contactPicker = null
-                    }
-                )
-            }
-            is AutoReplyEditorRoute.GroupMemberPicker -> {
-                val request = route.request
-                GroupMemberPickerPage(
-                    context = context,
-                    request = request,
-                    onBack = { groupMemberPicker = null },
-                    onConfirm = { entries ->
-                        request.onValue(formatIds(entries))
-                        Toast.makeText(context, "已选择 ${entries.size} 个群成员", Toast.LENGTH_SHORT).show()
-                        groupMemberPicker = null
-                    }
-                )
-            }
-            AutoReplyEditorRoute.Main -> AutoReplyRuleEditorContent(
-                rule = current,
-                listState = listState,
-                onRuleChange = {
-                    current = it
-                    onDraftChange(it)
-                },
-                onBack = onBack,
-                onSave = { onSave(current) },
-                onEditSteps = { onEditSteps(current) },
-                onOptionPicker = { optionPicker = it },
-                onContactPicker = { contactPicker = it },
-                onGroupMemberPicker = { groupMemberPicker = it }
-            )
-        }
-    }
-}
-
-@Composable
-internal fun AutoReplyRuleEditorContent(
-    rule: AutoReplyRule,
-    listState: LazyListState,
-    onRuleChange: (AutoReplyRule) -> Unit,
-    onBack: () -> Unit,
-    onSave: () -> Unit,
-    onEditSteps: () -> Unit,
-    onOptionPicker: (OptionPickerRequest) -> Unit,
-    onContactPicker: (ContactPickerRequest) -> Unit,
-    onGroupMemberPicker: (GroupMemberPickerRequest) -> Unit
-) {
-    val current = rule
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = "编辑规则",
-        largeTitle = "编辑规则",
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar(
-                primaryText = "保存",
-                onPrimaryClick = onSave,
-                secondaryText = "返回",
-                onSecondaryClick = onBack
-            )
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
-        ) {
-            item { SmallTitle(text = "基础") }
-            item {
-                SettingsCard {
-                    SwitchRow(current.enabled, "启用规则", "关闭后保留配置但不触发") { onRuleChange(current.copy(enabled = it)) }
-                    InsetDivider()
-                    InputRow("规则名称", "用于列表里识别规则", current.name) { onRuleChange(current.copy(name = it)) }
-                    InsetDivider()
-                    PopupOptionRow(
-                        title = "匹配方式",
-                        summary = autoReplyMatchLabel(current.matchType),
-                        options = autoReplyMatchOptions(),
-                        currentValue = current.matchType,
-                        onValueChanged = {
-                            onRuleChange(
-                                current.copy(
-                                    matchType = it,
-                                    keyword = if (it == AutoReplySettings.MATCH_ANY) "" else current.keyword
-                                )
-                            )
-                        }
-                    )
-                    if (current.matchType != AutoReplySettings.MATCH_ANY) {
-                        InsetDivider()
-                        InputRow("关键词", "多个关键词用 |、逗号或换行分隔", current.keyword, minLines = 2) {
-                            onRuleChange(current.copy(keyword = it))
-                        }
-                    } else {
-                        InsetDivider()
-                        InputRow("排除关键词", "包含任一关键词时不触发，多个用 |、逗号或换行分隔", current.excludedKeywords, minLines = 2) {
-                            onRuleChange(current.copy(excludedKeywords = it))
-                        }
-                    }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "范围") }
-            item {
-                SettingsCard {
-                    PopupOptionRow(
-                        title = "生效范围",
-                        summary = autoReplyTargetLabel(current.targetMode),
-                        options = autoReplyTargetOptions(),
-                        currentValue = current.targetMode,
-                        onValueChanged = { onRuleChange(current.copy(targetMode = it)) }
-                    )
-                    if (current.targetMode == AutoReplySettings.TARGET_SPECIFIC) {
-                        InsetDivider()
-                        ActionRow("选择指定好友", autoReplySelectedIdSummary(formatIds(current.targetIds.filter { !isAutoReplyGroupId(it) }))) {
-                            onContactPicker(ContactPickerRequest(
-                                title = "选择指定好友",
-                                mode = ContactPickerMode.FRIENDS,
-                                multiSelect = true,
-                                existingValue = formatIds(current.targetIds.filter { !isAutoReplyGroupId(it) }),
-                                onValue = { onRuleChange(current.copy(targetIds = replaceAutoReplyTypedIds(current.targetIds, parseIds(it), group = false))) },
-                                enableLabels = true
-                            ))
-                        }
-                        InsetDivider()
-                        ActionRow("选择指定群聊", autoReplySelectedIdSummary(formatIds(current.targetIds.filter { isAutoReplyGroupId(it) }))) {
-                            onContactPicker(ContactPickerRequest(
-                                title = "选择指定群聊",
-                                mode = ContactPickerMode.GROUPS,
-                                multiSelect = true,
-                                existingValue = formatIds(current.targetIds.filter { isAutoReplyGroupId(it) }),
-                                onValue = { onRuleChange(current.copy(targetIds = replaceAutoReplyTypedIds(current.targetIds, parseIds(it), group = true))) }
-                            ))
-                        }
-                        InsetDivider()
-                        ActionRow("选择指定群成员", autoReplySelectedIdSummary(formatIds(current.includedGroupMembers))) {
-                            onGroupMemberPicker(GroupMemberPickerRequest(
-                                title = "选择指定群成员",
-                                existingValue = formatIds(current.includedGroupMembers),
-                                onValue = { onRuleChange(current.copy(includedGroupMembers = parseIds(it))) }
-                            ))
-                        }
-                    } else {
-                        InsetDivider()
-                        ActionRow("选择排除好友", autoReplySelectedIdSummary(formatIds(current.excludedIds.filter { !isAutoReplyGroupId(it) }))) {
-                            onContactPicker(ContactPickerRequest(
-                                title = "选择排除好友",
-                                mode = ContactPickerMode.FRIENDS,
-                                multiSelect = true,
-                                existingValue = formatIds(current.excludedIds.filter { !isAutoReplyGroupId(it) }),
-                                onValue = { onRuleChange(current.copy(excludedIds = replaceAutoReplyTypedIds(current.excludedIds, parseIds(it), group = false))) },
-                                enableLabels = true
-                            ))
-                        }
-                        InsetDivider()
-                        ActionRow("选择排除群聊", autoReplySelectedIdSummary(formatIds(current.excludedIds.filter { isAutoReplyGroupId(it) }))) {
-                            onContactPicker(ContactPickerRequest(
-                                title = "选择排除群聊",
-                                mode = ContactPickerMode.GROUPS,
-                                multiSelect = true,
-                                existingValue = formatIds(current.excludedIds.filter { isAutoReplyGroupId(it) }),
-                                onValue = { onRuleChange(current.copy(excludedIds = replaceAutoReplyTypedIds(current.excludedIds, parseIds(it), group = true))) }
-                            ))
-                        }
-                        InsetDivider()
-                        ActionRow("选择排除群成员", autoReplySelectedIdSummary(formatIds(current.excludedGroupMembers))) {
-                            onGroupMemberPicker(GroupMemberPickerRequest(
-                                title = "选择排除群成员",
-                                existingValue = formatIds(current.excludedGroupMembers),
-                                onValue = { onRuleChange(current.copy(excludedGroupMembers = parseIds(it))) }
-                            ))
-                        }
-                    }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "触发") }
-            item {
-                SettingsCard {
-                    PopupOptionRow(
-                        title = "@ 触发",
-                        summary = autoReplyAtLabel(current.atTrigger),
-                        options = autoReplyAtOptions(),
-                        currentValue = current.atTrigger,
-                        onValueChanged = { onRuleChange(current.copy(atTrigger = it)) }
-                    )
-                    InsetDivider()
-                    PopupOptionRow(
-                        title = "拍一拍",
-                        summary = autoReplyPatLabel(current.patTrigger),
-                        options = autoReplyPatOptions(),
-                        currentValue = current.patTrigger,
-                        onValueChanged = { onRuleChange(current.copy(patTrigger = it)) }
-                    )
-                    InsetDivider()
-                    TimeOfDayPickerRow("开始时间", current.startTime, allowEmpty = true) {
-                        onRuleChange(current.copy(startTime = it))
-                    }
-                    InsetDivider()
-                    TimeOfDayPickerRow("结束时间", current.endTime, allowEmpty = true) {
-                        onRuleChange(current.copy(endTime = it))
-                    }
-                    InsetDivider()
-                    NumberInputRow("最大回复次数", "0 表示不限制，按规则/会话/发送者统计", current.maxReplyCount.toString()) {
-                        onRuleChange(current.copy(maxReplyCount = it.toIntOrNull()?.coerceAtLeast(0) ?: 0))
-                    }
-                    InsetDivider()
-                    NumberInputRow("回复冷却时间", "单位秒，0 表示不限制；同一规则在同一会话内冷却", current.cooldownSeconds.toString()) {
-                        onRuleChange(current.copy(cooldownSeconds = it.toLongOrNull()?.coerceAtLeast(0L) ?: 0L))
-                    }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "回复") }
-            item {
-                SettingsCard {
-                    SwitchRow(current.replyAsQuote, "引用回复", "文本和 AI 可引用原消息回复") { onRuleChange(current.copy(replyAsQuote = it)) }
-                    InsetDivider()
-                    ActionRow("回复步骤", describeAutoReplySteps(current.steps), onEditSteps)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun AutoReplyFriendPage(
+internal fun FloatingShortcutMiuixPage(
     context: Context,
-    title: String,
-    sp: SharedPreferences,
-    enabledKey: String,
-    delayKey: String,
-    tagEnabledKey: String,
-    tagNameKey: String,
-    steps: List<AutoReplyStep>,
-    listState: LazyListState,
-    onBack: () -> Unit,
-    automationKeys: AutoReplyFriendAutomationKeys?,
-    onSelectLabels: (() -> Unit)?,
-    onEditSteps: () -> Unit
-) {
-    var delayMs by remember { mutableStateOf(sp.getLong(delayKey, 2000L).coerceAtLeast(0L).toString()) }
-    var tagName by remember { mutableStateOf(sp.getString(tagNameKey, "") ?: "") }
-    var labelDateFormat by remember {
-        mutableStateOf(sp.getString(automationKeys?.labelDateFormat ?: "", "yyyy-MM-dd") ?: "yyyy-MM-dd")
-    }
-    val selectedLabelNames = sp.getString(automationKeys?.labelSelectedNames ?: "", "") ?: ""
-    var remarkDateFormat by remember {
-        mutableStateOf(sp.getString(automationKeys?.remarkDateFormat ?: "", "yyMMdd") ?: "yyMMdd")
-    }
-    var remarkCustomText by remember {
-        mutableStateOf(sp.getString(automationKeys?.remarkCustomText ?: "", "") ?: "")
-    }
-    val hasAutomation = automationKeys != null && onSelectLabels != null
-    var labelDateEnabled by remember { mutableStateOf(automationKeys?.let { sp.getBoolean(it.labelDateEnable, false) } ?: false) }
-    var labelExistingEnabled by remember { mutableStateOf(automationKeys?.let { sp.getBoolean(it.labelExistingEnable, false) } ?: false) }
-    var remarkDateEnabled by remember { mutableStateOf(automationKeys?.let { sp.getBoolean(it.remarkDateEnable, false) } ?: false) }
-    var remarkCustomEnabled by remember { mutableStateOf(automationKeys?.let { sp.getBoolean(it.remarkCustomEnable, false) } ?: false) }
-    var tagEnabled by remember { mutableStateOf(sp.getBoolean(tagEnabledKey, false)) }
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = title,
-        largeTitle = title,
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar(
-                primaryText = "保存",
-                onPrimaryClick = {
-                    sp.edit()
-                        .putLong(delayKey, delayMs.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L)
-                        .putString(tagNameKey, tagName.trim())
-                        .also { editor ->
-                            automationKeys?.let { keys ->
-                                editor.putString(keys.labelDateFormat, labelDateFormat.trim().ifBlank { "yyyy-MM-dd" })
-                                editor.putString(keys.remarkDateFormat, remarkDateFormat.trim().ifBlank { "yyMMdd" })
-                                editor.putString(keys.remarkCustomText, remarkCustomText.trim())
-                            }
-                        }
-                        .apply()
-                    Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
-                },
-                secondaryText = "返回",
-                onSecondaryClick = onBack
-            )
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
-        ) {
-            item {
-                SettingsCard {
-                    SwitchRow(sp, enabledKey, "启用", "开启后自动处理这个场景", false)
-                    InsetDivider()
-                    NumberInputRow("延迟发送", "单位 ms，通过好友后等待再发欢迎内容", delayMs) { delayMs = it }
-                    if (hasAutomation) {
-                        val keys = automationKeys!!
-                        InsetDivider()
-                        SwitchRow(sp, keys.labelNewFriendEnable, "自动标签新加好友", "给好友添加“新加好友”标签", false)
-                        InsetDivider()
-                        SwitchRow(labelDateEnabled, "自动标签日期", "按日期格式生成一个标签") {
-                            labelDateEnabled = it
-                            sp.edit().putBoolean(keys.labelDateEnable, it).apply()
-                        }
-                        if (labelDateEnabled) {
-                            InsetDivider()
-                            InputRow("标签日期格式", "例如 yyyy-MM-dd", labelDateFormat) { labelDateFormat = it }
-                        }
-                        InsetDivider()
-                        SwitchRow(labelExistingEnabled, "自动标签已有标签", "把好友加入已选择的微信标签") {
-                            labelExistingEnabled = it
-                            sp.edit().putBoolean(keys.labelExistingEnable, it).apply()
-                        }
-                        if (labelExistingEnabled) {
-                            InsetDivider()
-                            ActionRow("选择标签", autoReplyLabelSummary(selectedLabelNames), onSelectLabels!!)
-                        }
-                        InsetDivider()
-                        SwitchRow(sp, keys.remarkNewFriendEnable, "自动备注新加好友", "备注里加入“新加好友”", false)
-                        InsetDivider()
-                        SwitchRow(sp, keys.remarkNicknameSuffixEnable, "加昵称后面", "备注格式为微信昵称 + 备注内容", false)
-                        InsetDivider()
-                        SwitchRow(remarkDateEnabled, "自动备注日期", "备注里加入日期") {
-                            remarkDateEnabled = it
-                            sp.edit().putBoolean(keys.remarkDateEnable, it).apply()
-                        }
-                        if (remarkDateEnabled) {
-                            InsetDivider()
-                            InputRow("备注日期格式", "例如 yyMMdd", remarkDateFormat) { remarkDateFormat = it }
-                        }
-                        InsetDivider()
-                        SwitchRow(remarkCustomEnabled, "自动备注自定义文本", "备注里加入自定义内容") {
-                            remarkCustomEnabled = it
-                            sp.edit().putBoolean(keys.remarkCustomEnable, it).apply()
-                        }
-                        if (remarkCustomEnabled) {
-                            InsetDivider()
-                            InputRow("备注自定义文本", "例如 渠道A", remarkCustomText) { remarkCustomText = it }
-                        }
-                    } else {
-                        InsetDivider()
-                        SwitchRow(tagEnabled, "自动打标签", "处理后把好友加入指定标签") {
-                            tagEnabled = it
-                            sp.edit().putBoolean(tagEnabledKey, it).apply()
-                        }
-                        if (tagEnabled) {
-                            InsetDivider()
-                            InputRow("标签名称", "标签需要微信里已存在", tagName) { tagName = it }
-                        }
-                    }
-                    InsetDivider()
-                    ActionRow("回复步骤", describeAutoReplySteps(steps), onEditSteps)
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun AutoReplyLabelPickerPage(
-    context: Context,
-    sp: SharedPreferences,
-    selectedKey: String,
-    listState: LazyListState,
+    provider: FeatureSettingsProvider,
     onBack: () -> Unit
 ) {
-    var query by remember { mutableStateOf("") }
-    var loading by remember { mutableStateOf(true) }
-    var error by remember { mutableStateOf("") }
-    var labels by remember { mutableStateOf<List<ContactLabelBean>>(emptyList()) }
-    var selected by remember {
-        mutableStateOf(splitAutoReplyNames(sp.getString(selectedKey, "") ?: "").toSet())
-    }
-    LaunchedEffect(Unit) {
-        loading = true
-        error = ""
-        val api = WeChatApis.contact().contacts()
-        if (api == null || !api.isAvailable) {
-            labels = emptyList()
-            error = "联系人标签不可用"
-            loading = false
-        } else {
-            Thread({
-                val result = runCatching { api.getContactLabelList() }
-                Handler(Looper.getMainLooper()).post {
-                    labels = result.getOrDefault(emptyList())
-                        .filter { it.labelName.isNotBlank() || it.labelId.isNotBlank() }
-                        .sortedBy { it.labelName.ifBlank { it.labelId }.lowercase(Locale.US) }
-                    error = result.exceptionOrNull()?.message.orEmpty()
-                    loading = false
-                }
-            }, "HchatAutoReplyLabels").start()
-        }
-    }
-    val visible = labels.filter { label ->
-        val name = label.labelName.ifBlank { label.labelId }
-        val key = query.trim().lowercase(Locale.US)
-        key.isBlank() || name.lowercase(Locale.US).contains(key)
-    }
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = "选择标签",
-        largeTitle = "选择标签",
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar(
-                primaryText = "保存",
-                onPrimaryClick = {
-                    sp.edit()
-                        .putString(selectedKey, selected.joinToString(";;;"))
-                        .apply()
-                    Toast.makeText(context, "标签已保存", Toast.LENGTH_SHORT).show()
-                    onBack()
-                },
-                secondaryText = "返回",
-                onSecondaryClick = onBack
-            )
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
-        ) {
-            item { SmallTitle(text = "搜索") }
-            item {
-                SettingsCard {
-                    InputRow("关键词", "按标签名筛选", query) { query = it }
-                }
-            }
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "标签") }
-            when {
-                loading -> item { SettingsCard { EmptyText("正在载入标签...") } }
-                error.isNotEmpty() -> item { SettingsCard { EmptyText(error) } }
-                visible.isEmpty() -> item { SettingsCard { EmptyText("没有匹配标签") } }
-                else -> visible.forEach { label ->
-                    val name = label.labelName.ifBlank { label.labelId }
-                    item {
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-                            cornerRadius = 14.dp
-                        ) {
-                            AutoReplyLabelRow(
-                                name = name,
-                                summary = "${label.userNameList.size} 人",
-                                selected = selected.contains(name),
-                                onClick = {
-                                    selected = if (selected.contains(name)) selected - name else selected + name
-                                }
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun AutoReplyLabelRow(
-    name: String,
-    summary: String,
-    selected: Boolean,
-    onClick: () -> Unit
-) {
-    var pressed by remember { mutableStateOf(false) }
-    val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(pressFeedbackColor)
-            .responsiveTap(
-                onClick = onClick,
-                onPressedChange = { pressed = it }
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier.size(42.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MiuixTheme.colorScheme.secondaryVariant),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = name.take(1).ifEmpty { "签" },
-                color = MiuixTheme.colorScheme.onSecondaryVariant,
-                fontWeight = FontWeight.Bold
-            )
-        }
-        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
-            Text(text = name, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-        }
-        SelectionMark(selected = selected, multiSelect = true)
-    }
-}
-
-internal fun autoReplyLabelSummary(value: String): String {
-    val names = splitAutoReplyNames(value)
-    return if (names.isEmpty()) "未选择" else names.take(3).joinToString("、") + if (names.size > 3) " 等 ${names.size} 个" else ""
-}
-
-@Composable
-internal fun XiaozhiCaptchaSvgView(svg: String) {
-    AndroidView(
-        modifier = Modifier.fillMaxWidth().height(72.dp).padding(horizontal = 16.dp, vertical = 8.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(MiuixTheme.colorScheme.secondaryVariant),
-        factory = { context ->
-            WebView(context).apply {
-                setBackgroundColor(AndroidColor.TRANSPARENT)
-                settings.javaScriptEnabled = false
-                settings.loadWithOverviewMode = true
-                settings.useWideViewPort = true
-            }
-        },
-        update = { view ->
-            view.loadDataWithBaseURL(null, svg, "image/svg+xml", "UTF-8", null)
-        }
-    )
-}
-
-internal fun xiaozhiAgentSummary(agentId: String, agents: List<XiaozhiAgentOption>): String {
-    if (agentId.isBlank()) return "未选择，点击拉取"
-    val agent = agents.firstOrNull { it.id == agentId }
-    return if (agent == null) "已保存 ID: $agentId" else "${agent.name} / ${agent.assistantName.ifBlank { agent.id }}"
-}
-
-internal fun xiaozhiModelSummary(model: String, models: List<XiaozhiModelOption>): String {
-    if (model.isBlank()) return "未选择，点击拉取"
-    val item = models.firstOrNull { it.id == model }
-    return if (item == null) "已保存: $model" else "${item.name} / ${item.id}"
-}
-
-internal fun xiaozhiVoiceSummary(voice: String, voices: List<XiaozhiVoiceOption>): String {
-    if (voice.isBlank()) return "未选择，留空使用控制台当前角色"
-    val item = voices.firstOrNull { it.id == voice }
-    return if (item == null) "已保存: $voice" else "${item.name} / ${item.id}"
-}
-
-internal fun splitAutoReplyNames(value: String): List<String> =
-    value.split(";;;", "|", "\n")
-        .map { it.trim() }
-        .filter { it.isNotEmpty() }
-        .distinct()
-
-@Composable
-internal fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: () -> Unit) {
-    val settings = remember { AutoReplySettings(context) }
-    val scope = rememberCoroutineScope()
-    var xiaozhiServe by remember { mutableStateOf(settings.xiaozhiConfig().serveUrl) }
-    var xiaozhiOta by remember { mutableStateOf(settings.xiaozhiConfig().otaUrl) }
-    var xiaozhiConsole by remember { mutableStateOf(settings.xiaozhiConfig().consoleUrl) }
-    var xiaozhiConsolePhone by remember { mutableStateOf(settings.xiaozhiConfig().consolePhone) }
-    var xiaozhiConsoleToken by remember { mutableStateOf(settings.xiaozhiConfig().consoleToken) }
-    var xiaozhiConsoleAgentId by remember { mutableStateOf(settings.xiaozhiConfig().consoleAgentId) }
-    var xiaozhiConsoleModel by remember { mutableStateOf(settings.xiaozhiConfig().consoleModel) }
-    var xiaozhiVoiceRole by remember { mutableStateOf(settings.xiaozhiConfig().voiceRole) }
-    var xiaozhiMusicMcp by remember { mutableStateOf(settings.xiaozhiConfig().musicMcpEnabled) }
-    var xiaozhiMcpBridge by remember { mutableStateOf(settings.xiaozhiConfig().mcpBridgeEnabled) }
-    var xiaozhiMcpEndpoint by remember { mutableStateOf(settings.xiaozhiConfig().mcpEndpointUrl) }
-    var xiaozhiMcpKugouEnabled by remember { mutableStateOf(settings.xiaozhiConfig().mcpKugouEnabled) }
-    var xiaozhiMcpKugouPluginId by remember { mutableStateOf(settings.xiaozhiConfig().mcpKugouPluginId) }
-    var xiaozhiMcpKugouFunction by remember { mutableStateOf(settings.xiaozhiConfig().mcpKugouFunctionName) }
-    var xiaozhiMcpReadySeconds by remember { mutableStateOf(settings.xiaozhiConfig().mcpReadySeconds.toString()) }
-    var xiaozhiMcpIdleSeconds by remember { mutableStateOf(settings.xiaozhiConfig().mcpIdleSeconds.toString()) }
-    var xiaozhiMcpStatus by remember { mutableStateOf(XiaozhiMcpStatus(false, "未查询", "点击刷新查询小智控制台")) }
-    var configs by remember { mutableStateOf(settings.zhiliaConfigs()) }
-    var activeName by remember { mutableStateOf(settings.activeZhiliaName()) }
-    val activeConfig = configs.firstOrNull { it.name == activeName } ?: configs.firstOrNull() ?: settings.activeZhiliaConfig()
-    var cfgName by remember(activeName, configs) { mutableStateOf(activeConfig.name) }
-    var apiKey by remember(activeName, configs) { mutableStateOf(activeConfig.apiKey) }
-    var apiBase by remember(activeName, configs) { mutableStateOf(activeConfig.apiBaseUrl) }
-    var apiPath by remember(activeName, configs) { mutableStateOf(activeConfig.apiPath) }
-    var model by remember(activeName, configs) { mutableStateOf(activeConfig.model) }
-    var prompt by remember(activeName, configs) { mutableStateOf(activeConfig.systemPrompt) }
-    var contextLimit by remember(activeName, configs) { mutableStateOf(activeConfig.contextLimit.toString()) }
-    var modelQuery by remember { mutableStateOf("") }
-    var fetchedModels by remember { mutableStateOf<List<String>>(emptyList()) }
-    var favoriteModels by remember(apiBase) { mutableStateOf(settings.favoriteModels(apiBase)) }
-    var loadingText by remember { mutableStateOf("") }
-    var testResult by remember { mutableStateOf("") }
-    var xiaozhiBindResult by remember { mutableStateOf("") }
-    var xiaozhiCaptchaSvg by remember { mutableStateOf("") }
-    var xiaozhiCaptchaCode by remember { mutableStateOf("") }
-    var xiaozhiSmsCode by remember { mutableStateOf("") }
-    var xiaozhiConsoleResult by remember { mutableStateOf("") }
-    var xiaozhiAgents by remember { mutableStateOf<List<XiaozhiAgentOption>>(emptyList()) }
-    var xiaozhiModels by remember { mutableStateOf<List<XiaozhiModelOption>>(emptyList()) }
-    var xiaozhiVoices by remember { mutableStateOf<List<XiaozhiVoiceOption>>(emptyList()) }
-    var route by remember { mutableStateOf<AutoReplyAiRoute>(AutoReplyAiRoute.Main) }
-    var zhiliaPendingName by remember { mutableStateOf(activeName) }
-    var pendingModel by remember { mutableStateOf(model) }
-    val mainListState = rememberLazyListState()
-    val xiaozhiListState = rememberLazyListState()
-    val zhiliaListState = rememberLazyListState()
-    val zhiliaConfigListState = rememberLazyListState()
-    val zhiliaModelListState = rememberLazyListState()
-
-    fun currentZhiliaConfig(): AutoReplyZhiliaConfig {
-        return AutoReplyZhiliaConfig(
-            name = cfgName,
-            apiKey = apiKey.trim(),
-            apiBaseUrl = apiBase.trim(),
-            apiPath = apiPath.trim(),
-            model = model.trim(),
-            systemPrompt = prompt,
-            contextLimit = contextLimit.toIntOrNull() ?: AutoReplySettings.DEFAULT_AI_CONTEXT_LIMIT
-        ).normalized()
-    }
-
-    fun currentXiaozhiConfig(): AutoReplyXiaozhiConfig {
-        return AutoReplyXiaozhiConfig(
-            serveUrl = xiaozhiServe,
-            otaUrl = xiaozhiOta,
-            consoleUrl = xiaozhiConsole,
-            consolePhone = xiaozhiConsolePhone,
-            consoleToken = xiaozhiConsoleToken,
-            consoleAgentId = xiaozhiConsoleAgentId,
-            consoleModel = xiaozhiConsoleModel,
-            voiceRole = xiaozhiVoiceRole,
-            musicMcpEnabled = xiaozhiMusicMcp,
-            mcpBridgeEnabled = xiaozhiMcpBridge,
-            mcpEndpointUrl = xiaozhiMcpEndpoint,
-            mcpKugouEnabled = xiaozhiMcpKugouEnabled,
-            mcpKugouPluginId = xiaozhiMcpKugouPluginId,
-            mcpKugouFunctionName = xiaozhiMcpKugouFunction,
-            mcpReadySeconds = xiaozhiMcpReadySeconds.toIntOrNull()?.coerceIn(1, 30)
-                ?: AutoReplySettings.DEFAULT_XIAOZHI_MCP_READY_SECONDS,
-            mcpIdleSeconds = xiaozhiMcpIdleSeconds.toIntOrNull()?.coerceIn(10, 600)
-                ?: AutoReplySettings.DEFAULT_XIAOZHI_MCP_IDLE_SECONDS
+    val sp = remember { HchatStorage.preferences(context, FloatingShortcutSettings.PREFS_NAME) }
+    var enabled by remember { mutableStateOf(FloatingShortcutRuntime.isEnabled(context)) }
+    var scope by remember {
+        mutableStateOf(
+            sp.getString(FloatingShortcutSettings.KEY_SCOPE, FloatingShortcutSettings.DEFAULT_SCOPE)
+                ?: FloatingShortcutSettings.DEFAULT_SCOPE
         )
     }
+    var displayMode by remember {
+        mutableStateOf(
+            sp.getString(
+                FloatingShortcutSettings.KEY_DISPLAY_MODE,
+                FloatingShortcutSettings.DEFAULT_DISPLAY_MODE
+            ) ?: FloatingShortcutSettings.DEFAULT_DISPLAY_MODE
+        )
+    }
+    var expandDirection by remember {
+        mutableStateOf(
+            sp.getString(
+                FloatingShortcutSettings.KEY_EXPAND_DIRECTION,
+                FloatingShortcutSettings.DEFAULT_EXPAND_DIRECTION
+            ) ?: FloatingShortcutSettings.DEFAULT_EXPAND_DIRECTION
+        )
+    }
+    var bubbleIcon by remember {
+        mutableStateOf(sp.getString(FloatingShortcutSettings.KEY_BUBBLE_ICON, "").orEmpty())
+    }
+    var bubbleDarkIcon by remember {
+        mutableStateOf(sp.getString(FloatingShortcutSettings.KEY_BUBBLE_DARK_ICON, "").orEmpty())
+    }
+    var shortcuts by remember { mutableStateOf(FloatingShortcutSettings.loadItems(context)) }
+    var editor by remember { mutableStateOf<FloatingShortcutEditorRequest?>(null) }
+    var route by remember { mutableStateOf(FloatingShortcutRoute.MAIN) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
 
-    fun saveXiaozhi(showToast: Boolean) {
-        settings.saveXiaozhiConfig(currentXiaozhiConfig())
-        if (showToast) Toast.makeText(context, "小智AI配置已保存", Toast.LENGTH_SHORT).show()
+    fun saveShortcuts(value: List<FloatingShortcutItem>) {
+        shortcuts = value
+        FloatingShortcutSettings.saveItems(context, value)
     }
 
-    fun xiaozhiNeedToken(): Boolean {
-        if (xiaozhiConsoleToken.trim().isBlank()) {
-            xiaozhiConsoleResult = "请先登录小智控制台"
-            Toast.makeText(context, "请先登录小智控制台", Toast.LENGTH_SHORT).show()
-            return true
-        }
-        return false
-    }
-
-    fun refreshXiaozhiCaptcha(updateStatus: Boolean = true) {
-        if (updateStatus) xiaozhiConsoleResult = "正在刷新图形验证码..."
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { XiaozhiConsoleApi.fetchCaptchaSvg() }
-            }
-            result.onSuccess {
-                xiaozhiCaptchaSvg = it
-                xiaozhiCaptchaCode = ""
-                if (updateStatus) xiaozhiConsoleResult = "请输入图形验证码"
-            }.onFailure {
-                xiaozhiConsoleResult = "刷新图形验证码失败: ${it.message}"
-            }
-        }
-    }
-
-    fun sendXiaozhiSmsCode() {
-        val phone = xiaozhiConsolePhone.trim()
-        val captcha = xiaozhiCaptchaCode.trim()
-        if (phone.isBlank() || captcha.isBlank()) {
-            Toast.makeText(context, "请填写手机号和图形验证码", Toast.LENGTH_SHORT).show()
+    fun pickIcon(key: String, onSaved: (String) -> Unit) {
+        val activity = (context as? Activity) ?: WeChatApis.currentActivity()?.currentActivity()
+        if (activity == null) {
+            Toast.makeText(context, "当前页面无法打开图片选择器", Toast.LENGTH_SHORT).show()
             return
         }
-        settings.saveXiaozhiConfig(currentXiaozhiConfig())
-        xiaozhiConsoleResult = "正在发送短信验证码..."
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { XiaozhiConsoleApi.sendSmsCode(phone, captcha) }
-            }
-            result.onSuccess {
-                xiaozhiConsoleResult = it
-                xiaozhiCaptchaCode = ""
-                refreshXiaozhiCaptcha(updateStatus = false)
-            }.onFailure {
-                xiaozhiConsoleResult = "发送短信验证码失败: ${it.message}"
-                xiaozhiCaptchaCode = ""
-                refreshXiaozhiCaptcha(updateStatus = false)
-            }
-            Toast.makeText(context, xiaozhiConsoleResult, Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun loginXiaozhiConsole() {
-        val phone = xiaozhiConsolePhone.trim()
-        val sms = xiaozhiSmsCode.trim()
-        if (phone.isBlank() || sms.isBlank()) {
-            Toast.makeText(context, "请填写手机号和短信验证码", Toast.LENGTH_SHORT).show()
-            return
-        }
-        xiaozhiConsoleResult = "正在登录小智控制台..."
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { XiaozhiConsoleApi.phoneLogin(phone, sms) }
-            }
-            result.onSuccess { token ->
-                xiaozhiConsoleToken = token
-                xiaozhiSmsCode = ""
-                xiaozhiCaptchaCode = ""
-                settings.saveXiaozhiConfig(currentXiaozhiConfig())
-                xiaozhiConsoleResult = "登录成功，token 已保存"
-                Toast.makeText(context, "小智控制台登录成功", Toast.LENGTH_SHORT).show()
-                val agentsResult = withContext(Dispatchers.IO) {
-                    runCatching { XiaozhiConsoleApi.fetchAgents(token) }
-                }
-                agentsResult.onSuccess { agents ->
-                    xiaozhiAgents = agents
-                    agents.firstOrNull()?.let { agent ->
-                        if (xiaozhiConsoleAgentId.isBlank()) xiaozhiConsoleAgentId = agent.id
-                        if (xiaozhiConsoleModel.isBlank()) xiaozhiConsoleModel = agent.model
-                        if (xiaozhiVoiceRole.isBlank()) xiaozhiVoiceRole = agent.voice
-                        settings.saveXiaozhiConfig(currentXiaozhiConfig())
-                    }
-                    xiaozhiConsoleResult = "登录成功，已拉取 ${agents.size} 个智能体"
-                }.onFailure {
-                    xiaozhiConsoleResult = "登录成功，拉取智能体失败: ${it.message}"
-                }
-            }.onFailure {
-                xiaozhiConsoleResult = "登录失败: ${it.message}"
+        FloatingShortcutIconPicker.launch(activity, key) { result ->
+            when (result) {
+                is FloatingShortcutIconPickResult.Saved -> onSaved(result.path)
+                FloatingShortcutIconPickResult.FAILED ->
+                    Toast.makeText(context, "图标读取失败", Toast.LENGTH_SHORT).show()
+                FloatingShortcutIconPickResult.CANCELLED -> Unit
             }
         }
     }
 
-    fun fetchXiaozhiAgents(openPicker: Boolean) {
-        if (xiaozhiNeedToken()) return
-        xiaozhiConsoleResult = "正在拉取智能体..."
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { XiaozhiConsoleApi.fetchAgents(xiaozhiConsoleToken) }
-            }
-            result.onSuccess { agents ->
-                xiaozhiAgents = agents
-                xiaozhiConsoleResult = "已拉取 ${agents.size} 个智能体"
-                if (openPicker && agents.isNotEmpty()) {
-                    val currentIndex = agents.indexOfFirst { it.id == xiaozhiConsoleAgentId }.coerceAtLeast(0)
-                    route = AutoReplyAiRoute.OptionPicker(
-                        OptionPickerRequest(
-                            title = "选择小智智能体",
-                            options = agents.mapIndexed { index, agent ->
-                                OptionItem(
-                                    label = agent.name,
-                                    value = index,
-                                    summary = listOf(agent.assistantName, agent.model, agent.voice).filter { it.isNotBlank() }.joinToString(" / ")
-                                )
-                            },
-                            currentValue = currentIndex,
-                            onSelected = { selected ->
-                                agents.getOrNull(selected.value)?.let { agent ->
-                                    xiaozhiConsoleAgentId = agent.id
-                                    xiaozhiConsoleModel = agent.model
-                                    xiaozhiVoiceRole = agent.voice
-                                    settings.saveXiaozhiConfig(currentXiaozhiConfig())
-                                }
-                                route = AutoReplyAiRoute.Xiaozhi
-                            }
-                        )
-                    )
-                }
-            }.onFailure {
-                xiaozhiConsoleResult = "拉取智能体失败: ${it.message}"
-            }
+    fun dismissEditor() {
+        val request = editor ?: return
+        if (request.draft.iconPath != request.original?.iconPath) {
+            FloatingShortcutIconStore.delete(context, request.draft.iconPath)
         }
-    }
-
-    fun fetchXiaozhiModels(openPicker: Boolean) {
-        if (xiaozhiNeedToken()) return
-        xiaozhiConsoleResult = "正在拉取模型列表..."
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { XiaozhiConsoleApi.fetchModels(xiaozhiConsoleToken) }
-            }
-            result.onSuccess { models ->
-                xiaozhiModels = models
-                xiaozhiConsoleResult = "已拉取 ${models.size} 个模型"
-                if (openPicker && models.isNotEmpty()) {
-                    val currentIndex = models.indexOfFirst { it.id == xiaozhiConsoleModel }.coerceAtLeast(0)
-                    route = AutoReplyAiRoute.OptionPicker(
-                        OptionPickerRequest(
-                            title = "选择小智模型",
-                            options = models.mapIndexed { index, item -> OptionItem(item.name, index, item.id) },
-                            currentValue = currentIndex,
-                            onSelected = { selected ->
-                                models.getOrNull(selected.value)?.let { item ->
-                                    xiaozhiConsoleModel = item.id
-                                    settings.saveXiaozhiConfig(currentXiaozhiConfig())
-                                }
-                                route = AutoReplyAiRoute.Xiaozhi
-                            }
-                        )
-                    )
-                }
-            }.onFailure {
-                xiaozhiConsoleResult = "拉取模型失败: ${it.message}"
-            }
+        if (request.draft.darkIconPath != request.original?.darkIconPath) {
+            FloatingShortcutIconStore.delete(context, request.draft.darkIconPath)
         }
-    }
-
-    fun fetchXiaozhiVoices(openPicker: Boolean) {
-        if (xiaozhiNeedToken()) return
-        xiaozhiConsoleResult = "正在拉取语音角色..."
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching { XiaozhiConsoleApi.fetchVoices(xiaozhiConsoleToken) }
-            }
-            result.onSuccess { voices ->
-                xiaozhiVoices = voices
-                xiaozhiConsoleResult = "已拉取 ${voices.size} 个语音角色"
-                if (openPicker && voices.isNotEmpty()) {
-                    val currentIndex = voices.indexOfFirst { it.id == xiaozhiVoiceRole }.coerceAtLeast(0)
-                    route = AutoReplyAiRoute.OptionPicker(
-                        OptionPickerRequest(
-                            title = "选择语音角色",
-                            options = voices.mapIndexed { index, item ->
-                                OptionItem(item.name, index, listOf(item.id, item.languages.joinToString(",")).filter { it.isNotBlank() }.joinToString(" / "))
-                            },
-                            currentValue = currentIndex,
-                            onSelected = { selected ->
-                                voices.getOrNull(selected.value)?.let { item ->
-                                    xiaozhiVoiceRole = item.id
-                                    settings.saveXiaozhiConfig(currentXiaozhiConfig())
-                                }
-                                route = AutoReplyAiRoute.Xiaozhi
-                            }
-                        )
-                    )
-                }
-            }.onFailure {
-                xiaozhiConsoleResult = "拉取语音角色失败: ${it.message}"
-            }
-        }
-    }
-
-    fun saveXiaozhiConsoleAgentConfig() {
-        if (xiaozhiNeedToken()) return
-        val agentId = xiaozhiConsoleAgentId.trim()
-        if (agentId.isBlank()) {
-            Toast.makeText(context, "请先选择智能体", Toast.LENGTH_SHORT).show()
-            return
-        }
-        settings.saveXiaozhiConfig(currentXiaozhiConfig())
-        xiaozhiConsoleResult = "正在保存到小智控制台..."
-        scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                runCatching {
-                    XiaozhiConsoleApi.saveAgentConfig(
-                        token = xiaozhiConsoleToken,
-                        agentId = agentId,
-                        model = xiaozhiConsoleModel,
-                        voice = xiaozhiVoiceRole
-                    )
-                }
-            }
-            result.onSuccess { agent ->
-                xiaozhiConsoleAgentId = agent.id
-                xiaozhiConsoleModel = agent.model
-                xiaozhiVoiceRole = agent.voice
-                settings.saveXiaozhiConfig(currentXiaozhiConfig())
-                xiaozhiConsoleResult = "已保存到控制台: ${agent.name}"
-                Toast.makeText(context, "小智控制台配置已保存", Toast.LENGTH_SHORT).show()
-            }.onFailure {
-                xiaozhiConsoleResult = "保存到控制台失败: ${it.message}"
-            }
-        }
-    }
-
-    fun saveZhilia(showToast: Boolean) {
-        val saved = currentZhiliaConfig()
-        val next = configs.filterNot { it.name == activeName || it.name == saved.name } + saved
-        settings.saveZhiliaConfigs(next, saved.name)
-        configs = settings.zhiliaConfigs()
-        activeName = saved.name
-        if (sp.getBoolean(AutoReplySettings.KEY_AI_CLEAR_CONTEXT_ON_SAVE, AutoReplySettings.DEFAULT_AI_CLEAR_CONTEXT_ON_SAVE)) {
-            AutoReplyRuntime.clearAiHistories()
-        }
-        if (showToast) Toast.makeText(context, "智聊AI配置已保存", Toast.LENGTH_SHORT).show()
-    }
-
-    fun switchZhiliaTo(name: String) {
-        if (name.isBlank()) {
-            Toast.makeText(context, "请选择配置", Toast.LENGTH_SHORT).show()
-            return
-        }
-        if (name == activeName) {
-            zhiliaPendingName = activeName
-            Toast.makeText(context, "已是当前配置", Toast.LENGTH_SHORT).show()
-            return
-        }
-        saveZhilia(showToast = false)
-        settings.saveZhiliaConfigs(settings.zhiliaConfigs(), name)
-        configs = settings.zhiliaConfigs()
-        activeName = settings.activeZhiliaName()
-        zhiliaPendingName = activeName
-        Toast.makeText(context, "已切换到 $activeName", Toast.LENGTH_SHORT).show()
-    }
-
-    fun uniqueConfigName(base: String): String {
-        val names = configs.map { it.name }.toSet()
-        if (base !in names) return base
-        var index = 2
-        while ("$base$index" in names) index++
-        return "$base$index"
-    }
-
-    val visibleModels = remember(fetchedModels, modelQuery, favoriteModels) {
-        val keyword = modelQuery.trim().lowercase(Locale.US)
-        fetchedModels
-            .filter { keyword.isBlank() || it.lowercase(Locale.US).contains(keyword) }
-            .sortedWith(compareByDescending<String> { it in favoriteModels }.thenBy { it.lowercase(Locale.US) })
+        editor = null
     }
 
     SettingsRouteTransition(
         targetState = route,
-        label = "AutoReplyAiRoute",
-        depthOf = { it.depth() }
+        label = "FloatingShortcutRoute",
+        depthOf = { if (it == FloatingShortcutRoute.MAIN) 0 else 1 }
     ) { currentRoute ->
         when (currentRoute) {
-            AutoReplyAiRoute.Main -> {
-                val scrollBehavior = MiuixScrollBehavior()
-                PageScaffold(
-                    title = "AI 配置",
-                    largeTitle = "AI 配置",
-                    scrollBehavior = scrollBehavior,
-                    bottomBar = { BottomActionBar("返回", onBack) }
-                ) { padding ->
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                        state = mainListState,
-                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
-                    ) {
-                        item { SmallTitle(text = "配置分组") }
-                        item {
-                            SettingsCard {
-                                ActionRow("小智AI配置", xiaozhiServe.ifBlank { "未设置 WebSocket 地址" }) {
-                                    route = AutoReplyAiRoute.Xiaozhi
-                                }
-                                InsetDivider()
-                                ActionRow("智聊AI配置", "当前启用：$activeName") {
-                                    route = AutoReplyAiRoute.Zhilia
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            AutoReplyAiRoute.Xiaozhi -> {
-                val scrollBehavior = MiuixScrollBehavior()
-                PageScaffold(
-                    title = "小智AI配置",
-                    largeTitle = "小智AI配置",
-                    scrollBehavior = scrollBehavior,
-                    bottomBar = {
-                        BottomActionBar(
-                            primaryText = "保存小智",
-                            onPrimaryClick = { saveXiaozhi(showToast = true) },
-                            secondaryText = "返回",
-                            onSecondaryClick = { route = AutoReplyAiRoute.Main }
-                        )
-                    }
-                ) { padding ->
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                        state = xiaozhiListState,
-                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
-                    ) {
-                        item { SmallTitle(text = "连接地址") }
-                        item {
-                            SettingsCard {
-                                InputRow("WebSocket 地址", "小智服务地址", xiaozhiServe) { xiaozhiServe = it }
-                                InsetDivider()
-                                InputRow("OTA 地址", "小智 OTA 地址", xiaozhiOta) { xiaozhiOta = it }
-                                InsetDivider()
-                                InputRow("控制台地址", "用于查看或绑定设备", xiaozhiConsole) { xiaozhiConsole = it }
-                            }
-                        }
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "设备") }
-                        item {
-                            SettingsCard {
-                                InfoRow("UUID", AutoReplyRuntime.xiaozhiDeviceUuid(context))
-                                InsetDivider()
-                                InfoRow("MAC 地址", AutoReplyRuntime.xiaozhiDeviceMac(context))
-                                InsetDivider()
-                                ActionRow("绑定设备", xiaozhiBindResult.ifBlank { "请求 OTA 获取验证码或绑定状态" }) {
-                                    xiaozhiBindResult = "正在请求..."
-                                    scope.launch {
-                                        val result = withContext(Dispatchers.IO) {
-                                            AutoReplyRuntime.bindXiaozhiDevice(context, currentXiaozhiConfig())
-                                        }
-                                        xiaozhiBindResult = result
-                                        Toast.makeText(context, result.lineSequence().firstOrNull().orEmpty(), Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                                val xiaozhiBindLink = remember(xiaozhiBindResult) { extractFirstHttpUrl(xiaozhiBindResult) }
-                                if (xiaozhiBindLink != null) {
-                                    InsetDivider()
-                                    InfoRow("绑定链接", xiaozhiBindLink) {
-                                        openExternalLink(context, xiaozhiBindLink)
-                                    }
-                                }
-                            }
-                        }
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "控制台登录") }
-                        item {
-                            SettingsCard {
-                                InfoRow("登录状态", if (xiaozhiConsoleToken.isBlank()) "未登录" else "已保存 token")
-                                InsetDivider()
-                                InputRow("手机号", "登录成功后会记住手机号", xiaozhiConsolePhone) { xiaozhiConsolePhone = it }
-                                InsetDivider()
-                                ActionRow("刷新图形验证码", if (xiaozhiCaptchaSvg.isBlank()) "先刷新，再输入图片上的字符" else "已刷新，输入下方图形验证码") {
-                                    refreshXiaozhiCaptcha()
-                                }
-                                if (xiaozhiCaptchaSvg.isNotBlank()) {
-                                    InsetDivider()
-                                    XiaozhiCaptchaSvgView(xiaozhiCaptchaSvg)
-                                }
-                                InsetDivider()
-                                InputRow("图形验证码", "输入上方图片里的字符", xiaozhiCaptchaCode) { xiaozhiCaptchaCode = it }
-                                InsetDivider()
-                                ActionRow("发送短信验证码", "需要先填写手机号和图形验证码") {
-                                    sendXiaozhiSmsCode()
-                                }
-                                InsetDivider()
-                                InputRow("短信验证码", "输入手机收到的验证码", xiaozhiSmsCode) { xiaozhiSmsCode = it }
-                                InsetDivider()
-                                ActionRow("登录并保存 token", "登录成功后自动保存 token 并拉取智能体") {
-                                    loginXiaozhiConsole()
-                                }
-                                if (xiaozhiConsoleResult.isNotBlank()) {
-                                    InsetDivider()
-                                    InfoRow("控制台状态", xiaozhiConsoleResult)
-                                }
-                            }
-                        }
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "控制台配置") }
-                        item {
-                            SettingsCard {
-                                ActionRow("选择智能体", xiaozhiAgentSummary(xiaozhiConsoleAgentId, xiaozhiAgents)) {
-                                    fetchXiaozhiAgents(openPicker = true)
-                                }
-                                InsetDivider()
-                                InfoRow("Agent ID", xiaozhiConsoleAgentId.ifBlank { "未选择" })
-                                InsetDivider()
-                                ActionRow("选择模型", xiaozhiModelSummary(xiaozhiConsoleModel, xiaozhiModels)) {
-                                    fetchXiaozhiModels(openPicker = true)
-                                }
-                                InsetDivider()
-                                ActionRow("选择语音角色", xiaozhiVoiceSummary(xiaozhiVoiceRole, xiaozhiVoices)) {
-                                    fetchXiaozhiVoices(openPicker = true)
-                                }
-                                InsetDivider()
-                                ActionRow("保存到小智控制台", "读取当前智能体配置后只替换模型和语音角色") {
-                                    saveXiaozhiConsoleAgentConfig()
-                                }
-                            }
-                        }
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "回复") }
-                        item {
-                            SettingsCard {
-                                InputRow("语音角色ID", "留空使用控制台当前角色", xiaozhiVoiceRole) { xiaozhiVoiceRole = it }
-                                InsetDivider()
-                                SwitchRow(
-                                    checked = xiaozhiMusicMcp,
-                                    title = "提示官方 Music 工具",
-                                    summary = "点歌类问题会提示小智优先使用控制台启用的官方 Music MCP",
-                                    onCheckedChange = { xiaozhiMusicMcp = it }
-                                )
-                            }
-                        }
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "MCP桥接") }
-                        item {
-                            SettingsCard {
-                                SwitchRow(
-                                    checked = xiaozhiMcpBridge,
-                                    title = "启用MCP桥接实验",
-                                    summary = "把 Hchat 能力暴露给小智调用；端点地址包含 token，请勿外传",
-                                    onCheckedChange = { xiaozhiMcpBridge = it }
-                                )
-                                InsetDivider()
-                                InputRow(
-                                    "MCP Endpoint",
-                                    "wss://api.xiaozhi.me/mcp/?token=...；留空不连接",
-                                    xiaozhiMcpEndpoint
-                                ) { xiaozhiMcpEndpoint = it }
-                                InsetDivider()
-                                XiaozhiMcpStatusRow(xiaozhiMcpStatus)
-                                InsetDivider()
-                                ActionRow("刷新连接状态", xiaozhiMcpStatus.detail) {
-                                    if (xiaozhiConsoleToken.trim().isBlank() || xiaozhiConsoleAgentId.trim().isBlank()) {
-                                        Toast.makeText(context, "请先登录并选择智能体", Toast.LENGTH_SHORT).show()
-                                    } else {
-                                        xiaozhiMcpStatus = XiaozhiMcpStatus(false, "查询中", "正在查询小智控制台...")
-                                        scope.launch {
-                                            val result = withContext(Dispatchers.IO) {
-                                                runCatching {
-                                                    XiaozhiConsoleApi.fetchMcpEndpointStatus(
-                                                        xiaozhiConsoleToken,
-                                                        xiaozhiConsoleAgentId
-                                                    )
-                                                }
-                                            }
-                                            result.onSuccess {
-                                                xiaozhiMcpStatus = it
-                                            }.onFailure {
-                                                xiaozhiMcpStatus = XiaozhiMcpStatus(false, "查询失败", it.message.orEmpty())
-                                            }
-                                        }
-                                    }
-                                }
-                                InsetDivider()
-                                InputRow(
-                                    "就绪等待时长",
-                                    "断开后首次触发等待 MCP ready 的秒数，默认 5，可填 1-30",
-                                    xiaozhiMcpReadySeconds
-                                ) { xiaozhiMcpReadySeconds = it.filter { ch -> ch.isDigit() }.take(2) }
-                                InsetDivider()
-                                InputRow(
-                                    "自动断开时长",
-                                    "空闲多少秒后断开 MCP，默认 90，可填 10-600",
-                                    xiaozhiMcpIdleSeconds
-                                ) { xiaozhiMcpIdleSeconds = it.filter { ch -> ch.isDigit() }.take(3) }
-                                InsetDivider()
-                                SwitchRow(
-                                    checked = xiaozhiMcpKugouEnabled,
-                                    title = "调用点歌工具",
-                                    summary = "让小智理解自然语言后调用本地点歌插件发送音乐卡片",
-                                    onCheckedChange = { xiaozhiMcpKugouEnabled = it }
-                                )
-                                if (xiaozhiMcpKugouEnabled) {
-                                    InsetDivider()
-                                    InputRow(
-                                        "点歌插件ID",
-                                        "例如 QQ点歌",
-                                        xiaozhiMcpKugouPluginId
-                                    ) { xiaozhiMcpKugouPluginId = it }
-                                    InsetDivider()
-                                    InputRow(
-                                        "点歌函数名",
-                                        "例如 queryKugouMusic",
-                                        xiaozhiMcpKugouFunction
-                                    ) { xiaozhiMcpKugouFunction = it }
-                                }
-                            }
-                        }
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "运行状态") }
-                        item {
-                            SettingsCard {
-                                ActionRow("立即清空上下文", "清除当前运行中的小智对话记忆") {
-                                    AutoReplyRuntime.clearAiHistories()
-                                    Toast.makeText(context, "小智上下文已清空", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            AutoReplyAiRoute.Zhilia -> {
-                val scrollBehavior = MiuixScrollBehavior()
-                PageScaffold(
-                    title = "智聊AI配置",
-                    largeTitle = "智聊AI配置",
-                    scrollBehavior = scrollBehavior,
-                    bottomBar = {
-                        BottomActionBar(
-                            primaryText = "保存智聊",
-                            onPrimaryClick = { saveZhilia(showToast = true) },
-                            secondaryText = "返回",
-                            onSecondaryClick = { route = AutoReplyAiRoute.Main }
-                        )
-                    }
-                ) { padding ->
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                        state = zhiliaListState,
-                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
-                    ) {
-                        item { SmallTitle(text = "当前配置") }
-                        item {
-                            SettingsCard {
-                                InfoRow("当前启用", activeName)
-                                InsetDivider()
-                                InputRow("配置名称", "例如 DeepSeek 主账号", cfgName) { cfgName = it }
-                                InsetDivider()
-                                InputRow("API Key", "OpenAI 兼容接口密钥", apiKey) { apiKey = it }
-                                InsetDivider()
-                                InputRow("API 地址", "例如 https://api.xxx.com/v1", apiBase) { apiBase = it }
-                                InsetDivider()
-                                InputRow("API 路径", "默认 /chat/completions", apiPath) { apiPath = it }
-                                InsetDivider()
-                                InputRow("模型", "例如 deepseek-ai/DeepSeek-V3", model) { model = it }
-                                InsetDivider()
-                                InputRow("系统指令", "AI 角色设定和回复要求", prompt, minLines = 4) { prompt = it }
-                                InsetDivider()
-                                NumberInputRow("上下文轮数", "0 表示不保留上下文", contextLimit) { contextLimit = it }
-                                InsetDivider()
-                                SwitchRow(sp, AutoReplySettings.KEY_AI_STREAM, "流式请求", "失败时会自动尝试非流式", AutoReplySettings.DEFAULT_AI_STREAM)
-                                InsetDivider()
-                                SwitchRow(sp, AutoReplySettings.KEY_AI_CLEAR_CONTEXT_ON_SAVE, "保存后清空上下文", "修改人设或模型后避免继续沿用旧对话", AutoReplySettings.DEFAULT_AI_CLEAR_CONTEXT_ON_SAVE)
-                            }
-                        }
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "配置管理") }
-                        item {
-                            SettingsCard {
-                                ActionRow("配置列表", "${configs.size} 个配置，当前启用：$activeName") {
-                                    zhiliaPendingName = activeName
-                                    route = AutoReplyAiRoute.ZhiliaConfigs
-                                }
-                            }
-                        }
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模型工具") }
-                        item {
-                            SettingsCard {
-                                ActionRow("模型选择", model.ifBlank { "未设置模型" }) {
-                                    pendingModel = model
-                                    route = AutoReplyAiRoute.ZhiliaModels
-                                }
-                                InsetDivider()
-                                ActionRow("测试连通性", testResult.ifBlank { "测试当前模型的流式和非流式请求" }) {
-                                    val config = currentZhiliaConfig().toAiConfig(sp.getBoolean(AutoReplySettings.KEY_AI_STREAM, AutoReplySettings.DEFAULT_AI_STREAM))
-                                    testResult = "正在测试..."
-                                    scope.launch {
-                                        testResult = withContext(Dispatchers.IO) {
-                                            AutoReplyRuntime.testAiConnectivity(config)
-                                        }
-                                        Toast.makeText(context, testResult, Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-                        }
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "运行状态") }
-                        item {
-                            SettingsCard {
-                                ActionRow("立即清空上下文", "清除当前运行中的 AI 对话记忆") {
-                                    AutoReplyRuntime.clearAiHistories()
-                                    Toast.makeText(context, "AI 上下文已清空", Toast.LENGTH_SHORT).show()
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            AutoReplyAiRoute.ZhiliaConfigs -> {
-                val scrollBehavior = MiuixScrollBehavior()
-                PageScaffold(
-                    title = "智聊配置列表",
-                    largeTitle = "智聊配置列表",
-                    scrollBehavior = scrollBehavior,
-                    bottomBar = {
-                        BottomActionBar(
-                            primaryText = "切换到所选",
-                            onPrimaryClick = { switchZhiliaTo(zhiliaPendingName) },
-                            secondaryText = "返回",
-                            onSecondaryClick = { route = AutoReplyAiRoute.Zhilia }
-                        )
-                    }
-                ) { padding ->
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                        state = zhiliaConfigListState,
-                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
-                    ) {
-                        item { SmallTitle(text = "配置") }
-                        configs.forEach { config ->
-                            item {
-                                SettingsCard(modifier = Modifier.padding(bottom = 8.dp)) {
-                                    ActionRow(
-                                        title = config.name,
-                                        summary = buildString {
-                                            append(config.model.ifBlank { "未设置模型" })
-                                            if (config.name == activeName) append(" · 当前")
-                                            if (config.name == zhiliaPendingName && config.name != activeName) append(" · 已选择")
-                                        }
-                                    ) {
-                                        zhiliaPendingName = config.name
-                                        Toast.makeText(context, "已选择 ${config.name}", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-                        }
-                        item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "管理") }
-                        item {
-                            SettingsCard {
-                                ActionRow("新增空配置", "创建后留在此页，可再手动切换") {
-                                    val newName = uniqueConfigName("新配置")
-                                    val next = configs + AutoReplyZhiliaConfig(newName, "", AutoReplySettings.DEFAULT_AI_API_BASE, AutoReplySettings.DEFAULT_AI_API_PATH, AutoReplySettings.DEFAULT_AI_MODEL, "", AutoReplySettings.DEFAULT_AI_CONTEXT_LIMIT)
-                                    settings.saveZhiliaConfigs(next, activeName)
-                                    configs = settings.zhiliaConfigs()
-                                    zhiliaPendingName = newName
-                                    Toast.makeText(context, "已新增 $newName", Toast.LENGTH_SHORT).show()
-                                }
-                                InsetDivider()
-                                ActionRow("复制当前输入", "按智聊编辑页当前输入复制配置") {
-                                    val newName = uniqueConfigName("${cfgName.ifBlank { activeName }}_副本")
-                                    val next = configs + currentZhiliaConfig().copy(name = newName)
-                                    settings.saveZhiliaConfigs(next, activeName)
-                                    configs = settings.zhiliaConfigs()
-                                    zhiliaPendingName = newName
-                                    Toast.makeText(context, "已复制 $newName", Toast.LENGTH_SHORT).show()
-                                }
-                                if (configs.size > 1) {
-                                    InsetDivider()
-                                    ActionRow("删除当前配置", "删除正在编辑的配置，至少保留一个") {
-                                        val next = configs.filterNot { it.name == activeName || it.name == cfgName }
-                                        val nextActive = next.firstOrNull()?.name ?: AutoReplySettings.DEFAULT_ZHILIA_CONFIG_NAME
-                                        settings.saveZhiliaConfigs(next, nextActive)
-                                        configs = settings.zhiliaConfigs()
-                                        activeName = settings.activeZhiliaName()
-                                        zhiliaPendingName = activeName
-                                        Toast.makeText(context, "已删除当前配置", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            AutoReplyAiRoute.ZhiliaModels -> {
-                val scrollBehavior = MiuixScrollBehavior()
-                PageScaffold(
-                    title = "智聊模型选择",
-                    largeTitle = "智聊模型选择",
-                    scrollBehavior = scrollBehavior,
-                    bottomBar = {
-                        BottomActionBar(
-                            primaryText = "使用所选模型",
-                            onPrimaryClick = {
-                                model = pendingModel
-                                Toast.makeText(context, "已选择模型: $pendingModel", Toast.LENGTH_SHORT).show()
-                            },
-                            secondaryText = "返回",
-                            onSecondaryClick = { route = AutoReplyAiRoute.Zhilia }
-                        )
-                    }
-                ) { padding ->
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                        state = zhiliaModelListState,
-                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
-                    ) {
-                        item { SmallTitle(text = "拉取模型") }
-                        item {
-                            SettingsCard {
-                                ActionRow("拉取模型列表", if (loadingText.isBlank()) "从当前 API 地址获取 /models" else loadingText) {
-                                    val base = apiBase
-                                    val key = apiKey
-                                    loadingText = "正在拉取模型..."
-                                    scope.launch {
-                                        val models = withContext(Dispatchers.IO) {
-                                            AutoReplyRuntime.fetchAiModels(base, key)
-                                        }
-                                        fetchedModels = models
-                                        loadingText = ""
-                                        Toast.makeText(context, if (models.isEmpty()) "未获取到模型" else "已获取 ${models.size} 个模型", Toast.LENGTH_SHORT).show()
-                                    }
-                                }
-                            }
-                        }
-                        if (visibleModels.isNotEmpty()) {
-                            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "模型列表 · ${visibleModels.size}") }
-                            item {
-                                SettingsCard(modifier = Modifier.padding(bottom = 8.dp)) {
-                                    InputRow("搜索", "输入模型名过滤", modelQuery) { modelQuery = it }
-                                }
-                            }
-                            visibleModels.take(80).forEach { itemModel ->
-                                item {
-                                    ZhiliaModelSelectCard(
-                                        modelName = itemModel,
-                                        currentModel = model,
-                                        pendingModel = pendingModel,
-                                        favorite = itemModel in favoriteModels,
-                                        onSelect = {
-                                            pendingModel = itemModel
-                                            Toast.makeText(context, "已选择 $itemModel", Toast.LENGTH_SHORT).show()
-                                        },
-                                        onToggleFavorite = {
-                                            val next = if (itemModel in favoriteModels) favoriteModels - itemModel else favoriteModels + itemModel
-                                            favoriteModels = next
-                                            settings.saveFavoriteModels(apiBase, next)
-                                            Toast.makeText(context, if (itemModel in next) "已收藏模型" else "已取消收藏", Toast.LENGTH_SHORT).show()
-                                        }
-                                    )
-                                }
-                            }
-                        } else {
-                            item { SettingsCard { EmptyText("暂无模型列表，先点击“拉取模型列表”。") } }
-                        }
-                    }
-                }
-            }
-            is AutoReplyAiRoute.OptionPicker -> {
-                OptionPickerPage(
-                    request = currentRoute.request,
-                    onBack = { route = AutoReplyAiRoute.Xiaozhi },
-                    onSelected = { currentRoute.request.onSelected(it) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-internal fun ZhiliaModelSelectCard(
-    modelName: String,
-    currentModel: String,
-    pendingModel: String,
-    favorite: Boolean,
-    onSelect: () -> Unit,
-    onToggleFavorite: () -> Unit
-) {
-    val selected = modelName == pendingModel
-    val current = modelName == currentModel
-    Card(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp),
-        cornerRadius = 14.dp
-    ) {
-        var pressed by remember { mutableStateOf(false) }
-        val pressFeedbackColor = rememberPressFeedbackColor(pressed)
-        Column(
-            modifier = Modifier.fillMaxWidth()
-                .clip(RoundedCornerShape(12.dp))
-                .background(pressFeedbackColor)
-                .responsiveTap(
-                    onClick = onSelect,
-                    onPressedChange = { pressed = it }
-                )
-                .padding(horizontal = 16.dp, vertical = 13.dp)
+            FloatingShortcutRoute.MAIN -> PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar("返回", onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(text = modelName, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-                    val state = buildString {
-                        if (current) append("当前")
-                        if (selected && !current) {
-                            if (isNotEmpty()) append(" · ")
-                            append("已选择")
+            item { SmallTitle(text = "悬浮入口") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        checked = enabled,
+                        title = "悬浮快捷菜单",
+                        summary = "在微信页面显示可自由拖动和停放的快捷入口",
+                        onCheckedChange = {
+                            enabled = it
+                            FloatingShortcutRuntime.setEnabled(context, it)
                         }
-                        if (favorite) {
-                            if (isNotEmpty()) append(" · ")
-                            append("已收藏")
-                        }
-                        if (isEmpty()) append("点击选择")
-                    }
-                    Text(text = state, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
-                }
-                Text(
-                    text = if (selected) "已选" else "选择",
-                    color = if (selected) MiuixTheme.colorScheme.primary else MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-            InsetDivider()
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                Text(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .clickable { onToggleFavorite() }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    text = if (favorite) "取消收藏" else "收藏",
-                    color = MiuixTheme.colorScheme.primary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-        }
-    }
-}
-
-@Composable
-internal fun AutoReplyStepsPage(
-    title: String,
-    initialSteps: List<AutoReplyStep>,
-    onBack: () -> Unit,
-    onSave: (List<AutoReplyStep>) -> Unit
-) {
-    val context = LocalContext.current
-    var steps by remember(initialSteps) { mutableStateOf(initialSteps.ifEmpty { listOf(AutoReplyStep()) }) }
-    var optionPicker by remember { mutableStateOf<OptionPickerRequest?>(null) }
-    var contactPicker by remember { mutableStateOf<ContactPickerRequest?>(null) }
-    var favoritePicker by remember { mutableStateOf<FavoritePickerRequest?>(null) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-    fun update(index: Int, step: AutoReplyStep) {
-        steps = steps.toMutableList().also { if (index in it.indices) it[index] = step }
-    }
-    val stepsRoute = when {
-        favoritePicker != null -> AutoReplyStepsRoute.FavoritePicker(favoritePicker!!)
-        optionPicker != null -> AutoReplyStepsRoute.OptionPicker(optionPicker!!)
-        contactPicker != null -> AutoReplyStepsRoute.ContactPicker(contactPicker!!)
-        else -> AutoReplyStepsRoute.Main
-    }
-    SettingsRouteTransition(
-        targetState = stepsRoute,
-        label = "AutoReplyStepsRoute",
-        depthOf = { it.depth() }
-    ) { currentRoute ->
-        when (currentRoute) {
-            is AutoReplyStepsRoute.OptionPicker -> {
-                val request = currentRoute.request
-                OptionPickerPage(
-                    request = request,
-                    onBack = { optionPicker = null },
-                    onSelected = { request.onSelected(it); optionPicker = null }
-                )
-            }
-            is AutoReplyStepsRoute.ContactPicker -> {
-                val request = currentRoute.request
-                ContactPickerPage(
-                    context = context,
-                    request = request,
-                    onBack = { contactPicker = null },
-                    onConfirm = { selected ->
-                        request.onValue(formatIds(selected.map { it.id }))
-                        Toast.makeText(context, "已选择 ${selected.size} 项", Toast.LENGTH_SHORT).show()
-                        contactPicker = null
-                    }
-                )
-            }
-            is AutoReplyStepsRoute.FavoritePicker -> {
-                FavoritePickerPage(
-                    request = currentRoute.request,
-                    onBack = { favoritePicker = null }
-                )
-            }
-            AutoReplyStepsRoute.Main -> PageScaffold(
-                title = title,
-                largeTitle = title,
-                scrollBehavior = scrollBehavior,
-                bottomBar = {
-                    BottomActionBar(
-                        primaryText = "保存回复",
-                        onPrimaryClick = { onSave(steps.filter { AutoReplySettings.isAiReplyMode(it.mode) || it.content.isNotBlank() }) },
-                        secondaryText = "返回",
-                        onSecondaryClick = onBack
                     )
                 }
-            ) { padding ->
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                    state = listState,
-                    contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
-                ) {
-                    steps.forEachIndexed { index, step ->
-                        item { SmallTitle(modifier = Modifier.padding(top = if (index == 0) 0.dp else 10.dp), text = "第 ${index + 1} 条") }
-                        item {
-                            SettingsCard {
-                                PopupOptionRow(
-                                    title = "回复类型",
-                                    summary = autoReplyStepLabel(step.mode),
-                                    options = autoReplyStepOptions(),
-                                    currentValue = step.mode,
-                                    onValueChanged = {
-                                        update(
-                                            index,
-                                            step.copy(
-                                                mode = it,
-                                                content = when {
-                                                    AutoReplySettings.isAiReplyMode(it) -> ""
-                                                    it == step.mode -> step.content
-                                                    it == AutoReplySettings.REPLY_FAVORITE ||
-                                                        step.mode == AutoReplySettings.REPLY_FAVORITE -> ""
-                                                    else -> step.content
-                                                }
-                                            )
-                                        )
-                                    }
-                                )
-                                InsetDivider()
-                                if (!AutoReplySettings.isAiReplyMode(step.mode)) {
-                                    AutoReplyStepContentEditor(
-                                        context = context,
-                                        step = step,
-                                        onStepChange = { update(index, it) },
-                                        onContactPicker = { contactPicker = it },
-                                        onFavoritePicker = { favoritePicker = it }
-                                    )
-                                    InsetDivider()
+            }
+            if (enabled) {
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "显示方式") }
+                item {
+                    SettingsCard {
+                        PopupChoiceRow(
+                            title = "显示范围",
+                            summary = if (scope == FloatingShortcutSettings.SCOPE_ALL) {
+                                "微信所有页面"
+                            } else {
+                                "仅微信主页"
+                            },
+                            options = listOf(
+                                PopupChoice("仅微信主页", FloatingShortcutSettings.SCOPE_HOME),
+                                PopupChoice("所有微信页面", FloatingShortcutSettings.SCOPE_ALL)
+                            ),
+                            currentValue = scope,
+                            onValueChanged = {
+                                scope = it
+                                sp.edit().putString(FloatingShortcutSettings.KEY_SCOPE, it).apply()
+                            }
+                        )
+                        InsetDivider()
+                        PopupChoiceRow(
+                            title = "快捷项样式",
+                            summary = when (displayMode) {
+                                FloatingShortcutSettings.DISPLAY_TEXT -> "仅文字"
+                                FloatingShortcutSettings.DISPLAY_BOTH -> "图标和文字"
+                                else -> "仅图标"
+                            },
+                            options = listOf(
+                                PopupChoice("仅图标", FloatingShortcutSettings.DISPLAY_ICON),
+                                PopupChoice("仅文字", FloatingShortcutSettings.DISPLAY_TEXT),
+                                PopupChoice("图标和文字", FloatingShortcutSettings.DISPLAY_BOTH)
+                            ),
+                            currentValue = displayMode,
+                            onValueChanged = {
+                                displayMode = it
+                                sp.edit().putString(FloatingShortcutSettings.KEY_DISPLAY_MODE, it).apply()
+                            }
+                        )
+                        InsetDivider()
+                        PopupChoiceRow(
+                            title = "展开方向",
+                            summary = when (expandDirection) {
+                                FloatingShortcutSettings.EXPAND_DOWN -> "向下展开"
+                                FloatingShortcutSettings.EXPAND_LEFT -> "向左展开"
+                                FloatingShortcutSettings.EXPAND_RIGHT -> "向右展开"
+                                else -> "向上展开"
+                            },
+                            options = listOf(
+                                PopupChoice("向上展开", FloatingShortcutSettings.EXPAND_UP),
+                                PopupChoice("向下展开", FloatingShortcutSettings.EXPAND_DOWN),
+                                PopupChoice("向左展开", FloatingShortcutSettings.EXPAND_LEFT),
+                                PopupChoice("向右展开", FloatingShortcutSettings.EXPAND_RIGHT)
+                            ),
+                            currentValue = expandDirection,
+                            onValueChanged = {
+                                expandDirection = it
+                                sp.edit().putString(FloatingShortcutSettings.KEY_EXPAND_DIRECTION, it).apply()
+                            }
+                        )
+                        InsetDivider()
+                        ActionRow(
+                            title = "按钮外观",
+                            summary = "设置按钮渐变、大小和菜单名称样式",
+                            onClick = { route = FloatingShortcutRoute.APPEARANCE }
+                        )
+                    }
+                }
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "主按钮图标") }
+                item {
+                    SettingsCard {
+                        FloatingShortcutIconActionRow(
+                            title = "浅色模式图标",
+                            iconPath = bubbleIcon,
+                            defaultSummary = "未选择时使用内置快捷菜单图标",
+                            onSelect = {
+                                pickIcon("bubble-${System.nanoTime()}") { path ->
+                                    val previous = bubbleIcon
+                                    bubbleIcon = path
+                                    sp.edit().putString(FloatingShortcutSettings.KEY_BUBBLE_ICON, path).apply()
+                                    FloatingShortcutIconStore.delete(context, previous)
                                 }
-                                NumberInputRow("发送前延迟", "单位 ms", step.delayMs.toString()) {
-                                    update(index, step.copy(delayMs = it.toLongOrNull()?.coerceIn(0L, 600000L) ?: 0L))
+                            },
+                            onReset = if (bubbleIcon.isBlank()) null else {
+                                {
+                                    val previous = bubbleIcon
+                                    bubbleIcon = ""
+                                    sp.edit().remove(FloatingShortcutSettings.KEY_BUBBLE_ICON).apply()
+                                    FloatingShortcutIconStore.delete(context, previous)
                                 }
-                                InsetDivider()
-                                SwitchRow(step.randomDelay, "随机追加延迟", "发送前额外随机等待 0-2 秒") {
-                                    update(index, step.copy(randomDelay = it))
+                            }
+                        )
+                        InsetDivider()
+                        FloatingShortcutIconActionRow(
+                            title = "深色模式图标",
+                            iconPath = bubbleDarkIcon,
+                            defaultSummary = "未选择时沿用浅色模式图标",
+                            onSelect = {
+                                pickIcon("bubble-dark-${System.nanoTime()}") { path ->
+                                    val previous = bubbleDarkIcon
+                                    bubbleDarkIcon = path
+                                    sp.edit().putString(FloatingShortcutSettings.KEY_BUBBLE_DARK_ICON, path).apply()
+                                    FloatingShortcutIconStore.delete(context, previous)
                                 }
-                                InsetDivider()
-                                RedPacketReplyStepActions(
+                            },
+                            onReset = if (bubbleDarkIcon.isBlank()) null else {
+                                {
+                                    val previous = bubbleDarkIcon
+                                    bubbleDarkIcon = ""
+                                    sp.edit().remove(FloatingShortcutSettings.KEY_BUBBLE_DARK_ICON).apply()
+                                    FloatingShortcutIconStore.delete(context, previous)
+                                }
+                            }
+                        )
+                    }
+                }
+                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "快捷项") }
+                item {
+                    SettingsCard {
+                        if (shortcuts.isEmpty()) {
+                            Text(
+                                text = "暂无快捷项",
+                                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 18.dp),
+                                textAlign = TextAlign.Center
+                            )
+                        } else {
+                            shortcuts.forEachIndexed { index, item ->
+                                if (index > 0) InsetDivider()
+                                FloatingShortcutSettingsItemRow(
+                                    item = item,
                                     canMoveUp = index > 0,
-                                    canMoveDown = index < steps.lastIndex,
+                                    canMoveDown = index < shortcuts.lastIndex,
+                                    onEnabledChange = { checked ->
+                                        saveShortcuts(shortcuts.toMutableList().apply {
+                                            this[index] = item.copy(enabled = checked)
+                                        })
+                                    },
                                     onMoveUp = {
-                                        steps = steps.toMutableList().also {
-                                            val item = it.removeAt(index)
-                                            it.add(index - 1, item)
+                                        if (index > 0) {
+                                            saveShortcuts(shortcuts.toMutableList().apply {
+                                                val moved = removeAt(index)
+                                                add(index - 1, moved)
+                                            })
                                         }
                                     },
                                     onMoveDown = {
-                                        steps = steps.toMutableList().also {
-                                            val item = it.removeAt(index)
-                                            it.add(index + 1, item)
+                                        if (index < shortcuts.lastIndex) {
+                                            saveShortcuts(shortcuts.toMutableList().apply {
+                                                val moved = removeAt(index)
+                                                add(index + 1, moved)
+                                            })
                                         }
                                     },
-                                    onDelete = { steps = steps.toMutableList().also { it.removeAt(index) }.ifEmpty { listOf(AutoReplyStep()) } }
+                                    onEdit = { editor = FloatingShortcutEditorRequest(item, item) },
+                                    onDelete = {
+                                        FloatingShortcutIconStore.delete(context, item.iconPath)
+                                        FloatingShortcutIconStore.delete(context, item.darkIconPath)
+                                        saveShortcuts(shortcuts.filterNot { it.id == item.id })
+                                    }
                                 )
                             }
                         }
+                        InsetDivider()
+                        ActionRow(
+                            title = "新增快捷项",
+                            summary = "添加微信页面、模块设置或插件 Agent 入口",
+                            onClick = {
+                                editor = FloatingShortcutEditorRequest(
+                                    original = null,
+                                    draft = FloatingShortcutItem(
+                                        id = "shortcut_${System.currentTimeMillis()}_${shortcuts.size}",
+                                        title = "",
+                                        actionType = FloatingShortcutSettings.ACTION_ACTIVITY,
+                                        target = ""
+                                    )
+                                )
+                            }
+                        )
                     }
-                    item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "操作") }
-                    item {
-                        SettingsCard {
-                            ActionRow("新增回复", "添加一条按顺序发送的回复") {
-                                steps = steps + AutoReplyStep(id = System.currentTimeMillis().toString(), content = "你好")
+                }
+            }
+        }
+    }
+            FloatingShortcutRoute.APPEARANCE -> FloatingShortcutAppearanceMiuixPage(
+                context = context,
+                onBack = { route = FloatingShortcutRoute.MAIN }
+            )
+        }
+    }
+
+    editor?.let { request ->
+        val draft = request.draft
+        val valid = draft.title.isNotBlank() &&
+            (draft.actionType != FloatingShortcutSettings.ACTION_ACTIVITY || draft.target.isNotBlank())
+        WindowDialog(
+            show = true,
+            title = if (request.original == null) "新增快捷项" else "编辑快捷项",
+            onDismissRequest = ::dismissEditor,
+            content = {
+                Column(modifier = Modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+                    InputRow(
+                        title = "名称",
+                        summary = "显示在展开菜单中的名称",
+                        value = draft.title,
+                        onValueChange = { editor = request.copy(draft = draft.copy(title = it)) }
+                    )
+                    PopupChoiceRow(
+                        title = "动作类型",
+                        summary = when (draft.actionType) {
+                            FloatingShortcutSettings.ACTION_MODULE_SETTINGS -> "打开 Hchat 设置"
+                            FloatingShortcutSettings.ACTION_PLUGIN_AGENT -> "展开或收起插件 Agent"
+                            else -> "打开微信页面"
+                        },
+                        options = listOf(
+                            PopupChoice("微信页面", FloatingShortcutSettings.ACTION_ACTIVITY),
+                            PopupChoice("模块设置", FloatingShortcutSettings.ACTION_MODULE_SETTINGS),
+                            PopupChoice("插件 Agent", FloatingShortcutSettings.ACTION_PLUGIN_AGENT)
+                        ),
+                        currentValue = draft.actionType,
+                        onValueChanged = { type ->
+                            editor = request.copy(
+                                draft = draft.copy(
+                                    actionType = type,
+                                    target = if (type == FloatingShortcutSettings.ACTION_ACTIVITY) draft.target else ""
+                                )
+                            )
+                        }
+                    )
+                    if (draft.actionType == FloatingShortcutSettings.ACTION_ACTIVITY) {
+                        InputRow(
+                            title = "Activity 类名",
+                            summary = "填写微信页面的完整 Activity 类名",
+                            value = draft.target,
+                            onValueChange = { editor = request.copy(draft = draft.copy(target = it)) }
+                        )
+                    }
+                    FloatingShortcutIconActionRow(
+                        title = "浅色模式图标",
+                        iconPath = draft.iconPath,
+                        defaultSummary = "未选择时使用内置图标",
+                        onSelect = {
+                            pickIcon("item-${draft.id}-${System.nanoTime()}") { path ->
+                                if (draft.iconPath != request.original?.iconPath) {
+                                    FloatingShortcutIconStore.delete(context, draft.iconPath)
+                                }
+                                editor = request.copy(draft = draft.copy(iconPath = path))
+                            }
+                        },
+                        onReset = if (draft.iconPath.isBlank()) null else {
+                            {
+                                if (draft.iconPath != request.original?.iconPath) {
+                                    FloatingShortcutIconStore.delete(context, draft.iconPath)
+                                }
+                                editor = request.copy(draft = draft.copy(iconPath = ""))
                             }
                         }
+                    )
+                    FloatingShortcutIconActionRow(
+                        title = "深色模式图标",
+                        iconPath = draft.darkIconPath,
+                        defaultSummary = "未选择时沿用浅色模式图标",
+                        onSelect = {
+                            pickIcon("item-dark-${draft.id}-${System.nanoTime()}") { path ->
+                                if (draft.darkIconPath != request.original?.darkIconPath) {
+                                    FloatingShortcutIconStore.delete(context, draft.darkIconPath)
+                                }
+                                editor = request.copy(draft = draft.copy(darkIconPath = path))
+                            }
+                        },
+                        onReset = if (draft.darkIconPath.isBlank()) null else {
+                            {
+                                if (draft.darkIconPath != request.original?.darkIconPath) {
+                                    FloatingShortcutIconStore.delete(context, draft.darkIconPath)
+                                }
+                                editor = request.copy(draft = draft.copy(darkIconPath = ""))
+                            }
+                        }
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        TextButton(
+                            text = "取消",
+                            onClick = ::dismissEditor,
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                        TextButton(
+                            text = "保存",
+                            onClick = {
+                                if (!valid) {
+                                    Toast.makeText(context, "请填写完整的快捷项信息", Toast.LENGTH_SHORT).show()
+                                    return@TextButton
+                                }
+                                val saved = draft.copy(
+                                    title = draft.title.trim(),
+                                    target = draft.target.trim()
+                                )
+                                val original = request.original
+                                if (original != null && original.iconPath != saved.iconPath) {
+                                    FloatingShortcutIconStore.delete(context, original.iconPath)
+                                }
+                                if (original != null && original.darkIconPath != saved.darkIconPath) {
+                                    FloatingShortcutIconStore.delete(context, original.darkIconPath)
+                                }
+                                val next = shortcuts.toMutableList()
+                                val index = next.indexOfFirst { it.id == saved.id }
+                                if (index >= 0) next[index] = saved else next.add(saved)
+                                saveShortcuts(next)
+                                editor = null
+                            },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.textButtonColorsPrimary()
+                        )
+                    }
+                }
+            }
+        )
+    }
+}
+
+@Composable
+internal fun FloatingShortcutAppearanceMiuixPage(
+    context: Context,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, FloatingShortcutSettings.PREFS_NAME) }
+    var bubbleSize by remember {
+        mutableStateOf(
+            sp.getInt(
+                FloatingShortcutSettings.KEY_BUBBLE_SIZE,
+                FloatingShortcutSettings.DEFAULT_BUBBLE_SIZE
+            ).coerceIn(FloatingShortcutSettings.MIN_BUTTON_SIZE, FloatingShortcutSettings.MAX_BUTTON_SIZE)
+        )
+    }
+    var bubbleColor by remember {
+        mutableStateOf(
+            sp.getString(
+                FloatingShortcutSettings.KEY_BUBBLE_COLOR,
+                FloatingShortcutSettings.DEFAULT_BUBBLE_COLOR
+            ) ?: FloatingShortcutSettings.DEFAULT_BUBBLE_COLOR
+        )
+    }
+    var actionSize by remember {
+        mutableStateOf(
+            sp.getInt(
+                FloatingShortcutSettings.KEY_ACTION_SIZE,
+                FloatingShortcutSettings.DEFAULT_ACTION_SIZE
+            ).coerceIn(FloatingShortcutSettings.MIN_BUTTON_SIZE, FloatingShortcutSettings.MAX_BUTTON_SIZE)
+        )
+    }
+    var actionColor by remember {
+        mutableStateOf(
+            sp.getString(
+                FloatingShortcutSettings.KEY_ACTION_COLOR,
+                FloatingShortcutSettings.DEFAULT_ACTION_COLOR
+            ) ?: FloatingShortcutSettings.DEFAULT_ACTION_COLOR
+        )
+    }
+    var labelTextSize by remember {
+        mutableStateOf(
+            sp.getInt(
+                FloatingShortcutSettings.KEY_LABEL_TEXT_SIZE,
+                FloatingShortcutSettings.DEFAULT_LABEL_TEXT_SIZE
+            ).coerceIn(
+                FloatingShortcutSettings.MIN_LABEL_TEXT_SIZE,
+                FloatingShortcutSettings.MAX_LABEL_TEXT_SIZE
+            )
+        )
+    }
+    var labelColor by remember {
+        mutableStateOf(
+            sp.getString(
+                FloatingShortcutSettings.KEY_LABEL_COLOR,
+                FloatingShortcutSettings.DEFAULT_LABEL_COLOR
+            ) ?: FloatingShortcutSettings.DEFAULT_LABEL_COLOR
+        )
+    }
+    val currentBubbleSize by rememberUpdatedState(bubbleSize)
+    val currentBubbleColor by rememberUpdatedState(bubbleColor)
+    val currentActionSize by rememberUpdatedState(actionSize)
+    val currentActionColor by rememberUpdatedState(actionColor)
+    val currentLabelTextSize by rememberUpdatedState(labelTextSize)
+    val currentLabelColor by rememberUpdatedState(labelColor)
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    fun persistAppearance() {
+        sp.edit()
+            .putInt(FloatingShortcutSettings.KEY_BUBBLE_SIZE, currentBubbleSize)
+            .putString(FloatingShortcutSettings.KEY_BUBBLE_COLOR, currentBubbleColor.trim())
+            .putInt(FloatingShortcutSettings.KEY_ACTION_SIZE, currentActionSize)
+            .putString(FloatingShortcutSettings.KEY_ACTION_COLOR, currentActionColor.trim())
+            .putInt(FloatingShortcutSettings.KEY_LABEL_TEXT_SIZE, currentLabelTextSize)
+            .putString(FloatingShortcutSettings.KEY_LABEL_COLOR, currentLabelColor.trim())
+            .apply()
+    }
+
+    DisposableEffect(sp) {
+        onDispose(::persistAppearance)
+    }
+
+    PageScaffold(
+        title = "按钮外观",
+        largeTitle = "按钮外观",
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar(
+                primaryText = "返回",
+                onPrimaryClick = {
+                    persistAppearance()
+                    onBack()
+                }
+            )
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "主按钮") }
+            item {
+                SettingsCard {
+                    FloatingShortcutSizeSlider("主按钮大小", bubbleSize) { bubbleSize = it }
+                    InsetDivider()
+                    ColorPickerRow(
+                        title = "主按钮颜色",
+                        summary = "圆形背景色",
+                        value = bubbleColor,
+                        onReset = { bubbleColor = FloatingShortcutSettings.DEFAULT_BUBBLE_COLOR }
+                    ) { bubbleColor = it.take(19) }
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "副按钮") }
+            item {
+                SettingsCard {
+                    FloatingShortcutSizeSlider("副按钮大小", actionSize) { actionSize = it }
+                    InsetDivider()
+                    ColorPickerRow(
+                        title = "副按钮颜色",
+                        summary = "留空时跟随深浅色模式",
+                        value = actionColor,
+                        onReset = { actionColor = FloatingShortcutSettings.DEFAULT_ACTION_COLOR }
+                    ) { actionColor = it.take(19) }
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "菜单名称") }
+            item {
+                SettingsCard {
+                    FloatingShortcutTextSizeSlider("菜单名称大小", labelTextSize) { labelTextSize = it }
+                    InsetDivider()
+                    ColorPickerRow(
+                        title = "菜单名称颜色",
+                        summary = "留空时跟随深浅色模式",
+                        value = labelColor,
+                        onReset = { labelColor = FloatingShortcutSettings.DEFAULT_LABEL_COLOR }
+                    ) { labelColor = it.take(19) }
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "重置") }
+            item {
+                SettingsCard {
+                    ActionRow(
+                        title = "恢复默认外观",
+                        summary = "恢复按钮和菜单名称的默认外观",
+                        onClick = {
+                            bubbleSize = FloatingShortcutSettings.DEFAULT_BUBBLE_SIZE
+                            bubbleColor = FloatingShortcutSettings.DEFAULT_BUBBLE_COLOR
+                            actionSize = FloatingShortcutSettings.DEFAULT_ACTION_SIZE
+                            actionColor = FloatingShortcutSettings.DEFAULT_ACTION_COLOR
+                            labelTextSize = FloatingShortcutSettings.DEFAULT_LABEL_TEXT_SIZE
+                            labelColor = FloatingShortcutSettings.DEFAULT_LABEL_COLOR
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun FloatingShortcutTextSizeSlider(
+    title: String,
+    value: Int,
+    onValueChange: (Int) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+        Text(
+            text = "$title ${value}sp",
+            color = MiuixTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Medium
+        )
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValueChange(it.toInt()) },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            valueRange = FloatingShortcutSettings.MIN_LABEL_TEXT_SIZE.toFloat()..
+                FloatingShortcutSettings.MAX_LABEL_TEXT_SIZE.toFloat(),
+            steps = FloatingShortcutSettings.MAX_LABEL_TEXT_SIZE -
+                FloatingShortcutSettings.MIN_LABEL_TEXT_SIZE - 1,
+            showKeyPoints = true,
+            keyPoints = listOf(10f, 12f, 14f, 16f, 18f, 20f, 24f)
+        )
+    }
+}
+
+@Composable
+internal fun FloatingShortcutSizeSlider(
+    title: String,
+    value: Int,
+    onValueChange: (Int) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+        Text(
+            text = "$title ${value}dp",
+            color = MiuixTheme.colorScheme.onSurface,
+            fontWeight = FontWeight.Medium
+        )
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValueChange(it.toInt()) },
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            valueRange = FloatingShortcutSettings.MIN_BUTTON_SIZE.toFloat()..
+                FloatingShortcutSettings.MAX_BUTTON_SIZE.toFloat(),
+            steps = FloatingShortcutSettings.MAX_BUTTON_SIZE -
+                FloatingShortcutSettings.MIN_BUTTON_SIZE - 1,
+            showKeyPoints = true,
+            keyPoints = listOf(36f, 44f, 52f, 60f, 64f)
+        )
+    }
+}
+
+@Composable
+internal fun FloatingShortcutSettingsItemRow(
+    item: FloatingShortcutItem,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
+    onEnabledChange: (Boolean) -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            FloatingShortcutIconPreview(
+                if (isSystemInDarkTheme() && item.darkIconPath.isNotBlank()) item.darkIconPath else item.iconPath,
+                item.title,
+                isPluginAgent = item.actionType == FloatingShortcutSettings.ACTION_PLUGIN_AGENT,
+                defaultGlyph = FloatingShortcutGlyphs.forItem(item)
+            )
+            Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+                Text(
+                    text = item.title,
+                    color = MiuixTheme.colorScheme.onSurface,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = when (item.actionType) {
+                        FloatingShortcutSettings.ACTION_MODULE_SETTINGS -> "模块设置"
+                        FloatingShortcutSettings.ACTION_PLUGIN_AGENT -> "插件 Agent"
+                        else -> item.target
+                    },
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = 12.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Switch(checked = item.enabled, onCheckedChange = onEnabledChange)
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            FloatingShortcutItemAction(NavIcons.MoveUp, "上移", canMoveUp, onMoveUp)
+            FloatingShortcutItemAction(NavIcons.MoveDown, "下移", canMoveDown, onMoveDown)
+            FloatingShortcutItemAction(NavIcons.Edit, "编辑", true, onEdit)
+            FloatingShortcutItemAction(NavIcons.Delete, "删除", true, onDelete, destructive = true)
+        }
+    }
+}
+
+@Composable
+internal fun FloatingShortcutItemAction(
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    destructive: Boolean = false
+) {
+    val color = when {
+        !enabled -> MiuixTheme.colorScheme.onSurfaceVariantSummary.copy(alpha = 0.35f)
+        destructive -> Color(0xFFD93025)
+        else -> MiuixTheme.colorScheme.onSurfaceVariantSummary
+    }
+    Image(
+        imageVector = icon,
+        contentDescription = description,
+        colorFilter = ColorFilter.tint(color),
+        modifier = Modifier.padding(start = 4.dp).size(34.dp)
+            .clip(RoundedCornerShape(6.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(7.dp)
+    )
+}
+
+@Composable
+internal fun FloatingShortcutIconActionRow(
+    title: String,
+    iconPath: String,
+    defaultSummary: String,
+    onSelect: () -> Unit,
+    onReset: (() -> Unit)?
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        FloatingShortcutIconPreview(iconPath, title)
+        Column(modifier = Modifier.weight(1f).padding(start = 12.dp)) {
+            Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
+            Text(
+                text = if (iconPath.isBlank()) defaultSummary else File(iconPath).name,
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        TextButton(
+            text = "选择",
+            onClick = onSelect,
+            colors = ButtonDefaults.textButtonColorsPrimary()
+        )
+        if (onReset != null) {
+            TextButton(
+                text = "默认",
+                onClick = onReset,
+                colors = ButtonDefaults.textButtonColorsPrimary()
+            )
+        }
+    }
+}
+
+@Composable
+internal fun FloatingShortcutIconPreview(
+    path: String,
+    description: String,
+    isPluginAgent: Boolean = false,
+    defaultGlyph: FloatingShortcutGlyph? = null
+) {
+    val previewSizePx = with(LocalDensity.current) { 40.dp.roundToPx() }
+    val bitmap = remember(path, previewSizePx) {
+        path.takeIf { it.isNotBlank() }?.let { decodeFavoriteImage(it, previewSizePx) }
+    }
+    val fallbackTint = MiuixTheme.colorScheme.onSecondaryVariant.toArgb()
+    Box(
+        modifier = Modifier.size(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(MiuixTheme.colorScheme.secondaryVariant),
+        contentAlignment = Alignment.Center
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap,
+                contentDescription = description,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else if (isPluginAgent) {
+            AndroidView(
+                factory = { viewContext ->
+                    ImageView(viewContext).apply { scaleType = ImageView.ScaleType.CENTER_INSIDE }
+                },
+                update = { imageView ->
+                    imageView.contentDescription = description
+                    imageView.setImageDrawable(
+                        HchatAgentIconDrawable(fallbackTint, HchatAgentIconDrawable.Frame.CIRCLE)
+                    )
+                },
+                modifier = Modifier.size(26.dp)
+            )
+        } else if (defaultGlyph != null) {
+            AndroidView(
+                factory = { viewContext ->
+                    ImageView(viewContext).apply { scaleType = ImageView.ScaleType.CENTER_INSIDE }
+                },
+                update = { imageView ->
+                    imageView.contentDescription = description
+                    imageView.setImageDrawable(FloatingShortcutGlyphDrawable(defaultGlyph, fallbackTint))
+                },
+                modifier = Modifier.size(24.dp)
+            )
+        } else {
+            Image(
+                imageVector = NavIcons.Practical,
+                contentDescription = description,
+                colorFilter = ColorFilter.tint(MiuixTheme.colorScheme.onSecondaryVariant),
+                modifier = Modifier.size(22.dp)
+            )
+        }
+    }
+}
+
+@Composable
+internal fun QuickMarkReadMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, QuickMarkReadSettings.PREFS_NAME) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar("返回", onBack)
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "快捷已读") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        sp,
+                        QuickMarkReadSettings.KEY_DRAG_READ,
+                        "拖拽已读",
+                        "在微信底部未读角标向上拖动后，清空全部会话未读",
+                        QuickMarkReadSettings.DEFAULT_DRAG_READ
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        sp,
+                        QuickMarkReadSettings.KEY_PLUS_MENU_READ,
+                        "注入加号菜单已读",
+                        "在右上角加号菜单添加“全部已读”，重启微信后生效",
+                        QuickMarkReadSettings.DEFAULT_PLUS_MENU_READ
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun WeChatKeepAliveMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, WeChatKeepAliveSettings.PREFS_NAME) }
+    var enabled by remember { mutableStateOf(sp.getBoolean(WeChatKeepAliveSettings.KEY_ENABLE, WeChatKeepAliveSettings.DEFAULT_ENABLE)) }
+    var foregroundService by remember { mutableStateOf(sp.getBoolean(WeChatKeepAliveSettings.KEY_FOREGROUND_SERVICE, WeChatKeepAliveSettings.DEFAULT_FOREGROUND_SERVICE)) }
+    var wakeLock by remember { mutableStateOf(sp.getBoolean(WeChatKeepAliveSettings.KEY_WAKE_LOCK, WeChatKeepAliveSettings.DEFAULT_WAKE_LOCK)) }
+    var rootWhitelist by remember { mutableStateOf(sp.getBoolean(WeChatKeepAliveSettings.KEY_ROOT_DOZE_WHITELIST, WeChatKeepAliveSettings.DEFAULT_ROOT_DOZE_WHITELIST)) }
+    var watchdog by remember { mutableStateOf(sp.getBoolean(WeChatKeepAliveSettings.KEY_WATCHDOG, WeChatKeepAliveSettings.DEFAULT_WATCHDOG)) }
+    var rootAppOps by remember { mutableStateOf(sp.getBoolean(WeChatKeepAliveSettings.KEY_ROOT_APP_OPS, WeChatKeepAliveSettings.DEFAULT_ROOT_APP_OPS)) }
+    var networkHeartbeat by remember { mutableStateOf(sp.getBoolean(WeChatKeepAliveSettings.KEY_NETWORK_HEARTBEAT, WeChatKeepAliveSettings.DEFAULT_NETWORK_HEARTBEAT)) }
+    var ignoringBattery by remember { mutableStateOf(WeChatKeepAliveRuntime.isIgnoringBatteryOptimizations(context)) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    fun saveBoolean(key: String, value: Boolean) {
+        sp.edit().putBoolean(key, value).apply()
+        WeChatKeepAliveRuntime.apply(context)
+    }
+
+    fun openBatterySettings() {
+        val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        runCatching { context.startActivity(intent) }
+            .onFailure { Toast.makeText(context, "无法打开电池优化设置", Toast.LENGTH_SHORT).show() }
+    }
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar("返回", onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "强保活") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        checked = enabled,
+                        title = "启用微信强保活",
+                        summary = "开启后尝试保持微信息屏运行",
+                        onCheckedChange = {
+                            enabled = it
+                            saveBoolean(WeChatKeepAliveSettings.KEY_ENABLE, it)
+                        }
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = foregroundService,
+                        title = "前台服务保活",
+                        summary = "通过常驻通知提高后台存活率",
+                        onCheckedChange = {
+                            foregroundService = it
+                            saveBoolean(WeChatKeepAliveSettings.KEY_FOREGROUND_SERVICE, it)
+                        }
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = wakeLock,
+                        title = "WakeLock 保活",
+                        summary = "息屏后保持 CPU 运行，耗电会增加",
+                        onCheckedChange = {
+                            wakeLock = it
+                            saveBoolean(WeChatKeepAliveSettings.KEY_WAKE_LOCK, it)
+                        }
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = rootWhitelist,
+                        title = "Root Doze 白名单",
+                        summary = "有 Root 时执行 deviceidle 白名单命令",
+                        onCheckedChange = {
+                            rootWhitelist = it
+                            saveBoolean(WeChatKeepAliveSettings.KEY_ROOT_DOZE_WHITELIST, it)
+                        }
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = rootAppOps,
+                        title = "Root 后台限制放行",
+                        summary = "有 Root 时放行微信后台运行相关 AppOps",
+                        onCheckedChange = {
+                            rootAppOps = it
+                            saveBoolean(WeChatKeepAliveSettings.KEY_ROOT_APP_OPS, it)
+                        }
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = watchdog,
+                        title = "看门狗拉起微信",
+                        summary = "前台服务存活时定期尝试拉起微信",
+                        onCheckedChange = {
+                            watchdog = it
+                            saveBoolean(WeChatKeepAliveSettings.KEY_WATCHDOG, it)
+                        }
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        checked = networkHeartbeat,
+                        title = "网络心跳保活",
+                        summary = "定时发起轻量网络请求保持链路活跃",
+                        onCheckedChange = {
+                            networkHeartbeat = it
+                            saveBoolean(WeChatKeepAliveSettings.KEY_NETWORK_HEARTBEAT, it)
+                        }
+                    )
+                }
+            }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "系统限制") }
+            item {
+                SettingsCard {
+                    InfoRow(
+                        "电池优化白名单",
+                        if (ignoringBattery) "微信已在白名单" else "微信可能仍受系统省电影响"
+                    )
+                    InsetDivider()
+                    ActionRow("打开电池优化设置", "建议把微信设置为不限制") {
+                        openBatterySettings()
+                    }
+                    InsetDivider()
+                    ActionRow("刷新状态", if (ignoringBattery) "当前已忽略优化" else "当前未忽略优化") {
+                        ignoringBattery = WeChatKeepAliveRuntime.isIgnoringBatteryOptimizations(context)
+                        Toast.makeText(context, "状态已刷新", Toast.LENGTH_SHORT).show()
+                    }
+                    InsetDivider()
+                    ActionRow("立即应用保活", "重新启动服务并应用 WakeLock / Root 白名单") {
+                        WeChatKeepAliveRuntime.apply(context)
+                        ignoringBattery = WeChatKeepAliveRuntime.isIgnoringBatteryOptimizations(context)
+                        Toast.makeText(context, "已应用", Toast.LENGTH_SHORT).show()
                     }
                 }
             }
@@ -2421,3 +1853,436 @@ internal fun AutoReplyStepsPage(
 }
 
 @Composable
+internal fun CustomNotificationMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val settings = remember { CustomNotificationSettings(context) }
+    val sp = remember { HchatStorage.preferences(context, CustomNotificationSettings.PREFS_NAME) }
+    var route by remember { mutableStateOf<CustomNotificationRoute>(CustomNotificationRoute.Main) }
+    var rules by remember { mutableStateOf(settings.rules()) }
+    var defaultPrivateRule by remember { mutableStateOf(settings.defaultPrivateRule()) }
+    var defaultGroupRule by remember { mutableStateOf(settings.defaultGroupRule()) }
+    var defaultOfficialRule by remember { mutableStateOf(settings.defaultOfficialRule()) }
+    val ruleListState = rememberLazyListState()
+    var ruleQuery by remember { mutableStateOf("") }
+    val ruleEditorListState = rememberLazyListState()
+    val defaultEditorListState = rememberLazyListState()
+
+    fun saveRules(next: List<CustomNotificationRule>) {
+        val clean = next.distinctBy { it.talker }
+        rules = clean
+        settings.saveRules(clean)
+    }
+
+    fun saveDefaultRule(rule: CustomNotificationRule) {
+        when {
+            rule.official -> {
+                defaultOfficialRule = rule
+                settings.saveDefaultOfficialRule(rule)
+            }
+            rule.group -> {
+                defaultGroupRule = rule
+                settings.saveDefaultGroupRule(rule)
+            }
+            else -> {
+                defaultPrivateRule = rule
+                settings.saveDefaultPrivateRule(rule)
+            }
+        }
+    }
+
+    SettingsRouteTransition(
+        targetState = route,
+        label = "CustomNotificationRoute",
+        depthOf = { it.depth() }
+    ) { currentRoute ->
+        when (currentRoute) {
+            CustomNotificationRoute.Main -> CustomNotificationMainPage(
+                context = context,
+                provider = provider,
+                sp = sp,
+                rules = rules,
+                defaultPrivateRule = defaultPrivateRule,
+                defaultGroupRule = defaultGroupRule,
+                defaultOfficialRule = defaultOfficialRule,
+                onBack = onBack,
+                onOpenRules = { route = CustomNotificationRoute.RuleList },
+                onEditDefault = { route = CustomNotificationRoute.DefaultEditor(it) }
+            )
+            is CustomNotificationRoute.DefaultEditor -> {
+                val rule = when (currentRoute.kind) {
+                    CustomNotificationDefaultKind.PRIVATE -> defaultPrivateRule
+                    CustomNotificationDefaultKind.GROUP -> defaultGroupRule
+                    CustomNotificationDefaultKind.OFFICIAL -> defaultOfficialRule
+                }
+                CustomNotificationRuleEditorPage(
+                    context = context,
+                    initialRule = rule,
+                    listState = defaultEditorListState,
+                    isDefault = true,
+                    onBack = { route = CustomNotificationRoute.Main },
+                    onSave = { saved ->
+                        saveDefaultRule(saved)
+                        Toast.makeText(context, "默认规则已保存", Toast.LENGTH_SHORT).show()
+                        route = CustomNotificationRoute.Main
+                    },
+                    onDelete = {},
+                    onPickOnlyMembers = {},
+                    onPickBlockMembers = {}
+                )
+            }
+            CustomNotificationRoute.RuleList -> CustomNotificationRuleListPage(
+                context = context,
+                rules = rules,
+                query = ruleQuery,
+                onQueryChange = { ruleQuery = it },
+                listState = ruleListState,
+                onBack = { route = CustomNotificationRoute.Main },
+                onSaveRules = ::saveRules,
+                onEditRule = { route = CustomNotificationRoute.RuleEditor(it) },
+                onToggleRule = { rule, enabled ->
+                    saveRules(rules.map { if (it.talker == rule.talker) it.copy(enabled = enabled) else it })
+                    Toast.makeText(context, if (enabled) "已启用该会话规则" else "已关闭该会话规则", Toast.LENGTH_SHORT).show()
+                },
+                onBatchEdit = { route = CustomNotificationRoute.BatchEditor },
+                onAddRules = {
+                    route = CustomNotificationRoute.ContactPicker(
+                        ContactPickerRequest(
+                            title = "添加通知会话",
+                            mode = ContactPickerMode.ALL_CHATS,
+                            multiSelect = true,
+                            existingValue = "",
+                            onValue = {},
+                            enableLabels = true
+                        )
+                    )
+                }
+            )
+            CustomNotificationRoute.BatchEditor -> CustomNotificationBatchEditorPage(
+                ruleCount = rules.size,
+                onBack = { route = CustomNotificationRoute.RuleList },
+                onApply = { update ->
+                    if (!update.hasChanges()) {
+                        Toast.makeText(context, "请选择要应用的配置", Toast.LENGTH_SHORT).show()
+                    } else {
+                        saveRules(rules.map { rule -> update.apply(rule) })
+                        Toast.makeText(context, "批量配置已应用", Toast.LENGTH_SHORT).show()
+                        route = CustomNotificationRoute.RuleList
+                    }
+                }
+            )
+            is CustomNotificationRoute.RuleEditor -> {
+                val rule = rules.firstOrNull { it.talker == currentRoute.talker }
+                if (rule == null) {
+                    CustomNotificationMissingRulePage(
+                        onBack = { route = CustomNotificationRoute.RuleList }
+                    )
+                } else {
+                    CustomNotificationRuleEditorPage(
+                        context = context,
+                        initialRule = rule,
+                        listState = ruleEditorListState,
+                        onBack = { route = CustomNotificationRoute.RuleList },
+                        onSave = { saved ->
+                            saveRules(rules.map { if (it.talker == saved.talker) saved else it })
+                            Toast.makeText(context, "规则已保存", Toast.LENGTH_SHORT).show()
+                            route = CustomNotificationRoute.RuleList
+                        },
+                        onDelete = {
+                            saveRules(rules.filterNot { it.talker == rule.talker })
+                            Toast.makeText(context, "规则已删除", Toast.LENGTH_SHORT).show()
+                            route = CustomNotificationRoute.RuleList
+                        },
+                        onPickOnlyMembers = { value ->
+                            route = CustomNotificationRoute.GroupMemberPicker(
+                                talker = rule.talker,
+                                request = GroupMemberPickerRequest(
+                                    title = "仅显示成员通知",
+                                    existingValue = memberRulesToGroupEntries(rule.talker, value),
+                                    onValue = {}
+                                )
+                            )
+                        },
+                        onPickBlockMembers = { value ->
+                            route = CustomNotificationRoute.GroupMemberPicker(
+                                talker = rule.talker,
+                                request = GroupMemberPickerRequest(
+                                    title = "屏蔽成员通知",
+                                    existingValue = memberRulesToGroupEntries(rule.talker, value),
+                                    onValue = {}
+                                )
+                            )
+                        }
+                    )
+                }
+            }
+            is CustomNotificationRoute.ContactPicker -> ContactPickerPage(
+                context = context,
+                request = currentRoute.request,
+                onBack = { route = CustomNotificationRoute.RuleList },
+                onConfirm = { picked ->
+                    if (picked.isEmpty()) {
+                        Toast.makeText(context, "未选择会话", Toast.LENGTH_SHORT).show()
+                        route = CustomNotificationRoute.RuleList
+                    } else {
+                        val byTalker = rules.associateBy { it.talker }.toMutableMap()
+                        var added = 0
+                        var updated = 0
+                        picked.forEach { option ->
+                            val old = byTalker[option.id]
+                            if (old == null) {
+                                added++
+                                byTalker[option.id] = customNotificationRuleFromContact(option)
+                            } else {
+                                updated++
+                                byTalker[option.id] = old.copy(
+                                    label = option.label,
+                                    group = option.group,
+                                    official = option.official
+                                )
+                            }
+                        }
+                        saveRules(byTalker.values.sortedWith(compareBy<CustomNotificationRule> { !it.enabled }.thenBy { it.label.lowercase(Locale.US) }))
+                        val message = when {
+                            added > 0 && updated > 0 -> "已添加 $added 个会话，更新 $updated 个会话"
+                            added > 0 -> "已添加 $added 个会话"
+                            else -> "已更新 $updated 个会话"
+                        }
+                        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+                        route = CustomNotificationRoute.RuleList
+                    }
+                }
+            )
+            is CustomNotificationRoute.GroupMemberPicker -> GroupMemberPickerPage(
+                context = context,
+                request = currentRoute.request,
+                onBack = { route = CustomNotificationRoute.RuleEditor(currentRoute.talker) },
+                onConfirm = { entries ->
+                    val talker = currentRoute.talker
+                    val memberValue = groupEntriesToMemberRules(talker, entries)
+                    val title = currentRoute.request.title
+                    rules.firstOrNull { it.talker == talker }?.let { old ->
+                        val nextRule = if (title.contains("屏蔽")) {
+                            old.copy(blockMembers = memberValue)
+                        } else {
+                            old.copy(onlyMembers = memberValue)
+                        }
+                        saveRules(rules.map { if (it.talker == talker) nextRule else it })
+                        Toast.makeText(context, "成员规则已保存", Toast.LENGTH_SHORT).show()
+                    }
+                    route = CustomNotificationRoute.RuleEditor(talker)
+                }
+            )
+        }
+    }
+}
+
+@Composable
+internal fun AutoReplyMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, AutoReplySettings.PREFS_NAME) }
+    val settings = remember { AutoReplySettings(context) }
+    var rules by remember { mutableStateOf(settings.rules()) }
+    var route by remember { mutableStateOf("main") }
+    var editingRuleId by remember { mutableStateOf<String?>(null) }
+    var editingRuleDraft by remember { mutableStateOf<AutoReplyRule?>(null) }
+    var editingSteps by remember { mutableStateOf<Pair<String, List<AutoReplyStep>>?>(null) }
+    val ruleListState = rememberLazyListState()
+    var ruleQuery by remember { mutableStateOf("") }
+    val ruleEditorListState = rememberLazyListState()
+    val autoAcceptListState = rememberLazyListState()
+    val greetAcceptedListState = rememberLazyListState()
+    val autoAcceptLabelListState = rememberLazyListState()
+    val greetAcceptedLabelListState = rememberLazyListState()
+    val autoAcceptAutomationKeys = remember {
+        AutoReplyFriendAutomationKeys(
+            AutoReplySettings.KEY_AUTO_ACCEPT_LABEL_NEW_FRIEND_ENABLE,
+            AutoReplySettings.KEY_AUTO_ACCEPT_LABEL_DATE_ENABLE,
+            AutoReplySettings.KEY_AUTO_ACCEPT_LABEL_DATE_FORMAT,
+            AutoReplySettings.KEY_AUTO_ACCEPT_LABEL_EXISTING_ENABLE,
+            AutoReplySettings.KEY_AUTO_ACCEPT_LABEL_SELECTED_NAMES,
+            AutoReplySettings.KEY_AUTO_ACCEPT_REMARK_NEW_FRIEND_ENABLE,
+            AutoReplySettings.KEY_AUTO_ACCEPT_REMARK_NICKNAME_SUFFIX_ENABLE,
+            AutoReplySettings.KEY_AUTO_ACCEPT_REMARK_DATE_ENABLE,
+            AutoReplySettings.KEY_AUTO_ACCEPT_REMARK_DATE_FORMAT,
+            AutoReplySettings.KEY_AUTO_ACCEPT_REMARK_CUSTOM_ENABLE,
+            AutoReplySettings.KEY_AUTO_ACCEPT_REMARK_CUSTOM_TEXT
+        )
+    }
+    val greetAcceptedAutomationKeys = remember {
+        AutoReplyFriendAutomationKeys(
+            AutoReplySettings.KEY_GREET_ACCEPTED_LABEL_NEW_FRIEND_ENABLE,
+            AutoReplySettings.KEY_GREET_ACCEPTED_LABEL_DATE_ENABLE,
+            AutoReplySettings.KEY_GREET_ACCEPTED_LABEL_DATE_FORMAT,
+            AutoReplySettings.KEY_GREET_ACCEPTED_LABEL_EXISTING_ENABLE,
+            AutoReplySettings.KEY_GREET_ACCEPTED_LABEL_SELECTED_NAMES,
+            AutoReplySettings.KEY_GREET_ACCEPTED_REMARK_NEW_FRIEND_ENABLE,
+            AutoReplySettings.KEY_GREET_ACCEPTED_REMARK_NICKNAME_SUFFIX_ENABLE,
+            AutoReplySettings.KEY_GREET_ACCEPTED_REMARK_DATE_ENABLE,
+            AutoReplySettings.KEY_GREET_ACCEPTED_REMARK_DATE_FORMAT,
+            AutoReplySettings.KEY_GREET_ACCEPTED_REMARK_CUSTOM_ENABLE,
+            AutoReplySettings.KEY_GREET_ACCEPTED_REMARK_CUSTOM_TEXT
+        )
+    }
+
+    fun saveRules(next: List<AutoReplyRule>) {
+        rules = next
+        settings.saveRules(next)
+    }
+
+    val autoReplyRoute = if (editingSteps != null) "steps" else route
+    SettingsRouteTransition(
+        targetState = autoReplyRoute,
+        label = "AutoReplyRouteTransition",
+        depthOf = { autoReplyRouteDepth(it) }
+    ) { currentRoute ->
+        when (currentRoute) {
+            "steps" -> {
+                val request = editingSteps ?: return@SettingsRouteTransition
+            AutoReplyStepsPage(
+                title = request.first,
+                initialSteps = request.second,
+                onBack = { editingSteps = null },
+                onSave = { steps ->
+                    when (route) {
+                        "autoAccept" -> settings.saveAutoAcceptSteps(steps)
+                        "greetAccepted" -> settings.saveGreetAcceptedSteps(steps)
+                        else -> {
+                            val id = editingRuleId
+                            if (id != null) {
+                                val updated = (editingRuleDraft ?: rules.firstOrNull { it.id == id })
+                                    ?.copy(steps = steps)
+                                if (updated != null) {
+                                    editingRuleDraft = updated
+                                    saveRules(rules.map { if (it.id == id) updated else it })
+                                }
+                            }
+                        }
+                    }
+                    Toast.makeText(context, "回复步骤已保存", Toast.LENGTH_SHORT).show()
+                    editingSteps = null
+                }
+            )
+            }
+        "rules" -> AutoReplyRuleListPage(
+            rules = rules,
+            query = ruleQuery,
+            onQueryChange = { ruleQuery = it },
+            listState = ruleListState,
+            onBack = { route = "main" },
+            onAdd = {
+                val rule = AutoReplyRule(
+                    id = System.currentTimeMillis().toString(),
+                    name = "规则 ${rules.size + 1}"
+                )
+                saveRules(rules + rule)
+                editingRuleId = rule.id
+                editingRuleDraft = rule
+                route = "ruleEditor"
+            },
+            onEdit = {
+                editingRuleId = it.id
+                editingRuleDraft = it
+                route = "ruleEditor"
+            },
+            onToggle = { rule, enabled -> saveRules(rules.map { if (it.id == rule.id) it.copy(enabled = enabled) else it }) },
+            onDelete = { rule ->
+                saveRules(rules.filterNot { it.id == rule.id })
+                Toast.makeText(context, "规则已删除", Toast.LENGTH_SHORT).show()
+            },
+            onBatchDelete = { targets ->
+                val targetIds = targets.mapTo(HashSet()) { it.id }
+                saveRules(rules.filterNot { it.id in targetIds })
+                Toast.makeText(context, "已删除 ${targets.size} 条规则", Toast.LENGTH_SHORT).show()
+            }
+        )
+        "ruleEditor" -> {
+            val rule = editingRuleDraft ?: rules.firstOrNull { it.id == editingRuleId }
+            if (rule == null) {
+                editingRuleDraft = null
+                route = "rules"
+            } else {
+                AutoReplyRuleEditorPage(
+                    rule = rule,
+                    listState = ruleEditorListState,
+                    onBack = {
+                        editingRuleDraft = null
+                        route = "rules"
+                    },
+                    onSave = { saved ->
+                        saveRules(rules.map { if (it.id == saved.id) saved else it })
+                        editingRuleDraft = null
+                        Toast.makeText(context, "规则已保存", Toast.LENGTH_SHORT).show()
+                        route = "rules"
+                    },
+                    onDraftChange = { editingRuleDraft = it },
+                    onEditSteps = { draft ->
+                        editingRuleDraft = draft
+                        editingSteps = "规则回复" to draft.steps
+                    }
+                )
+            }
+        }
+        "autoAccept" -> AutoReplyFriendPage(
+            context = context,
+            title = "好友请求处理",
+            sp = sp,
+            enabledKey = AutoReplySettings.KEY_AUTO_ACCEPT_ENABLE,
+            delayKey = AutoReplySettings.KEY_AUTO_ACCEPT_DELAY_MS,
+            tagEnabledKey = AutoReplySettings.KEY_AUTO_ACCEPT_TAG_ENABLE,
+            tagNameKey = AutoReplySettings.KEY_AUTO_ACCEPT_TAG_NAME,
+            steps = settings.autoAcceptSteps(),
+            listState = autoAcceptListState,
+            onBack = { route = "main" },
+            automationKeys = autoAcceptAutomationKeys,
+            onSelectLabels = { route = "autoAcceptLabels" },
+            onEditSteps = { editingSteps = "好友请求回复" to settings.autoAcceptSteps() }
+        )
+        "autoAcceptLabels" -> AutoReplyLabelPickerPage(
+            context = context,
+            sp = sp,
+            selectedKey = AutoReplySettings.KEY_AUTO_ACCEPT_LABEL_SELECTED_NAMES,
+            listState = autoAcceptLabelListState,
+            onBack = { route = "autoAccept" }
+        )
+        "greetAccepted" -> AutoReplyFriendPage(
+            context = context,
+            title = "通过后欢迎语",
+            sp = sp,
+            enabledKey = AutoReplySettings.KEY_GREET_ACCEPTED_ENABLE,
+            delayKey = AutoReplySettings.KEY_GREET_ACCEPTED_DELAY_MS,
+            tagEnabledKey = AutoReplySettings.KEY_GREET_ACCEPTED_TAG_ENABLE,
+            tagNameKey = AutoReplySettings.KEY_GREET_ACCEPTED_TAG_NAME,
+            steps = settings.greetAcceptedSteps(),
+            listState = greetAcceptedListState,
+            onBack = { route = "main" },
+            automationKeys = greetAcceptedAutomationKeys,
+            onSelectLabels = { route = "greetAcceptedLabels" },
+            onEditSteps = { editingSteps = "通过后欢迎语" to settings.greetAcceptedSteps() }
+        )
+        "greetAcceptedLabels" -> AutoReplyLabelPickerPage(
+            context = context,
+            sp = sp,
+            selectedKey = AutoReplySettings.KEY_GREET_ACCEPTED_LABEL_SELECTED_NAMES,
+            listState = greetAcceptedLabelListState,
+            onBack = { route = "greetAccepted" }
+        )
+        "ai" -> AutoReplyAiPage(context, sp, onBack = { route = "main" })
+        else -> AutoReplyMainPage(
+            provider = provider,
+            sp = sp,
+            rules = rules,
+            onBack = onBack,
+            onOpenRules = { route = "rules" },
+            onOpenAutoAccept = { route = "autoAccept" },
+            onOpenGreetAccepted = { route = "greetAccepted" },
+            onOpenAi = { route = "ai" }
+        )
+        }
+    }
+}

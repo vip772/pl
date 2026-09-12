@@ -540,6 +540,459 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.random.Random
 
+internal object ScheduledTaskFilePickerBridge {
+    private val hookedClasses = HashSet<Class<*>>()
+    private var onPicked: ((List<String>) -> Unit)? = null
+    private var currentActivity: Activity? = null
+
+    @Synchronized
+    fun launch(activity: Activity, taskType: Int, onResult: (List<String>) -> Unit) {
+        onPicked = onResult
+        currentActivity = activity
+        hookActivityResult(activity.javaClass)
+        hookActivityResult(Activity::class.java)
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }.preferSystemDocumentsUi(activity)
+        try {
+            activity.startActivityForResult(intent, SCHEDULED_TASK_FILE_REQUEST_CODE)
+        } catch (_: Throwable) {
+            val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            activity.startActivityForResult(
+                Intent.createChooser(fallback, scheduledTaskPickerTitle(taskType)),
+                SCHEDULED_TASK_FILE_REQUEST_CODE
+            )
+        }
+    }
+
+    @Synchronized
+    private fun hookActivityResult(clazz: Class<*>) {
+        if (hookedClasses.contains(clazz)) return
+        try {
+            XposedBridge.hookAllMethods(clazz, "onActivityResult", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val requestCode = param.args.getOrNull(0) as? Int ?: return
+                    if (requestCode != SCHEDULED_TASK_FILE_REQUEST_CODE) return
+                    val resultCode = param.args.getOrNull(1) as? Int ?: return
+                    if (resultCode != Activity.RESULT_OK) return
+                    val data = param.args.getOrNull(2) as? Intent ?: return
+                    val activity = currentActivity ?: return
+                    val paths = scheduledTaskPickedUris(data)
+                        .mapNotNull { uri ->
+                            scheduledTaskTakeReadPermission(activity, data, uri)
+                            copyScheduledTaskFileToCache(activity, uri)
+                        }
+                        .distinct()
+                    if (paths.isNotEmpty()) onPicked?.invoke(paths)
+                }
+            })
+            hookedClasses.add(clazz)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun scheduledTaskPickedUris(data: Intent): List<Uri> {
+        val result = ArrayList<Uri>()
+        data.data?.let { result.add(it) }
+        data.clipData?.let { clip ->
+            for (index in 0 until clip.itemCount) {
+                try {
+                    clip.getItemAt(index)?.uri?.let { result.add(it) }
+                } catch (_: Throwable) {
+                }
+            }
+        }
+        @Suppress("DEPRECATION")
+        (data.getParcelableExtra(Intent.EXTRA_STREAM) as? Uri)?.let { result.add(it) }
+        return result.distinct()
+    }
+
+    private fun scheduledTaskTakeReadPermission(activity: Activity, data: Intent, uri: Uri) {
+        if (uri.scheme != "content") return
+        try {
+            val flags = data.flags and
+                (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            if ((flags and Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0) return
+            activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun copyScheduledTaskFileToCache(context: Context, uri: Uri): String? {
+        if ("file".equals(uri.scheme, ignoreCase = true)) {
+            val path = uri.path.orEmpty()
+            if (path.isNotBlank() && File(path).isFile) return path
+        }
+        return try {
+            val name = safeScheduledTaskFileName(queryDisplayName(context, uri) ?: uri.lastPathSegment ?: "scheduled_task_file")
+            val dir = File(context.filesDir, "Hchat/scheduled_task").apply { mkdirs() }
+            val target = File(dir, "${System.currentTimeMillis()}_$name")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            } ?: return null
+            target.absolutePath.takeIf { target.isFile && target.length() > 0L }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun safeScheduledTaskFileName(value: String): String {
+        return value.replace(Regex("""[\\/:*?"<>|]"""), "_")
+            .trim()
+            .ifBlank { "scheduled_task_file" }
+    }
+}
+
+internal object AudioTransformDocumentBridge {
+    private val hookedClasses = HashSet<Class<*>>()
+    private var onInputPicked: ((String, String) -> Unit)? = null
+    private var onOutputPicked: ((Uri, String) -> Unit)? = null
+    private var currentActivity: Activity? = null
+
+    @Synchronized
+    fun launchInput(activity: Activity, onResult: (String, String) -> Unit) {
+        onInputPicked = onResult
+        currentActivity = activity
+        hookActivityResult(activity.javaClass)
+        hookActivityResult(Activity::class.java)
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }.preferSystemDocumentsUi(activity)
+        try {
+            activity.startActivityForResult(intent, AUDIO_TRANSFORM_INPUT_REQUEST_CODE)
+        } catch (_: Throwable) {
+            val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            activity.startActivityForResult(
+                Intent.createChooser(fallback, "选择音频文件"),
+                AUDIO_TRANSFORM_INPUT_REQUEST_CODE
+            )
+        }
+    }
+
+    @Synchronized
+    fun launchOutput(
+        activity: Activity,
+        suggestedFileName: String,
+        mimeType: String,
+        onResult: (Uri, String) -> Unit
+    ) {
+        onOutputPicked = onResult
+        currentActivity = activity
+        hookActivityResult(activity.javaClass)
+        hookActivityResult(Activity::class.java)
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = mimeType
+            putExtra(Intent.EXTRA_TITLE, suggestedFileName)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }.preferSystemDocumentsUi(activity)
+        try {
+            activity.startActivityForResult(intent, AUDIO_TRANSFORM_OUTPUT_REQUEST_CODE)
+        } catch (_: Throwable) {
+            Toast.makeText(activity, "当前系统不支持创建输出文件", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @Synchronized
+    private fun hookActivityResult(clazz: Class<*>) {
+        if (hookedClasses.contains(clazz)) return
+        try {
+            XposedBridge.hookAllMethods(clazz, "onActivityResult", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val requestCode = param.args.getOrNull(0) as? Int ?: return
+                    if (requestCode != AUDIO_TRANSFORM_INPUT_REQUEST_CODE &&
+                        requestCode != AUDIO_TRANSFORM_OUTPUT_REQUEST_CODE
+                    ) return
+                    val resultCode = param.args.getOrNull(1) as? Int ?: return
+                    if (resultCode != Activity.RESULT_OK) return
+                    val data = param.args.getOrNull(2) as? Intent ?: return
+                    val activity = currentActivity ?: return
+                    val uri = data.data ?: return
+                    if (requestCode == AUDIO_TRANSFORM_INPUT_REQUEST_CODE) {
+                        takeReadPermission(activity, data, uri)
+                        val copied = copyInputFileToCache(activity, uri) ?: return
+                        onInputPicked?.invoke(copied.first, copied.second)
+                    } else {
+                        val displayName = queryDisplayName(activity, uri)
+                            ?: uri.lastPathSegment
+                            ?.substringAfterLast('/')
+                            ?.substringAfterLast(':')
+                            .orEmpty()
+                        onOutputPicked?.invoke(uri, displayName.ifBlank { "output" })
+                    }
+                }
+            })
+            hookedClasses.add(clazz)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun takeReadPermission(activity: Activity, data: Intent, uri: Uri) {
+        if (uri.scheme != "content") return
+        try {
+            val flags = data.flags and
+                (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            if ((flags and Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0) return
+            activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: Throwable) {
+        }
+    }
+
+    private fun copyInputFileToCache(context: Context, uri: Uri): Pair<String, String>? {
+        if ("file".equals(uri.scheme, ignoreCase = true)) {
+            val path = uri.path.orEmpty()
+            if (path.isNotBlank() && File(path).isFile) {
+                val name = File(path).name.ifBlank { "audio_input" }
+                return path to name
+            }
+        }
+        return try {
+            val name = safeAudioTransformFileName(queryDisplayName(context, uri) ?: uri.lastPathSegment ?: "audio_input")
+            val dir = File(context.filesDir, "Hchat/audio_transform/input").apply { mkdirs() }
+            val target = File(dir, "${System.currentTimeMillis()}_$name")
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                target.outputStream().use { output -> input.copyTo(output) }
+            } ?: return null
+            if (!target.isFile || target.length() <= 0L) return null
+            target.absolutePath to name
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun safeAudioTransformFileName(value: String): String {
+        return value.replace(Regex("""[\\/:*?"<>|]"""), "_")
+            .trim()
+            .ifBlank { "audio_input" }
+    }
+}
+
+internal object ScriptPluginDocumentBridge {
+    private val hookedClasses = HashSet<Class<*>>()
+    private var exportCallback: ((Uri) -> Unit)? = null
+    private var importCallback: ((Uri) -> Unit)? = null
+    private var exportOwner: WeakReference<Activity>? = null
+    private var importOwner: WeakReference<Activity>? = null
+
+    @Synchronized
+    fun launchExport(activity: Activity, fileName: String, onPicked: (Uri) -> Unit) {
+        if (exportCallback != null) {
+            Toast.makeText(activity, "已有导出文件选择正在进行", Toast.LENGTH_SHORT).show()
+            return
+        }
+        exportCallback = onPicked
+        exportOwner = WeakReference(activity)
+        hookActivityResult(activity.javaClass)
+        hookActivityResult(Activity::class.java)
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/zip"
+            putExtra(Intent.EXTRA_TITLE, fileName)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }.preferSystemDocumentsUi(activity)
+        try {
+            activity.startActivityForResult(intent, SCRIPT_PLUGIN_EXPORT_REQUEST_CODE)
+        } catch (_: Throwable) {
+            exportCallback = null
+            exportOwner = null
+            Toast.makeText(activity, "当前系统不支持创建 ZIP 文件", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @Synchronized
+    fun launchImport(activity: Activity, onPicked: (Uri) -> Unit) {
+        if (importCallback != null) {
+            Toast.makeText(activity, "已有导入文件选择正在进行", Toast.LENGTH_SHORT).show()
+            return
+        }
+        importCallback = onPicked
+        importOwner = WeakReference(activity)
+        hookActivityResult(activity.javaClass)
+        hookActivityResult(Activity::class.java)
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(
+                Intent.EXTRA_MIME_TYPES,
+                arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream")
+            )
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+        }.preferSystemDocumentsUi(activity)
+        try {
+            activity.startActivityForResult(intent, SCRIPT_PLUGIN_IMPORT_REQUEST_CODE)
+        } catch (_: Throwable) {
+            val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            try {
+                activity.startActivityForResult(
+                    Intent.createChooser(fallback, "选择插件 ZIP 文件"),
+                    SCRIPT_PLUGIN_IMPORT_REQUEST_CODE
+                )
+            } catch (_: Throwable) {
+                importCallback = null
+                importOwner = null
+                Toast.makeText(activity, "当前系统不支持选择 ZIP 文件", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    @Synchronized
+    private fun hookActivityResult(clazz: Class<*>) {
+        if (hookedClasses.contains(clazz)) return
+        try {
+            XposedBridge.hookAllMethods(clazz, "onActivityResult", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val requestCode = param.args.getOrNull(0) as? Int ?: return
+                    if (requestCode != SCRIPT_PLUGIN_EXPORT_REQUEST_CODE &&
+                        requestCode != SCRIPT_PLUGIN_IMPORT_REQUEST_CODE
+                    ) {
+                        return
+                    }
+                    val owner = param.thisObject as? Activity ?: return
+                    val callback = synchronized(this@ScriptPluginDocumentBridge) {
+                        if (requestCode == SCRIPT_PLUGIN_EXPORT_REQUEST_CODE) {
+                            val matches = exportOwner?.get() === owner
+                            exportCallback.takeIf { matches }.also {
+                                exportCallback = null
+                                exportOwner = null
+                            }
+                        } else {
+                            val matches = importOwner?.get() === owner
+                            importCallback.takeIf { matches }.also {
+                                importCallback = null
+                                importOwner = null
+                            }
+                        }
+                    } ?: return
+                    val resultCode = param.args.getOrNull(1) as? Int ?: return
+                    if (resultCode != Activity.RESULT_OK) return
+                    val data = param.args.getOrNull(2) as? Intent ?: return
+                    val uri = data.data ?: return
+                    if (requestCode == SCRIPT_PLUGIN_IMPORT_REQUEST_CODE && uri.scheme == "content") {
+                        runCatching {
+                            val flags = data.flags and
+                                (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                            if ((flags and Intent.FLAG_GRANT_READ_URI_PERMISSION) != 0) {
+                                owner.contentResolver.takePersistableUriPermission(
+                                    uri,
+                                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                )
+                            }
+                        }
+                    }
+                    callback(uri)
+                }
+            })
+            hookedClasses.add(clazz)
+        } catch (_: Throwable) {
+        }
+    }
+}
+
+internal object ConfigImportExportBridge {
+    private val hookedClasses = HashSet<Class<*>>()
+    private var onImported: (() -> Unit)? = null
+    private var currentActivity: Activity? = null
+
+    @Synchronized
+    fun launchExport(activity: Activity) {
+        currentActivity = activity
+        hookActivityResult(activity.javaClass)
+        hookActivityResult(Activity::class.java)
+        val fileName = "Hchat_config_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".json"
+        val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/json"
+            putExtra(Intent.EXTRA_TITLE, fileName)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+        }.preferSystemDocumentsUi(activity)
+        try {
+            activity.startActivityForResult(intent, CONFIG_EXPORT_REQUEST_CODE)
+        } catch (_: Throwable) {
+            Toast.makeText(activity, "当前系统不支持创建配置文件", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    @Synchronized
+    fun launchImport(activity: Activity, onDone: () -> Unit) {
+        onImported = onDone
+        currentActivity = activity
+        hookActivityResult(activity.javaClass)
+        hookActivityResult(Activity::class.java)
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }.preferSystemDocumentsUi(activity)
+        try {
+            activity.startActivityForResult(intent, CONFIG_IMPORT_REQUEST_CODE)
+        } catch (_: Throwable) {
+            val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                type = "*/*"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            activity.startActivityForResult(Intent.createChooser(fallback, "选择 Hchat 配置文件"), CONFIG_IMPORT_REQUEST_CODE)
+        }
+    }
+
+    @Synchronized
+    private fun hookActivityResult(clazz: Class<*>) {
+        if (hookedClasses.contains(clazz)) return
+        try {
+            XposedBridge.hookAllMethods(clazz, "onActivityResult", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val requestCode = param.args.getOrNull(0) as? Int ?: return
+                    if (requestCode != CONFIG_EXPORT_REQUEST_CODE && requestCode != CONFIG_IMPORT_REQUEST_CODE) return
+                    val resultCode = param.args.getOrNull(1) as? Int ?: return
+                    if (resultCode != Activity.RESULT_OK) return
+                    val data = param.args.getOrNull(2) as? Intent ?: return
+                    val uri = data.data ?: return
+                    val activity = currentActivity ?: return
+                    if (requestCode == CONFIG_EXPORT_REQUEST_CODE) {
+                        val count = HchatConfigBackup.exportToUri(activity, uri)
+                        if (count > 0) {
+                            Toast.makeText(activity, "已导出 $count 项配置", Toast.LENGTH_SHORT).show()
+                        } else {
+                            Toast.makeText(activity, "导出失败", Toast.LENGTH_SHORT).show()
+                        }
+                    } else {
+                        val count = HchatConfigBackup.importFromUri(activity, uri)
+                        if (count > 0) {
+                            onImported?.invoke()
+                            Toast.makeText(activity, "已导入 $count 项配置，当前设置页已刷新", Toast.LENGTH_LONG).show()
+                        } else {
+                            Toast.makeText(activity, "导入失败或文件无配置", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            })
+            hookedClasses.add(clazz)
+        } catch (_: Throwable) {
+        }
+    }
+}
+
 internal object HchatConfigBackup {
     private const val VERSION = 1
     private const val TYPE_BOOLEAN = "boolean"
@@ -1653,7 +2106,7 @@ internal data class TemplateVariable(
     val label: String
 )
 
-private sealed class DetailPage {
+internal sealed class DetailPage {
     object Search : DetailPage()
     object RuntimeLog : DetailPage()
     data class FeatureGroup(val group: FeatureGroupEntry) : DetailPage()
@@ -1930,861 +2383,3 @@ internal fun featureSubSearchTerms(featureId: String): List<String> {
         else -> emptyList()
     }
 }
-
-internal fun filterPluginSearchResults(
-    query: String,
-    plugins: List<ScriptPluginRuntime.ScriptPlugin>
-): List<ScriptPluginRuntime.ScriptPlugin> {
-    val keyword = query.trim()
-    if (keyword.isEmpty()) return emptyList()
-    return plugins.filter { plugin ->
-        containsSearchText(plugin.displayName.orEmpty(), keyword) ||
-            containsSearchText(plugin.name, keyword) ||
-            containsSearchText(plugin.id, keyword) ||
-            containsSearchText(plugin.dir.name, keyword) ||
-            containsSearchText(plugin.author, keyword) ||
-            containsSearchText(plugin.version, keyword)
-    }
-}
-
-internal fun containsSearchText(text: String, query: String): Boolean {
-    return text.contains(query, ignoreCase = true)
-}
-
-internal fun readSearchHistory(sp: SharedPreferences): List<String> {
-    val raw = sp.getString(KEY_SEARCH_HISTORY, "").orEmpty()
-    if (raw.isBlank()) return emptyList()
-    return runCatching {
-        val array = JSONArray(raw)
-        buildList {
-            for (index in 0 until array.length()) {
-                val keyword = array.optString(index).trim()
-                if (keyword.isNotEmpty() && keyword !in this) add(keyword)
-                if (size >= SEARCH_HISTORY_LIMIT) break
-            }
-        }
-    }.getOrDefault(emptyList())
-}
-
-internal fun saveSearchHistory(sp: SharedPreferences, history: List<String>) {
-    val array = JSONArray()
-    history.take(SEARCH_HISTORY_LIMIT).forEach { array.put(it) }
-    sp.edit().putString(KEY_SEARCH_HISTORY, array.toString()).apply()
-}
-
-internal fun rememberSearchKeyword(sp: SharedPreferences, keyword: String): List<String> {
-    val value = keyword.trim()
-    if (value.isBlank()) return readSearchHistory(sp)
-    val next = (listOf(value) + readSearchHistory(sp).filterNot { it.equals(value, ignoreCase = true) })
-        .take(SEARCH_HISTORY_LIMIT)
-    saveSearchHistory(sp, next)
-    return next
-}
-
-private sealed class FeatureSubRoute {
-    object Main : FeatureSubRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : FeatureSubRoute()
-    data class OptionPicker(val request: OptionPickerRequest) : FeatureSubRoute()
-}
-
-private sealed class MomentsAutoLikeRoute {
-    object Main : MomentsAutoLikeRoute()
-    data class ContactPicker(val listMode: Int, val request: ContactPickerRequest) : MomentsAutoLikeRoute()
-}
-
-private sealed class AtAllNotificationBlockRoute {
-    object Main : AtAllNotificationBlockRoute()
-    data class GroupPicker(val request: ContactPickerRequest) : AtAllNotificationBlockRoute()
-}
-
-private sealed class MomentsAutoCommentRoute {
-    object Main : MomentsAutoCommentRoute()
-    data class ContactPicker(val listMode: Int, val request: ContactPickerRequest) : MomentsAutoCommentRoute()
-}
-
-private sealed class MomentsAutoForwardRoute {
-    object Main : MomentsAutoForwardRoute()
-    object ReplacementRules : MomentsAutoForwardRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : MomentsAutoForwardRoute()
-}
-
-private sealed class MomentsContactFilterRoute {
-    object Main : MomentsContactFilterRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : MomentsContactFilterRoute()
-}
-
-private sealed class MomentsPostNotificationRoute {
-    object Main : MomentsPostNotificationRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : MomentsPostNotificationRoute()
-}
-
-private sealed class RedPacketRoute {
-    object Main : RedPacketRoute()
-    object TemplateManager : RedPacketRoute()
-    object ListManager : RedPacketRoute()
-    object ReplySteps : RedPacketRoute()
-    data class TemplateEditor(val request: RedPacketTemplateEditorRequest) : RedPacketRoute()
-    data class BindingEditor(val request: RedPacketBindingEditorRequest) : RedPacketRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : RedPacketRoute()
-    data class RuleContactPicker(val request: MessageBlockContactPickerRequest) : RedPacketRoute()
-    data class OptionPicker(val request: OptionPickerRequest) : RedPacketRoute()
-}
-
-private sealed class AutoTransferRoute {
-    object Main : AutoTransferRoute()
-    object TemplateManager : AutoTransferRoute()
-    object BindingManager : AutoTransferRoute()
-    object BatchApply : AutoTransferRoute()
-    data class GlobalReplySteps(val target: TransferReplyTarget) : AutoTransferRoute()
-    data class TemplateEditor(val request: TransferTemplateEditorRequest) : AutoTransferRoute()
-    data class BindingEditor(val request: TransferBindingEditorRequest) : AutoTransferRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : AutoTransferRoute()
-}
-
-internal enum class TransferReplyTarget {
-    PRIVATE,
-    GROUP
-}
-
-private sealed class MessageBlockRoute {
-    object Main : MessageBlockRoute()
-    object TemplateManager : MessageBlockRoute()
-    object ListManager : MessageBlockRoute()
-    data class DefaultRuleEditor(val kind: MessageBlockDefaultRuleKind) : MessageBlockRoute()
-    data class TemplateEditor(val request: MessageBlockTemplateEditorRequest) : MessageBlockRoute()
-    data class BindingEditor(val request: MessageBlockBindingEditorRequest) : MessageBlockRoute()
-    data class BatchBindingEditor(val request: MessageBlockBatchBindingEditorRequest) : MessageBlockRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : MessageBlockRoute()
-    data class GroupMemberPicker(val request: GroupMemberPickerRequest) : MessageBlockRoute()
-}
-
-private sealed class GroupLeaveRoute {
-    object Main : GroupLeaveRoute()
-    object GroupManager : GroupLeaveRoute()
-    object TemplateManager : GroupLeaveRoute()
-    object BatchTemplateBinding : GroupLeaveRoute()
-    data class TemplateEditor(val request: GroupLeaveTemplateEditorRequest) : GroupLeaveRoute()
-    data class GroupEditor(val groupId: String, val label: String) : GroupLeaveRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : GroupLeaveRoute()
-    data class FavoritePicker(val request: FavoritePickerRequest) : GroupLeaveRoute()
-}
-
-private sealed class GroupChatLabelRoute {
-    object Main : GroupChatLabelRoute()
-    data class Editor(val label: GroupChatLabel, val existing: Boolean) : GroupChatLabelRoute()
-    data class GroupPicker(val label: GroupChatLabel, val existing: Boolean) : GroupChatLabelRoute()
-}
-
-private sealed class ConversationGroupRoute {
-    object Main : ConversationGroupRoute()
-    data class Editor(val group: ConversationGroup, val existing: Boolean) : ConversationGroupRoute()
-    data class ConversationPicker(val group: ConversationGroup, val existing: Boolean) : ConversationGroupRoute()
-    data class ParentPicker(val group: ConversationGroup, val existing: Boolean) : ConversationGroupRoute()
-    data class AutomaticGrouping(val group: ConversationGroup) : ConversationGroupRoute()
-    data class AutomaticPicker(
-        val group: ConversationGroup,
-        val kind: ConversationGroupAutomaticPickerKind
-    ) : ConversationGroupRoute()
-}
-
-internal enum class ConversationGroupAutomaticPickerKind(
-    val title: String,
-    val emptyText: String
-) {
-    GROUPS("选择自动归拢群聊", "没有可选群聊"),
-    OFFICIAL_INCLUDE("选择要包含的公众号", "没有可选公众号"),
-    OFFICIAL_EXCLUDE("选择要排除的公众号", "没有可选公众号")
-}
-
-private sealed class GroupRenameRoute {
-    object Main : GroupRenameRoute()
-    object GroupManager : GroupRenameRoute()
-    object TemplateManager : GroupRenameRoute()
-    object BatchTemplateBinding : GroupRenameRoute()
-    data class GroupEditor(val groupId: String, val label: String) : GroupRenameRoute()
-    data class TemplateEditor(val index: Int, val template: GroupRenameReplyTemplate, val canDelete: Boolean) : GroupRenameRoute()
-    data class ContactPicker(val request: ContactPickerRequest, val fromMain: Boolean = false) : GroupRenameRoute()
-}
-
-private sealed class ScheduledTaskRoute {
-    object Main : ScheduledTaskRoute()
-    object Editor : ScheduledTaskRoute()
-    object ContactPicker : ScheduledTaskRoute()
-    data class FavoritePicker(val index: Int, val request: FavoritePickerRequest) : ScheduledTaskRoute()
-}
-
-private sealed class SelectedMessagesRoute {
-    object Main : SelectedMessagesRoute()
-    object Editor : SelectedMessagesRoute()
-    object ContactPicker : SelectedMessagesRoute()
-    data class FavoritePicker(val request: FavoritePickerRequest) : SelectedMessagesRoute()
-}
-
-private sealed class AudioTransformRoute {
-    object Main : AudioTransformRoute()
-    object ContactPicker : AudioTransformRoute()
-}
-
-private sealed class CustomNotificationRoute {
-    object Main : CustomNotificationRoute()
-    object RuleList : CustomNotificationRoute()
-    object BatchEditor : CustomNotificationRoute()
-    data class DefaultEditor(val kind: CustomNotificationDefaultKind) : CustomNotificationRoute()
-    data class RuleEditor(val talker: String) : CustomNotificationRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : CustomNotificationRoute()
-    data class GroupMemberPicker(val talker: String, val request: GroupMemberPickerRequest) : CustomNotificationRoute()
-}
-
-private sealed class KeywordNotificationRoute {
-    object Main : KeywordNotificationRoute()
-    object KeywordList : KeywordNotificationRoute()
-    object TemplateEditor : KeywordNotificationRoute()
-    data class KeywordEditor(val oldKeyword: String?) : KeywordNotificationRoute()
-    data class ContactPicker(val request: ContactPickerRequest, val includeMode: Boolean) : KeywordNotificationRoute()
-}
-
-private sealed class TextSpeechRoute {
-    object Main : TextSpeechRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : TextSpeechRoute()
-}
-
-internal enum class MessageBlockDefaultRuleKind {
-    PRIVATE,
-    GROUP,
-    OFFICIAL
-}
-
-internal enum class CustomNotificationDefaultKind {
-    PRIVATE,
-    GROUP,
-    OFFICIAL
-}
-
-internal data class AutoReplyFriendAutomationKeys(
-    val labelNewFriendEnable: String,
-    val labelDateEnable: String,
-    val labelDateFormat: String,
-    val labelExistingEnable: String,
-    val labelSelectedNames: String,
-    val remarkNewFriendEnable: String,
-    val remarkNicknameSuffixEnable: String,
-    val remarkDateEnable: String,
-    val remarkDateFormat: String,
-    val remarkCustomEnable: String,
-    val remarkCustomText: String
-)
-
-private sealed class AutoReplyEditorRoute {
-    object Main : AutoReplyEditorRoute()
-    data class OptionPicker(val request: OptionPickerRequest) : AutoReplyEditorRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : AutoReplyEditorRoute()
-    data class GroupMemberPicker(val request: GroupMemberPickerRequest) : AutoReplyEditorRoute()
-}
-
-private sealed class AutoReplyStepsRoute {
-    object Main : AutoReplyStepsRoute()
-    data class OptionPicker(val request: OptionPickerRequest) : AutoReplyStepsRoute()
-    data class ContactPicker(val request: ContactPickerRequest) : AutoReplyStepsRoute()
-    data class FavoritePicker(val request: FavoritePickerRequest) : AutoReplyStepsRoute()
-}
-
-private sealed class AutoReplyAiRoute {
-    object Main : AutoReplyAiRoute()
-    object Xiaozhi : AutoReplyAiRoute()
-    object Zhilia : AutoReplyAiRoute()
-    object ZhiliaConfigs : AutoReplyAiRoute()
-    object ZhiliaModels : AutoReplyAiRoute()
-    data class OptionPicker(val request: OptionPickerRequest) : AutoReplyAiRoute()
-}
-
-private sealed class RedPacketReplyStepsRoute {
-    object Main : RedPacketReplyStepsRoute()
-    data class StepEditor(val index: Int) : RedPacketReplyStepsRoute()
-    data class FavoritePicker(val request: FavoritePickerRequest) : RedPacketReplyStepsRoute()
-}
-
-private sealed class MessageBlockContactPickerRoute {
-    object Labels : MessageBlockContactPickerRoute()
-    data class Contacts(
-        val filter: MessageBlockContactFilter,
-        val label: MessageBlockLabelOption?
-    ) : MessageBlockContactPickerRoute()
-}
-
-private sealed class GroupMemberPickerRoute {
-    object Groups : GroupMemberPickerRoute()
-    data class Members(val group: ContactOption) : GroupMemberPickerRoute()
-}
-
-internal fun FeatureSubRoute.depth(): Int = when (this) {
-    FeatureSubRoute.Main -> 0
-    is FeatureSubRoute.ContactPicker,
-    is FeatureSubRoute.OptionPicker -> 1
-}
-
-internal fun RedPacketRoute.depth(): Int = when (this) {
-    RedPacketRoute.Main -> 0
-    RedPacketRoute.TemplateManager,
-    RedPacketRoute.ListManager,
-    RedPacketRoute.ReplySteps,
-    is RedPacketRoute.ContactPicker,
-    is RedPacketRoute.OptionPicker -> 1
-    is RedPacketRoute.TemplateEditor,
-    is RedPacketRoute.BindingEditor,
-    is RedPacketRoute.RuleContactPicker -> 2
-}
-
-internal fun AutoTransferRoute.depth(): Int = when (this) {
-    AutoTransferRoute.Main -> 0
-    AutoTransferRoute.TemplateManager,
-    AutoTransferRoute.BindingManager,
-    AutoTransferRoute.BatchApply,
-    is AutoTransferRoute.GlobalReplySteps,
-    is AutoTransferRoute.ContactPicker -> 1
-    is AutoTransferRoute.TemplateEditor,
-    is AutoTransferRoute.BindingEditor -> 2
-}
-
-internal fun MessageBlockRoute.depth(): Int = when (this) {
-    MessageBlockRoute.Main -> 0
-    MessageBlockRoute.TemplateManager,
-    is MessageBlockRoute.DefaultRuleEditor,
-    MessageBlockRoute.ListManager -> 1
-    is MessageBlockRoute.TemplateEditor,
-    is MessageBlockRoute.BindingEditor,
-    is MessageBlockRoute.BatchBindingEditor,
-    is MessageBlockRoute.ContactPicker,
-    is MessageBlockRoute.GroupMemberPicker -> 2
-}
-
-internal fun GroupLeaveRoute.depth(): Int = when (this) {
-    GroupLeaveRoute.Main -> 0
-    GroupLeaveRoute.GroupManager,
-    GroupLeaveRoute.TemplateManager,
-    GroupLeaveRoute.BatchTemplateBinding,
-    is GroupLeaveRoute.ContactPicker,
-    is GroupLeaveRoute.FavoritePicker -> 1
-    is GroupLeaveRoute.TemplateEditor,
-    is GroupLeaveRoute.GroupEditor -> 2
-}
-
-internal fun ScheduledTaskRoute.depth(): Int = when (this) {
-    ScheduledTaskRoute.Main -> 0
-    ScheduledTaskRoute.Editor -> 1
-    ScheduledTaskRoute.ContactPicker,
-    is ScheduledTaskRoute.FavoritePicker -> 2
-}
-
-internal fun SelectedMessagesRoute.depth(): Int = when (this) {
-    SelectedMessagesRoute.Main -> 0
-    SelectedMessagesRoute.Editor -> 1
-    SelectedMessagesRoute.ContactPicker,
-    is SelectedMessagesRoute.FavoritePicker -> 2
-}
-
-internal fun AudioTransformRoute.depth(): Int = when (this) {
-    AudioTransformRoute.Main -> 0
-    AudioTransformRoute.ContactPicker -> 1
-}
-
-internal fun CustomNotificationRoute.depth(): Int = when (this) {
-    CustomNotificationRoute.Main -> 0
-    CustomNotificationRoute.RuleList,
-    is CustomNotificationRoute.DefaultEditor,
-    is CustomNotificationRoute.ContactPicker -> 1
-    CustomNotificationRoute.BatchEditor,
-    is CustomNotificationRoute.RuleEditor,
-    is CustomNotificationRoute.GroupMemberPicker -> 2
-}
-
-internal fun KeywordNotificationRoute.depth(): Int = when (this) {
-    KeywordNotificationRoute.Main -> 0
-    KeywordNotificationRoute.KeywordList,
-    KeywordNotificationRoute.TemplateEditor,
-    is KeywordNotificationRoute.ContactPicker -> 1
-    is KeywordNotificationRoute.KeywordEditor -> 2
-}
-
-internal fun TextSpeechRoute.depth(): Int = when (this) {
-    TextSpeechRoute.Main -> 0
-    is TextSpeechRoute.ContactPicker -> 1
-}
-
-internal fun autoReplyRouteDepth(route: String): Int = when (route) {
-    "main" -> 0
-    "rules",
-    "autoAccept",
-    "greetAccepted",
-    "ai" -> 1
-    "ruleEditor",
-    "steps",
-    "autoAcceptLabels",
-    "greetAcceptedLabels" -> 2
-    else -> 0
-}
-
-internal fun AutoReplyEditorRoute.depth(): Int = when (this) {
-    AutoReplyEditorRoute.Main -> 0
-    is AutoReplyEditorRoute.OptionPicker,
-    is AutoReplyEditorRoute.ContactPicker,
-    is AutoReplyEditorRoute.GroupMemberPicker -> 1
-}
-
-internal fun AutoReplyStepsRoute.depth(): Int = when (this) {
-    AutoReplyStepsRoute.Main -> 0
-    is AutoReplyStepsRoute.OptionPicker,
-    is AutoReplyStepsRoute.ContactPicker,
-    is AutoReplyStepsRoute.FavoritePicker -> 1
-}
-
-internal fun AutoReplyAiRoute.depth(): Int = when (this) {
-    AutoReplyAiRoute.Main -> 0
-    AutoReplyAiRoute.Xiaozhi,
-    AutoReplyAiRoute.Zhilia -> 1
-    AutoReplyAiRoute.ZhiliaConfigs,
-    AutoReplyAiRoute.ZhiliaModels,
-    is AutoReplyAiRoute.OptionPicker -> 2
-}
-
-internal fun RedPacketReplyStepsRoute.depth(): Int = when (this) {
-    RedPacketReplyStepsRoute.Main -> 0
-    is RedPacketReplyStepsRoute.StepEditor -> 1
-    is RedPacketReplyStepsRoute.FavoritePicker -> 2
-}
-
-internal fun MessageBlockContactPickerRoute.depth(): Int = when (this) {
-    MessageBlockContactPickerRoute.Labels -> 0
-    is MessageBlockContactPickerRoute.Contacts -> if (label == null) 0 else 1
-}
-
-internal fun GroupMemberPickerRoute.depth(): Int = when (this) {
-    GroupMemberPickerRoute.Groups -> 0
-    is GroupMemberPickerRoute.Members -> 1
-}
-
-@OptIn(ExperimentalAnimationApi::class)
-@Composable
-internal fun <T> SettingsRouteTransition(
-    targetState: T,
-    modifier: Modifier = Modifier.fillMaxSize(),
-    label: String,
-    depthOf: (T) -> Int,
-    horizontalOnSameDepth: Boolean = true,
-    content: @Composable (T) -> Unit
-) {
-    AnimatedContent(
-        targetState = targetState,
-        transitionSpec = {
-            val initialDepth = depthOf(initialState)
-            val targetDepth = depthOf(targetState)
-            if (!horizontalOnSameDepth && initialDepth == targetDepth) {
-                fadeIn(animationSpec = tween(120)) togetherWith
-                    fadeOut(animationSpec = tween(90))
-            } else {
-                val forward = targetDepth >= initialDepth
-                val enter = slideInHorizontally(
-                    animationSpec = tween(240),
-                    initialOffsetX = { width -> if (forward) width else -width / 4 }
-                ) + fadeIn(animationSpec = tween(160))
-                val exit = slideOutHorizontally(
-                    animationSpec = tween(220),
-                    targetOffsetX = { width -> if (forward) -width / 4 else width }
-                ) + fadeOut(animationSpec = tween(140))
-                enter togetherWith exit
-            }
-        },
-        modifier = modifier.background(MiuixTheme.colorScheme.background),
-        label = label
-    ) { route ->
-        content(route)
-    }
-}
-
-@Composable
-internal fun MainNavigationBar(
-    selectedTab: MainTab,
-    floating: Boolean,
-    glass: Boolean,
-    backdrop: Backdrop,
-    onSelected: (MainTab) -> Unit
-) {
-    val items = remember {
-        listOf(
-            MainNavItem(MainTab.PRACTICAL, "实用", NavIcons.Practical),
-            MainNavItem(MainTab.ENTERTAINMENT, "娱乐", NavIcons.Entertainment),
-            MainNavItem(MainTab.PLUGIN, "插件", NavIcons.Modules),
-            MainNavItem(MainTab.SETTINGS, "设置", NavIcons.Settings)
-        )
-    }
-    val selectedIndex = items.indexOfFirst { it.tab == selectedTab }.coerceAtLeast(0)
-    val contentColor = MiuixTheme.colorScheme.onSurface
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(bottom = if (floating) 12.dp else 4.dp),
-        contentAlignment = Alignment.BottomCenter
-    ) {
-        FloatingBottomBar(
-            selectedIndex = selectedIndex,
-            onSelected = { index -> onSelected(items[index].tab) },
-            backdrop = backdrop,
-            tabsCount = items.size,
-            isBlurEnabled = glass,
-            floating = floating
-        ) { selectTab ->
-            items.forEachIndexed { index, item ->
-                val selected = index == selectedIndex
-                FloatingBottomBarItem(
-                    onClick = { selectTab(index) },
-                    modifier = Modifier.defaultMinSize(minWidth = 76.dp)
-                ) {
-                    Image(
-                        imageVector = item.icon,
-                        contentDescription = item.label,
-                        colorFilter = ColorFilter.tint(contentColor),
-                        modifier = Modifier.size(26.dp)
-                    )
-                    Text(
-                        text = item.label,
-                        color = contentColor,
-                        fontSize = 11.sp,
-                        lineHeight = 14.sp,
-                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun FeatureSettingsPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit,
-    onOpenScriptPluginAgent: () -> Unit = {},
-    onOpenScriptPluginMarket: () -> Unit = {},
-    onOpenScriptPluginManager: () -> Unit = {}
-) {
-    when (provider.featureId()) {
-        AutoRedPacketFeature.ID -> RedPacketMiuixPage(context, provider, onBack)
-        AutoTransferFeature.ID -> AutoTransferMiuixPage(context, provider, onBack)
-        FakeWalletBalanceFeature.ID -> FakeWalletBalanceMiuixPage(context, provider, onBack)
-        RealNameTailFeature.ID -> RealNameTailMiuixPage(context, provider, onBack)
-        GroupNicknameColorSettings.FEATURE_ID -> GroupNicknameColorMiuixPage(context, provider, onBack)
-        MemberTitleFeature.ID -> MemberTitleMiuixPage(context, provider, onBack)
-        AntiRecallFeature.ID -> AntiRecallMiuixPage(context, provider, onBack)
-        MultiRecallFeature.ID -> MultiRecallMiuixPage(context, provider, onBack)
-        MessageForwardFeature.ID -> MessageForwardMiuixPage(context, provider, onBack)
-        SelectedMessagesFeature.ID -> SelectedMessagesMiuixPage(context, provider, onBack)
-        CallMediaLimitFeature.ID -> CallMediaLimitMiuixPage(context, provider, onBack)
-        CallRingtoneBlockFeature.ID -> CallRingtoneBlockMiuixPage(context, provider, onBack)
-        DisableHotUpdateFeature.ID -> DisableHotUpdateMiuixPage(context, provider, onBack)
-        ProfileIdFeature.ID -> ProfileIdMiuixPage(context, provider, onBack)
-        QuickContactEditFeature.ID -> QuickContactEditMiuixPage(context, provider, onBack)
-        QuickGroupChatLabelFeature.ID -> QuickGroupChatLabelMiuixPage(context, provider, onBack)
-        QuickMomentsFeature.ID -> QuickMomentsMiuixPage(context, provider, onBack)
-        QuickTerminateFeature.ID -> QuickTerminateMiuixPage(context, provider, onBack)
-        HideChatMenuFeature.ID -> HideChatMenuMiuixPage(context, provider, onBack)
-        MessageAffixFeature.ID -> MessageAffixMiuixPage(context, provider, onBack)
-        TypingReportBlockFeature.ID -> TypingReportBlockMiuixPage(context, provider, onBack)
-        PatBlockFeature.ID -> PatBlockMiuixPage(context, provider, onBack)
-        AutoOriginalImageFeature.ID -> AutoOriginalImageMiuixPage(context, provider, onBack)
-        AutoViewOriginalFeature.ID -> AutoViewOriginalMiuixPage(context, provider, onBack)
-        RemoveForwardLimitFeature.ID -> RemoveForwardLimitMiuixPage(context, provider, onBack)
-        AtAllNotificationBlockFeature.ID -> AtAllNotificationBlockMiuixPage(context, provider, onBack)
-        SettingsFeature.ID -> SettingsEntryMiuixPage(context, provider, onBack)
-        PluginAgentEntryProvider.ID -> PluginAgentEntryMiuixPage(context, provider, onBack)
-        SpecialMessageFeature.ID -> SpecialMessageMiuixPage(context, onBack)
-        FloatingShortcutFeature.ID -> FloatingShortcutMiuixPage(context, provider, onBack)
-        FloatingChatHeaderFeature.ID -> FloatingChatToggleMiuixPage(context, provider, onBack)
-        FloatingChatFooterFeature.ID -> FloatingChatToggleMiuixPage(context, provider, onBack)
-        MessageDetailsSettingsProvider.FEATURE_ID -> MessageDetailsConfigPage(
-            context = context,
-            sp = HchatStorage.preferences(context, HchatExtraSettings.PREFS_NAME),
-            onBack = onBack
-        )
-        GroupMemberHistorySettingsProvider.FEATURE_ID -> HchatExtraToggleMiuixPage(
-            context = context,
-            provider = provider,
-            key = HchatExtraSettings.KEY_GROUP_MEMBER_HISTORY,
-            defaultValue = HchatExtraSettings.DEFAULT_GROUP_MEMBER_HISTORY,
-            summary = "在群成员资料页添加历史发言记录入口",
-            onBack = onBack
-        )
-        RedPacketDetailsSettingsProvider.FEATURE_ID -> HchatExtraToggleMiuixPage(
-            context = context,
-            provider = provider,
-            key = HchatExtraSettings.KEY_RED_PACKET_DETAILS,
-            defaultValue = HchatExtraSettings.DEFAULT_RED_PACKET_DETAILS,
-            summary = "红包详情页显示金额、个数和领取时间",
-            onBack = onBack
-        )
-        SkipWebRiskSettingsProvider.FEATURE_ID -> HchatExtraToggleMiuixPage(
-            context = context,
-            provider = provider,
-            key = HchatExtraSettings.KEY_SKIP_WEB_RISK,
-            defaultValue = HchatExtraSettings.DEFAULT_SKIP_WEB_RISK,
-            summary = "跳过微信 WebView 高风险网页拦截提示",
-            onBack = onBack
-        )
-        QuickMarkReadFeature.ID -> QuickMarkReadMiuixPage(context, provider, onBack)
-        AutoReplyFeature.ID -> AutoReplyMiuixPage(context, provider, onBack)
-        AutoMessageForwardFeature.ID -> AutoMessageForwardMiuixPage(context, provider, onBack)
-        ConversationGroupFeature.ID -> ConversationGroupMiuixPage(context, provider, onBack)
-        CustomNotificationFeature.ID -> CustomNotificationMiuixPage(context, provider, onBack)
-        KeywordNotificationFeature.ID -> KeywordNotificationMiuixPage(context, provider, onBack)
-        TextSpeechFeature.ID -> TextSpeechMiuixPage(context, provider, onBack)
-        ZombieCheckFeature.ID -> ZombieCheckMiuixPage(context, provider, onBack)
-        QQMusicOrderFeature.ID -> QQMusicOrderMiuixPage(context, provider, onBack)
-        WeChatKeepAliveFeature.ID -> WeChatKeepAliveMiuixPage(context, provider, onBack)
-        QuoteDeleteClearFeature.ID -> QuoteDeleteClearMiuixPage(context, provider, onBack)
-        EmojiSaveFeature.ID -> EmojiSaveMiuixPage(context, provider, onBack)
-        SwipeQuoteFeature.ID -> SwipeQuoteMiuixPage(context, provider, onBack)
-        AudioTransformFeature.ID -> AudioTransformSettingsPage(context, provider, onBack)
-        TextVoiceFeature.ID -> TextVoiceMiuixPage(context, provider, onBack)
-        FakeVoiceDurationFeature.ID -> FakeVoiceDurationMiuixPage(context, provider, onBack)
-        VoicePreviewFeature.ID -> VoicePreviewMiuixPage(context, provider, onBack)
-        FakeMiniProgramBaseLibFeature.ID -> FakeMiniProgramBaseLibMiuixPage(context, provider, onBack)
-        SkipMiniProgramVideoAdsFeature.ID -> SkipMiniProgramVideoAdsMiuixPage(context, provider, onBack)
-        SkipGlobalMiniProgramSplashAdsFeature.ID -> SkipGlobalMiniProgramSplashAdsMiuixPage(context, provider, onBack)
-        FakeLocationFeature.ID -> FakeLocationMiuixPage(context, provider, onBack)
-        GameEmojiFeature.ID -> GameEmojiMiuixPage(context, provider, onBack)
-        MessageBubbleFeature.ID -> MessageBubbleMiuixPage(context, provider, onBack)
-        BackgroundBeautyFeature.ID -> BackgroundBeautyMiuixPage(context, provider, onBack)
-        MessageTextColorFeature.ID -> MessageTextColorMiuixPage(context, provider, onBack)
-        HomeTextColorFeature.ID -> HomeTextColorMiuixPage(context, provider, onBack)
-        ChatTimeStyleFeature.ID -> ChatTimeStyleMiuixPage(context, provider, onBack)
-        InputHintFeature.ID -> InputHintMiuixPage(context, provider, onBack)
-        HideChatAvatarFeature.ID -> HideChatAvatarMiuixPage(context, provider, onBack)
-        CustomBottomBarFeature.ID -> CustomBottomBarMiuixPage(context, provider, onBack)
-        FloatingBottomBarSettings.FEATURE_ID -> FloatingBottomBarMiuixPage(context, provider, onBack)
-        RoundAvatarFeature.ID -> RoundAvatarMiuixPage(context, provider, onBack)
-        CustomFriendAvatarFeature.ID -> CustomFriendAvatarMiuixPage(context, provider, onBack)
-        MessageBlockFeature.ID -> MessageBlockMiuixPage(context, provider, onBack)
-        GroupChatLabelFeature.ID -> GroupChatLabelMiuixPage(context, provider, onBack)
-        GroupLeaveMonitorFeature.ID -> GroupLeaveMonitorMiuixPage(context, provider, onBack)
-        GroupRenameMonitorFeature.ID -> GroupRenameMonitorMiuixPage(context, provider, onBack)
-        MomentsAutoLikeFeature.ID -> MomentsAutoLikeMiuixPage(context, provider, onBack)
-        MomentsAutoCommentFeature.ID -> MomentsAutoCommentPage(context, provider, onBack)
-        MomentsAutoForwardFeature.ID -> MomentsAutoForwardMiuixPage(context, provider, onBack)
-        MomentsAutoRefreshFeature.ID -> MomentsAutoRefreshMiuixPage(context, provider, onBack)
-        MomentsContactFilterFeature.ID -> MomentsContactFilterMiuixPage(context, provider, onBack)
-        MomentsKeywordBlockFeature.ID -> MomentsKeywordBlockMiuixPage(context, provider, onBack)
-        MomentsBottomDetailFeature.ID -> MomentsBottomDetailMiuixPage(context, provider, onBack)
-        MomentsPostNotificationFeature.ID -> MomentsPostNotificationMiuixPage(context, provider, onBack)
-        OriginalMomentsUploadFeature.ID -> OriginalMomentsUploadMiuixPage(context, provider, onBack)
-        MomentsUploadTailFeature.ID -> MomentsUploadTailMiuixPage(context, provider, onBack)
-        SnsAntiRecallFeature.ID -> SnsAntiRecallMiuixPage(context, provider, onBack)
-        MomentsFakeLikeSettingsProvider.ID,
-        MomentsFakeCommentSettingsProvider.ID,
-        MomentsFakeForwardSettingsProvider.ID -> MomentsFakeInteractionMiuixPage(context, provider, onBack)
-        RemoveMomentsAdsFeature.ID -> RemoveMomentsAdsMiuixPage(context, provider, onBack)
-        EditMessageFeature.ID -> EditMessageMiuixPage(context, provider, onBack)
-        VoiceForwardFeature.ID -> VoiceForwardMiuixPage(context, provider, onBack)
-        ScheduledTaskFeature.ID -> ScheduledTaskMiuixPage(context, provider, onBack)
-        FakeScanCameraFeature.ID -> FakeScanCameraMiuixPage(context, provider, onBack)
-        FinderMediaDownloadFeature.ID -> FinderMediaDownloadMiuixPage(context, provider, onBack)
-        ProtobufPacketFeature.ID -> ProtobufPacketMiuixPage(context, provider, onBack)
-        CrashReportSettingsProvider.ID -> CrashReportMiuixPage(context, provider, onBack)
-        StatusTextLimitFeature.ID -> StatusTextLimitMiuixPage(context, provider, onBack)
-        ScriptPluginFeature.ID -> ScriptPluginMiuixPage(
-            context,
-            provider,
-            onBack,
-            onOpenScriptPluginMarket,
-            onOpenScriptPluginAgent,
-            onOpenScriptPluginManager
-        )
-        WeChatTabletFeature.ID -> WeChatTabletMiuixPage(context, provider, onBack)
-        else -> UnsupportedFeaturePage(provider, onBack)
-    }
-}
-
-@Composable
-internal fun MultiRecallMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, MultiRecallSettings.PREFS_NAME) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar("返回", onBack)
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "聊天消息") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        sp,
-                        MultiRecallSettings.KEY_ENABLE,
-                        "多选撤回",
-                        "在多选消息的分享菜单中显示批量撤回",
-                        MultiRecallSettings.DEFAULT_ENABLE
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun SelectedMessagesMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, SelectedMessagesSettings.PREFS_NAME) }
-    var route by remember { mutableStateOf<SelectedMessagesRoute>(SelectedMessagesRoute.Main) }
-    var draft by remember {
-        mutableStateOf(
-            ScheduledTaskSettings.newDraft().copy(
-                type = ScheduledTaskSettings.TYPE_IMAGE,
-                items = listOf(ScheduledTaskContentItem(ScheduledTaskSettings.TYPE_IMAGE, "")),
-                intervalSeconds = SelectedMessagesSettings.sendIntervalSeconds(context),
-                mediaIntervalSeconds = SelectedMessagesSettings.sendIntervalSeconds(context)
-            )
-        )
-    }
-    var channel by remember { mutableStateOf(SelectedMessagesRuntimeCoordinator.CHANNEL_MODULE) }
-    val mainListState = rememberLazyListState()
-    val editorListState = rememberLazyListState()
-
-    fun validationError(): String? {
-        return SelectedMessagesRuntimeCoordinator.validationError(
-            channel,
-            scheduledTaskEditableItems(draft)
-        )
-    }
-
-    fun openContactPicker() {
-        validationError()?.let {
-            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
-            return
-        }
-        route = SelectedMessagesRoute.ContactPicker
-    }
-
-    fun startSend() {
-        val error = validationError() ?: if (draft.targetIds.isEmpty()) "请选择群发对象" else null
-        if (error != null) {
-            Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-            return
-        }
-        val activity = context as? Activity
-        if (activity == null) {
-            Toast.makeText(context, "当前页面无法启动群发", Toast.LENGTH_SHORT).show()
-            return
-        }
-        SelectedMessagesRuntimeCoordinator.sendCustom(
-            activity = activity,
-            channel = channel,
-            items = scheduledTaskEditableItems(draft),
-            targetIds = draft.targetIds,
-            targetIntervalSeconds = draft.intervalSeconds,
-            itemIntervalSeconds = draft.mediaIntervalSeconds
-        )
-    }
-
-    SettingsRouteTransition(
-        targetState = route,
-        label = "SelectedMessagesRoute",
-        depthOf = { it.depth() }
-    ) { currentRoute ->
-        when (currentRoute) {
-            SelectedMessagesRoute.Main -> {
-                SelectedMessagesMainPage(
-                    provider = provider,
-                    sp = sp,
-                    listState = mainListState,
-                    onBack = onBack,
-                    onCompose = { route = SelectedMessagesRoute.Editor }
-                )
-            }
-            SelectedMessagesRoute.Editor -> {
-                SelectedMessagesCustomEditorPage(
-                    draft = draft,
-                    channel = channel,
-                    listState = editorListState,
-                    onBack = { route = SelectedMessagesRoute.Main },
-                    onDraftChange = { draft = it },
-                    onChannelChange = { next ->
-                        if (next != channel) {
-                            channel = next
-                            draft = draft.copy(targetIds = emptyList())
-                        }
-                    },
-                    onPickTargets = ::openContactPicker,
-                    onPickFiles = { itemIndex, itemType ->
-                        val activity = context as? Activity
-                        if (activity == null) {
-                            Toast.makeText(context, "当前页面无法打开文件选择器", Toast.LENGTH_SHORT).show()
-                        } else {
-                            ScheduledTaskFilePickerBridge.launch(activity, itemType) { paths ->
-                                draft = updateScheduledTaskMediaItem(draft, itemIndex, itemType, paths)
-                            }
-                        }
-                    },
-                    onPickFavorite = { itemIndex ->
-                        scheduledTaskEditableItems(draft).getOrNull(itemIndex)?.let { item ->
-                            route = SelectedMessagesRoute.FavoritePicker(
-                                FavoritePickerRequest(
-                                    title = scheduledTaskPickerTitle(item.type),
-                                    existingValue = item.value,
-                                    onValue = { value ->
-                                        draft = updateScheduledTaskContentItemValue(draft, itemIndex, value)
-                                    },
-                                    multiSelect = false,
-                                    delimiter = "|"
-                                )
-                            )
-                        }
-                    },
-                    onSend = ::startSend
-                )
-            }
-            SelectedMessagesRoute.ContactPicker -> {
-                val official = channel == SelectedMessagesRuntimeCoordinator.CHANNEL_OFFICIAL
-                ContactPickerPage(
-                    context = context,
-                    request = ContactPickerRequest(
-                        title = if (official) "选择官方群发好友" else "选择群发对象",
-                        mode = if (official) ContactPickerMode.FRIENDS else ContactPickerMode.ALL_CHATS,
-                        multiSelect = true,
-                        existingValue = formatIds(draft.targetIds),
-                        onValue = {},
-                        enableLabels = true
-                    ),
-                    onBack = { route = SelectedMessagesRoute.Editor },
-                    onConfirm = { selected ->
-                        draft = draft.copy(targetIds = selected.map { it.id })
-                        route = SelectedMessagesRoute.Editor
-                    }
-                )
-            }
-            is SelectedMessagesRoute.FavoritePicker -> {
-                FavoritePickerPage(
-                    request = currentRoute.request,
-                    onBack = { route = SelectedMessagesRoute.Editor }
-                )
-            }
-        }
-    }
-}
-
-@Composable

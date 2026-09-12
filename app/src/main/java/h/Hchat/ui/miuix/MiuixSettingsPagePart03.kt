@@ -540,6 +540,863 @@ import java.util.concurrent.atomic.AtomicReference
 import kotlin.math.abs
 import kotlin.random.Random
 
+internal fun filterPluginSearchResults(
+    query: String,
+    plugins: List<ScriptPluginRuntime.ScriptPlugin>
+): List<ScriptPluginRuntime.ScriptPlugin> {
+    val keyword = query.trim()
+    if (keyword.isEmpty()) return emptyList()
+    return plugins.filter { plugin ->
+        containsSearchText(plugin.displayName.orEmpty(), keyword) ||
+            containsSearchText(plugin.name, keyword) ||
+            containsSearchText(plugin.id, keyword) ||
+            containsSearchText(plugin.dir.name, keyword) ||
+            containsSearchText(plugin.author, keyword) ||
+            containsSearchText(plugin.version, keyword)
+    }
+}
+
+internal fun containsSearchText(text: String, query: String): Boolean {
+    return text.contains(query, ignoreCase = true)
+}
+
+internal fun readSearchHistory(sp: SharedPreferences): List<String> {
+    val raw = sp.getString(KEY_SEARCH_HISTORY, "").orEmpty()
+    if (raw.isBlank()) return emptyList()
+    return runCatching {
+        val array = JSONArray(raw)
+        buildList {
+            for (index in 0 until array.length()) {
+                val keyword = array.optString(index).trim()
+                if (keyword.isNotEmpty() && keyword !in this) add(keyword)
+                if (size >= SEARCH_HISTORY_LIMIT) break
+            }
+        }
+    }.getOrDefault(emptyList())
+}
+
+internal fun saveSearchHistory(sp: SharedPreferences, history: List<String>) {
+    val array = JSONArray()
+    history.take(SEARCH_HISTORY_LIMIT).forEach { array.put(it) }
+    sp.edit().putString(KEY_SEARCH_HISTORY, array.toString()).apply()
+}
+
+internal fun rememberSearchKeyword(sp: SharedPreferences, keyword: String): List<String> {
+    val value = keyword.trim()
+    if (value.isBlank()) return readSearchHistory(sp)
+    val next = (listOf(value) + readSearchHistory(sp).filterNot { it.equals(value, ignoreCase = true) })
+        .take(SEARCH_HISTORY_LIMIT)
+    saveSearchHistory(sp, next)
+    return next
+}
+
+internal sealed class FeatureSubRoute {
+    object Main : FeatureSubRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : FeatureSubRoute()
+    data class OptionPicker(val request: OptionPickerRequest) : FeatureSubRoute()
+}
+
+internal sealed class MomentsAutoLikeRoute {
+    object Main : MomentsAutoLikeRoute()
+    data class ContactPicker(val listMode: Int, val request: ContactPickerRequest) : MomentsAutoLikeRoute()
+}
+
+internal sealed class AtAllNotificationBlockRoute {
+    object Main : AtAllNotificationBlockRoute()
+    data class GroupPicker(val request: ContactPickerRequest) : AtAllNotificationBlockRoute()
+}
+
+internal sealed class MomentsAutoCommentRoute {
+    object Main : MomentsAutoCommentRoute()
+    data class ContactPicker(val listMode: Int, val request: ContactPickerRequest) : MomentsAutoCommentRoute()
+}
+
+internal sealed class MomentsAutoForwardRoute {
+    object Main : MomentsAutoForwardRoute()
+    object ReplacementRules : MomentsAutoForwardRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : MomentsAutoForwardRoute()
+}
+
+internal sealed class MomentsContactFilterRoute {
+    object Main : MomentsContactFilterRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : MomentsContactFilterRoute()
+}
+
+internal sealed class MomentsPostNotificationRoute {
+    object Main : MomentsPostNotificationRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : MomentsPostNotificationRoute()
+}
+
+internal sealed class RedPacketRoute {
+    object Main : RedPacketRoute()
+    object TemplateManager : RedPacketRoute()
+    object ListManager : RedPacketRoute()
+    object ReplySteps : RedPacketRoute()
+    data class TemplateEditor(val request: RedPacketTemplateEditorRequest) : RedPacketRoute()
+    data class BindingEditor(val request: RedPacketBindingEditorRequest) : RedPacketRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : RedPacketRoute()
+    data class RuleContactPicker(val request: MessageBlockContactPickerRequest) : RedPacketRoute()
+    data class OptionPicker(val request: OptionPickerRequest) : RedPacketRoute()
+}
+
+internal sealed class AutoTransferRoute {
+    object Main : AutoTransferRoute()
+    object TemplateManager : AutoTransferRoute()
+    object BindingManager : AutoTransferRoute()
+    object BatchApply : AutoTransferRoute()
+    data class GlobalReplySteps(val target: TransferReplyTarget) : AutoTransferRoute()
+    data class TemplateEditor(val request: TransferTemplateEditorRequest) : AutoTransferRoute()
+    data class BindingEditor(val request: TransferBindingEditorRequest) : AutoTransferRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : AutoTransferRoute()
+}
+
+internal enum class TransferReplyTarget {
+    PRIVATE,
+    GROUP
+}
+
+internal sealed class MessageBlockRoute {
+    object Main : MessageBlockRoute()
+    object TemplateManager : MessageBlockRoute()
+    object ListManager : MessageBlockRoute()
+    data class DefaultRuleEditor(val kind: MessageBlockDefaultRuleKind) : MessageBlockRoute()
+    data class TemplateEditor(val request: MessageBlockTemplateEditorRequest) : MessageBlockRoute()
+    data class BindingEditor(val request: MessageBlockBindingEditorRequest) : MessageBlockRoute()
+    data class BatchBindingEditor(val request: MessageBlockBatchBindingEditorRequest) : MessageBlockRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : MessageBlockRoute()
+    data class GroupMemberPicker(val request: GroupMemberPickerRequest) : MessageBlockRoute()
+}
+
+internal sealed class GroupLeaveRoute {
+    object Main : GroupLeaveRoute()
+    object GroupManager : GroupLeaveRoute()
+    object TemplateManager : GroupLeaveRoute()
+    object BatchTemplateBinding : GroupLeaveRoute()
+    data class TemplateEditor(val request: GroupLeaveTemplateEditorRequest) : GroupLeaveRoute()
+    data class GroupEditor(val groupId: String, val label: String) : GroupLeaveRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : GroupLeaveRoute()
+    data class FavoritePicker(val request: FavoritePickerRequest) : GroupLeaveRoute()
+}
+
+internal sealed class GroupChatLabelRoute {
+    object Main : GroupChatLabelRoute()
+    data class Editor(val label: GroupChatLabel, val existing: Boolean) : GroupChatLabelRoute()
+    data class GroupPicker(val label: GroupChatLabel, val existing: Boolean) : GroupChatLabelRoute()
+}
+
+internal sealed class ConversationGroupRoute {
+    object Main : ConversationGroupRoute()
+    data class Editor(val group: ConversationGroup, val existing: Boolean) : ConversationGroupRoute()
+    data class ConversationPicker(val group: ConversationGroup, val existing: Boolean) : ConversationGroupRoute()
+    data class ParentPicker(val group: ConversationGroup, val existing: Boolean) : ConversationGroupRoute()
+    data class AutomaticGrouping(val group: ConversationGroup) : ConversationGroupRoute()
+    data class AutomaticPicker(
+        val group: ConversationGroup,
+        val kind: ConversationGroupAutomaticPickerKind
+    ) : ConversationGroupRoute()
+}
+
+internal enum class ConversationGroupAutomaticPickerKind(
+    val title: String,
+    val emptyText: String
+) {
+    GROUPS("选择自动归拢群聊", "没有可选群聊"),
+    OFFICIAL_INCLUDE("选择要包含的公众号", "没有可选公众号"),
+    OFFICIAL_EXCLUDE("选择要排除的公众号", "没有可选公众号")
+}
+
+internal sealed class GroupRenameRoute {
+    object Main : GroupRenameRoute()
+    object GroupManager : GroupRenameRoute()
+    object TemplateManager : GroupRenameRoute()
+    object BatchTemplateBinding : GroupRenameRoute()
+    data class GroupEditor(val groupId: String, val label: String) : GroupRenameRoute()
+    data class TemplateEditor(val index: Int, val template: GroupRenameReplyTemplate, val canDelete: Boolean) : GroupRenameRoute()
+    data class ContactPicker(val request: ContactPickerRequest, val fromMain: Boolean = false) : GroupRenameRoute()
+}
+
+internal sealed class ScheduledTaskRoute {
+    object Main : ScheduledTaskRoute()
+    object Editor : ScheduledTaskRoute()
+    object ContactPicker : ScheduledTaskRoute()
+    data class FavoritePicker(val index: Int, val request: FavoritePickerRequest) : ScheduledTaskRoute()
+}
+
+internal sealed class SelectedMessagesRoute {
+    object Main : SelectedMessagesRoute()
+    object Editor : SelectedMessagesRoute()
+    object ContactPicker : SelectedMessagesRoute()
+    data class FavoritePicker(val request: FavoritePickerRequest) : SelectedMessagesRoute()
+}
+
+internal sealed class AudioTransformRoute {
+    object Main : AudioTransformRoute()
+    object ContactPicker : AudioTransformRoute()
+}
+
+internal sealed class CustomNotificationRoute {
+    object Main : CustomNotificationRoute()
+    object RuleList : CustomNotificationRoute()
+    object BatchEditor : CustomNotificationRoute()
+    data class DefaultEditor(val kind: CustomNotificationDefaultKind) : CustomNotificationRoute()
+    data class RuleEditor(val talker: String) : CustomNotificationRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : CustomNotificationRoute()
+    data class GroupMemberPicker(val talker: String, val request: GroupMemberPickerRequest) : CustomNotificationRoute()
+}
+
+internal sealed class KeywordNotificationRoute {
+    object Main : KeywordNotificationRoute()
+    object KeywordList : KeywordNotificationRoute()
+    object TemplateEditor : KeywordNotificationRoute()
+    data class KeywordEditor(val oldKeyword: String?) : KeywordNotificationRoute()
+    data class ContactPicker(val request: ContactPickerRequest, val includeMode: Boolean) : KeywordNotificationRoute()
+}
+
+internal sealed class TextSpeechRoute {
+    object Main : TextSpeechRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : TextSpeechRoute()
+}
+
+internal enum class MessageBlockDefaultRuleKind {
+    PRIVATE,
+    GROUP,
+    OFFICIAL
+}
+
+internal enum class CustomNotificationDefaultKind {
+    PRIVATE,
+    GROUP,
+    OFFICIAL
+}
+
+internal data class AutoReplyFriendAutomationKeys(
+    val labelNewFriendEnable: String,
+    val labelDateEnable: String,
+    val labelDateFormat: String,
+    val labelExistingEnable: String,
+    val labelSelectedNames: String,
+    val remarkNewFriendEnable: String,
+    val remarkNicknameSuffixEnable: String,
+    val remarkDateEnable: String,
+    val remarkDateFormat: String,
+    val remarkCustomEnable: String,
+    val remarkCustomText: String
+)
+
+internal sealed class AutoReplyEditorRoute {
+    object Main : AutoReplyEditorRoute()
+    data class OptionPicker(val request: OptionPickerRequest) : AutoReplyEditorRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : AutoReplyEditorRoute()
+    data class GroupMemberPicker(val request: GroupMemberPickerRequest) : AutoReplyEditorRoute()
+}
+
+internal sealed class AutoReplyStepsRoute {
+    object Main : AutoReplyStepsRoute()
+    data class OptionPicker(val request: OptionPickerRequest) : AutoReplyStepsRoute()
+    data class ContactPicker(val request: ContactPickerRequest) : AutoReplyStepsRoute()
+    data class FavoritePicker(val request: FavoritePickerRequest) : AutoReplyStepsRoute()
+}
+
+internal sealed class AutoReplyAiRoute {
+    object Main : AutoReplyAiRoute()
+    object Xiaozhi : AutoReplyAiRoute()
+    object Zhilia : AutoReplyAiRoute()
+    object ZhiliaConfigs : AutoReplyAiRoute()
+    object ZhiliaModels : AutoReplyAiRoute()
+    data class OptionPicker(val request: OptionPickerRequest) : AutoReplyAiRoute()
+}
+
+internal sealed class RedPacketReplyStepsRoute {
+    object Main : RedPacketReplyStepsRoute()
+    data class StepEditor(val index: Int) : RedPacketReplyStepsRoute()
+    data class FavoritePicker(val request: FavoritePickerRequest) : RedPacketReplyStepsRoute()
+}
+
+internal sealed class MessageBlockContactPickerRoute {
+    object Labels : MessageBlockContactPickerRoute()
+    data class Contacts(
+        val filter: MessageBlockContactFilter,
+        val label: MessageBlockLabelOption?
+    ) : MessageBlockContactPickerRoute()
+}
+
+internal sealed class GroupMemberPickerRoute {
+    object Groups : GroupMemberPickerRoute()
+    data class Members(val group: ContactOption) : GroupMemberPickerRoute()
+}
+
+internal fun FeatureSubRoute.depth(): Int = when (this) {
+    FeatureSubRoute.Main -> 0
+    is FeatureSubRoute.ContactPicker,
+    is FeatureSubRoute.OptionPicker -> 1
+}
+
+internal fun RedPacketRoute.depth(): Int = when (this) {
+    RedPacketRoute.Main -> 0
+    RedPacketRoute.TemplateManager,
+    RedPacketRoute.ListManager,
+    RedPacketRoute.ReplySteps,
+    is RedPacketRoute.ContactPicker,
+    is RedPacketRoute.OptionPicker -> 1
+    is RedPacketRoute.TemplateEditor,
+    is RedPacketRoute.BindingEditor,
+    is RedPacketRoute.RuleContactPicker -> 2
+}
+
+internal fun AutoTransferRoute.depth(): Int = when (this) {
+    AutoTransferRoute.Main -> 0
+    AutoTransferRoute.TemplateManager,
+    AutoTransferRoute.BindingManager,
+    AutoTransferRoute.BatchApply,
+    is AutoTransferRoute.GlobalReplySteps,
+    is AutoTransferRoute.ContactPicker -> 1
+    is AutoTransferRoute.TemplateEditor,
+    is AutoTransferRoute.BindingEditor -> 2
+}
+
+internal fun MessageBlockRoute.depth(): Int = when (this) {
+    MessageBlockRoute.Main -> 0
+    MessageBlockRoute.TemplateManager,
+    is MessageBlockRoute.DefaultRuleEditor,
+    MessageBlockRoute.ListManager -> 1
+    is MessageBlockRoute.TemplateEditor,
+    is MessageBlockRoute.BindingEditor,
+    is MessageBlockRoute.BatchBindingEditor,
+    is MessageBlockRoute.ContactPicker,
+    is MessageBlockRoute.GroupMemberPicker -> 2
+}
+
+internal fun GroupLeaveRoute.depth(): Int = when (this) {
+    GroupLeaveRoute.Main -> 0
+    GroupLeaveRoute.GroupManager,
+    GroupLeaveRoute.TemplateManager,
+    GroupLeaveRoute.BatchTemplateBinding,
+    is GroupLeaveRoute.ContactPicker,
+    is GroupLeaveRoute.FavoritePicker -> 1
+    is GroupLeaveRoute.TemplateEditor,
+    is GroupLeaveRoute.GroupEditor -> 2
+}
+
+internal fun ScheduledTaskRoute.depth(): Int = when (this) {
+    ScheduledTaskRoute.Main -> 0
+    ScheduledTaskRoute.Editor -> 1
+    ScheduledTaskRoute.ContactPicker,
+    is ScheduledTaskRoute.FavoritePicker -> 2
+}
+
+internal fun SelectedMessagesRoute.depth(): Int = when (this) {
+    SelectedMessagesRoute.Main -> 0
+    SelectedMessagesRoute.Editor -> 1
+    SelectedMessagesRoute.ContactPicker,
+    is SelectedMessagesRoute.FavoritePicker -> 2
+}
+
+internal fun AudioTransformRoute.depth(): Int = when (this) {
+    AudioTransformRoute.Main -> 0
+    AudioTransformRoute.ContactPicker -> 1
+}
+
+internal fun CustomNotificationRoute.depth(): Int = when (this) {
+    CustomNotificationRoute.Main -> 0
+    CustomNotificationRoute.RuleList,
+    is CustomNotificationRoute.DefaultEditor,
+    is CustomNotificationRoute.ContactPicker -> 1
+    CustomNotificationRoute.BatchEditor,
+    is CustomNotificationRoute.RuleEditor,
+    is CustomNotificationRoute.GroupMemberPicker -> 2
+}
+
+internal fun KeywordNotificationRoute.depth(): Int = when (this) {
+    KeywordNotificationRoute.Main -> 0
+    KeywordNotificationRoute.KeywordList,
+    KeywordNotificationRoute.TemplateEditor,
+    is KeywordNotificationRoute.ContactPicker -> 1
+    is KeywordNotificationRoute.KeywordEditor -> 2
+}
+
+internal fun TextSpeechRoute.depth(): Int = when (this) {
+    TextSpeechRoute.Main -> 0
+    is TextSpeechRoute.ContactPicker -> 1
+}
+
+internal fun autoReplyRouteDepth(route: String): Int = when (route) {
+    "main" -> 0
+    "rules",
+    "autoAccept",
+    "greetAccepted",
+    "ai" -> 1
+    "ruleEditor",
+    "steps",
+    "autoAcceptLabels",
+    "greetAcceptedLabels" -> 2
+    else -> 0
+}
+
+internal fun AutoReplyEditorRoute.depth(): Int = when (this) {
+    AutoReplyEditorRoute.Main -> 0
+    is AutoReplyEditorRoute.OptionPicker,
+    is AutoReplyEditorRoute.ContactPicker,
+    is AutoReplyEditorRoute.GroupMemberPicker -> 1
+}
+
+internal fun AutoReplyStepsRoute.depth(): Int = when (this) {
+    AutoReplyStepsRoute.Main -> 0
+    is AutoReplyStepsRoute.OptionPicker,
+    is AutoReplyStepsRoute.ContactPicker,
+    is AutoReplyStepsRoute.FavoritePicker -> 1
+}
+
+internal fun AutoReplyAiRoute.depth(): Int = when (this) {
+    AutoReplyAiRoute.Main -> 0
+    AutoReplyAiRoute.Xiaozhi,
+    AutoReplyAiRoute.Zhilia -> 1
+    AutoReplyAiRoute.ZhiliaConfigs,
+    AutoReplyAiRoute.ZhiliaModels,
+    is AutoReplyAiRoute.OptionPicker -> 2
+}
+
+internal fun RedPacketReplyStepsRoute.depth(): Int = when (this) {
+    RedPacketReplyStepsRoute.Main -> 0
+    is RedPacketReplyStepsRoute.StepEditor -> 1
+    is RedPacketReplyStepsRoute.FavoritePicker -> 2
+}
+
+internal fun MessageBlockContactPickerRoute.depth(): Int = when (this) {
+    MessageBlockContactPickerRoute.Labels -> 0
+    is MessageBlockContactPickerRoute.Contacts -> if (label == null) 0 else 1
+}
+
+internal fun GroupMemberPickerRoute.depth(): Int = when (this) {
+    GroupMemberPickerRoute.Groups -> 0
+    is GroupMemberPickerRoute.Members -> 1
+}
+
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+internal fun <T> SettingsRouteTransition(
+    targetState: T,
+    modifier: Modifier = Modifier.fillMaxSize(),
+    label: String,
+    depthOf: (T) -> Int,
+    horizontalOnSameDepth: Boolean = true,
+    content: @Composable (T) -> Unit
+) {
+    AnimatedContent(
+        targetState = targetState,
+        transitionSpec = {
+            val initialDepth = depthOf(initialState)
+            val targetDepth = depthOf(targetState)
+            if (!horizontalOnSameDepth && initialDepth == targetDepth) {
+                fadeIn(animationSpec = tween(120)) togetherWith
+                    fadeOut(animationSpec = tween(90))
+            } else {
+                val forward = targetDepth >= initialDepth
+                val enter = slideInHorizontally(
+                    animationSpec = tween(240),
+                    initialOffsetX = { width -> if (forward) width else -width / 4 }
+                ) + fadeIn(animationSpec = tween(160))
+                val exit = slideOutHorizontally(
+                    animationSpec = tween(220),
+                    targetOffsetX = { width -> if (forward) -width / 4 else width }
+                ) + fadeOut(animationSpec = tween(140))
+                enter togetherWith exit
+            }
+        },
+        modifier = modifier.background(MiuixTheme.colorScheme.background),
+        label = label
+    ) { route ->
+        content(route)
+    }
+}
+
+@Composable
+internal fun MainNavigationBar(
+    selectedTab: MainTab,
+    floating: Boolean,
+    glass: Boolean,
+    backdrop: Backdrop,
+    onSelected: (MainTab) -> Unit
+) {
+    val items = remember {
+        listOf(
+            MainNavItem(MainTab.PRACTICAL, "实用", NavIcons.Practical),
+            MainNavItem(MainTab.ENTERTAINMENT, "娱乐", NavIcons.Entertainment),
+            MainNavItem(MainTab.PLUGIN, "插件", NavIcons.Modules),
+            MainNavItem(MainTab.SETTINGS, "设置", NavIcons.Settings)
+        )
+    }
+    val selectedIndex = items.indexOfFirst { it.tab == selectedTab }.coerceAtLeast(0)
+    val contentColor = MiuixTheme.colorScheme.onSurface
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = if (floating) 12.dp else 4.dp),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        FloatingBottomBar(
+            selectedIndex = selectedIndex,
+            onSelected = { index -> onSelected(items[index].tab) },
+            backdrop = backdrop,
+            tabsCount = items.size,
+            isBlurEnabled = glass,
+            floating = floating
+        ) { selectTab ->
+            items.forEachIndexed { index, item ->
+                val selected = index == selectedIndex
+                FloatingBottomBarItem(
+                    onClick = { selectTab(index) },
+                    modifier = Modifier.defaultMinSize(minWidth = 76.dp)
+                ) {
+                    Image(
+                        imageVector = item.icon,
+                        contentDescription = item.label,
+                        colorFilter = ColorFilter.tint(contentColor),
+                        modifier = Modifier.size(26.dp)
+                    )
+                    Text(
+                        text = item.label,
+                        color = contentColor,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        fontWeight = if (selected) FontWeight.Medium else FontWeight.Normal
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun FeatureSettingsPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit,
+    onOpenScriptPluginAgent: () -> Unit = {},
+    onOpenScriptPluginMarket: () -> Unit = {},
+    onOpenScriptPluginManager: () -> Unit = {}
+) {
+    when (provider.featureId()) {
+        AutoRedPacketFeature.ID -> RedPacketMiuixPage(context, provider, onBack)
+        AutoTransferFeature.ID -> AutoTransferMiuixPage(context, provider, onBack)
+        FakeWalletBalanceFeature.ID -> FakeWalletBalanceMiuixPage(context, provider, onBack)
+        RealNameTailFeature.ID -> RealNameTailMiuixPage(context, provider, onBack)
+        GroupNicknameColorSettings.FEATURE_ID -> GroupNicknameColorMiuixPage(context, provider, onBack)
+        MemberTitleFeature.ID -> MemberTitleMiuixPage(context, provider, onBack)
+        AntiRecallFeature.ID -> AntiRecallMiuixPage(context, provider, onBack)
+        MultiRecallFeature.ID -> MultiRecallMiuixPage(context, provider, onBack)
+        MessageForwardFeature.ID -> MessageForwardMiuixPage(context, provider, onBack)
+        SelectedMessagesFeature.ID -> SelectedMessagesMiuixPage(context, provider, onBack)
+        CallMediaLimitFeature.ID -> CallMediaLimitMiuixPage(context, provider, onBack)
+        CallRingtoneBlockFeature.ID -> CallRingtoneBlockMiuixPage(context, provider, onBack)
+        DisableHotUpdateFeature.ID -> DisableHotUpdateMiuixPage(context, provider, onBack)
+        ProfileIdFeature.ID -> ProfileIdMiuixPage(context, provider, onBack)
+        QuickContactEditFeature.ID -> QuickContactEditMiuixPage(context, provider, onBack)
+        QuickGroupChatLabelFeature.ID -> QuickGroupChatLabelMiuixPage(context, provider, onBack)
+        QuickMomentsFeature.ID -> QuickMomentsMiuixPage(context, provider, onBack)
+        QuickTerminateFeature.ID -> QuickTerminateMiuixPage(context, provider, onBack)
+        HideChatMenuFeature.ID -> HideChatMenuMiuixPage(context, provider, onBack)
+        MessageAffixFeature.ID -> MessageAffixMiuixPage(context, provider, onBack)
+        TypingReportBlockFeature.ID -> TypingReportBlockMiuixPage(context, provider, onBack)
+        PatBlockFeature.ID -> PatBlockMiuixPage(context, provider, onBack)
+        AutoOriginalImageFeature.ID -> AutoOriginalImageMiuixPage(context, provider, onBack)
+        AutoViewOriginalFeature.ID -> AutoViewOriginalMiuixPage(context, provider, onBack)
+        RemoveForwardLimitFeature.ID -> RemoveForwardLimitMiuixPage(context, provider, onBack)
+        AtAllNotificationBlockFeature.ID -> AtAllNotificationBlockMiuixPage(context, provider, onBack)
+        SettingsFeature.ID -> SettingsEntryMiuixPage(context, provider, onBack)
+        PluginAgentEntryProvider.ID -> PluginAgentEntryMiuixPage(context, provider, onBack)
+        SpecialMessageFeature.ID -> SpecialMessageMiuixPage(context, onBack)
+        FloatingShortcutFeature.ID -> FloatingShortcutMiuixPage(context, provider, onBack)
+        FloatingChatHeaderFeature.ID -> FloatingChatToggleMiuixPage(context, provider, onBack)
+        FloatingChatFooterFeature.ID -> FloatingChatToggleMiuixPage(context, provider, onBack)
+        MessageDetailsSettingsProvider.FEATURE_ID -> MessageDetailsConfigPage(
+            context = context,
+            sp = HchatStorage.preferences(context, HchatExtraSettings.PREFS_NAME),
+            onBack = onBack
+        )
+        GroupMemberHistorySettingsProvider.FEATURE_ID -> HchatExtraToggleMiuixPage(
+            context = context,
+            provider = provider,
+            key = HchatExtraSettings.KEY_GROUP_MEMBER_HISTORY,
+            defaultValue = HchatExtraSettings.DEFAULT_GROUP_MEMBER_HISTORY,
+            summary = "在群成员资料页添加历史发言记录入口",
+            onBack = onBack
+        )
+        RedPacketDetailsSettingsProvider.FEATURE_ID -> HchatExtraToggleMiuixPage(
+            context = context,
+            provider = provider,
+            key = HchatExtraSettings.KEY_RED_PACKET_DETAILS,
+            defaultValue = HchatExtraSettings.DEFAULT_RED_PACKET_DETAILS,
+            summary = "红包详情页显示金额、个数和领取时间",
+            onBack = onBack
+        )
+        SkipWebRiskSettingsProvider.FEATURE_ID -> HchatExtraToggleMiuixPage(
+            context = context,
+            provider = provider,
+            key = HchatExtraSettings.KEY_SKIP_WEB_RISK,
+            defaultValue = HchatExtraSettings.DEFAULT_SKIP_WEB_RISK,
+            summary = "跳过微信 WebView 高风险网页拦截提示",
+            onBack = onBack
+        )
+        QuickMarkReadFeature.ID -> QuickMarkReadMiuixPage(context, provider, onBack)
+        AutoReplyFeature.ID -> AutoReplyMiuixPage(context, provider, onBack)
+        AutoMessageForwardFeature.ID -> AutoMessageForwardMiuixPage(context, provider, onBack)
+        ConversationGroupFeature.ID -> ConversationGroupMiuixPage(context, provider, onBack)
+        CustomNotificationFeature.ID -> CustomNotificationMiuixPage(context, provider, onBack)
+        KeywordNotificationFeature.ID -> KeywordNotificationMiuixPage(context, provider, onBack)
+        TextSpeechFeature.ID -> TextSpeechMiuixPage(context, provider, onBack)
+        ZombieCheckFeature.ID -> ZombieCheckMiuixPage(context, provider, onBack)
+        QQMusicOrderFeature.ID -> QQMusicOrderMiuixPage(context, provider, onBack)
+        WeChatKeepAliveFeature.ID -> WeChatKeepAliveMiuixPage(context, provider, onBack)
+        QuoteDeleteClearFeature.ID -> QuoteDeleteClearMiuixPage(context, provider, onBack)
+        EmojiSaveFeature.ID -> EmojiSaveMiuixPage(context, provider, onBack)
+        SwipeQuoteFeature.ID -> SwipeQuoteMiuixPage(context, provider, onBack)
+        AudioTransformFeature.ID -> AudioTransformSettingsPage(context, provider, onBack)
+        TextVoiceFeature.ID -> TextVoiceMiuixPage(context, provider, onBack)
+        FakeVoiceDurationFeature.ID -> FakeVoiceDurationMiuixPage(context, provider, onBack)
+        VoicePreviewFeature.ID -> VoicePreviewMiuixPage(context, provider, onBack)
+        FakeMiniProgramBaseLibFeature.ID -> FakeMiniProgramBaseLibMiuixPage(context, provider, onBack)
+        SkipMiniProgramVideoAdsFeature.ID -> SkipMiniProgramVideoAdsMiuixPage(context, provider, onBack)
+        SkipGlobalMiniProgramSplashAdsFeature.ID -> SkipGlobalMiniProgramSplashAdsMiuixPage(context, provider, onBack)
+        FakeLocationFeature.ID -> FakeLocationMiuixPage(context, provider, onBack)
+        GameEmojiFeature.ID -> GameEmojiMiuixPage(context, provider, onBack)
+        MessageBubbleFeature.ID -> MessageBubbleMiuixPage(context, provider, onBack)
+        BackgroundBeautyFeature.ID -> BackgroundBeautyMiuixPage(context, provider, onBack)
+        MessageTextColorFeature.ID -> MessageTextColorMiuixPage(context, provider, onBack)
+        HomeTextColorFeature.ID -> HomeTextColorMiuixPage(context, provider, onBack)
+        ChatTimeStyleFeature.ID -> ChatTimeStyleMiuixPage(context, provider, onBack)
+        InputHintFeature.ID -> InputHintMiuixPage(context, provider, onBack)
+        HideChatAvatarFeature.ID -> HideChatAvatarMiuixPage(context, provider, onBack)
+        CustomBottomBarFeature.ID -> CustomBottomBarMiuixPage(context, provider, onBack)
+        FloatingBottomBarSettings.FEATURE_ID -> FloatingBottomBarMiuixPage(context, provider, onBack)
+        RoundAvatarFeature.ID -> RoundAvatarMiuixPage(context, provider, onBack)
+        CustomFriendAvatarFeature.ID -> CustomFriendAvatarMiuixPage(context, provider, onBack)
+        MessageBlockFeature.ID -> MessageBlockMiuixPage(context, provider, onBack)
+        GroupChatLabelFeature.ID -> GroupChatLabelMiuixPage(context, provider, onBack)
+        GroupLeaveMonitorFeature.ID -> GroupLeaveMonitorMiuixPage(context, provider, onBack)
+        GroupRenameMonitorFeature.ID -> GroupRenameMonitorMiuixPage(context, provider, onBack)
+        MomentsAutoLikeFeature.ID -> MomentsAutoLikeMiuixPage(context, provider, onBack)
+        MomentsAutoCommentFeature.ID -> MomentsAutoCommentPage(context, provider, onBack)
+        MomentsAutoForwardFeature.ID -> MomentsAutoForwardMiuixPage(context, provider, onBack)
+        MomentsAutoRefreshFeature.ID -> MomentsAutoRefreshMiuixPage(context, provider, onBack)
+        MomentsContactFilterFeature.ID -> MomentsContactFilterMiuixPage(context, provider, onBack)
+        MomentsKeywordBlockFeature.ID -> MomentsKeywordBlockMiuixPage(context, provider, onBack)
+        MomentsBottomDetailFeature.ID -> MomentsBottomDetailMiuixPage(context, provider, onBack)
+        MomentsPostNotificationFeature.ID -> MomentsPostNotificationMiuixPage(context, provider, onBack)
+        OriginalMomentsUploadFeature.ID -> OriginalMomentsUploadMiuixPage(context, provider, onBack)
+        MomentsUploadTailFeature.ID -> MomentsUploadTailMiuixPage(context, provider, onBack)
+        SnsAntiRecallFeature.ID -> SnsAntiRecallMiuixPage(context, provider, onBack)
+        MomentsFakeLikeSettingsProvider.ID,
+        MomentsFakeCommentSettingsProvider.ID,
+        MomentsFakeForwardSettingsProvider.ID -> MomentsFakeInteractionMiuixPage(context, provider, onBack)
+        RemoveMomentsAdsFeature.ID -> RemoveMomentsAdsMiuixPage(context, provider, onBack)
+        EditMessageFeature.ID -> EditMessageMiuixPage(context, provider, onBack)
+        VoiceForwardFeature.ID -> VoiceForwardMiuixPage(context, provider, onBack)
+        ScheduledTaskFeature.ID -> ScheduledTaskMiuixPage(context, provider, onBack)
+        FakeScanCameraFeature.ID -> FakeScanCameraMiuixPage(context, provider, onBack)
+        FinderMediaDownloadFeature.ID -> FinderMediaDownloadMiuixPage(context, provider, onBack)
+        ProtobufPacketFeature.ID -> ProtobufPacketMiuixPage(context, provider, onBack)
+        CrashReportSettingsProvider.ID -> CrashReportMiuixPage(context, provider, onBack)
+        StatusTextLimitFeature.ID -> StatusTextLimitMiuixPage(context, provider, onBack)
+        ScriptPluginFeature.ID -> ScriptPluginMiuixPage(
+            context,
+            provider,
+            onBack,
+            onOpenScriptPluginMarket,
+            onOpenScriptPluginAgent,
+            onOpenScriptPluginManager
+        )
+        WeChatTabletFeature.ID -> WeChatTabletMiuixPage(context, provider, onBack)
+        else -> UnsupportedFeaturePage(provider, onBack)
+    }
+}
+
+@Composable
+internal fun MultiRecallMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, MultiRecallSettings.PREFS_NAME) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = {
+            BottomActionBar("返回", onBack)
+        }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "聊天消息") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        sp,
+                        MultiRecallSettings.KEY_ENABLE,
+                        "多选撤回",
+                        "在多选消息的分享菜单中显示批量撤回",
+                        MultiRecallSettings.DEFAULT_ENABLE
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun SelectedMessagesMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, SelectedMessagesSettings.PREFS_NAME) }
+    var route by remember { mutableStateOf<SelectedMessagesRoute>(SelectedMessagesRoute.Main) }
+    var draft by remember {
+        mutableStateOf(
+            ScheduledTaskSettings.newDraft().copy(
+                type = ScheduledTaskSettings.TYPE_IMAGE,
+                items = listOf(ScheduledTaskContentItem(ScheduledTaskSettings.TYPE_IMAGE, "")),
+                intervalSeconds = SelectedMessagesSettings.sendIntervalSeconds(context),
+                mediaIntervalSeconds = SelectedMessagesSettings.sendIntervalSeconds(context)
+            )
+        )
+    }
+    var channel by remember { mutableStateOf(SelectedMessagesRuntimeCoordinator.CHANNEL_MODULE) }
+    val mainListState = rememberLazyListState()
+    val editorListState = rememberLazyListState()
+
+    fun validationError(): String? {
+        return SelectedMessagesRuntimeCoordinator.validationError(
+            channel,
+            scheduledTaskEditableItems(draft)
+        )
+    }
+
+    fun openContactPicker() {
+        validationError()?.let {
+            Toast.makeText(context, it, Toast.LENGTH_SHORT).show()
+            return
+        }
+        route = SelectedMessagesRoute.ContactPicker
+    }
+
+    fun startSend() {
+        val error = validationError() ?: if (draft.targetIds.isEmpty()) "请选择群发对象" else null
+        if (error != null) {
+            Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val activity = context as? Activity
+        if (activity == null) {
+            Toast.makeText(context, "当前页面无法启动群发", Toast.LENGTH_SHORT).show()
+            return
+        }
+        SelectedMessagesRuntimeCoordinator.sendCustom(
+            activity = activity,
+            channel = channel,
+            items = scheduledTaskEditableItems(draft),
+            targetIds = draft.targetIds,
+            targetIntervalSeconds = draft.intervalSeconds,
+            itemIntervalSeconds = draft.mediaIntervalSeconds
+        )
+    }
+
+    SettingsRouteTransition(
+        targetState = route,
+        label = "SelectedMessagesRoute",
+        depthOf = { it.depth() }
+    ) { currentRoute ->
+        when (currentRoute) {
+            SelectedMessagesRoute.Main -> {
+                SelectedMessagesMainPage(
+                    provider = provider,
+                    sp = sp,
+                    listState = mainListState,
+                    onBack = onBack,
+                    onCompose = { route = SelectedMessagesRoute.Editor }
+                )
+            }
+            SelectedMessagesRoute.Editor -> {
+                SelectedMessagesCustomEditorPage(
+                    draft = draft,
+                    channel = channel,
+                    listState = editorListState,
+                    onBack = { route = SelectedMessagesRoute.Main },
+                    onDraftChange = { draft = it },
+                    onChannelChange = { next ->
+                        if (next != channel) {
+                            channel = next
+                            draft = draft.copy(targetIds = emptyList())
+                        }
+                    },
+                    onPickTargets = ::openContactPicker,
+                    onPickFiles = { itemIndex, itemType ->
+                        val activity = context as? Activity
+                        if (activity == null) {
+                            Toast.makeText(context, "当前页面无法打开文件选择器", Toast.LENGTH_SHORT).show()
+                        } else {
+                            ScheduledTaskFilePickerBridge.launch(activity, itemType) { paths ->
+                                draft = updateScheduledTaskMediaItem(draft, itemIndex, itemType, paths)
+                            }
+                        }
+                    },
+                    onPickFavorite = { itemIndex ->
+                        scheduledTaskEditableItems(draft).getOrNull(itemIndex)?.let { item ->
+                            route = SelectedMessagesRoute.FavoritePicker(
+                                FavoritePickerRequest(
+                                    title = scheduledTaskPickerTitle(item.type),
+                                    existingValue = item.value,
+                                    onValue = { value ->
+                                        draft = updateScheduledTaskContentItemValue(draft, itemIndex, value)
+                                    },
+                                    multiSelect = false,
+                                    delimiter = "|"
+                                )
+                            )
+                        }
+                    },
+                    onSend = ::startSend
+                )
+            }
+            SelectedMessagesRoute.ContactPicker -> {
+                val official = channel == SelectedMessagesRuntimeCoordinator.CHANNEL_OFFICIAL
+                ContactPickerPage(
+                    context = context,
+                    request = ContactPickerRequest(
+                        title = if (official) "选择官方群发好友" else "选择群发对象",
+                        mode = if (official) ContactPickerMode.FRIENDS else ContactPickerMode.ALL_CHATS,
+                        multiSelect = true,
+                        existingValue = formatIds(draft.targetIds),
+                        onValue = {},
+                        enableLabels = true
+                    ),
+                    onBack = { route = SelectedMessagesRoute.Editor },
+                    onConfirm = { selected ->
+                        draft = draft.copy(targetIds = selected.map { it.id })
+                        route = SelectedMessagesRoute.Editor
+                    }
+                )
+            }
+            is SelectedMessagesRoute.FavoritePicker -> {
+                FavoritePickerPage(
+                    request = currentRoute.request,
+                    onBack = { route = SelectedMessagesRoute.Editor }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 internal fun SelectedMessagesMainPage(
     provider: FeatureSettingsProvider,
     sp: SharedPreferences,
@@ -1429,1210 +2286,3 @@ internal fun InputHintMiuixPage(
         }
     }
 }
-
-@Composable
-internal fun InputHintVariableColorRow(sp: android.content.SharedPreferences, variable: TemplateVariable) {
-    val startKey = InputHintSettings.variableColorKey(variable.token, false)
-    val endKey = InputHintSettings.variableColorKey(variable.token, true)
-    var colorSpec by remember { mutableStateOf(composeColorSpec(sp.getString(startKey, InputHintSettings.DEFAULT_VARIABLE_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_COLOR, sp.getString(endKey, InputHintSettings.DEFAULT_VARIABLE_COLOR) ?: InputHintSettings.DEFAULT_VARIABLE_COLOR)) }
-    ColorPickerRow(variable.label, "${variable.label}的渐变颜色", colorSpec, onReset = { colorSpec = InputHintSettings.DEFAULT_VARIABLE_COLOR; sp.edit().remove(startKey).remove(endKey).apply() }) { value ->
-        colorSpec = value.take(19)
-        val parts = colorSpecParts(colorSpec)
-        sp.edit().putString(startKey, parts.first).putString(endKey, parts.second.ifEmpty { parts.first }).apply()
-    }
-}
-@Composable
-internal fun PatBlockMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, PatBlockSettings.PREFS_NAME) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "聊天头像") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        sp,
-                        PatBlockSettings.KEY_ENABLE,
-                        "禁止拍一拍",
-                        "双击聊天头像时不发送拍一拍",
-                        PatBlockSettings.DEFAULT_ENABLE
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun AutoOriginalImageMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, AutoOriginalImageSettings.PREFS_NAME) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "聊天图片") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        sp,
-                        AutoOriginalImageSettings.KEY_ENABLE,
-                        "自动勾选原图",
-                        "进入聊天图片发送界面时自动选择原图",
-                        AutoOriginalImageSettings.DEFAULT_ENABLE
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun AutoViewOriginalMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, AutoViewOriginalSettings.PREFS_NAME) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "聊天媒体") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        sp,
-                        AutoViewOriginalSettings.KEY_ENABLE,
-                        "自动查看原图",
-                        "打开聊天图片或视频时自动查看原图或原视频",
-                        AutoViewOriginalSettings.DEFAULT_ENABLE
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun RemoveForwardLimitMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, RemoveForwardLimitSettings.PREFS_NAME) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "消息转发") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        sp,
-                        RemoveForwardLimitSettings.KEY_ENABLE,
-                        "移除转发限制",
-                        "允许微信原生转发选择超过 9 个会话；大量目标仍受微信发送能力限制",
-                        RemoveForwardLimitSettings.DEFAULT_ENABLE
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun AtAllNotificationBlockMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, AtAllNotificationBlockSettings.PREFS_NAME) }
-    var enabled by remember {
-        mutableStateOf(sp.getBoolean(AtAllNotificationBlockSettings.KEY_ENABLE, AtAllNotificationBlockSettings.DEFAULT_ENABLE))
-    }
-    var selectedGroups by remember {
-        mutableStateOf(AtAllNotificationBlockSettings.parseGroups(sp.getString(AtAllNotificationBlockSettings.KEY_GROUPS, "")))
-    }
-    var legacyAllGroups by remember { mutableStateOf(enabled && !sp.contains(AtAllNotificationBlockSettings.KEY_GROUPS)) }
-    var route by remember { mutableStateOf<AtAllNotificationBlockRoute>(AtAllNotificationBlockRoute.Main) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    SettingsRouteTransition(
-        targetState = route,
-        label = "AtAllNotificationBlockRoute",
-        depthOf = { if (it is AtAllNotificationBlockRoute.Main) 0 else 1 }
-    ) { current ->
-        when (current) {
-            AtAllNotificationBlockRoute.Main -> PageScaffold(
-                title = provider.title(),
-                largeTitle = provider.title(),
-                scrollBehavior = scrollBehavior,
-                bottomBar = { BottomActionBar("返回", onBack) }
-            ) { padding ->
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-                    state = listState,
-                    contentPadding = PaddingValues(
-                        top = padding.calculateTopPadding() + 8.dp,
-                        bottom = padding.calculateBottomPadding() + 84.dp
-                    )
-                ) {
-                    item { SmallTitle(text = "群聊通知") }
-                    item {
-                        SettingsCard {
-                            SwitchRow(
-                                checked = enabled,
-                                title = "屏蔽艾特所有人",
-                                summary = "仅拦截所选群聊的艾特所有人通知",
-                                onCheckedChange = {
-                                    enabled = it
-                                    val editor = sp.edit().putBoolean(AtAllNotificationBlockSettings.KEY_ENABLE, it)
-                                    if (it && !sp.contains(AtAllNotificationBlockSettings.KEY_GROUPS)) {
-                                        editor.putString(AtAllNotificationBlockSettings.KEY_GROUPS, "")
-                                        legacyAllGroups = false
-                                    }
-                                    editor.apply()
-                                }
-                            )
-                            if (enabled) {
-                                InsetDivider()
-                                ActionRow(
-                                    "选择屏蔽群聊",
-                                    when {
-                                        legacyAllGroups -> "当前屏蔽全部群聊，重新选择后按选择生效"
-                                        selectedGroups.isEmpty() -> "未选择群聊，不会屏蔽通知"
-                                        else -> "已选择 ${selectedGroups.size} 个群聊"
-                                    }
-                                ) {
-                                    route = AtAllNotificationBlockRoute.GroupPicker(
-                                        ContactPickerRequest(
-                                            title = "选择屏蔽群聊",
-                                            mode = ContactPickerMode.GROUPS,
-                                            multiSelect = true,
-                                            existingValue = formatIds(selectedGroups),
-                                            onValue = {}
-                                        )
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            is AtAllNotificationBlockRoute.GroupPicker -> ContactPickerPage(
-                context = context,
-                request = current.request,
-                onBack = { route = AtAllNotificationBlockRoute.Main },
-                onConfirm = { picked ->
-                    selectedGroups = picked.map { it.id }.filter { it.isNotBlank() }.toSet()
-                    legacyAllGroups = false
-                    sp.edit()
-                        .putString(AtAllNotificationBlockSettings.KEY_GROUPS, formatIds(selectedGroups))
-                        .apply()
-                    route = AtAllNotificationBlockRoute.Main
-                }
-            )
-        }
-    }
-}
-
-@Composable
-internal fun DisableHotUpdateMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, DisableHotUpdateSettings.PREFS_NAME) }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = {
-            BottomActionBar("返回", onBack)
-        }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "热更新") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        sp,
-                        DisableHotUpdateSettings.KEY_ENABLE,
-                        "屏蔽热更新",
-                        "阻止微信加载和应用热更新补丁",
-                        DisableHotUpdateSettings.DEFAULT_ENABLE
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun MomentsAutoLikeMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, MomentsAutoLikeSettings.PREFS_NAME) }
-    var route by remember { mutableStateOf<MomentsAutoLikeRoute>(MomentsAutoLikeRoute.Main) }
-    var whitelist by remember { mutableStateOf(parseIds(sp.getString(MomentsAutoLikeSettings.KEY_WHITELIST, "").orEmpty())) }
-    var blacklist by remember { mutableStateOf(parseIds(sp.getString(MomentsAutoLikeSettings.KEY_BLACKLIST, "").orEmpty())) }
-
-    SettingsRouteTransition(
-        targetState = route,
-        label = "MomentsAutoLikeRoute",
-        depthOf = { if (it is MomentsAutoLikeRoute.Main) 0 else 1 }
-    ) { current ->
-        when (current) {
-            MomentsAutoLikeRoute.Main -> MomentsAutoLikeMainPage(
-                provider = provider,
-                sp = sp,
-                whitelist = whitelist,
-                blacklist = blacklist,
-                onBack = onBack,
-                onPickTargets = { listMode ->
-                    val selected = if (listMode == MomentsAutoLikeSettings.LIST_BLACKLIST) blacklist else whitelist
-                    route = MomentsAutoLikeRoute.ContactPicker(
-                        listMode,
-                        ContactPickerRequest(
-                            title = if (listMode == MomentsAutoLikeSettings.LIST_BLACKLIST) "选择点赞黑名单" else "选择点赞白名单",
-                            mode = ContactPickerMode.FRIENDS,
-                            multiSelect = true,
-                            existingValue = formatIds(selected),
-                            onValue = {},
-                            enableLabels = true
-                        )
-                    )
-                }
-            )
-            is MomentsAutoLikeRoute.ContactPicker -> ContactPickerPage(
-                context = context,
-                request = current.request,
-                onBack = { route = MomentsAutoLikeRoute.Main },
-                onConfirm = { picked ->
-                    val ids = picked.map { it.id }.filter { it.isNotBlank() }.toSet()
-                    if (current.listMode == MomentsAutoLikeSettings.LIST_BLACKLIST) {
-                        blacklist = ids
-                        sp.edit().putString(MomentsAutoLikeSettings.KEY_BLACKLIST, formatIds(ids)).apply()
-                    } else {
-                        whitelist = ids
-                        sp.edit().putString(MomentsAutoLikeSettings.KEY_WHITELIST, formatIds(ids)).apply()
-                    }
-                    route = MomentsAutoLikeRoute.Main
-                }
-            )
-        }
-    }
-}
-
-@Composable
-internal fun MomentsAutoLikeMainPage(
-    provider: FeatureSettingsProvider,
-    sp: SharedPreferences,
-    whitelist: Set<String>,
-    blacklist: Set<String>,
-    onBack: () -> Unit,
-    onPickTargets: (Int) -> Unit
-) {
-    var enabled by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_ENABLE, false)) }
-    var likeSelf by remember {
-        mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_LIKE_SELF, MomentsAutoLikeSettings.DEFAULT_LIKE_SELF))
-    }
-    var listMode by remember {
-        mutableStateOf(sp.getInt(MomentsAutoLikeSettings.KEY_LIST_MODE, MomentsAutoLikeSettings.DEFAULT_LIST_MODE))
-    }
-    var dailyLikeLimit by remember {
-        mutableStateOf(
-            sp.getInt(
-                MomentsAutoLikeSettings.KEY_DAILY_LIKE_LIMIT,
-                MomentsAutoLikeSettings.DEFAULT_DAILY_LIKE_LIMIT
-            ).toString()
-        )
-    }
-    var delayMode by remember {
-        mutableStateOf(sp.getInt(MomentsAutoLikeSettings.KEY_DELAY_MODE, MomentsAutoLikeSettings.DEFAULT_DELAY_MODE))
-    }
-    var fixedDelay by remember {
-        mutableStateOf(sp.getInt(MomentsAutoLikeSettings.KEY_FIXED_DELAY_SECONDS, MomentsAutoLikeSettings.DEFAULT_FIXED_DELAY_SECONDS).toString())
-    }
-    var randomMin by remember {
-        mutableStateOf(sp.getInt(MomentsAutoLikeSettings.KEY_RANDOM_MIN_SECONDS, MomentsAutoLikeSettings.DEFAULT_RANDOM_MIN_SECONDS).toString())
-    }
-    var randomMax by remember {
-        mutableStateOf(sp.getInt(MomentsAutoLikeSettings.KEY_RANDOM_MAX_SECONDS, MomentsAutoLikeSettings.DEFAULT_RANDOM_MAX_SECONDS).toString())
-    }
-    var timeWindow by remember {
-        mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_TIME_WINDOW_ENABLE, MomentsAutoLikeSettings.DEFAULT_TIME_WINDOW_ENABLE))
-    }
-    var startTime by remember {
-        mutableStateOf(sp.getString(MomentsAutoLikeSettings.KEY_START_TIME, MomentsAutoLikeSettings.DEFAULT_START_TIME).orEmpty())
-    }
-    var endTime by remember {
-        mutableStateOf(sp.getString(MomentsAutoLikeSettings.KEY_END_TIME, MomentsAutoLikeSettings.DEFAULT_END_TIME).orEmpty())
-    }
-    var maxAge by remember {
-        mutableStateOf(sp.getInt(MomentsAutoLikeSettings.KEY_MAX_AGE_HOURS, MomentsAutoLikeSettings.DEFAULT_MAX_AGE_HOURS).toString())
-    }
-    var allowText by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_ALLOW_TEXT, true)) }
-    var allowImage by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_ALLOW_IMAGE, true)) }
-    var allowVideo by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_ALLOW_VIDEO, true)) }
-    var allowLink by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_ALLOW_LINK, false)) }
-    var allowMusic by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_ALLOW_MUSIC, false)) }
-    var allowOther by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_ALLOW_OTHER, false)) }
-    var allowUnknown by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_ALLOW_UNKNOWN, false)) }
-    var keywordsText by remember { mutableStateOf(sp.getString(MomentsAutoLikeSettings.KEY_KEYWORDS_TEXT, "").orEmpty()) }
-    var keywordsImageText by remember { mutableStateOf(sp.getString(MomentsAutoLikeSettings.KEY_KEYWORDS_IMAGE_TEXT, "").orEmpty()) }
-    var keywordsVideoText by remember { mutableStateOf(sp.getString(MomentsAutoLikeSettings.KEY_KEYWORDS_VIDEO_TEXT, "").orEmpty()) }
-    var keywordsCardText by remember { mutableStateOf(sp.getString(MomentsAutoLikeSettings.KEY_KEYWORDS_CARD_TEXT, "").orEmpty()) }
-    var keywordText by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_KEYWORD_TEXT, true)) }
-    var keywordImage by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_KEYWORD_IMAGE, true)) }
-    var keywordVideo by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_KEYWORD_VIDEO, true)) }
-    var keywordCard by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_KEYWORD_CARD, true)) }
-    var logEnabled by remember { mutableStateOf(sp.getBoolean(MomentsAutoLikeSettings.KEY_LOG_ENABLE, false)) }
-    var logs by remember { mutableStateOf(sp.getString(MomentsAutoLikeSettings.KEY_LOGS, "").orEmpty()) }
-    val list = if (listMode == MomentsAutoLikeSettings.LIST_BLACKLIST) blacklist else whitelist
-    val listSummary = when {
-        listMode == MomentsAutoLikeSettings.LIST_BLACKLIST && list.isEmpty() -> "未排除好友，将匹配全部好友"
-        listMode == MomentsAutoLikeSettings.LIST_WHITELIST && list.isEmpty() -> "未选择好友，自动点赞不会执行"
-        else -> "已选择 ${list.size} 位好友"
-    }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "自动点赞") }
-            item {
-                SettingsCard {
-                    SwitchRow(enabled, "朋友圈自动点赞", "按下方规则处理新获取的朋友圈") {
-                        enabled = it
-                        sp.edit()
-                            .putBoolean(MomentsAutoLikeSettings.KEY_ENABLE, it)
-                            .putLong(
-                                MomentsAutoLikeSettings.KEY_ENABLED_AT_SECONDS,
-                                if (it) System.currentTimeMillis() / 1000L else 0L
-                            )
-                            .apply()
-                    }
-                    if (enabled) {
-                        InsetDivider()
-                        SwitchRow(likeSelf, "点赞自己的朋友圈", "自己的朋友圈不受好友名单限制") {
-                            likeSelf = it
-                            sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_LIKE_SELF, it).apply()
-                        }
-                    }
-                }
-            }
-            if (enabled) {
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "好友范围") }
-                item {
-                    SettingsCard {
-                        PopupOptionRow(
-                            title = "名单模式",
-                            summary = if (listMode == MomentsAutoLikeSettings.LIST_BLACKLIST) "除黑名单外均可点赞" else "只点赞白名单好友",
-                            options = optionItems(
-                                "白名单" to MomentsAutoLikeSettings.LIST_WHITELIST,
-                                "黑名单" to MomentsAutoLikeSettings.LIST_BLACKLIST
-                            ),
-                            currentValue = listMode,
-                            onValueChanged = {
-                                listMode = it
-                                sp.edit().putInt(MomentsAutoLikeSettings.KEY_LIST_MODE, it).apply()
-                            }
-                        )
-                        InsetDivider()
-                        ActionRow(if (listMode == MomentsAutoLikeSettings.LIST_BLACKLIST) "黑名单" else "白名单", listSummary) {
-                            onPickTargets(listMode)
-                        }
-                        InsetDivider()
-                        NumberInputRow("同一人每天点赞数量", "每天最多点赞同一人的朋友圈条数，0 表示不限制", dailyLikeLimit) {
-                            dailyLikeLimit = it
-                            it.toIntOrNull()?.let { value ->
-                                sp.edit()
-                                    .putInt(MomentsAutoLikeSettings.KEY_DAILY_LIKE_LIMIT, value.coerceAtLeast(0))
-                                    .apply()
-                            }
-                        }
-                    }
-                }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "执行时间") }
-                item {
-                    SettingsCard {
-                        PopupOptionRow(
-                            title = "点赞延迟",
-                            summary = if (delayMode == MomentsAutoLikeSettings.DELAY_RANDOM) "在范围内随机等待" else "每条等待固定时间",
-                            options = optionItems(
-                                "固定延迟" to MomentsAutoLikeSettings.DELAY_FIXED,
-                                "随机延迟" to MomentsAutoLikeSettings.DELAY_RANDOM
-                            ),
-                            currentValue = delayMode,
-                            onValueChanged = {
-                                delayMode = it
-                                sp.edit().putInt(MomentsAutoLikeSettings.KEY_DELAY_MODE, it).apply()
-                            }
-                        )
-                        if (delayMode == MomentsAutoLikeSettings.DELAY_FIXED) {
-                            InsetDivider()
-                            NumberInputRow("等待时间", "单位秒，最少 0 秒", fixedDelay) {
-                                fixedDelay = it
-                                it.toIntOrNull()?.let { value ->
-                                    sp.edit().putInt(MomentsAutoLikeSettings.KEY_FIXED_DELAY_SECONDS, value.coerceAtLeast(0)).apply()
-                                }
-                            }
-                        } else {
-                            InsetDivider()
-                            NumberInputRow("最短等待", "单位秒，最少 0 秒", randomMin) {
-                                randomMin = it
-                                it.toIntOrNull()?.let { value ->
-                                    sp.edit().putInt(MomentsAutoLikeSettings.KEY_RANDOM_MIN_SECONDS, value.coerceAtLeast(0)).apply()
-                                }
-                            }
-                            InsetDivider()
-                            NumberInputRow("最长等待", "单位秒，不能小于最短等待", randomMax) {
-                                randomMax = it
-                                it.toIntOrNull()?.let { value ->
-                                    sp.edit().putInt(MomentsAutoLikeSettings.KEY_RANDOM_MAX_SECONDS, value.coerceAtLeast(0)).apply()
-                                }
-                            }
-                        }
-                        InsetDivider()
-                        SwitchRow(timeWindow, "限制运行时段", "支持跨零点时段") {
-                            timeWindow = it
-                            sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_TIME_WINDOW_ENABLE, it).apply()
-                        }
-                        if (timeWindow) {
-                            InsetDivider()
-                            TimeOfDayPickerRow("开始时间", startTime) {
-                                startTime = it
-                                sp.edit().putString(MomentsAutoLikeSettings.KEY_START_TIME, it).apply()
-                            }
-                            InsetDivider()
-                            TimeOfDayPickerRow("结束时间", endTime) {
-                                endTime = it
-                                sp.edit().putString(MomentsAutoLikeSettings.KEY_END_TIME, it).apply()
-                            }
-                        }
-                        InsetDivider()
-                        NumberInputRow("发布时间限制", "仅点赞发布后指定小时内的朋友圈，最少 1 小时", maxAge) {
-                            maxAge = it
-                            it.toIntOrNull()?.let { value ->
-                                sp.edit().putInt(MomentsAutoLikeSettings.KEY_MAX_AGE_HOURS, value.coerceAtLeast(1)).apply()
-                            }
-                        }
-                    }
-                }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "内容过滤") }
-                item {
-                    SettingsCard {
-                        SwitchRow(allowText, "文字朋友圈", "允许自动点赞") {
-                            allowText = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_ALLOW_TEXT, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowImage, "图片/图文朋友圈", "允许自动点赞") {
-                            allowImage = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_ALLOW_IMAGE, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowVideo, "视频/视文朋友圈", "允许自动点赞") {
-                            allowVideo = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_ALLOW_VIDEO, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowLink, "网页/链接朋友圈", "允许自动点赞") {
-                            allowLink = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_ALLOW_LINK, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowMusic, "音乐朋友圈", "允许自动点赞") {
-                            allowMusic = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_ALLOW_MUSIC, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowOther, "其他卡片朋友圈", "允许自动点赞") {
-                            allowOther = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_ALLOW_OTHER, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowUnknown, "未知类型朋友圈", "允许自动点赞，默认关闭") {
-                            allowUnknown = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_ALLOW_UNKNOWN, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(keywordText, "文字朋友圈关键词", "开启后按关键词排除") {
-                            keywordText = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_KEYWORD_TEXT, it).apply()
-                        }
-                        if (keywordText) {
-                            InsetDivider()
-                            InputRow("文字排除关键词", "多个关键词用逗号或换行分隔", keywordsText, minLines = 2) {
-                                keywordsText = it
-                                sp.edit().putString(MomentsAutoLikeSettings.KEY_KEYWORDS_TEXT, it).apply()
-                            }
-                        }
-                        InsetDivider()
-                        SwitchRow(keywordImage, "图文朋友圈关键词", "开启后按关键词排除") {
-                            keywordImage = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_KEYWORD_IMAGE, it).apply()
-                        }
-                        if (keywordImage) {
-                            InsetDivider()
-                            InputRow("图文排除关键词", "多个关键词用逗号或换行分隔", keywordsImageText, minLines = 2) {
-                                keywordsImageText = it
-                                sp.edit().putString(MomentsAutoLikeSettings.KEY_KEYWORDS_IMAGE_TEXT, it).apply()
-                            }
-                        }
-                        InsetDivider()
-                        SwitchRow(keywordVideo, "视文朋友圈关键词", "开启后按关键词排除") {
-                            keywordVideo = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_KEYWORD_VIDEO, it).apply()
-                        }
-                        if (keywordVideo) {
-                            InsetDivider()
-                            InputRow("视文排除关键词", "多个关键词用逗号或换行分隔", keywordsVideoText, minLines = 2) {
-                                keywordsVideoText = it
-                                sp.edit().putString(MomentsAutoLikeSettings.KEY_KEYWORDS_VIDEO_TEXT, it).apply()
-                            }
-                        }
-                        InsetDivider()
-                        SwitchRow(keywordCard, "链接/卡片朋友圈关键词", "开启后按关键词排除") {
-                            keywordCard = it; sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_KEYWORD_CARD, it).apply()
-                        }
-                        if (keywordCard) {
-                            InsetDivider()
-                            InputRow("链接/卡片排除关键词", "多个关键词用逗号或换行分隔", keywordsCardText, minLines = 2) {
-                                keywordsCardText = it
-                                sp.edit().putString(MomentsAutoLikeSettings.KEY_KEYWORDS_CARD_TEXT, it).apply()
-                            }
-                        }
-                    }
-                }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "运行记录") }
-                item {
-                    SettingsCard {
-                        SwitchRow(logEnabled, "记录运行日志", "只保留最近 200 条") {
-                            logEnabled = it
-                            sp.edit().putBoolean(MomentsAutoLikeSettings.KEY_LOG_ENABLE, it).apply()
-                        }
-                        if (logEnabled) {
-                            InsetDivider()
-                            ActionRow("刷新日志", if (logs.isBlank()) "暂无记录" else "${logs.lineSequence().count()} 条记录") {
-                                logs = sp.getString(MomentsAutoLikeSettings.KEY_LOGS, "").orEmpty()
-                            }
-                            if (logs.isNotBlank()) {
-                                InsetDivider()
-                                Text(
-                                    text = logs.take(5000),
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.fillMaxWidth().padding(16.dp)
-                                )
-                                InsetDivider()
-                                ActionRow("清空日志", "删除当前自动点赞运行记录") {
-                                    sp.edit().remove(MomentsAutoLikeSettings.KEY_LOGS).apply()
-                                    logs = ""
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-internal object MomentsAutoCommentPage {
-    @Composable
-    operator fun invoke(
-        context: Context,
-        provider: FeatureSettingsProvider,
-        onBack: () -> Unit
-    ) {
-    val sp = remember { HchatStorage.preferences(context, MomentsAutoCommentSettings.PREFS_NAME) }
-    var route by remember { mutableStateOf<MomentsAutoCommentRoute>(MomentsAutoCommentRoute.Main) }
-    var whitelist by remember { mutableStateOf(parseIds(sp.getString(MomentsAutoCommentSettings.KEY_WHITELIST, "").orEmpty())) }
-    var blacklist by remember { mutableStateOf(parseIds(sp.getString(MomentsAutoCommentSettings.KEY_BLACKLIST, "").orEmpty())) }
-
-    SettingsRouteTransition(
-        targetState = route,
-        label = "MomentsAutoCommentRoute",
-        depthOf = { if (it is MomentsAutoCommentRoute.Main) 0 else 1 }
-    ) { current ->
-        when (current) {
-            MomentsAutoCommentRoute.Main -> MainPage(
-                provider = provider,
-                sp = sp,
-                whitelist = whitelist,
-                blacklist = blacklist,
-                onBack = onBack,
-                onPickTargets = { listMode ->
-                    val selected = if (listMode == MomentsAutoCommentSettings.LIST_BLACKLIST) blacklist else whitelist
-                    route = MomentsAutoCommentRoute.ContactPicker(
-                        listMode,
-                        ContactPickerRequest(
-                            title = if (listMode == MomentsAutoCommentSettings.LIST_BLACKLIST) "选择评论黑名单" else "选择评论白名单",
-                            mode = ContactPickerMode.FRIENDS,
-                            multiSelect = true,
-                            existingValue = formatIds(selected),
-                            onValue = {},
-                            enableLabels = true
-                        )
-                    )
-                }
-            )
-            is MomentsAutoCommentRoute.ContactPicker -> ContactPickerPage(
-                context = context,
-                request = current.request,
-                onBack = { route = MomentsAutoCommentRoute.Main },
-                onConfirm = { picked ->
-                    val ids = picked.map { it.id }.filter { it.isNotBlank() }.toSet()
-                    if (current.listMode == MomentsAutoCommentSettings.LIST_BLACKLIST) {
-                        blacklist = ids
-                        sp.edit().putString(MomentsAutoCommentSettings.KEY_BLACKLIST, formatIds(ids)).apply()
-                    } else {
-                        whitelist = ids
-                        sp.edit().putString(MomentsAutoCommentSettings.KEY_WHITELIST, formatIds(ids)).apply()
-                    }
-                    route = MomentsAutoCommentRoute.Main
-                }
-            )
-        }
-    }
-    }
-
-    @Composable
-    private fun MainPage(
-        provider: FeatureSettingsProvider,
-        sp: SharedPreferences,
-        whitelist: Set<String>,
-        blacklist: Set<String>,
-        onBack: () -> Unit,
-        onPickTargets: (Int) -> Unit
-    ) {
-    var enabled by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_ENABLE, false)) }
-    var commentContent by remember {
-        mutableStateOf(
-            sp.getString(
-                MomentsAutoCommentSettings.KEY_COMMENT_CONTENT,
-                MomentsAutoCommentSettings.DEFAULT_COMMENT_CONTENT
-            ).orEmpty()
-        )
-    }
-    var timeFormat by remember {
-        mutableStateOf(
-            sp.getString(
-                MomentsAutoCommentSettings.KEY_TIME_FORMAT,
-                MomentsAutoCommentSettings.DEFAULT_TIME_FORMAT
-            ).orEmpty()
-        )
-    }
-    var commentSelf by remember {
-        mutableStateOf(
-            sp.getBoolean(
-                MomentsAutoCommentSettings.KEY_COMMENT_SELF,
-                MomentsAutoCommentSettings.DEFAULT_COMMENT_SELF
-            )
-        )
-    }
-    var listMode by remember {
-        mutableStateOf(sp.getInt(MomentsAutoCommentSettings.KEY_LIST_MODE, MomentsAutoCommentSettings.DEFAULT_LIST_MODE))
-    }
-    var dailyCommentLimit by remember {
-        mutableStateOf(
-            sp.getInt(
-                MomentsAutoCommentSettings.KEY_DAILY_COMMENT_LIMIT,
-                MomentsAutoCommentSettings.DEFAULT_DAILY_COMMENT_LIMIT
-            ).toString()
-        )
-    }
-    var delayMode by remember {
-        mutableStateOf(sp.getInt(MomentsAutoCommentSettings.KEY_DELAY_MODE, MomentsAutoCommentSettings.DEFAULT_DELAY_MODE))
-    }
-    var fixedDelay by remember {
-        mutableStateOf(sp.getInt(MomentsAutoCommentSettings.KEY_FIXED_DELAY_SECONDS, MomentsAutoCommentSettings.DEFAULT_FIXED_DELAY_SECONDS).toString())
-    }
-    var randomMin by remember {
-        mutableStateOf(sp.getInt(MomentsAutoCommentSettings.KEY_RANDOM_MIN_SECONDS, MomentsAutoCommentSettings.DEFAULT_RANDOM_MIN_SECONDS).toString())
-    }
-    var randomMax by remember {
-        mutableStateOf(sp.getInt(MomentsAutoCommentSettings.KEY_RANDOM_MAX_SECONDS, MomentsAutoCommentSettings.DEFAULT_RANDOM_MAX_SECONDS).toString())
-    }
-    var timeWindow by remember {
-        mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_TIME_WINDOW_ENABLE, MomentsAutoCommentSettings.DEFAULT_TIME_WINDOW_ENABLE))
-    }
-    var startTime by remember {
-        mutableStateOf(sp.getString(MomentsAutoCommentSettings.KEY_START_TIME, MomentsAutoCommentSettings.DEFAULT_START_TIME).orEmpty())
-    }
-    var endTime by remember {
-        mutableStateOf(sp.getString(MomentsAutoCommentSettings.KEY_END_TIME, MomentsAutoCommentSettings.DEFAULT_END_TIME).orEmpty())
-    }
-    var maxAge by remember {
-        mutableStateOf(sp.getInt(MomentsAutoCommentSettings.KEY_MAX_AGE_HOURS, MomentsAutoCommentSettings.DEFAULT_MAX_AGE_HOURS).toString())
-    }
-    var allowText by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_ALLOW_TEXT, true)) }
-    var allowImage by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_ALLOW_IMAGE, true)) }
-    var allowVideo by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_ALLOW_VIDEO, true)) }
-    var allowLink by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_ALLOW_LINK, false)) }
-    var allowMusic by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_ALLOW_MUSIC, false)) }
-    var allowOther by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_ALLOW_OTHER, false)) }
-    var allowUnknown by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_ALLOW_UNKNOWN, false)) }
-    var keywordsText by remember { mutableStateOf(sp.getString(MomentsAutoCommentSettings.KEY_KEYWORDS_TEXT, "").orEmpty()) }
-    var keywordsImageText by remember { mutableStateOf(sp.getString(MomentsAutoCommentSettings.KEY_KEYWORDS_IMAGE_TEXT, "").orEmpty()) }
-    var keywordsVideoText by remember { mutableStateOf(sp.getString(MomentsAutoCommentSettings.KEY_KEYWORDS_VIDEO_TEXT, "").orEmpty()) }
-    var keywordsCardText by remember { mutableStateOf(sp.getString(MomentsAutoCommentSettings.KEY_KEYWORDS_CARD_TEXT, "").orEmpty()) }
-    var keywordText by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_KEYWORD_TEXT, true)) }
-    var keywordImage by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_KEYWORD_IMAGE, true)) }
-    var keywordVideo by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_KEYWORD_VIDEO, true)) }
-    var keywordCard by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_KEYWORD_CARD, true)) }
-    var logEnabled by remember { mutableStateOf(sp.getBoolean(MomentsAutoCommentSettings.KEY_LOG_ENABLE, false)) }
-    var logs by remember { mutableStateOf(sp.getString(MomentsAutoCommentSettings.KEY_LOGS, "").orEmpty()) }
-    val list = if (listMode == MomentsAutoCommentSettings.LIST_BLACKLIST) blacklist else whitelist
-    val listSummary = when {
-        listMode == MomentsAutoCommentSettings.LIST_BLACKLIST && list.isEmpty() -> "未排除好友，将匹配全部好友"
-        listMode == MomentsAutoCommentSettings.LIST_WHITELIST && list.isEmpty() -> "未选择好友，自动评论不会执行"
-        else -> "已选择 ${list.size} 位好友"
-    }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-
-    PageScaffold(
-        title = provider.title(),
-        largeTitle = provider.title(),
-        scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
-            )
-        ) {
-            item { SmallTitle(text = "自动评论") }
-            item {
-                SettingsCard {
-                    SwitchRow(enabled, "朋友圈自动评论", "按下方规则处理新获取的朋友圈") {
-                        enabled = it
-                        sp.edit()
-                            .putBoolean(MomentsAutoCommentSettings.KEY_ENABLE, it)
-                            .putLong(
-                                MomentsAutoCommentSettings.KEY_ENABLED_AT_SECONDS,
-                                if (it) System.currentTimeMillis() / 1000L else 0L
-                            )
-                            .apply()
-                    }
-                    if (enabled) {
-                        InsetDivider()
-                        VariableInputRow(
-                            title = "评论内容",
-                            summary = if (commentContent.isBlank()) "需要填写" else "点击下方中文变量插入到光标位置",
-                            value = commentContent,
-                            variables = momentsAutoCommentTemplateVariables,
-                            minLines = 3
-                        ) {
-                            commentContent = it
-                            sp.edit().putString(MomentsAutoCommentSettings.KEY_COMMENT_CONTENT, it).apply()
-                        }
-                        if (commentContent.contains(MomentsAutoCommentSettings.VAR_TIME)) {
-                            InsetDivider()
-                            InputRow(
-                                title = "时间变量格式",
-                                summary = if (MomentsAutoCommentSettings.isValidTimeFormat(timeFormat)) {
-                                    "例如 HH:mm:ss 或 yyyy-MM-dd HH:mm:ss"
-                                } else {
-                                    "格式无效，当前输入不会保存"
-                                },
-                                value = timeFormat
-                            ) {
-                                timeFormat = it
-                                if (MomentsAutoCommentSettings.isValidTimeFormat(it)) {
-                                    sp.edit().putString(
-                                        MomentsAutoCommentSettings.KEY_TIME_FORMAT,
-                                        MomentsAutoCommentSettings.normalizeTimeFormat(it)
-                                    ).apply()
-                                }
-                            }
-                        }
-                        InsetDivider()
-                        SwitchRow(commentSelf, "评论自己的朋友圈", "自己的朋友圈不受好友名单限制") {
-                            commentSelf = it
-                            sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_COMMENT_SELF, it).apply()
-                        }
-                    }
-                }
-            }
-            if (enabled) {
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "好友范围") }
-                item {
-                    SettingsCard {
-                        PopupOptionRow(
-                            title = "名单模式",
-                            summary = if (listMode == MomentsAutoCommentSettings.LIST_BLACKLIST) "除黑名单外均可评论" else "只评论白名单好友",
-                            options = optionItems(
-                                "白名单" to MomentsAutoCommentSettings.LIST_WHITELIST,
-                                "黑名单" to MomentsAutoCommentSettings.LIST_BLACKLIST
-                            ),
-                            currentValue = listMode,
-                            onValueChanged = {
-                                listMode = it
-                                sp.edit().putInt(MomentsAutoCommentSettings.KEY_LIST_MODE, it).apply()
-                            }
-                        )
-                        InsetDivider()
-                        ActionRow(if (listMode == MomentsAutoCommentSettings.LIST_BLACKLIST) "黑名单" else "白名单", listSummary) {
-                            onPickTargets(listMode)
-                        }
-                        InsetDivider()
-                        NumberInputRow("同一人每天评论数量", "每天最多评论同一人的朋友圈条数，0 表示不限制", dailyCommentLimit) {
-                            dailyCommentLimit = it
-                            it.toIntOrNull()?.let { value ->
-                                sp.edit()
-                                    .putInt(MomentsAutoCommentSettings.KEY_DAILY_COMMENT_LIMIT, value.coerceAtLeast(0))
-                                    .apply()
-                            }
-                        }
-                    }
-                }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "执行时间") }
-                item {
-                    SettingsCard {
-                        PopupOptionRow(
-                            title = "评论延迟",
-                            summary = if (delayMode == MomentsAutoCommentSettings.DELAY_RANDOM) "在范围内随机等待" else "每条等待固定时间",
-                            options = optionItems(
-                                "固定延迟" to MomentsAutoCommentSettings.DELAY_FIXED,
-                                "随机延迟" to MomentsAutoCommentSettings.DELAY_RANDOM
-                            ),
-                            currentValue = delayMode,
-                            onValueChanged = {
-                                delayMode = it
-                                sp.edit().putInt(MomentsAutoCommentSettings.KEY_DELAY_MODE, it).apply()
-                            }
-                        )
-                        if (delayMode == MomentsAutoCommentSettings.DELAY_FIXED) {
-                            InsetDivider()
-                            NumberInputRow("等待时间", "单位秒，最少 0 秒", fixedDelay) {
-                                fixedDelay = it
-                                it.toIntOrNull()?.let { value ->
-                                    sp.edit().putInt(MomentsAutoCommentSettings.KEY_FIXED_DELAY_SECONDS, value.coerceAtLeast(0)).apply()
-                                }
-                            }
-                        } else {
-                            InsetDivider()
-                            NumberInputRow("最短等待", "单位秒，最少 0 秒", randomMin) {
-                                randomMin = it
-                                it.toIntOrNull()?.let { value ->
-                                    sp.edit().putInt(MomentsAutoCommentSettings.KEY_RANDOM_MIN_SECONDS, value.coerceAtLeast(0)).apply()
-                                }
-                            }
-                            InsetDivider()
-                            NumberInputRow("最长等待", "单位秒，不能小于最短等待", randomMax) {
-                                randomMax = it
-                                it.toIntOrNull()?.let { value ->
-                                    sp.edit().putInt(MomentsAutoCommentSettings.KEY_RANDOM_MAX_SECONDS, value.coerceAtLeast(0)).apply()
-                                }
-                            }
-                        }
-                        InsetDivider()
-                        SwitchRow(timeWindow, "限制运行时段", "支持跨零点时段") {
-                            timeWindow = it
-                            sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_TIME_WINDOW_ENABLE, it).apply()
-                        }
-                        if (timeWindow) {
-                            InsetDivider()
-                            TimeOfDayPickerRow("开始时间", startTime) {
-                                startTime = it
-                                sp.edit().putString(MomentsAutoCommentSettings.KEY_START_TIME, it).apply()
-                            }
-                            InsetDivider()
-                            TimeOfDayPickerRow("结束时间", endTime) {
-                                endTime = it
-                                sp.edit().putString(MomentsAutoCommentSettings.KEY_END_TIME, it).apply()
-                            }
-                        }
-                        InsetDivider()
-                        NumberInputRow("发布时间限制", "仅评论发布后指定小时内的朋友圈，最少 1 小时", maxAge) {
-                            maxAge = it
-                            it.toIntOrNull()?.let { value ->
-                                sp.edit().putInt(MomentsAutoCommentSettings.KEY_MAX_AGE_HOURS, value.coerceAtLeast(1)).apply()
-                            }
-                        }
-                    }
-                }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "内容过滤") }
-                item {
-                    SettingsCard {
-                        SwitchRow(allowText, "文字朋友圈", "允许自动评论") {
-                            allowText = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_ALLOW_TEXT, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowImage, "图片/图文朋友圈", "允许自动评论") {
-                            allowImage = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_ALLOW_IMAGE, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowVideo, "视频/视文朋友圈", "允许自动评论") {
-                            allowVideo = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_ALLOW_VIDEO, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowLink, "网页/链接朋友圈", "允许自动评论") {
-                            allowLink = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_ALLOW_LINK, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowMusic, "音乐朋友圈", "允许自动评论") {
-                            allowMusic = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_ALLOW_MUSIC, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowOther, "其他卡片朋友圈", "允许自动评论") {
-                            allowOther = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_ALLOW_OTHER, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(allowUnknown, "未知类型朋友圈", "允许自动评论，默认关闭") {
-                            allowUnknown = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_ALLOW_UNKNOWN, it).apply()
-                        }
-                        InsetDivider()
-                        SwitchRow(keywordText, "文字朋友圈关键词", "开启后按关键词排除") {
-                            keywordText = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_KEYWORD_TEXT, it).apply()
-                        }
-                        if (keywordText) {
-                            InsetDivider()
-                            InputRow("文字排除关键词", "多个关键词用逗号或换行分隔", keywordsText, minLines = 2) {
-                                keywordsText = it
-                                sp.edit().putString(MomentsAutoCommentSettings.KEY_KEYWORDS_TEXT, it).apply()
-                            }
-                        }
-                        InsetDivider()
-                        SwitchRow(keywordImage, "图文朋友圈关键词", "开启后按关键词排除") {
-                            keywordImage = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_KEYWORD_IMAGE, it).apply()
-                        }
-                        if (keywordImage) {
-                            InsetDivider()
-                            InputRow("图文排除关键词", "多个关键词用逗号或换行分隔", keywordsImageText, minLines = 2) {
-                                keywordsImageText = it
-                                sp.edit().putString(MomentsAutoCommentSettings.KEY_KEYWORDS_IMAGE_TEXT, it).apply()
-                            }
-                        }
-                        InsetDivider()
-                        SwitchRow(keywordVideo, "视文朋友圈关键词", "开启后按关键词排除") {
-                            keywordVideo = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_KEYWORD_VIDEO, it).apply()
-                        }
-                        if (keywordVideo) {
-                            InsetDivider()
-                            InputRow("视文排除关键词", "多个关键词用逗号或换行分隔", keywordsVideoText, minLines = 2) {
-                                keywordsVideoText = it
-                                sp.edit().putString(MomentsAutoCommentSettings.KEY_KEYWORDS_VIDEO_TEXT, it).apply()
-                            }
-                        }
-                        InsetDivider()
-                        SwitchRow(keywordCard, "链接/卡片朋友圈关键词", "开启后按关键词排除") {
-                            keywordCard = it; sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_KEYWORD_CARD, it).apply()
-                        }
-                        if (keywordCard) {
-                            InsetDivider()
-                            InputRow("链接/卡片排除关键词", "多个关键词用逗号或换行分隔", keywordsCardText, minLines = 2) {
-                                keywordsCardText = it
-                                sp.edit().putString(MomentsAutoCommentSettings.KEY_KEYWORDS_CARD_TEXT, it).apply()
-                            }
-                        }
-                    }
-                }
-                item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "运行记录") }
-                item {
-                    SettingsCard {
-                        SwitchRow(logEnabled, "记录运行日志", "只保留最近 200 条") {
-                            logEnabled = it
-                            sp.edit().putBoolean(MomentsAutoCommentSettings.KEY_LOG_ENABLE, it).apply()
-                        }
-                        if (logEnabled) {
-                            InsetDivider()
-                            ActionRow("刷新日志", if (logs.isBlank()) "暂无记录" else "${logs.lineSequence().count()} 条记录") {
-                                logs = sp.getString(MomentsAutoCommentSettings.KEY_LOGS, "").orEmpty()
-                            }
-                            if (logs.isNotBlank()) {
-                                InsetDivider()
-                                Text(
-                                    text = logs.take(5000),
-                                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    modifier = Modifier.fillMaxWidth().padding(16.dp)
-                                )
-                                InsetDivider()
-                                ActionRow("清空日志", "删除当前自动评论运行记录") {
-                                    sp.edit().remove(MomentsAutoCommentSettings.KEY_LOGS).apply()
-                                    logs = ""
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    }
-}
-
-@Composable
-internal fun MomentsAutoForwardMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val sp = remember { HchatStorage.preferences(context, MomentsAutoForwardSettings.PREFS_NAME) }
-    var route by remember { mutableStateOf<MomentsAutoForwardRoute>(MomentsAutoForwardRoute.Main) }
-    var targets by remember {
-        mutableStateOf(
-            parseIds(
-                sp.getString(
-                    MomentsAutoForwardSettings.KEY_TARGETS,
-                    MomentsAutoForwardSettings.DEFAULT_TARGETS
-                ).orEmpty()
-            )
-        )
-    }
-    var replacementRules by remember {
-        mutableStateOf(
-            MomentsAutoForwardSettings.decodeKeywordReplacements(
-                sp.getString(
-                    MomentsAutoForwardSettings.KEY_KEYWORD_REPLACEMENTS,
-                    MomentsAutoForwardSettings.DEFAULT_KEYWORD_REPLACEMENTS
-                )
-            )
-        )
-    }
-    val mainListState = rememberLazyListState()
-
-    SettingsRouteTransition(
-        targetState = route,
-        label = "MomentsAutoForwardRoute",
-        depthOf = { if (it is MomentsAutoForwardRoute.Main) 0 else 1 }
-    ) { current ->
-        when (current) {
-            MomentsAutoForwardRoute.Main -> MomentsAutoForwardMainPage(
-                provider = provider,
-                sp = sp,
-                listState = mainListState,
-                targetCount = targets.size,
-                replacementRuleCount = replacementRules.size,
-                onBack = onBack,
-                onOpenReplacementRules = { route = MomentsAutoForwardRoute.ReplacementRules },
-                onPickTargets = {
-                    route = MomentsAutoForwardRoute.ContactPicker(
-                        ContactPickerRequest(
-                            title = "选择转发好友",
-                            mode = ContactPickerMode.FRIENDS,
-                            multiSelect = true,
-                            existingValue = formatIds(targets),
-                            onValue = {},
-                            enableLabels = true
-                        )
-                    )
-                }
-            )
-            is MomentsAutoForwardRoute.ContactPicker -> ContactPickerPage(
-                context = context,
-                request = current.request,
-                onBack = { route = MomentsAutoForwardRoute.Main },
-                onConfirm = { picked ->
-                    targets = picked.map { it.id }.filter { it.isNotBlank() }.toSet()
-                    sp.edit().putString(MomentsAutoForwardSettings.KEY_TARGETS, formatIds(targets)).apply()
-                    route = MomentsAutoForwardRoute.Main
-                }
-            )
-            MomentsAutoForwardRoute.ReplacementRules -> KeywordReplacementRulesPage(
-                context = context,
-                initialRules = replacementRules,
-                onBack = { route = MomentsAutoForwardRoute.Main },
-                onSave = { updated ->
-                    replacementRules = updated
-                    sp.edit()
-                        .putString(
-                            MomentsAutoForwardSettings.KEY_KEYWORD_REPLACEMENTS,
-                            MomentsAutoForwardSettings.encodeKeywordReplacements(updated)
-                        )
-                        .apply()
-                    Toast.makeText(context, "替换规则已保存", Toast.LENGTH_SHORT).show()
-                    route = MomentsAutoForwardRoute.Main
-                }
-            )
-        }
-    }
-}
-
-@Composable
