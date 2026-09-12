@@ -73,6 +73,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val tipsCardBottoms = WeakHashMap<ViewGroup, Int>()
     private val windowStates = WeakHashMap<Activity, WindowState>()
     private val decorStatusBarStates = WeakHashMap<View, DecorStatusBarState>()
+    private val layoutActivities = WeakHashMap<ViewGroup, Activity>()
     private val windowFocusListeners = WeakHashMap<ViewGroup, android.view.ViewTreeObserver.OnWindowFocusChangeListener>()
     private var reparentFailureReported = false
     private var installed = false
@@ -102,6 +103,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 (param.thisObject as? ViewGroup)?.let { layout ->
                     removeWindowFocusTracking(layout)
                     disposeLayoutTracker(layout)
+                    releaseWindowForLayout(layout)
                 }
             }
         }
@@ -217,7 +219,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
             visibleChatLayout(sourceLayout)?.takeIf { it !== sourceLayout }?.let(::restore)
             return
         }
-        val layout = visibleChatLayout(sourceLayout) ?: return
+        val layout = visibleChatLayout(sourceLayout) ?: run {
+            releaseWindowForLayout(sourceLayout)
+            return
+        }
         ensureWindowFocusTracking(layout)
         applyTopTransparency(layout)
         clearDecorStatusBarBackground(layout.rootView)
@@ -815,6 +820,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (windowFocusListeners[layout] != null) return
         val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
             if (!hasFocus || !layout.isAttachedToWindow || !isEnabled()) return@OnWindowFocusChangeListener
+            if (visibleChatLayout(layout) !== layout) {
+                releaseWindowForLayout(layout)
+                return@OnWindowFocusChangeListener
+            }
             applyTopTransparency(layout)
             clearDecorStatusBarBackground(layout.rootView)
             clearStatusBarWrapper(layout)
@@ -837,6 +846,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val activity = layout.context.activityOrNull()
             ?: layout.rootView.context.activityOrNull()
             ?: return
+        layoutActivities[layout as? ViewGroup ?: return] = activity
         val state = windowStates.getOrPut(activity) {
             val window = activity.window
             WindowState(window.decorView.systemUiVisibility, window.statusBarColor)
@@ -860,10 +870,18 @@ private class HeaderRuntime(private val context: FeatureContext) {
         statusView.alpha = 0f
     }
 
-    private fun restoreWindowStates() {
-        windowStates.forEach { (activity, state) ->
-            if (!state.applied) return@forEach
-            val window = activity.window
+    private fun releaseWindowForLayout(layout: ViewGroup) {
+        val activity = layoutActivities.remove(layout) ?: return
+        val hasVisibleChat = layoutActivities.any { (other, owner) ->
+            owner === activity && other !== layout && other.isAttachedToWindow && visibleChatLayout(other) === other
+        }
+        if (!hasVisibleChat) restoreWindowState(activity)
+    }
+
+    private fun restoreWindowState(activity: Activity) {
+        val state = windowStates.remove(activity) ?: return
+        val window = activity.window
+        if (state.applied) {
             window.decorView.systemUiVisibility =
                 (window.decorView.systemUiVisibility and TOP_IMMERSIVE_FLAGS.inv()) or
                     (state.systemUiVisibility and TOP_IMMERSIVE_FLAGS)
@@ -871,7 +889,19 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 window.statusBarColor = state.statusBarColor
             }
         }
-        windowStates.clear()
+        val decor = window.decorView
+        decorStatusBarStates.entries.toList().forEach { (view, decorState) ->
+            if (view.rootView === decor) {
+                view.background = decorState.background
+                view.alpha = decorState.alpha
+                decorStatusBarStates.remove(view)
+            }
+        }
+    }
+
+    private fun restoreWindowStates() {
+        windowStates.keys.toList().forEach(::restoreWindowState)
+        layoutActivities.clear()
         decorStatusBarStates.forEach { (view, state) ->
             view.background = state.background
             view.alpha = state.alpha
