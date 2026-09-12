@@ -631,8 +631,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 "[Hchat:$TAG] 聊天状态区目标: wrapper=${target.javaClass.name} " +
                     "parent=${target.parent?.javaClass?.name} size=${target.width}x${target.height} " +
                     "background=${target.background?.javaClass?.name} " +
-                    "setStatusBarBackgroundColor=${hasStatusBarMethod(target, \"setStatusBarBackgroundColor\")} " +
-                    "setStatusBarColor=${hasStatusBarMethod(target, \"setStatusBarColor\")}"
+                    "setStatusBarBackgroundColor=${hasStatusBarMethod(target, "setStatusBarBackgroundColor")} " +
+                    "setStatusBarColor=${hasStatusBarMethod(target, "setStatusBarColor")}"
             )
         }
     }
