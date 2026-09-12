@@ -52,9 +52,12 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val headerZoneStates = WeakHashMap<View, HeaderZoneState>()
     private val windowOverlayStates = WeakHashMap<View, Boolean>()
     private val statusWrapperBackgrounds = WeakHashMap<View, Drawable?>()
+    private val statusWrapperColors = WeakHashMap<View, Int?>()
+    private val statusWrappersByLayout = WeakHashMap<ViewGroup, View>()
     private val contentCardTranslations = WeakHashMap<View, Float>()
 
     private val diagnosedLayouts = WeakHashMap<View, Boolean>()
+    private val diagnosedStatusWrappers = WeakHashMap<View, Boolean>()
     private val tipsGroups = WeakHashMap<View, View>()
     private val tipsAttachListeners = WeakHashMap<View, View.OnAttachStateChangeListener>()
     private val tipsLayoutListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
@@ -208,12 +211,12 @@ private class HeaderRuntime(private val context: FeatureContext) {
             return
         }
         val layout = visibleChatLayout(sourceLayout) ?: return
+        applyChatStatusWrapper(layout)
         val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow }
             ?: find(layout) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
             ?: find(layout.rootView) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
             ?: return
         val state = states[header] ?: createState(header) ?: return
-        applyChatStatusWrapper(layout)
         if (isWindowBar(header, layout)) {
             enableWindowOverlay(header)
         } else if (!state.reparented && !reparentHeader(layout, header, state)) return
@@ -611,21 +614,59 @@ private class HeaderRuntime(private val context: FeatureContext) {
             }
             current = current.parent as? View
         }
-        if (wrapper == null) return
-        if (!statusWrapperBackgrounds.containsKey(wrapper)) {
-            statusWrapperBackgrounds[wrapper] = wrapper.background
-            wrapper.background = null
+        if (wrapper == null) {
+            wrapper = find(layout.rootView) { it.javaClass.name == STATUS_WRAPPER_CLASS }
+        }
+        val target = wrapper ?: return
+        statusWrappersByLayout[layout] = target
+        if (!statusWrapperBackgrounds.containsKey(target)) {
+            statusWrapperBackgrounds[target] = target.background
+            statusWrapperColors[target] = readStatusBarColor(target)
+        }
+        target.background = null
+        invokeStatusBarColor(target, Color.TRANSPARENT)
+        if (diagnosedStatusWrappers[target] != true) {
+            diagnosedStatusWrappers[target] = true
             HLog.i(
-                "[Hchat:$TAG] 聊天状态区透明: wrapper=${wrapper.javaClass.name} " +
-                    "parent=${wrapper.parent?.javaClass?.name} backgroundSaved=true"
+                "[Hchat:$TAG] 聊天状态区目标: wrapper=${target.javaClass.name} " +
+                    "parent=${target.parent?.javaClass?.name} size=${target.width}x${target.height} " +
+                    "background=${target.background?.javaClass?.name} " +
+                    "setStatusBarBackgroundColor=${hasStatusBarMethod(target, \"setStatusBarBackgroundColor\")} " +
+                    "setStatusBarColor=${hasStatusBarMethod(target, \"setStatusBarColor\")}"
             )
-        } else if (wrapper.background != null) {
-            wrapper.background = null
+        }
+    }
+
+    private fun findStatusBarMethod(view: View, name: String): Method? {
+        var type: Class<*>? = view.javaClass
+        while (type != null) {
+            type.declaredMethods.firstOrNull {
+                it.name == name && it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType))
+            }?.let {
+                it.isAccessible = true
+                return it
+            }
+            type = type.superclass
+        }
+        return null
+    }
+
+    private fun hasStatusBarMethod(view: View, name: String): Boolean =
+        findStatusBarMethod(view, name) != null
+
+    private fun readStatusBarColor(view: View): Int? =
+        (view.background as? android.graphics.drawable.ColorDrawable)?.color
+
+    private fun invokeStatusBarColor(view: View, color: Int) {
+        runCatching {
+            findStatusBarMethod(view, "setStatusBarBackgroundColor")?.invoke(view, color)
+            findStatusBarMethod(view, "setStatusBarColor")?.invoke(view, color)
         }
     }
 
     private fun restoreChatStatusWrapper(layout: ViewGroup) {
-        val wrapper = statusWrapperBackgrounds.keys.firstOrNull { saved ->
+        val wrapper = statusWrappersByLayout.remove(layout)
+            ?: statusWrapperBackgrounds.keys.firstOrNull { saved ->
             var current: View? = layout
             while (current != null) {
                 if (current === saved) return@firstOrNull true
@@ -634,6 +675,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
             false
         } ?: return
         wrapper.background = statusWrapperBackgrounds.remove(wrapper)
+        statusWrapperColors.remove(wrapper)?.let { originalColor ->
+            if (originalColor != null) invokeStatusBarColor(wrapper, originalColor)
+        }
     }
 
     private fun diagnoseHeaderLayout(layout: View, header: View) {
@@ -699,8 +743,15 @@ private class HeaderRuntime(private val context: FeatureContext) {
     fun destroy() {
         states.keys.toList().forEach(::restoreView)
         headerZoneStates.keys.toList().forEach { layout -> restore(layout as? ViewGroup ?: return@forEach) }
-        statusWrapperBackgrounds.entries.toList().forEach { (view, background) -> view.background = background }
+        statusWrapperBackgrounds.entries.toList().forEach { (view, background) ->
+            view.background = background
+            statusWrapperColors.remove(view)?.let { originalColor ->
+                if (originalColor != null) invokeStatusBarColor(view, originalColor)
+            }
+        }
         statusWrapperBackgrounds.clear()
+        statusWrapperColors.clear()
+        statusWrappersByLayout.clear()
         headersByLayout.clear()
         contentCardTranslations.forEach { (view, translation) -> view.translationY = translation }
         contentCardTranslations.clear()
