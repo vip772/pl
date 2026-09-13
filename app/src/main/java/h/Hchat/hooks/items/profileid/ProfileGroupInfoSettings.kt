@@ -17,4 +17,3 @@ object ProfileGroupInviterSettings {
     const val DEFAULT_COLOR = "#FF000000,#FF000000"
     fun cleanColorSpec(value: String?): String = ProfileAddTimeSettings.cleanColorSpec(value)
 }
-}
