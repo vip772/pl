@@ -104,7 +104,7 @@ private object RuntimeLogExportBridge {
         val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss", Locale.ROOT).format(Date())
         val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "text/plain"
+            type = "application/octet-stream"
             putExtra(Intent.EXTRA_TITLE, "Hchat-runtime-$timestamp.log")
         }
         runCatching { activity.startActivityForResult(intent, RUNTIME_LOG_EXPORT_REQUEST_CODE) }

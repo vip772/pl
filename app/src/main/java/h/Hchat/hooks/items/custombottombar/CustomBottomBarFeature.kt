@@ -69,8 +69,14 @@ class CustomBottomBarFeature : BaseFeature() {
     override fun name(): String = "自定义底栏"
 
     override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(CustomBottomBarSettingsProvider())
-        registerSettingsProvider(FloatingBottomBarSettingsProvider())
+        registerSettingsProvider(CustomBottomBarSettingsProvider()) {
+            HchatStorage.preferences(context.hostContext(), CustomBottomBarSettings.PREFS_NAME)
+                .getBoolean(CustomBottomBarSettings.KEY_ENABLE, CustomBottomBarSettings.DEFAULT_ENABLE)
+        }
+        registerSettingsProvider(FloatingBottomBarSettingsProvider()) {
+            HchatStorage.preferences(context.hostContext(), FloatingBottomBarSettings.PREFS_NAME)
+                .getBoolean(FloatingBottomBarSettings.KEY_ENABLE, FloatingBottomBarSettings.DEFAULT_ENABLE)
+        }
     }
 
     override fun onFeatureInstall(context: FeatureContext) {

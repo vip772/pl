@@ -24,7 +24,9 @@ class WeChatTabletFeature : BaseFeature() {
     override fun name(): String = "平板模式"
 
     override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(WeChatTabletSettingsProvider())
+        registerSettingsProvider(WeChatTabletSettingsProvider()) {
+            isEnabled(context)
+        }
     }
 
     override fun onFeatureInstall(context: FeatureContext) {

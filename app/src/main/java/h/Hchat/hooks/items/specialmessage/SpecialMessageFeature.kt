@@ -24,7 +24,12 @@ class SpecialMessageFeature : BaseFeature() {
     // 开关保存在 HchatStorage 中，并且需要运行时即时读取；功能本身必须始终安装监听。
     override fun isEnabled(context: FeatureContext): Boolean = true
     override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(object : SimpleFeatureSettingsProvider(ID, name(), "安全消息", FeatureSettingsProvider.CATEGORY_PRACTICAL) {})
+        registerSettingsProvider(
+            object : SimpleFeatureSettingsProvider(ID, name(), "安全消息", FeatureSettingsProvider.CATEGORY_PRACTICAL) {}
+        ) {
+            val sp = HchatStorage.preferences(context.hostContext(), PREFS)
+            sp.getBoolean("enabled", false) || sp.getBoolean("link", false)
+        }
     }
     override fun onFeatureInstall(context: FeatureContext) {
         // 仅启用已用宿主 APK 交叉确认的版本，避免混淆类碰撞。

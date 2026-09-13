@@ -12,7 +12,9 @@ class FloatingShortcutFeature : BaseFeature() {
     override fun name(): String = "悬浮快捷菜单"
 
     override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(FloatingShortcutSettingsProvider())
+        registerSettingsProvider(FloatingShortcutSettingsProvider()) {
+            FloatingShortcutRuntime.isEnabled(context.hostContext())
+        }
     }
 
     override fun onFeatureInstall(context: FeatureContext) {

@@ -32,7 +32,10 @@ class FakeWalletBalanceFeature : BaseFeature() {
     override fun name(): String = "伪造零钱"
 
     override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(FakeWalletBalanceSettingsProvider())
+        registerSettingsProvider(FakeWalletBalanceSettingsProvider()) {
+            HchatStorage.preferences(context.hostContext(), FakeWalletBalanceSettings.PREFS_NAME)
+                .getBoolean(FakeWalletBalanceSettings.KEY_ENABLE, FakeWalletBalanceSettings.DEFAULT_ENABLE)
+        }
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
