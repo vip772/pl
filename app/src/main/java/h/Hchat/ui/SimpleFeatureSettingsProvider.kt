@@ -4,7 +4,8 @@ open class SimpleFeatureSettingsProvider protected constructor(
     private val featureId: String,
     private val title: String,
     private val subtitle: String,
-    private val category: String = FeatureSettingsProvider.CATEGORY_ENHANCE
+    private val category: String = FeatureSettingsProvider.CATEGORY_ENHANCE,
+    private val newFeature: Boolean = false
 ) : FeatureSettingsProvider {
     final override fun featureId(): String = featureId
 
@@ -13,4 +14,5 @@ open class SimpleFeatureSettingsProvider protected constructor(
     final override fun subtitle(): String = subtitle
 
     final override fun category(): String = category
+    final override fun isNewFeature(): Boolean = newFeature
 }

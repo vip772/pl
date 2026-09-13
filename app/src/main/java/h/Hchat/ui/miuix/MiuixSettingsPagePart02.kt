@@ -382,6 +382,8 @@ import h.Hchat.hooks.items.patblock.PatBlockSettings
 import h.Hchat.hooks.items.profileid.ProfileIdFeature
 import h.Hchat.hooks.items.profileid.ProfileIdSettings
 import h.Hchat.hooks.items.profileid.ProfileAddTimeSettings
+import h.Hchat.hooks.items.profileid.ProfileAddTimeSettingsProvider
+
 import h.Hchat.hooks.items.protobuf.ProtobufPacketFeature
 import h.Hchat.hooks.items.protobuf.ProtobufPacketRuntime
 import h.Hchat.hooks.items.protobuf.ProtobufPacketSettings
@@ -1279,12 +1281,8 @@ internal fun MainSettingsPage(
         it.category() == FeatureSettingsProvider.CATEGORY_ENHANCE &&
             it.featureId() != ScriptPluginFeature.ID
     }
-    val practicalGroups = remember(practicalProviders, enhanceProviders) {
-        practicalFeatureGroups(practicalProviders, enhanceProviders)
-    }
-    val entertainmentGroups = remember(entertainmentProviders) {
-        entertainmentFeatureGroups(entertainmentProviders)
-    }
+    val practicalGroups = practicalFeatureGroups(practicalProviders, enhanceProviders)
+    val entertainmentGroups = entertainmentFeatureGroups(entertainmentProviders)
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
         title = "Hchat",
@@ -1444,11 +1442,32 @@ internal fun List<FeatureSettingsProvider>.filterByIds(vararg ids: String): List
         .sortedBy { order.indexOf(it.featureId()) }
 }
 
+internal fun newFeatureProviders(
+    practicalProviders: List<FeatureSettingsProvider>
+): List<FeatureSettingsProvider> = practicalProviders.filter { it.isNewFeature() }
+
+internal fun enabledFeatureProviders(
+    providers: List<FeatureSettingsProvider>
+): List<FeatureSettingsProvider> {
+    val enabledIds = UIRegistry.get().getEnabledProviders().mapTo(HashSet()) { it.featureId() }
+    return providers.filter { it.featureId() in enabledIds }
+}
+
 internal fun practicalFeatureGroups(
     practicalProviders: List<FeatureSettingsProvider>,
     enhanceProviders: List<FeatureSettingsProvider>
 ): List<FeatureGroupEntry> {
+    val newProviders = newFeatureProviders(practicalProviders)
+    val enabledProviders = enabledFeatureProviders(practicalProviders + enhanceProviders)
     return listOf(
+        FeatureGroupEntry(
+            title = "新功能",
+            providers = newProviders
+        ),
+        FeatureGroupEntry(
+            title = "已开启功能 (${enabledProviders.size})",
+            providers = enabledProviders
+        ),
         FeatureGroupEntry(
             title = "聊天",
             providers = practicalProviders.filterByIds(
@@ -1545,6 +1564,7 @@ internal fun practicalFeatureGroups(
                 PluginAgentEntryProvider.ID,
                 FloatingShortcutFeature.ID,
                 ProfileIdFeature.ID,
+                ProfileAddTimeSettingsProvider.ID,
                 GroupMemberHistorySettingsProvider.FEATURE_ID,
                 QuickContactEditFeature.ID,
                 QuickGroupChatLabelFeature.ID,
@@ -1569,9 +1589,12 @@ internal fun practicalFeatureGroups(
                 SkipWebRiskSettingsProvider.FEATURE_ID
             )
         )
-    ).filter { it.providers.isNotEmpty() }
+    ).filter {
+        it.providers.isNotEmpty() ||
+            it.title == "新功能" ||
+            it.title.startsWith("已开启功能")
+    }
 }
-
 internal fun entertainmentFeatureGroups(
     entertainmentProviders: List<FeatureSettingsProvider>
 ): List<FeatureGroupEntry> {

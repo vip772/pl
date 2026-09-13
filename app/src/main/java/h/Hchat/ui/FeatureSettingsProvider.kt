@@ -6,8 +6,8 @@ interface FeatureSettingsProvider {
     fun title(): String
 
     fun subtitle(): String
-
     fun category(): String = CATEGORY_ENHANCE
+    fun isNewFeature(): Boolean = false
 
     companion object {
         const val CATEGORY_PRACTICAL = "practical"

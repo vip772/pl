@@ -71,10 +71,15 @@ abstract class BaseFeature : Feature {
 
     protected fun context(): FeatureContext? = context
 
-    protected fun registerSettingsProvider(provider: FeatureSettingsProvider?) {
+    protected fun registerSettingsProvider(
+        provider: FeatureSettingsProvider?,
+        enabledCheck: (() -> Boolean)? = null
+    ) {
         val currentContext = context ?: return
         if (provider == null) return
-        currentContext.uiRegistry().registerProvider(provider)
+        currentContext.uiRegistry().registerProvider(provider) {
+            enabledCheck?.invoke() ?: isEnabled(currentContext)
+        }
         registeredProviderIds.add(provider.featureId())
     }
 

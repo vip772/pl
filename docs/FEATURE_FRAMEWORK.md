@@ -243,6 +243,14 @@ done
 
 面向插件作者的简明接口文档见 `docs/SCRIPT_PLUGIN_API.md`。该文档用于给用户和插件作者阅读，避免写入项目内部协作规则或逆向细节。
 
+## 设置功能聚合入口
+
+设置页通过 `FeatureSettingsProvider` 统一注册功能入口。实用功能首页保留原有聊天、美化、界面等分组，同时提供动态的“新功能”和“已开启功能”聚合分组。聚合分组只复用已有 provider，不复制功能设置页面；用户从任意分组进入后，都沿用统一的 `FeatureSettingsPage` 直接编辑对应功能。
+
+“新功能”用于集中展示标记为新功能的新入口，同时这些入口继续保留在原有功能分组中。当前包含“添加时间”“悬浮标题栏”“悬浮输入框”和“输入框提示”。provider 通过 `isNewFeature()` 标记是否进入该聚合区；“添加时间”使用独立的 `ProfileAddTimeSettingsProvider`，设置页复用资料页显示页面，但启用状态读取自己的配置开关。
+
+“已开启功能”从 `UIRegistry` 的启用状态检查动态生成，并在标题中显示当前数量。`BaseFeature.registerSettingsProvider` 可为同一功能下的不同 provider 提供独立启用判断；没有特殊判断时使用功能自身的 `Feature.isEnabled`。因此新增功能只要注册 provider 并提供启用判断，就会自动进入已开启聚合，不需要在设置页复制维护入口。
+
 ## 日志规则
 LSPosed 只有 `XposedBridge.log(Throwable)` 会按错误日志显示。模块自身的失败、异常、未找到、未命中、不可用等错误日志必须统一使用 `h.Hchat.utils.HLog.e(...)`，不要直接 `XposedBridge.log(String)`。普通状态、抓包内容、用户脚本主动 `log()` 仍可使用普通字符串日志，避免把调试信息全部标红。
 

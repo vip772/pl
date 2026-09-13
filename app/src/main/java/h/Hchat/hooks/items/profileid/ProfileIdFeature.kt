@@ -35,6 +35,10 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
     override fun isEnabled(context: FeatureContext): Boolean = isEnabled(context.hostContext())
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(ProfileIdSettingsProvider())
+        registerSettingsProvider(ProfileAddTimeSettingsProvider()) {
+            val prefs = HchatStorage.preferences(context.hostContext(), ProfileAddTimeSettings.PREFS_NAME)
+            prefs.getBoolean(ProfileAddTimeSettings.KEY_ENABLE, ProfileAddTimeSettings.DEFAULT_ENABLE)
+        }
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
