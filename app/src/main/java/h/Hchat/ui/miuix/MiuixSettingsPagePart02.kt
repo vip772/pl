@@ -382,7 +382,6 @@ import h.Hchat.hooks.items.patblock.PatBlockSettings
 import h.Hchat.hooks.items.profileid.ProfileIdFeature
 import h.Hchat.hooks.items.profileid.ProfileIdSettings
 import h.Hchat.hooks.items.profileid.ProfileAddTimeSettings
-import h.Hchat.hooks.items.profileid.ProfileAddTimeSettingsProvider
 import h.Hchat.hooks.items.profileid.ProfileGroupInfoSettingsProvider
 import h.Hchat.hooks.items.profileid.ProfileGroupJoinTimeSettings
 import h.Hchat.hooks.items.profileid.ProfileGroupInviterSettings
@@ -1568,7 +1567,6 @@ internal fun practicalFeatureGroups(
                 PluginAgentEntryProvider.ID,
                 FloatingShortcutFeature.ID,
                 ProfileIdFeature.ID,
-                ProfileAddTimeSettingsProvider.ID,
                 GroupMemberHistorySettingsProvider.FEATURE_ID,
                 QuickContactEditFeature.ID,
                 QuickGroupChatLabelFeature.ID,

@@ -382,7 +382,6 @@ import h.Hchat.hooks.items.patblock.PatBlockSettings
 import h.Hchat.hooks.items.profileid.ProfileIdFeature
 import h.Hchat.hooks.items.profileid.ProfileIdSettings
 import h.Hchat.hooks.items.profileid.ProfileAddTimeSettings
-import h.Hchat.hooks.items.profileid.ProfileAddTimeSettingsProvider
 import h.Hchat.hooks.items.profileid.ProfileGroupInfoSettingsProvider
 import h.Hchat.hooks.items.protobuf.ProtobufPacketFeature
 import h.Hchat.hooks.items.protobuf.ProtobufPacketRuntime
@@ -1092,7 +1091,6 @@ internal fun FeatureSettingsPage(
         CallRingtoneBlockFeature.ID -> CallRingtoneBlockMiuixPage(context, provider, onBack)
         DisableHotUpdateFeature.ID -> DisableHotUpdateMiuixPage(context, provider, onBack)
         ProfileIdFeature.ID -> ProfileIdMiuixPage(context, provider, onBack)
-        ProfileAddTimeSettingsProvider.ID -> ProfileIdMiuixPage(context, provider, onBack)
         ProfileGroupInfoSettingsProvider.ID -> ProfileGroupInfoMiuixPage(context, provider, onBack)
         QuickContactEditFeature.ID -> QuickContactEditMiuixPage(context, provider, onBack)
         QuickGroupChatLabelFeature.ID -> QuickGroupChatLabelMiuixPage(context, provider, onBack)

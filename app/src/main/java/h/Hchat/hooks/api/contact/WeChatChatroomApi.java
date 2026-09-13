@@ -167,11 +167,50 @@ public final class WeChatChatroomApi {
         return memberWxId.equals(inviter) ? "" : inviter;
     }
 
-    /** Returns the persisted roomdata join time in milliseconds, or zero when unavailable. */
+    /** Returns the persisted join-event time from the group's system messages, or zero when unavailable. */
     public long getMemberJoinTime(String chatroomId, String memberWxId) {
-        if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId)) return 0L;
-        RoomDataMember member = getRoomDataMembers(chatroomId).get(memberWxId);
-        return member != null ? member.joinTimeMillis : 0L;
+        if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId) || databaseApi == null) return 0L;
+        String table = databaseApi.messageTableForTalker(chatroomId);
+        if (TextUtils.isEmpty(table)) return 0L;
+        try {
+            List<Map<String, Object>> rows = databaseApi.query(
+                    "SELECT createTime, content FROM " + databaseApi.quoteTable(table)
+                            + " WHERE type=? AND talker=? AND content LIKE ?"
+                            + " ORDER BY createTime ASC LIMIT 200",
+                    new String[]{"10000", chatroomId, "%" + memberWxId + "%"});
+            long best = 0L;
+            for (Map<String, Object> row : rows) {
+                String content = str(row, "content");
+                if (!isMemberJoinSystemMessage(content, memberWxId)) continue;
+                long time = number(row, "createTime");
+                long millis = time < 100000000000L ? time * 1000L : time;
+                if (millis > 0L && (best == 0L || millis < best)) best = millis;
+            }
+            return best;
+        } catch (Throwable e) {
+            log("查询群成员进群时间失败: group=" + chatroomId + " member=" + memberWxId
+                    + " " + e.getMessage());
+            return 0L;
+        }
+    }
+
+    private boolean isMemberJoinSystemMessage(String content, String memberWxId) {
+        if (TextUtils.isEmpty(content) || TextUtils.isEmpty(memberWxId) || !content.contains(memberWxId)) {
+            return false;
+        }
+        String lower = content.toLowerCase();
+        return lower.contains("加入") || lower.contains("邀请") || lower.contains("进群")
+                || lower.contains("addchatroommember") || lower.contains("invite");
+    }
+
+    private static long number(Map<String, Object> row, String key) {
+        Object value = row != null ? row.get(key) : null;
+        if (value instanceof Number) return ((Number) value).longValue();
+        try {
+            return value != null ? Long.parseLong(String.valueOf(value)) : 0L;
+        } catch (Throwable ignored) {
+            return 0L;
+        }
     }
 
 
@@ -360,12 +399,6 @@ public final class WeChatChatroomApi {
                     member.roomFlag = reader.readVarint32();
                 } else if (wireType == 2 && fieldNumber == 4) {
                     member.inviterWxId = reader.readString().trim();
-                } else if (wireType == 0 && (fieldNumber == 5 || fieldNumber == 6 || fieldNumber == 7)) {
-                    long value = reader.readVarint64();
-                    member.joinTimeMillis = normalizeJoinTime(value, member.joinTimeMillis);
-                } else if (wireType == 1 && (fieldNumber == 5 || fieldNumber == 6 || fieldNumber == 7)) {
-                    long value = reader.readFixed64();
-                    member.joinTimeMillis = normalizeJoinTime(value, member.joinTimeMillis);
                 } else {
                     reader.skip(wireType);
                 }
@@ -374,14 +407,6 @@ public final class WeChatChatroomApi {
             return new RoomDataMember();
         }
         return member;
-    }
-
-    private long normalizeJoinTime(long value, long current) {
-        if (value <= 0L) return current;
-        long millis = value < 100000000000L ? value * 1000L : value;
-        long now = System.currentTimeMillis();
-        if (millis < 946684800000L || millis > now + 86400000L) return current;
-        return current == 0L || millis < current ? millis : current;
     }
 
     private boolean hasColumn(String table, String column) {
@@ -461,7 +486,6 @@ public final class WeChatChatroomApi {
         String username = "";
         String displayName = "";
         String inviterWxId = "";
-        long joinTimeMillis;
         int roomFlag;
     }
 

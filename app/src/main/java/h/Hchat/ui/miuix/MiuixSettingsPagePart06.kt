@@ -656,6 +656,12 @@ internal fun ProfileGroupInfoMiuixPage(
 ) {
     val joinTimeSp = remember { HchatStorage.preferences(context, ProfileGroupJoinTimeSettings.PREFS_NAME) }
     val inviterSp = remember { HchatStorage.preferences(context, ProfileGroupInviterSettings.PREFS_NAME) }
+    var joinTimeColor by remember {
+        mutableStateOf(joinTimeSp.getString(ProfileGroupJoinTimeSettings.KEY_COLOR, ProfileGroupJoinTimeSettings.DEFAULT_COLOR) ?: ProfileGroupJoinTimeSettings.DEFAULT_COLOR)
+    }
+    var inviterColor by remember {
+        mutableStateOf(inviterSp.getString(ProfileGroupInviterSettings.KEY_COLOR, ProfileGroupInviterSettings.DEFAULT_COLOR) ?: ProfileGroupInviterSettings.DEFAULT_COLOR)
+    }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
@@ -692,10 +698,29 @@ internal fun ProfileGroupInfoMiuixPage(
                     )
                 }
             }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "进群时间颜色") }
+            item { SettingsCard {
+                ColorPickerRow("进群时间渐变颜色", "支持单色或左右渐变", joinTimeColor, onReset = {
+                    joinTimeColor = ProfileGroupJoinTimeSettings.DEFAULT_COLOR
+                    joinTimeSp.edit().remove(ProfileGroupJoinTimeSettings.KEY_COLOR).apply()
+                }) { value ->
+                    joinTimeColor = ProfileGroupJoinTimeSettings.cleanColorSpec(value)
+                    joinTimeSp.edit().putString(ProfileGroupJoinTimeSettings.KEY_COLOR, joinTimeColor).apply()
+                }
+            } }
+            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "邀请人颜色") }
+            item { SettingsCard {
+                ColorPickerRow("邀请人渐变颜色", "支持单色或左右渐变", inviterColor, onReset = {
+                    inviterColor = ProfileGroupInviterSettings.DEFAULT_COLOR
+                    inviterSp.edit().remove(ProfileGroupInviterSettings.KEY_COLOR).apply()
+                }) { value ->
+                    inviterColor = ProfileGroupInviterSettings.cleanColorSpec(value)
+                    inviterSp.edit().putString(ProfileGroupInviterSettings.KEY_COLOR, inviterColor).apply()
+                }
+            } }
         }
     }
 }
-
 @Composable
 internal fun HideChatMenuMiuixPage(
     context: Context,

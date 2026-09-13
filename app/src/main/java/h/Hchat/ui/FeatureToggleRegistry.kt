@@ -8,6 +8,8 @@ import h.Hchat.hooks.items.momentsfake.MomentsFakeInteractionSettings
 import h.Hchat.hooks.items.specialmessage.SpecialMessageFeature
 import h.Hchat.hooks.items.profileid.ProfileGroupJoinTimeSettings
 import h.Hchat.hooks.items.profileid.ProfileGroupInviterSettings
+import h.Hchat.hooks.items.profileid.ProfileIdSettings
+import h.Hchat.hooks.items.profileid.ProfileAddTimeSettings
 import h.Hchat.preferences.HchatStorage
 
 /** Reads the same primary toggle used by each feature settings page. */
@@ -67,8 +69,7 @@ object FeatureToggleRegistry {
         "multi_recall" to Toggle("Hchat_multi_recall_config", "multi_recall_enable"),
         "qq_music_order" to Toggle("Hchat_qq_music_order_config", "qq_music_order_enable"),
         "disable_pat" to Toggle("Hchat_disable_pat_config", "disable_pat_enable"),
-        "profile_add_time" to Toggle("Hchat_profile_add_time_config", "profile_add_time_enable"),
-        "profile_id" to Toggle("Hchat_profile_id_config", "profile_id_enable"),
+        "profile_id" to Toggle(ProfileIdSettings.PREFS_NAME, ProfileIdSettings.KEY_ENABLE),
         "protobuf_packet" to Toggle("Hchat_protobuf_packet_config", "protobuf_packet_enable"),
         "quick_contact_edit" to Toggle("Hchat_quick_contact_edit_config", "quick_contact_edit_enable"),
         "quick_moments" to Toggle("Hchat_quick_moments_config", "quick_moments_enable"),
@@ -118,6 +119,8 @@ object FeatureToggleRegistry {
                 }
                 boolean(context, MomentsFakeInteractionSettings.PREFS_NAME, key)
             }
+            "profile_id" -> boolean(context, ProfileIdSettings.PREFS_NAME, ProfileIdSettings.KEY_ENABLE) ||
+                boolean(context, ProfileAddTimeSettings.PREFS_NAME, ProfileAddTimeSettings.KEY_ENABLE)
             "profile_group_info" -> boolean(context, ProfileGroupJoinTimeSettings.PREFS_NAME, ProfileGroupJoinTimeSettings.KEY_ENABLE) ||
                 boolean(context, ProfileGroupInviterSettings.PREFS_NAME, ProfileGroupInviterSettings.KEY_ENABLE)
             "moments_fake_interaction" -> {
