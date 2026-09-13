@@ -1465,7 +1465,7 @@ internal fun practicalFeatureGroups(
             providers = newProviders
         ),
         FeatureGroupEntry(
-            title = "已开启功能 (${enabledProviders.size})",
+            title = "已开启功能",
             providers = enabledProviders
         ),
         FeatureGroupEntry(

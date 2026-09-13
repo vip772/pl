@@ -249,7 +249,7 @@ done
 
 “新功能”用于集中展示标记为新功能的新入口，同时这些入口继续保留在原有功能分组中。当前包含“添加时间”“悬浮标题栏”“悬浮输入框”和“输入框提示”。provider 通过 `isNewFeature()` 标记是否进入该聚合区；“添加时间”使用独立的 `ProfileAddTimeSettingsProvider`，设置页复用资料页显示页面，但启用状态读取自己的配置开关。
 
-“已开启功能”从 `UIRegistry` 的启用状态检查动态生成，并在标题中显示当前数量。`BaseFeature.registerSettingsProvider` 可为同一功能下的不同 provider 提供独立启用判断；没有特殊判断时使用功能自身的 `Feature.isEnabled`。因此新增功能只要注册 provider 并提供启用判断，就会自动进入已开启聚合，不需要在设置页复制维护入口。
+“已开启功能”只收录启用状态检查明确返回 `true` 的 provider；未提供真实开关判断的 provider 按关闭处理，不会因为功能已注册或已安装而被计入。标题固定显示为“已开启功能”，不附加数量。`BaseFeature.registerSettingsProvider` 可为同一功能下的不同 provider 提供独立启用判断；新增功能应提供真实开关判断后再进入该聚合，不需要在设置页复制维护入口。
 
 ## 日志规则
 LSPosed 只有 `XposedBridge.log(Throwable)` 会按错误日志显示。模块自身的失败、异常、未找到、未命中、不可用等错误日志必须统一使用 `h.Hchat.utils.HLog.e(...)`，不要直接 `XposedBridge.log(String)`。普通状态、抓包内容、用户脚本主动 `log()` 仍可使用普通字符串日志，避免把调试信息全部标红。
