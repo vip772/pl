@@ -480,6 +480,8 @@ WeChatApis.contact().chatrooms().getMemberDisplayName(chatroomId, memberWxId);
 WeChatApis.contact().chatrooms().getMemberInviter(chatroomId, memberWxId);
 ```
 
+内部群成员资料页的进群时间索引按群批量读取消息分表中的入群系统消息，并以成员 wxid 映射最早的 `createTime`。该索引必须在后台线程建立；资料页绑定阶段只读取已完成的内存缓存，未完成时不能同步扫描消息表或阻塞资料页。
+
 `WeChatApis.contact().users()`
 
 用户类型判断和账号辅助能力。

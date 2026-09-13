@@ -168,6 +168,56 @@ public final class WeChatChatroomApi {
         return memberWxId.equals(inviter) ? "" : inviter;
     }
 
+    /**
+     * Reads all known member join times for a group in one background-friendly pass.
+     * The result is keyed by member wxid and contains the earliest matching event time.
+     */
+    public Map<String, Long> getMemberJoinTimes(String chatroomId) {
+        Map<String, Long> result = new LinkedHashMap<>();
+        if (TextUtils.isEmpty(chatroomId) || databaseApi == null) return result;
+        Map<String, RoomDataMember> members = getRoomDataMembers(chatroomId);
+        if (members.isEmpty()) return result;
+        try {
+            List<String> tables = new ArrayList<>();
+            String mapped = databaseApi.messageTableForTalker(chatroomId);
+            if (!TextUtils.isEmpty(mapped)) tables.add(mapped);
+            for (String table : databaseApi.messageTables()) {
+                if (!tables.contains(table)) tables.add(table);
+            }
+            for (String table : tables) {
+                String quoted = databaseApi.quoteTable(table);
+                if (TextUtils.isEmpty(quoted)) continue;
+                List<Map<String, Object>> rows = databaseApi.query(
+                        "SELECT type, createTime, content FROM " + quoted
+                                + " WHERE talker=? AND (type=? OR type=? OR type=? OR type=?"
+                                + " OR type=? OR type=? OR type=? OR type=? OR type=?)"
+                                + " ORDER BY createTime ASC LIMIT 20000",
+                        new String[]{chatroomId, "10000", "10002", "64", "603979825",
+                                "268445456", "268445458", "285222674", "889192497", "922746929"});
+                for (Map<String, Object> row : rows) {
+                    String content = str(row, "content");
+                    int type = (int) number(row, "type");
+                    long time = number(row, "createTime");
+                    long millis = time < 100000000000L ? time * 1000L : time;
+                    if (millis <= 0L) continue;
+                    for (String memberWxId : members.keySet()) {
+                        if (!isMemberJoinSystemMessage(type, content, memberWxId)) continue;
+                        Long previous = result.get(memberWxId);
+                        if (previous == null || millis < previous) {
+                            result.put(memberWxId, millis);
+                        }
+                    }
+                }
+            }
+            log("群成员进群时间索引完成: group=" + chatroomId
+                    + " tables=" + tables.size() + " members=" + members.size()
+                    + " hits=" + result.size());
+        } catch (Throwable e) {
+            log("建立群成员进群时间索引失败: group=" + chatroomId + " " + e.getMessage());
+        }
+        return result;
+    }
+
     /** Returns the persisted join-event time from the group's system messages, or zero when unavailable. */
     public long getMemberJoinTime(String chatroomId, String memberWxId) {
         if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId) || databaseApi == null) return 0L;

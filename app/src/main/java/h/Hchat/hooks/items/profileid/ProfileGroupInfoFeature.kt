@@ -7,20 +7,91 @@ import h.Hchat.preferences.HchatStorage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.Collections
+import java.util.HashMap
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.atomic.AtomicInteger
 
 class ProfileGroupInfoFeature {
     companion object {
         private val joinTimeProvider = JoinTimeProvider()
         private val inviterProvider = InviterProvider()
+@Volatile private var executor: ExecutorService? = null
+
+        private fun executor(): ExecutorService {
+            val current = executor
+            if (current != null && !current.isShutdown) return current
+            return synchronized(this) {
+                val existing = executor
+                if (existing != null && !existing.isShutdown) existing else
+                    Executors.newSingleThreadExecutor { runnable ->
+                        Thread(runnable, "Hchat-GroupJoinTime").apply { isDaemon = true }
+                    }.also { executor = it }
+            }
+        }
+        private val generation = AtomicInteger(0)
+        private val cache = ConcurrentHashMap<String, Map<String, Long>>()
+        private val loadedGroups = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+        private val loadingGroups = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 
         fun installProvider() {
+            val run = generation.incrementAndGet()
             WeContactHeaderApi.addProvider(joinTimeProvider)
             WeContactHeaderApi.addProvider(inviterProvider)
+            executor().execute { warmAllGroups(run) }
         }
 
         fun removeProvider() {
+            generation.incrementAndGet()
+            executor?.shutdownNow()
+            executor = null
             WeContactHeaderApi.removeProvider(joinTimeProvider)
             WeContactHeaderApi.removeProvider(inviterProvider)
+            cache.clear()
+            loadedGroups.clear()
+            loadingGroups.clear()
+        }
+
+        private fun warmAllGroups(run: Int) {
+            if (generation.get() != run) return
+            runCatching {
+                WeChatApis.contacts()?.getGroups().orEmpty()
+                    .mapNotNull { it.wxId.takeIf { id -> id.endsWith("@chatroom") || id.endsWith("@im.chatroom") } }
+                    .forEach { scheduleGroup(it, run) }
+            }.onFailure {
+                h.Hchat.utils.HLog.e("[Hchat:profile_group_info] 预热群成员进群时间失败", it)
+            }
+        }
+
+        private fun scheduleGroup(groupId: String, run: Int = generation.get()) {
+            if (groupId.isBlank() || generation.get() != run
+                || loadedGroups.contains(groupId) || !loadingGroups.add(groupId)) return
+            executor().execute {
+                try {
+                    val times = WeChatApis.chatrooms()?.getMemberJoinTimes(groupId).orEmpty()
+                    if (generation.get() != run) return@execute
+                    cache[groupId] = HashMap(times)
+                    loadedGroups.add(groupId)
+                    times.keys.forEach { memberId ->
+                        WeContactHeaderApi.refreshCurrentProfile(groupId, memberId)
+                    }
+                } catch (t: Throwable) {
+                    h.Hchat.utils.HLog.e("[Hchat:profile_group_info] 群成员进群时间索引失败: $groupId", t)
+                } finally {
+                    loadingGroups.remove(groupId)
+                }
+            }
+        }
+
+        private fun cachedJoinTime(groupId: String, memberId: String): Long {
+            val groupCache = cache[groupId]
+            if (groupCache == null) {
+                scheduleGroup(groupId)
+                return 0L
+            }
+            return groupCache[memberId] ?: 0L
         }
 
         private fun profile(activity: Activity): Pair<String, String>? {
@@ -43,8 +114,7 @@ class ProfileGroupInfoFeature {
                 val enabled = HchatStorage.preferences(activity, ProfileGroupJoinTimeSettings.PREFS_NAME)
                     .getBoolean(ProfileGroupJoinTimeSettings.KEY_ENABLE, ProfileGroupJoinTimeSettings.DEFAULT_ENABLE)
                 if (!enabled) return null
-                val time = runCatching { WeChatApis.chatrooms()?.getMemberJoinTime(groupId, memberId) ?: 0L }
-                    .getOrDefault(0L)
+                val time = cachedJoinTime(groupId, memberId)
                 if (time <= 0L) return null
                 val formatted = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(Date(time))
                 return "进群时间：$formatted"

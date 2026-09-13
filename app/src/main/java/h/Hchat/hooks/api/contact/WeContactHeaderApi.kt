@@ -18,6 +18,7 @@ import h.Hchat.utils.HLog
 import h.Hchat.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
+import java.lang.ref.WeakReference
 import java.lang.reflect.Method
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -36,6 +37,11 @@ object WeContactHeaderApi {
     private const val CACHE_METHOD = "normal_profile_header_bind_v1"
     private val providers = CopyOnWriteArrayList<Provider>()
     @Volatile private var installed = false
+    @Volatile private var currentActivity: WeakReference<Activity>? = null
+    @Volatile private var currentHeader: WeakReference<View.OnLongClickListener>? = null
+    @Volatile private var currentRoot: WeakReference<View>? = null
+    @Volatile private var currentGroupId: String? = null
+    @Volatile private var currentMemberId: String? = null
 
     @Synchronized
     fun install(context: FeatureContext): Boolean {
@@ -89,6 +95,15 @@ object WeContactHeaderApi {
             method.parameterTypes.size == 1 &&
             View::class.java.isAssignableFrom(method.parameterTypes[0])
 
+    fun refreshCurrentProfile(groupId: String, memberId: String) {
+        val activity = currentActivity?.get() ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
+        if (currentGroupId != groupId || currentMemberId != memberId) return
+        val header = currentHeader?.get() ?: return
+        val root = currentRoot?.get() ?: return
+        root.post { bind(header, root) }
+    }
+
     private fun bind(header: View.OnLongClickListener?, root: View?) {
         if (header == null || root == null) return
         val viewRoot = root as? ViewGroup ?: return
@@ -97,6 +112,14 @@ object WeContactHeaderApi {
         var context = root.context
         while (context is ContextWrapper && context !is Activity) context = context.baseContext
         val activity = context as? Activity ?: return
+        currentActivity = WeakReference(activity)
+        currentHeader = WeakReference(header)
+        currentRoot = WeakReference(root)
+        currentGroupId = activity.intent?.getStringExtra("Contact_ChatRoomId")
+            ?: activity.intent?.getStringExtra("RoomInfo_Id")
+        currentMemberId = activity.intent?.getStringExtra("room_member")
+            ?: activity.intent?.getStringExtra("Contact_User")
+            ?: activity.intent?.getStringExtra("Chat_User")
         val templates = findViews(viewRoot) {
             it is TextView && listenerInfoLongClick(it) === header
         }.filterIsInstance<TextView>()
