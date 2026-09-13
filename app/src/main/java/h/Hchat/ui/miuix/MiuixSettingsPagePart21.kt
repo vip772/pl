@@ -2464,7 +2464,7 @@ internal fun AboutCard() {
         InsetDivider()
         InfoRow(label = "宿主", value = hostVersion)
         InsetDivider()
-        InfoRow(label = "Hchat作者", value = "。。")
+        InfoRow(label = "Hchat作者", value = "句号总")
         InsetDivider()
         InfoRow(label = "分支作者", value = "浪浪")
     }
