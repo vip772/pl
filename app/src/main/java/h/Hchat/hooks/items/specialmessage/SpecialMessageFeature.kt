@@ -26,10 +26,7 @@ class SpecialMessageFeature : BaseFeature() {
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(
             object : SimpleFeatureSettingsProvider(ID, name(), "安全消息", FeatureSettingsProvider.CATEGORY_PRACTICAL) {}
-        ) {
-            val sp = HchatStorage.preferences(context.hostContext(), PREFS)
-            sp.getBoolean("enabled", false) || sp.getBoolean("link", false)
-        }
+        )
     }
     override fun onFeatureInstall(context: FeatureContext) {
         // 仅启用已用宿主 APK 交叉确认的版本，避免混淆类碰撞。

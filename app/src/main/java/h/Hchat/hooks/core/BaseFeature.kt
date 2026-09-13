@@ -3,6 +3,7 @@ package h.Hchat.hooks.core
 import h.Hchat.event.EventBus
 import h.Hchat.event.EventHandler
 import h.Hchat.ui.FeatureSettingsProvider
+import h.Hchat.ui.FeatureToggleRegistry
 import h.Hchat.utils.HLog
 import h.Hchat.utils.KavaReflector
 
@@ -77,19 +78,11 @@ abstract class BaseFeature : Feature {
     ) {
         val currentContext = context ?: return
         if (provider == null) return
-        val registryCheck = enabledCheck ?: if (hasExplicitEnabledCheck()) {
-            { isEnabled(currentContext) }
-        } else {
-            null
+        val registryCheck = enabledCheck ?: {
+            FeatureToggleRegistry.isEnabled(currentContext.hostContext(), provider.featureId())
         }
         currentContext.uiRegistry().registerProvider(provider, registryCheck)
         registeredProviderIds.add(provider.featureId())
-    }
-
-    private fun hasExplicitEnabledCheck(): Boolean {
-        return runCatching {
-            javaClass.getMethod("isEnabled", FeatureContext::class.java).declaringClass != Feature::class.java
-        }.getOrDefault(false)
     }
     protected fun <E> subscribe(
         eventType: Class<E>,
