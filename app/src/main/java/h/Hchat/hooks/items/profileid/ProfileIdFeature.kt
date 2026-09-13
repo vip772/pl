@@ -39,13 +39,20 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
             val prefs = HchatStorage.preferences(context.hostContext(), ProfileAddTimeSettings.PREFS_NAME)
             prefs.getBoolean(ProfileAddTimeSettings.KEY_ENABLE, ProfileAddTimeSettings.DEFAULT_ENABLE)
         }
+        registerSettingsProvider(ProfileGroupInfoSettingsProvider()) {
+            val joinTime = HchatStorage.preferences(context.hostContext(), ProfileGroupJoinTimeSettings.PREFS_NAME)
+                .getBoolean(ProfileGroupJoinTimeSettings.KEY_ENABLE, ProfileGroupJoinTimeSettings.DEFAULT_ENABLE)
+            val inviter = HchatStorage.preferences(context.hostContext(), ProfileGroupInviterSettings.PREFS_NAME)
+                .getBoolean(ProfileGroupInviterSettings.KEY_ENABLE, ProfileGroupInviterSettings.DEFAULT_ENABLE)
+            joinTime || inviter
+        }
     }
-
     override fun onFeatureInstall(context: FeatureContext) {
         h.Hchat.utils.HLog.initialize(context.hostContext())
         WeContactHeaderApi.install(context)
         WeContactHeaderApi.addProvider(this)
         ProfileAddTimeFeature.installProvider(context.hostContext())
+        ProfileGroupInfoFeature.installProvider()
         install(context.hostContext(), context.hostClassLoader())
     }
 
@@ -59,6 +66,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
     override fun onFeatureDestroy(context: FeatureContext) {
         WeContactHeaderApi.removeProvider(this)
         ProfileAddTimeFeature.removeProvider()
+        ProfileGroupInfoFeature.removeProvider()
     }
 
     companion object {
@@ -96,8 +104,12 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
             if (context == null) return false
             val idPrefs = HchatStorage.preferences(context, ProfileIdSettings.PREFS_NAME)
             val addTimePrefs = HchatStorage.preferences(context, ProfileAddTimeSettings.PREFS_NAME)
+            val joinTimePrefs = HchatStorage.preferences(context, ProfileGroupJoinTimeSettings.PREFS_NAME)
+            val inviterPrefs = HchatStorage.preferences(context, ProfileGroupInviterSettings.PREFS_NAME)
             return idPrefs.getBoolean(ProfileIdSettings.KEY_ENABLE, ProfileIdSettings.DEFAULT_ENABLE) ||
-                addTimePrefs.getBoolean(ProfileAddTimeSettings.KEY_ENABLE, ProfileAddTimeSettings.DEFAULT_ENABLE)
+                addTimePrefs.getBoolean(ProfileAddTimeSettings.KEY_ENABLE, ProfileAddTimeSettings.DEFAULT_ENABLE) ||
+                joinTimePrefs.getBoolean(ProfileGroupJoinTimeSettings.KEY_ENABLE, ProfileGroupJoinTimeSettings.DEFAULT_ENABLE) ||
+                inviterPrefs.getBoolean(ProfileGroupInviterSettings.KEY_ENABLE, ProfileGroupInviterSettings.DEFAULT_ENABLE)
         }
 
         @JvmStatic

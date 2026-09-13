@@ -382,6 +382,8 @@ import h.Hchat.hooks.items.patblock.PatBlockSettings
 import h.Hchat.hooks.items.profileid.ProfileIdFeature
 import h.Hchat.hooks.items.profileid.ProfileIdSettings
 import h.Hchat.hooks.items.profileid.ProfileAddTimeSettings
+import h.Hchat.hooks.items.profileid.ProfileGroupJoinTimeSettings
+import h.Hchat.hooks.items.profileid.ProfileGroupInviterSettings
 import h.Hchat.hooks.items.protobuf.ProtobufPacketFeature
 import h.Hchat.hooks.items.protobuf.ProtobufPacketRuntime
 import h.Hchat.hooks.items.protobuf.ProtobufPacketSettings
@@ -642,6 +644,54 @@ internal fun ProfileIdMiuixPage(
                     addTimeSp.edit().putString(ProfileAddTimeSettings.KEY_COLOR, addTimeColor).apply()
                 }
             } }
+        }
+    }
+}
+
+@Composable
+internal fun ProfileGroupInfoMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val joinTimeSp = remember { HchatStorage.preferences(context, ProfileGroupJoinTimeSettings.PREFS_NAME) }
+    val inviterSp = remember { HchatStorage.preferences(context, ProfileGroupInviterSettings.PREFS_NAME) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar("返回", onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 84.dp
+            )
+        ) {
+            item { SmallTitle(text = "群成员资料页") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        joinTimeSp,
+                        ProfileGroupJoinTimeSettings.KEY_ENABLE,
+                        "显示进群时间",
+                        "格式：yyyy-MM-dd HH:mm:ss",
+                        ProfileGroupJoinTimeSettings.DEFAULT_ENABLE
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        inviterSp,
+                        ProfileGroupInviterSettings.KEY_ENABLE,
+                        "显示邀请人",
+                        "无邀请记录时显示：自然进群",
+                        ProfileGroupInviterSettings.DEFAULT_ENABLE
+                    )
+                }
+            }
         }
     }
 }

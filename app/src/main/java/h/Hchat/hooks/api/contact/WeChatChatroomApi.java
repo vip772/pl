@@ -159,7 +159,6 @@ public final class WeChatChatroomApi {
         if (role == ROLE_ADMIN) return "管理员";
         return "群员";
     }
-
     public String getMemberInviter(String chatroomId, String memberWxId) {
         if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId)) return "";
         RoomDataMember member = getRoomDataMembers(chatroomId).get(memberWxId);
@@ -167,6 +166,14 @@ public final class WeChatChatroomApi {
         String inviter = member.inviterWxId.trim();
         return memberWxId.equals(inviter) ? "" : inviter;
     }
+
+    /** Returns the persisted roomdata join time in milliseconds, or zero when unavailable. */
+    public long getMemberJoinTime(String chatroomId, String memberWxId) {
+        if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId)) return 0L;
+        RoomDataMember member = getRoomDataMembers(chatroomId).get(memberWxId);
+        return member != null ? member.joinTimeMillis : 0L;
+    }
+
 
     public List<String> getAdminMemberIds(String chatroomId) {
         List<String> result = new ArrayList<>();
@@ -353,6 +360,12 @@ public final class WeChatChatroomApi {
                     member.roomFlag = reader.readVarint32();
                 } else if (wireType == 2 && fieldNumber == 4) {
                     member.inviterWxId = reader.readString().trim();
+                } else if (wireType == 0 && (fieldNumber == 5 || fieldNumber == 6 || fieldNumber == 7)) {
+                    long value = reader.readVarint64();
+                    member.joinTimeMillis = normalizeJoinTime(value, member.joinTimeMillis);
+                } else if (wireType == 1 && (fieldNumber == 5 || fieldNumber == 6 || fieldNumber == 7)) {
+                    long value = reader.readFixed64();
+                    member.joinTimeMillis = normalizeJoinTime(value, member.joinTimeMillis);
                 } else {
                     reader.skip(wireType);
                 }
@@ -361,6 +374,14 @@ public final class WeChatChatroomApi {
             return new RoomDataMember();
         }
         return member;
+    }
+
+    private long normalizeJoinTime(long value, long current) {
+        if (value <= 0L) return current;
+        long millis = value < 100000000000L ? value * 1000L : value;
+        long now = System.currentTimeMillis();
+        if (millis < 946684800000L || millis > now + 86400000L) return current;
+        return current == 0L || millis < current ? millis : current;
     }
 
     private boolean hasColumn(String table, String column) {
@@ -440,6 +461,7 @@ public final class WeChatChatroomApi {
         String username = "";
         String displayName = "";
         String inviterWxId = "";
+        long joinTimeMillis;
         int roomFlag;
     }
 
@@ -463,6 +485,14 @@ public final class WeChatChatroomApi {
             return (int) value;
         }
 
+        long readFixed64() {
+            require(8);
+            long result = 0L;
+            for (int i = 0; i < 8; i++) {
+                result |= (long) (data[position++] & 0xFF) << (i * 8);
+            }
+            return result;
+        }
         long readVarint64() {
             long result = 0L;
             for (int shift = 0; shift < 64; shift += 7) {

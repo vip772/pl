@@ -383,6 +383,9 @@ import h.Hchat.hooks.items.profileid.ProfileIdFeature
 import h.Hchat.hooks.items.profileid.ProfileIdSettings
 import h.Hchat.hooks.items.profileid.ProfileAddTimeSettings
 import h.Hchat.hooks.items.profileid.ProfileAddTimeSettingsProvider
+import h.Hchat.hooks.items.profileid.ProfileGroupInfoSettingsProvider
+import h.Hchat.hooks.items.profileid.ProfileGroupJoinTimeSettings
+import h.Hchat.hooks.items.profileid.ProfileGroupInviterSettings
 
 import h.Hchat.hooks.items.protobuf.ProtobufPacketFeature
 import h.Hchat.hooks.items.protobuf.ProtobufPacketRuntime
@@ -1517,7 +1520,8 @@ internal fun practicalFeatureGroups(
                 GroupChatLabelFeature.ID,
                 AtAllNotificationBlockFeature.ID,
                 GroupLeaveMonitorFeature.ID,
-                GroupRenameMonitorFeature.ID
+                GroupRenameMonitorFeature.ID,
+                ProfileGroupInfoSettingsProvider.ID
             )
         ),
         FeatureGroupEntry(

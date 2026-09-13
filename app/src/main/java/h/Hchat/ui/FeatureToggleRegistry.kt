@@ -6,6 +6,8 @@ import h.Hchat.hooks.items.conversationgroup.ConversationGroupStore
 import h.Hchat.hooks.items.hchatextra.HchatExtraSettings
 import h.Hchat.hooks.items.momentsfake.MomentsFakeInteractionSettings
 import h.Hchat.hooks.items.specialmessage.SpecialMessageFeature
+import h.Hchat.hooks.items.profileid.ProfileGroupJoinTimeSettings
+import h.Hchat.hooks.items.profileid.ProfileGroupInviterSettings
 import h.Hchat.preferences.HchatStorage
 
 /** Reads the same primary toggle used by each feature settings page. */
@@ -116,7 +118,9 @@ object FeatureToggleRegistry {
                 }
                 boolean(context, MomentsFakeInteractionSettings.PREFS_NAME, key)
             }
-            "moments_fake_interaction" -> { 
+            "profile_group_info" -> boolean(context, ProfileGroupJoinTimeSettings.PREFS_NAME, ProfileGroupJoinTimeSettings.KEY_ENABLE) ||
+                boolean(context, ProfileGroupInviterSettings.PREFS_NAME, ProfileGroupInviterSettings.KEY_ENABLE)
+            "moments_fake_interaction" -> {
                 val sp = HchatStorage.preferences(context, MomentsFakeInteractionSettings.PREFS_NAME)
                 sp.getBoolean(MomentsFakeInteractionSettings.KEY_FAKE_LIKE_ENABLE, false) ||
                     sp.getBoolean(MomentsFakeInteractionSettings.KEY_FAKE_COMMENT_ENABLE, false) ||
