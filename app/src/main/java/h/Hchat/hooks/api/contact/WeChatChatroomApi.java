@@ -4,6 +4,7 @@ import android.text.TextUtils;
 
 import h.Hchat.dexkit.DexFinder;
 import h.Hchat.hooks.api.model.WeChatChatroom;
+import h.Hchat.hooks.api.model.WeChatMessageTypes;
 import h.Hchat.hooks.api.model.WeChatContact;
 import h.Hchat.hooks.api.net.WeChatNetworkDispatcher;
 import h.Hchat.hooks.api.runtime.WeChatDatabaseApi;
@@ -169,15 +170,14 @@ public final class WeChatChatroomApi {
 
     /** Returns the persisted join-event time from the group's system messages, or zero when unavailable. */
     public long getMemberJoinTime(String chatroomId, String memberWxId) {
-        if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId) || databaseApi == null) return 0L;
-        String table = databaseApi.messageTableForTalker(chatroomId);
-        if (TextUtils.isEmpty(table)) return 0L;
+        if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId)) return 0L;
         try {
+            String table = databaseApi != null ? databaseApi.messageTableForTalker(chatroomId) : "";
+            if (TextUtils.isEmpty(table)) return 0L;
             List<Map<String, Object>> rows = databaseApi.query(
-                    "SELECT createTime, content FROM " + databaseApi.quoteTable(table)
-                            + " WHERE type=? AND talker=? AND content LIKE ?"
-                            + " ORDER BY createTime ASC LIMIT 200",
-                    new String[]{"10000", chatroomId, "%" + memberWxId + "%"});
+                    "SELECT type, createTime, content FROM " + databaseApi.quoteTable(table)
+                            + " WHERE type=? AND content LIKE ? ORDER BY createTime ASC LIMIT 5000",
+                    new String[]{String.valueOf(WeChatMessageTypes.SYSTEM), "%" + memberWxId + "%"});
             long best = 0L;
             for (Map<String, Object> row : rows) {
                 String content = str(row, "content");
@@ -194,15 +194,6 @@ public final class WeChatChatroomApi {
         }
     }
 
-    private boolean isMemberJoinSystemMessage(String content, String memberWxId) {
-        if (TextUtils.isEmpty(content) || TextUtils.isEmpty(memberWxId) || !content.contains(memberWxId)) {
-            return false;
-        }
-        String lower = content.toLowerCase();
-        return lower.contains("加入") || lower.contains("邀请") || lower.contains("进群")
-                || lower.contains("addchatroommember") || lower.contains("invite");
-    }
-
     private static long number(Map<String, Object> row, String key) {
         Object value = row != null ? row.get(key) : null;
         if (value instanceof Number) return ((Number) value).longValue();
@@ -211,6 +202,17 @@ public final class WeChatChatroomApi {
         } catch (Throwable ignored) {
             return 0L;
         }
+    }
+
+    private boolean isMemberJoinSystemMessage(String content, String memberWxId) {
+        if (TextUtils.isEmpty(content) || TextUtils.isEmpty(memberWxId) || !content.contains(memberWxId)) {
+            return false;
+        }
+        String lower = content.toLowerCase();
+        return lower.contains("加入") || lower.contains("邀请") || lower.contains("进群")
+                || lower.contains("加入了群聊") || lower.contains("邀请加入")
+                || lower.contains("addchatroommember") || lower.contains("invite")
+                || (lower.contains("sysmsgtemplate") && lower.contains("chatroom"));
     }
 
 
