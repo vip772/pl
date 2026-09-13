@@ -170,22 +170,36 @@ public final class WeChatChatroomApi {
 
     /** Returns the persisted join-event time from the group's system messages, or zero when unavailable. */
     public long getMemberJoinTime(String chatroomId, String memberWxId) {
-        if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId)) return 0L;
+        if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId) || databaseApi == null) return 0L;
         try {
-            String table = databaseApi != null ? databaseApi.messageTableForTalker(chatroomId) : "";
-            if (TextUtils.isEmpty(table)) return 0L;
-            List<Map<String, Object>> rows = databaseApi.query(
-                    "SELECT type, createTime, content FROM " + databaseApi.quoteTable(table)
-                            + " WHERE type=? AND content LIKE ? ORDER BY createTime ASC LIMIT 5000",
-                    new String[]{String.valueOf(WeChatMessageTypes.SYSTEM), "%" + memberWxId + "%"});
-            long best = 0L;
-            for (Map<String, Object> row : rows) {
-                String content = str(row, "content");
-                if (!isMemberJoinSystemMessage(content, memberWxId)) continue;
-                long time = number(row, "createTime");
-                long millis = time < 100000000000L ? time * 1000L : time;
-                if (millis > 0L && (best == 0L || millis < best)) best = millis;
+            List<String> tables = new ArrayList<>();
+            String mapped = databaseApi.messageTableForTalker(chatroomId);
+            if (!TextUtils.isEmpty(mapped)) tables.add(mapped);
+            for (String table : databaseApi.messageTables()) {
+                if (!tables.contains(table)) tables.add(table);
             }
+            long best = 0L;
+            for (String table : tables) {
+                String quoted = databaseApi.quoteTable(table);
+                if (TextUtils.isEmpty(quoted)) continue;
+                // The join event is not a roomdata field. It is a system message,
+                // but WeChat has used several raw system-message type values and
+                // the XML may contain only username attributes rather than Chinese text.
+                List<Map<String, Object>> rows = databaseApi.query(
+                        "SELECT type, createTime, content FROM " + quoted
+                                + " WHERE content LIKE ? ORDER BY createTime ASC LIMIT 20000",
+                        new String[]{"%" + memberWxId + "%"});
+                for (Map<String, Object> row : rows) {
+                    String content = str(row, "content");
+                    int type = (int) number(row, "type");
+                    if (!isMemberJoinSystemMessage(type, content, memberWxId)) continue;
+                    long time = number(row, "createTime");
+                    long millis = time < 100000000000L ? time * 1000L : time;
+                    if (millis > 0L && (best == 0L || millis < best)) best = millis;
+                }
+            }
+            log("群成员进群时间查询: group=" + chatroomId + " member=" + memberWxId
+                    + " tables=" + tables.size() + " result=" + best);
             return best;
         } catch (Throwable e) {
             log("查询群成员进群时间失败: group=" + chatroomId + " member=" + memberWxId
@@ -204,15 +218,20 @@ public final class WeChatChatroomApi {
         }
     }
 
-    private boolean isMemberJoinSystemMessage(String content, String memberWxId) {
-        if (TextUtils.isEmpty(content) || TextUtils.isEmpty(memberWxId) || !content.contains(memberWxId)) {
-            return false;
-        }
+    private boolean isMemberJoinSystemMessage(int type, String content, String memberWxId) {
+        if (TextUtils.isEmpty(content) || TextUtils.isEmpty(memberWxId)
+                || !content.contains(memberWxId)) return false;
         String lower = content.toLowerCase();
+        boolean systemType = WeChatMessageTypes.isSystem(type)
+                || type == 64 || type == 603979825 || type == 268445456
+                || type == 268445458 || type == 285222674
+                || type == 889192497 || type == 922746929;
+        if (!systemType) return false;
         return lower.contains("加入") || lower.contains("邀请") || lower.contains("进群")
                 || lower.contains("加入了群聊") || lower.contains("邀请加入")
                 || lower.contains("addchatroommember") || lower.contains("invite")
-                || (lower.contains("sysmsgtemplate") && lower.contains("chatroom"));
+                || lower.contains("sysmsgtemplate") || lower.contains("chatroommember")
+                || lower.contains("linkname");
     }
 
 
