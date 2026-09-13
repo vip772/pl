@@ -222,7 +222,7 @@ public final class WeChatChatroomApi {
         if (TextUtils.isEmpty(content) || TextUtils.isEmpty(memberWxId)
                 || !content.contains(memberWxId)) return false;
         String lower = content.toLowerCase();
-        boolean systemType = WeChatMessageTypes.isSystem(type)
+        boolean systemType = WeChatMessageTypes.INSTANCE.isSystem(type)
                 || type == 64 || type == 603979825 || type == 268445456
                 || type == 268445458 || type == 285222674
                 || type == 889192497 || type == 922746929;
