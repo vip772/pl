@@ -30,6 +30,8 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.inputmethod.InputMethodManager
+import android.graphics.Rect
 import android.webkit.WebView
 import android.widget.DatePicker
 import android.widget.FrameLayout
@@ -1068,9 +1070,33 @@ object MiuixSettingsPage {
                 h.Hchat.utils.HLog.e("[Hchat:MiuixSettings] 销毁页面 Owner 失败: ${it.message}", it)
             }
         }
+        fun hideImeIfVisible(): Boolean {
+            val root = page
+            val visible = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                root.rootWindowInsets?.isVisible(android.view.WindowInsets.Type.ime()) == true
+            } else {
+                val frame = Rect()
+                root.getWindowVisibleDisplayFrame(frame)
+                val heightDifference = root.rootView.height - frame.bottom
+                heightDifference > root.rootView.resources.displayMetrics.density * 160f
+            }
+            if (!visible) return false
+            val focused = root.findFocus()
+            val imm = activity.getSystemService(InputMethodManager::class.java)
+            imm?.hideSoftInputFromWindow(
+                (focused ?: root).windowToken,
+                InputMethodManager.HIDE_NOT_ALWAYS
+            )
+            focused?.clearFocus()
+            return true
+        }
         fun handleBack() {
             if (consumingBack) return
             consumingBack = true
+            if (hideImeIfVisible()) {
+                page.post { consumingBack = false }
+                return
+            }
             val selected = detailPage.value
             if (selected is DetailPage.ScriptPluginAgent && agentExitHandler != null) {
                 agentExitHandler?.invoke()
