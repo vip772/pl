@@ -722,17 +722,6 @@ internal fun EmptyText(text: String) {
     )
 }
 
-@Composable
-public fun InsetDivider(start: Dp = 16.dp) {
-    Box(
-        modifier = Modifier
-            .padding(start = start)
-            .fillMaxWidth()
-            .height(Dp.Hairline)
-            .background(MiuixTheme.colorScheme.dividerLine)
-    )
-}
-
 class EmbeddedComposeOwner : LifecycleOwner, SavedStateRegistryOwner, ViewModelStoreOwner,
     NavigationEventDispatcherOwner {
     private val lifecycleRegistry = LifecycleRegistry(this)
@@ -2318,26 +2307,6 @@ internal fun normalizeGroupMemberEntry(value: String): String? {
     val memberId = token.substring(index + 1).trim()
     if (groupId.isEmpty() || memberId.isEmpty()) return null
     return groupMemberEntry(groupId, memberId)
-}
-
-suspend fun loadAvatarBitmap(wxId: String, primary: String, backup: String): ImageBitmap? = withContext(Dispatchers.IO) {
-    val sources = avatarSources(wxId, primary, backup)
-    if (sources.isEmpty()) {
-        null
-    } else {
-        val cacheKey = sources.joinToString("|")
-        val cached = AvatarMemoryCache.cached(cacheKey)
-        if (cached.first) {
-            cached.second
-        } else {
-            var bitmap: ImageBitmap? = null
-            for (source in sources) {
-                bitmap = loadAvatarSource(source)?.asImageBitmap()
-                if (bitmap != null) break
-            }
-            bitmap?.also { AvatarMemoryCache.put(cacheKey, it) }
-        }
-    }
 }
 
 internal fun avatarSources(wxId: String, primary: String, backup: String): List<String> {

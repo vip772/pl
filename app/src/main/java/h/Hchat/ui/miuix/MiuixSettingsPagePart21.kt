@@ -1864,10 +1864,6 @@ internal fun PickerSectionHeader(
     }
 }
 
-@Composable
-public fun ActionRow(title: String, summary: String, onClick: () -> Unit) {
-    SelectRow(title = title, summary = summary, onClick = onClick)
-}
 
 @Composable
 internal fun SelectRow(title: String, summary: String, onClick: () -> Unit) {
@@ -2329,59 +2325,6 @@ internal fun SelectionMark(selected: Boolean, multiSelect: Boolean) {
             modifier = Modifier.size(22.dp),
             state = if (selected) ToggleableState.On else ToggleableState.Off,
             onClick = null
-        )
-    }
-}
-
-@Composable
-public fun BottomActionBar(
-    primaryText: String,
-    onPrimaryClick: () -> Unit,
-    secondaryText: String? = null,
-    onSecondaryClick: (() -> Unit)? = null,
-    middleText: String? = null,
-    onMiddleClick: (() -> Unit)? = null
-) {
-    val backAction = when {
-        secondaryText == "取消" && onSecondaryClick != null -> onSecondaryClick
-        middleText == "取消" && onMiddleClick != null -> onMiddleClick
-        primaryText == "取消" -> onPrimaryClick
-        secondaryText == "返回" && onSecondaryClick != null -> onSecondaryClick
-        middleText == "返回" && onMiddleClick != null -> onMiddleClick
-        primaryText == "返回" -> onPrimaryClick
-        secondaryText == "关闭" && onSecondaryClick != null -> onSecondaryClick
-        middleText == "关闭" && onMiddleClick != null -> onMiddleClick
-        primaryText == "关闭" -> onPrimaryClick
-        else -> null
-    }
-    RegisterSettingsBackHandler(backAction)
-    Row(
-        modifier = Modifier.fillMaxWidth()
-            .background(MiuixTheme.colorScheme.background.copy(alpha = 0.92f))
-            .padding(start = 12.dp, top = 10.dp, end = 12.dp, bottom = 10.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
-    ) {
-        if (secondaryText != null && onSecondaryClick != null) {
-            BottomBarButton(
-                text = secondaryText,
-                modifier = Modifier.weight(1f),
-                filled = false,
-                onClick = onSecondaryClick
-            )
-        }
-        if (middleText != null && onMiddleClick != null) {
-            BottomBarButton(
-                text = middleText,
-                modifier = Modifier.weight(1f),
-                filled = false,
-                onClick = onMiddleClick
-            )
-        }
-        BottomBarButton(
-            text = primaryText,
-            modifier = Modifier.weight(1f),
-            filled = true,
-            onClick = onPrimaryClick
         )
     }
 }
