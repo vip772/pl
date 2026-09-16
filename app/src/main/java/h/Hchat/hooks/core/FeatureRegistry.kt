@@ -12,7 +12,13 @@ import h.Hchat.hooks.items.backgroundbeauty.BackgroundBeautyFeature
 import h.Hchat.hooks.items.callmedialimit.CallMediaLimitFeature
 import h.Hchat.hooks.items.callmedialimit.CallRingtoneBlockFeature
 import h.Hchat.hooks.items.chattime.ChatTimeStyleFeature
+import h.Hchat.hooks.items.chattoolbar.ChatToolbarFeature
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupFeature
+import h.Hchat.hooks.items.homesidepanel.HomeSidePanelFeature
+import h.Hchat.hooks.items.monetgenerator.MonetModuleGeneratorFeature
+import h.Hchat.hooks.items.securemessage.AntiSecureMessageFeature
+import h.Hchat.hooks.items.securemessage.SendSecureMessageFeature
+import h.Hchat.hooks.items.transparentavatar.UploadTransparentAvatarFeature
 import h.Hchat.hooks.items.custombottombar.CustomBottomBarFeature
 import h.Hchat.hooks.items.customfriendavatar.CustomFriendAvatarFeature
 import h.Hchat.hooks.items.customnotify.CustomNotificationFeature
@@ -102,6 +108,12 @@ object FeatureRegistry {
         return FeatureManager()
             .register(SettingsFeature())
             .register(WechatApiFeature())
+            .register(ChatToolbarFeature())
+            .register(HomeSidePanelFeature())
+            .register(MonetModuleGeneratorFeature())
+            .register(AntiSecureMessageFeature())
+            .register(SendSecureMessageFeature())
+            .register(UploadTransparentAvatarFeature())
             .register(SpecialMessageFeature())
             .register(FloatingShortcutFeature())
             .register(FloatingChatHeaderFeature())

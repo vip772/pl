@@ -232,6 +232,11 @@ import h.Hchat.hooks.items.callmedialimit.CallMediaLimitSettings
 import h.Hchat.hooks.items.callmedialimit.CallRingtoneBlockFeature
 import h.Hchat.hooks.items.chattime.ChatTimeStyleFeature
 import h.Hchat.hooks.items.chattime.ChatTimeStyleSettings
+import h.Hchat.hooks.items.chattoolbar.ChatToolbarFeature
+import h.Hchat.hooks.items.homesidepanel.HomeSidePanelFeature
+import h.Hchat.hooks.items.monetgenerator.MonetModuleGeneratorFeature
+import h.Hchat.hooks.items.securemessage.SecureMessageSettings
+import h.Hchat.hooks.items.transparentavatar.UploadTransparentAvatarFeature
 import h.Hchat.hooks.items.conversationgroup.ConversationGroup
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupFeature
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupPickerSupport
@@ -1166,6 +1171,12 @@ internal fun FeatureSettingsPage(
         MessageTextColorFeature.ID -> MessageTextColorMiuixPage(context, provider, onBack)
         HomeTextColorFeature.ID -> HomeTextColorMiuixPage(context, provider, onBack)
         ChatTimeStyleFeature.ID -> ChatTimeStyleMiuixPage(context, provider, onBack)
+        ChatToolbarFeature.ID -> ChatToolbarMiuixPage(context, provider, onBack)
+        HomeSidePanelFeature.ID -> HomeSidePanelMiuixPage(context, provider, onBack)
+        MonetModuleGeneratorFeature.ID -> MonetModuleGeneratorMiuixPage(context, provider, onBack)
+        SecureMessageSettings.SEND_ID,
+        SecureMessageSettings.ANTI_ID -> SecureMessageMiuixPage(context, provider, onBack)
+        UploadTransparentAvatarFeature.ID -> UploadTransparentAvatarMiuixPage(context, provider, onBack)
         InputHintFeature.ID -> InputHintMiuixPage(context, provider, onBack)
         HideChatAvatarFeature.ID -> HideChatAvatarMiuixPage(context, provider, onBack)
         CustomBottomBarFeature.ID -> CustomBottomBarMiuixPage(context, provider, onBack)
