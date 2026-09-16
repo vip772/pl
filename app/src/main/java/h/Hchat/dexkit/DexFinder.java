@@ -109,6 +109,8 @@ public class DexFinder {
     public Method imageBestPathMethod;
     public Method imageStorageGetterMethod;
     public Method imageTokenPathMethod;
+    // 微信消息描述文本方法（签名 (Context, boolean) -> String；用于消息描述防崩兜底）
+    public List<Method> msgDescTextMethods = new ArrayList<>();
     // 文件发送高层入口
     public Method sendFileMethod;
     public Method sendFileAttachDirMethod;
@@ -1209,6 +1211,35 @@ public class DexFinder {
         } catch (Throwable e) {
             h.Hchat.utils.HLog.e(TAG + " resolveSendFileApi 失败: " + e.getMessage(), e);
         }
+    }
+
+    public void resolveMsgDescTextApi() {
+        try {
+            if (!msgDescTextMethods.isEmpty()) return;
+            List<MethodData> methods = dexKit.findMethod(mkMethodUsingStringsAndName("l", "string"));
+            for (MethodData methodData : methods) {
+                try {
+                    Method method = methodData.getMethodInstance(classLoader);
+                    if (!isMsgDescTextMethod(method)) continue;
+                    KavaReflector.accessible(method);
+                    msgDescTextMethods.add(method);
+                } catch (Throwable ignored) {}
+            }
+            if (!msgDescTextMethods.isEmpty()) {
+                logDetail("消息描述文本兜底方法: " + msgDescTextMethods.size() + " 个");
+            }
+        } catch (Throwable e) {
+            h.Hchat.utils.HLog.e(TAG + " resolveMsgDescTextApi 失败: " + e.getMessage(), e);
+        }
+    }
+
+    private boolean isMsgDescTextMethod(Method method) {
+        if (method == null) return false;
+        if (method.getReturnType() != String.class) return false;
+        Class<?>[] params = method.getParameterTypes();
+        return params.length == 2
+                && params[0] == android.content.Context.class
+                && params[1] == boolean.class;
     }
 
     public void resolveSendXmlApi() {
