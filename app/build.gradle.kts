@@ -4,9 +4,44 @@ plugins {
     id("org.jetbrains.compose")
 }
 
+val modernXposed = providers.gradleProperty("hchat.modernXposed")
+    .map { it.toBoolean() }
+    .orElse(true)
+    .get()
+
+val arsclibSource = configurations.create("arsclibSource") {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+    isTransitive = false
+}
+
+// ARSCLib ships desktop Android/XML Pull stubs; strip them before D8/R8.
+val prepareAndroidArsclib = tasks.register<Jar>("prepareAndroidArsclib") {
+    from(provider { arsclibSource.map { zipTree(it) } })
+    exclude("android/**", "org/xmlpull/v1/**")
+    archiveFileName.set("arsclib-android.jar")
+    destinationDirectory.set(layout.buildDirectory.dir("generated/arsclib"))
+}
+
+val releaseStoreFile = rootProject.file("app/keystore/。。.jks")
+val releaseStorePassword = providers.environmentVariable("HCAT_STORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("HCAT_KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("HCAT_KEY_PASSWORD").orNull
+val hasReleaseSigning = releaseStoreFile.isFile &&
+    !releaseStorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
+
 android {
     namespace = "h.Hchat"
     compileSdk = 37
+
+    if (modernXposed) {
+        sourceSets.getByName("main").java.directories.add("src/modern/java")
+        sourceSets.getByName("main").resources.directories.add("src/modern/resources")
+    } else {
+        sourceSets.getByName("main").assets.srcDir("src/legacy/assets")
+    }
 
     val autoVersionCode = System.getenv("HCAT_VERSION_CODE")?.toIntOrNull() ?: 1
     val autoVersionName = System.getenv("HCAT_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.0.0"
@@ -24,20 +59,21 @@ android {
     }
 
     signingConfigs {
-        create("。。") {
-            storeFile = file("keystore/。。.jks")
-            storePassword = providers.environmentVariable("HCAT_STORE_PASSWORD").orNull
-                ?: error("缺少 HCAT_STORE_PASSWORD")
-            keyAlias = providers.environmentVariable("HCAT_KEY_ALIAS").orNull
-                ?: error("缺少 HCAT_KEY_ALIAS")
-            keyPassword = providers.environmentVariable("HCAT_KEY_PASSWORD").orNull
-                ?: error("缺少 HCAT_KEY_PASSWORD")
+        if (hasReleaseSigning) {
+            create("。。") {
+                storeFile = releaseStoreFile
+                storePassword = releaseStorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+            }
         }
     }
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("。。")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("。。")
+            }
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -74,6 +110,7 @@ android {
             excludes += "kotlin/**"
             excludes += "kotlin-tooling-metadata.json"
             excludes += "frameworks/android/*.apk"
+            excludes += "org/bouncycastle/pqc/crypto/picnic/**"
             excludes += "android/attrs.xml"
             excludes += "android/attrs_manifest.xml"
             excludes += "android/res-map.txt"
@@ -84,11 +121,33 @@ android {
     }
 }
 
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    doFirst {
+        val missing = buildList {
+            if (!releaseStoreFile.isFile) add("app/keystore/。。.jks")
+            if (releaseStorePassword.isNullOrBlank()) add("HCAT_STORE_PASSWORD")
+            if (releaseKeyAlias.isNullOrBlank()) add("HCAT_KEY_ALIAS")
+            if (releaseKeyPassword.isNullOrBlank()) add("HCAT_KEY_PASSWORD")
+        }
+        check(missing.isEmpty()) {
+            "正式构建缺少签名配置: ${missing.joinToString()}。调试构建请运行 :app:assembleDebug"
+        }
+    }
+}
+
 dependencies {
-    compileOnly("de.robv.android.xposed:api:82")
+    if (modernXposed) {
+        compileOnly("io.github.libxposed:api:102.0.0")
+    } else {
+        compileOnly("de.robv.android.xposed:api:82")
+    }
     implementation("io.github.billywei01:fastkv:3.0.1")
     implementation("org.luckypray:dexkit:2.0.1")
-    implementation("com.github.REAndroid:ARSCLib:V1.3.8")
+    add(arsclibSource.name, "io.github.reandroid:ARSCLib:1.4.0")
+    implementation(files(prepareAndroidArsclib))
+    implementation("com.android.tools.build:apksig:9.3.2")
+    implementation("org.bouncycastle:bcprov-jdk18on:1.79")
+    implementation("org.bouncycastle:bcpkix-jdk18on:1.79")
     implementation("io.github.skylot:jadx-dex-input:1.5.5") {
         exclude(group = "com.google.guava", module = "guava")
     }

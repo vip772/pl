@@ -17,6 +17,11 @@ object HchatExtraSettings {
     const val KEY_MESSAGE_DETAILS_TIME_FORMAT = "message_details_time_format"
     const val KEY_MESSAGE_DETAILS_POSITION = "message_details_position"
     const val KEY_MESSAGE_DETAILS_AVATAR_GAP = "message_details_avatar_gap"
+    const val KEY_MESSAGE_DETAILS_BUBBLE_TOP = "message_details_bubble_top"
+    const val KEY_MESSAGE_DETAILS_BUBBLE_BOTTOM = "message_details_bubble_bottom"
+    const val KEY_MESSAGE_DETAILS_BUBBLE_LEFT = "message_details_bubble_left"
+    const val KEY_MESSAGE_DETAILS_BUBBLE_RIGHT = "message_details_bubble_right"
+    private const val KEY_MESSAGE_DETAILS_DISTANCE_PREFIX = "message_details_distance"
     const val KEY_MESSAGE_DETAILS_LEFT_MARGIN = "message_details_left_margin"
     const val KEY_MESSAGE_DETAILS_RIGHT_MARGIN = "message_details_right_margin"
     const val KEY_MESSAGE_DETAILS_TEXT_SIZE = "message_details_text_size"
@@ -35,10 +40,19 @@ object HchatExtraSettings {
     const val LEGACY_MESSAGE_DETAILS_FORMAT = "\${time} | \${type}"
     const val DEFAULT_MESSAGE_DETAILS_TIME_FORMAT = "HH:mm:ss"
     const val POSITION_MESSAGE_BOTTOM = "message_bottom"
+    const val POSITION_BUBBLE_RIGHT = "bubble_right"
     const val POSITION_AVATAR_ABOVE = "avatar_above"
     const val POSITION_AVATAR_BELOW = "avatar_below"
     const val DEFAULT_MESSAGE_DETAILS_POSITION = POSITION_MESSAGE_BOTTOM
     const val DEFAULT_MESSAGE_DETAILS_AVATAR_GAP = 2
+    const val DEFAULT_MESSAGE_DETAILS_BUBBLE_TOP = 0
+    const val DEFAULT_MESSAGE_DETAILS_BUBBLE_BOTTOM = 0
+    const val DEFAULT_MESSAGE_DETAILS_BUBBLE_LEFT = 0
+    const val DEFAULT_MESSAGE_DETAILS_BUBBLE_RIGHT = 0
+    const val DISTANCE_TOP = "top"
+    const val DISTANCE_BOTTOM = "bottom"
+    const val DISTANCE_LEFT = "left"
+    const val DISTANCE_RIGHT = "right"
     const val DEFAULT_MESSAGE_DETAILS_LEFT_MARGIN = 64
     const val DEFAULT_MESSAGE_DETAILS_RIGHT_MARGIN = 64
     const val DEFAULT_MESSAGE_DETAILS_TEXT_SIZE = 10
@@ -46,6 +60,19 @@ object HchatExtraSettings {
     const val DEFAULT_MESSAGE_DETAILS_FORMAT_CONTENT = false
     const val DEFAULT_RED_PACKET_DETAILS = false
     const val DEFAULT_SKIP_WEB_RISK = false
+
+    fun messageDetailsDistanceKey(position: String, direction: String): String {
+        if (position == POSITION_BUBBLE_RIGHT) {
+            return when (direction) {
+                DISTANCE_TOP -> KEY_MESSAGE_DETAILS_BUBBLE_TOP
+                DISTANCE_BOTTOM -> KEY_MESSAGE_DETAILS_BUBBLE_BOTTOM
+                DISTANCE_LEFT -> KEY_MESSAGE_DETAILS_BUBBLE_LEFT
+                DISTANCE_RIGHT -> KEY_MESSAGE_DETAILS_BUBBLE_RIGHT
+                else -> "$KEY_MESSAGE_DETAILS_DISTANCE_PREFIX.$position.$direction"
+            }
+        }
+        return "$KEY_MESSAGE_DETAILS_DISTANCE_PREFIX.$position.$direction"
+    }
 
     @JvmStatic
     @Synchronized

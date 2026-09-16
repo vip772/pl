@@ -1520,7 +1520,13 @@ object ScriptPluginRuntime {
             waBridge.bindPluginLog(plugin.name, plugin.dir)
             val interpreter = newInterpreter(currentBridge, plugin, waBridge)
             withInterpreterLock(interpreter) {
-                interpreter.source(plugin.mainFile.absolutePath)
+                // BeanShell does not resolve the nested Xposed callback type
+                // from a short import reliably on Android. Normalize only in
+                // memory so legacy plugins remain unchanged on disk.
+                val compatibleScript = scriptText
+                    .replace(Regex("(?m)^\\s*import\\s+.*MethodHookParam\\s*;\\s*$"), "")
+                    .replace(Regex("(?<![\\w.])MethodHookParam(?![\\w])"), "XC_MethodHook.MethodHookParam")
+                interpreter.eval(compatibleScript)
             }
             callLifecycle(interpreter, "onLoad")
             val interpreterFlags = detectCallbacks(interpreter)
