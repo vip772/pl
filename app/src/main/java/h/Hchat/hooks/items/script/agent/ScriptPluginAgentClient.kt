@@ -380,6 +380,13 @@ object ScriptPluginAgentClient {
                     )
                 }
                 val effectiveStatus = if (storage.isFailure) "error" else status
+                diagnostics?.log(
+                    "tool_finish",
+                    "kind=${event.kind} name=${event.name} status=$effectiveStatus " +
+                        "durationMs=${(System.currentTimeMillis() - event.startedAt).coerceAtLeast(0L)} " +
+                        "result=${diagnostics?.parameterSummary(result).orEmpty()} " +
+                        "error=${toolErrorSummary(result)}"
+                )
                 val current = currentToolEvent(event)
                 publishToolEvent(
                     current.copy(
@@ -1121,7 +1128,13 @@ object ScriptPluginAgentClient {
                             currentRequest.agentWorkContext,
                             workRecord(
                                 turn,
-                                if (workspaceTool) "已完成插件工作区工具调用：$toolName" else "已完成内置逆向工具调用：$toolName"
+                                if (toolResultIsError(stored.modelContent)) {
+                                    "工具执行失败：$toolName"
+                                } else if (workspaceTool) {
+                                    "已完成插件工作区工具调用：$toolName"
+                                } else {
+                                    "已完成内置逆向工具调用：$toolName"
+                                }
                             )
                         )
                     )
@@ -1487,6 +1500,10 @@ object ScriptPluginAgentClient {
                 !cancellation.isCancellation(failure) &&
                 runCatching { workspace?.hasChanges() == true }.getOrDefault(false)
             if (!workspaceTransferred && !keepForResume) workspace?.close()
+            diagnostics?.finish(
+                if (failure == null) "success" else if (cancellation.isCancellation(failure)) "interrupted" else "error",
+                failure?.let { "error=${it.message ?: it.javaClass.simpleName}" }.orEmpty()
+            )
         }.onFailure {
             if (!cancellation.isCancellation(it)) {
                 HLog.e("$TAG 插件生成失败: ${it.message}", it)
@@ -3480,7 +3497,6 @@ object ScriptPluginAgentClient {
             status.equals("ready", ignoreCase = true) ||
             status.equals("delete", ignoreCase = true)
     }
-
     private fun toolResultIsError(result: String): Boolean {
         return runCatching {
             val json = JSONObject(result)
@@ -3489,6 +3505,21 @@ object ScriptPluginAgentClient {
                 (json.has("ok") && !json.optBoolean("ok", true))
         }.getOrDefault(false)
     }
+
+    private fun toolErrorSummary(result: String): String {
+        return runCatching {
+            val json = JSONObject(result)
+            if (!json.optBoolean("isError", false) &&
+                !json.optBoolean("error", false) &&
+                (!json.has("ok") || json.optBoolean("ok", true))
+            ) return@runCatching ""
+            val message = json.optString("message").ifBlank {
+                json.optString("error").ifBlank { json.optString("detail") }
+            }
+            message.replace('\n', ' ').take(500)
+        }.getOrDefault(if (toolResultIsError(result)) result.replace('\n', ' ').take(500) else "")
+    }
+
 
     private fun messageText(message: ScriptPluginAgentChatMessage): String {
         if (message.role == "tool") return toolMessageContent(message)
