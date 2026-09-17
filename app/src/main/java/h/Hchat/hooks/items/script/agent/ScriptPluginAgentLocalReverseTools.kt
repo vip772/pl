@@ -673,6 +673,12 @@ object ScriptPluginAgentLocalReverseTools {
     private fun openExternalTarget(host: Binding, input: String, allowedRoots: List<File>): Binding {
         val file = runCatching { File(input).canonicalFile }
             .getOrElse { throw IllegalArgumentException("APK 路径无效: $input", it) }
+
+        // The running WeChat APK is already bound to the shared DexKit instance.
+        // It is a valid default target even when the model supplied its runtime path
+        // rather than a path explicitly written in the user's message.
+        if (sameFile(file, File(host.apkPath))) return host
+
         val allowed = allowedRoots.any { root ->
             val canonicalRoot = runCatching { root.canonicalFile }.getOrNull() ?: return@any false
             file.path == canonicalRoot.path ||
@@ -680,7 +686,6 @@ object ScriptPluginAgentLocalReverseTools {
         }
         require(allowed) { "只能打开用户消息中明确提供的 APK 路径或其子项" }
         validateApk(file)
-        if (sameFile(file, File(host.apkPath))) return host
         val sessionId = targetId(file)
         targetSessions[sessionId]?.let { return resolveTarget(host, sessionId) }
         val supersededSessionIds = targetSessions.values
