@@ -361,7 +361,7 @@ object ScriptPluginAgentLocalReverseTools {
             put("source", "Hchat 内置逆向工具")
             put(
                 "instructions",
-                "默认目标是当前微信 APK。分析其它版本时先用 open_target_session(input) 注册 APK，并在后续每次查询中传返回的 session_id；多版本初筛优先使用 compare_methods_using_strings。find/list 首次查询优先 brief=true，确有需要再选择 fields。Java/Smali/XML 按 nextOffset 分页读取。"
+                "默认目标是当前微信 APK。查询当前微信时不要传 session_id；只有分析其它版本时才用 open_target_session(input) 注册 APK，并在后续查询中传返回的外部 session_id。多版本初筛优先使用 compare_methods_using_strings。find/list 首次查询优先 brief=true，确有需要再选择 fields。Java/Smali/XML 按 nextOffset 分页读取。"
             )
             put("tools", tools)
             put("target", "当前微信 APK，可按 session_id 查询已注册的其它微信 APK")
@@ -475,7 +475,7 @@ object ScriptPluginAgentLocalReverseTools {
         if (normalizedName !in SESSION_MANAGEMENT_TOOLS && normalizedName != "read_tool_result") {
             scopedProperties.putIfAbsent(
                 "session_id",
-                stringValue("可选目标 session_id；省略时查询当前运行微信 APK")
+                stringValue("仅分析外部微信 APK 时填写；分析当前运行微信 APK 时必须省略")
             )
         }
         tools.put(JSONObject().apply {
@@ -583,7 +583,7 @@ object ScriptPluginAgentLocalReverseTools {
         val items = targetSessions.values.map { targetView(host, it) }
         return JSONObject().apply {
             put("total", items.size)
-            put("default_session_id", host.sessionId)
+            put("default_target", "current_wechat_apk")
             put("items", JSONArray(items))
         }.toString()
     }
@@ -741,7 +741,15 @@ object ScriptPluginAgentLocalReverseTools {
     private fun attachTarget(rawResult: String, target: Binding): String {
         return runCatching {
             JSONObject(rawResult).apply {
-                put("session_id", target.sessionId)
+                if (target.kind == TARGET_KIND_EXTERNAL) {
+                    // Only external APKs need a session_id for subsequent calls.
+                    put("session_id", target.sessionId)
+                } else {
+                    // Do not teach the model to carry a runtime-specific host ID
+                    // through the conversation. The current WeChat target is implicit.
+                    remove("session_id")
+                    put("defaultTarget", true)
+                }
                 put("sourcePath", target.apkPath)
                 put("targetKind", target.kind)
             }.toString()
@@ -751,7 +759,7 @@ object ScriptPluginAgentLocalReverseTools {
     private fun targetView(host: Binding, session: TargetSession): JSONObject {
         val packageInfo = archivePackageInfo(host.context, session.apkPath)
         return JSONObject().apply {
-            put("session_id", session.sessionId)
+            if (session.kind == TARGET_KIND_EXTERNAL) put("session_id", session.sessionId)
             put("input", session.apkPath)
             put("sourcePath", session.apkPath)
             put("kind", session.kind)
