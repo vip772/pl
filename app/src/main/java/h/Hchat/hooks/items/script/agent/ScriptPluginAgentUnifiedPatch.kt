@@ -156,7 +156,7 @@ object ScriptPluginAgentUnifiedPatch {
         var lineDelta = 0
         hunks.forEachIndexed { hunkIndex, hunk ->
             val oldLines = hunk.lines.filterNot { it.startsWith('+') || it.startsWith("\\ ") }
-                .map { it.substring(1) }
+                .map { normalizeContextLine(it.substring(1)) }
             val expected = hunk.oldStart?.let { (it - 1 + lineDelta).coerceAtLeast(0) }
             val position = when {
                 hunk.endOfFile && oldLines.isEmpty() -> text.lines.size
@@ -187,6 +187,10 @@ object ScriptPluginAgentUnifiedPatch {
             else -> normalized.split('\n').toMutableList()
         }
         return TextLines(lines, trailing, separator)
+    }
+
+    private fun normalizeContextLine(line: String): String {
+        return line.replaceFirst(Regex("^\\s*\\d+(?::\\d+)?\\s*\\|\\s?"), "")
     }
 
     private fun findMatch(lines: List<String>, expected: List<String>, start: Int): Int {

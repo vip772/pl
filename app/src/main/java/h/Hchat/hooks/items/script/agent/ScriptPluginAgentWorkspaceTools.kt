@@ -71,7 +71,7 @@ object ScriptPluginAgentWorkspaceTools {
             "start_column" to integerSchema("起始行内的字符位置，从 1 开始", 1, 1),
             "end_line" to integerSchema("可选结束行，0 表示按 max_lines", 0, 0),
             "max_lines" to integerSchema("未指定 end_line 时最多返回行数", 400, 1, 2_000),
-            "include_line_numbers" to booleanSchema("是否在内容前显示行号", true)
+            "include_line_numbers" to booleanSchema("是否在内容前显示行号；修改文件前默认关闭，避免行号被误复制到补丁上下文", false)
         ), listOf("plugin_id", "path"))
         tool(tools, "search_files", "搜索插件工作区内文本文件的内容", linkedMapOf(
             "plugin_id" to stringSchema("插件目录名"),

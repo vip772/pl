@@ -29,6 +29,9 @@ object ScriptPluginAgentClient {
     private const val MAX_RESPONSE_PARSE_RETRIES = 2
     private const val MAX_WORKSPACE_COMPLETION_RETRIES = 2
     private const val MAX_TRANSIENT_REQUEST_RETRIES = 6
+    private const val MAX_AGENT_STEPS = 32
+    private const val MAX_REPEATED_TOOL_CALLS = 3
+    private const val MAX_CONSECUTIVE_TOOL_FAILURES = 5
     private val ORDER_INSENSITIVE_SCHEMA_ARRAY_KEYS = setOf("required", "enum", "type")
     private val promptCacheRejectedEndpoints = ConcurrentHashMap.newKeySet<String>()
 
@@ -110,6 +113,7 @@ object ScriptPluginAgentClient {
         onUpdate: (ScriptPluginAgentStreamUpdate) -> Unit
     ): Result<ScriptPluginAgentTurn> {
         var workspace: ScriptPluginAgentWorkspaceTools.Workspace? = null
+        var diagnostics: ScriptPluginAgentDiagnostics? = null
         var workspaceTransferred = false
         var workspaceWriteApprovalMode = config.workspaceWriteApprovalMode
         return runCatching<ScriptPluginAgentTurn> {
@@ -118,6 +122,8 @@ object ScriptPluginAgentClient {
             require(config.model.isNotBlank()) { "请填写模型" }
             require(request.messages.any { it.role == "user" && it.content.isNotBlank() }) { "请先发送消息" }
             val turnId = request.turnId.ifBlank { UUID.randomUUID().toString() }
+            diagnostics = ScriptPluginAgentDiagnostics.start(context, request.sessionId, turnId)
+            diagnostics?.log("request_config", "model=${config.model.take(80)} endpointMode=${config.endpointMode} approval=${config.workspaceWriteApprovalMode}")
             var activeStreamId = ""
             val sourceUserMessage = request.messages.lastOrNull {
                 it.role == "user" && it.turnId == turnId
@@ -242,6 +248,8 @@ object ScriptPluginAgentClient {
             var workspaceCompletionRetries = 0
             var transientRequestRetries = 0
             var forceJsonResponse = false
+            val toolCallCounts = LinkedHashMap<String, Int>()
+            var consecutiveToolFailures = 0
             val runStartedAt = System.currentTimeMillis()
             fun publishToolEvent(event: ScriptPluginAgentToolEvent) {
                 val isNew = synchronized(toolEventLock) {
@@ -291,7 +299,10 @@ object ScriptPluginAgentClient {
                     protocolName = protocolName,
                     providerMetadata = providerMetadata,
                     parentAssistantMessageId = activeStreamId
-                ).also(::publishToolEvent)
+                ).also {
+                    diagnostics?.log("tool_start", "kind=$kind name=$name args=${diagnostics?.parameterSummary(arguments).orEmpty()}")
+                    ::publishToolEvent.invoke(it)
+                }
             }
             fun updateToolProgress(
                 event: ScriptPluginAgentToolEvent,
@@ -409,6 +420,15 @@ object ScriptPluginAgentClient {
                     nativeToolHistory = currentRequest.nativeToolHistory
                 )
             }
+            fun repeatedToolCall(toolName: String, arguments: String): Boolean {
+                val normalizedArguments = runCatching {
+                    canonicalJsonObject(JSONObject(arguments)).toString()
+                }.getOrDefault(arguments.trim())
+                val signature = "$toolName\u0000$normalizedArguments"
+                val count = (toolCallCounts[signature] ?: 0) + 1
+                toolCallCounts[signature] = count
+                return count > MAX_REPEATED_TOOL_CALLS
+            }
             fun publishCheckpoint() {
                 val workspaceCheckpoint = workspace?.checkpoint()
                 currentRequest = currentRequest.copy(workspaceCheckpoint = workspaceCheckpoint)
@@ -452,6 +472,19 @@ object ScriptPluginAgentClient {
             }
             while (!cancellation.isCancelled) {
                 cancellation.throwIfCancelled()
+                if (attempt >= MAX_AGENT_STEPS) {
+                    publishCheckpoint()
+                    return@runCatching ScriptPluginAgentTurn(
+                        status = "clarify",
+                        reply = "本轮 Agent 已达到 $MAX_AGENT_STEPS 次自动处理上限，已停止继续调用工具，避免重复循环。暂存修改和工具结果已保留，请检查失败记录后重新发送具体要求。",
+                        draft = null,
+                        progress = "已停止重复工具循环",
+                        taskGoal = currentRequest.lockedTaskGoal,
+                        toolEvents = toolEvents.toList(),
+                        nativeToolHistory = currentRequest.nativeToolHistory,
+                        protocolTranscript = currentRequest.protocolTranscript
+                    )
+                }
                 publishCheckpoint()
                 activeStreamId = UUID.randomUUID().toString()
                 publish(
@@ -620,6 +653,22 @@ object ScriptPluginAgentClient {
                     continue
                 }
                 if (turn.status.equals("native_tools", ignoreCase = true) && turn.nativeToolCalls.isNotEmpty()) {
+                    val repeatedCall = turn.nativeToolCalls.firstOrNull {
+                        repeatedToolCall(it.originalName, it.arguments)
+                    }
+                    if (repeatedCall != null) {
+                        publishCheckpoint()
+                        return@runCatching ScriptPluginAgentTurn(
+                            status = "clarify",
+                            reply = "模型重复调用同一工具超过 $MAX_REPEATED_TOOL_CALLS 次，已停止自动重试：${repeatedCall.originalName}。暂存修改和已有工具结果已保留，请检查该工具之前的失败结果。",
+                            draft = null,
+                            progress = "已停止重复工具调用",
+                            taskGoal = currentRequest.lockedTaskGoal,
+                            toolEvents = toolEvents.toList(),
+                            nativeToolHistory = currentRequest.nativeToolHistory,
+                            protocolTranscript = currentRequest.protocolTranscript
+                        )
+                    }
                     val eventsByCall = LinkedHashMap<String, ScriptPluginAgentToolEvent>()
                     turn.nativeToolCalls.forEach { call ->
                         eventsByCall[call.id] = beginToolEvent(
@@ -829,6 +878,22 @@ object ScriptPluginAgentClient {
                         executor?.shutdownNow()
                     }
                     val orderedExecutions = turn.nativeToolCalls.mapNotNull { executions[it.id] }
+                    orderedExecutions.forEach { execution ->
+                        consecutiveToolFailures = if (execution.failed) consecutiveToolFailures + 1 else 0
+                    }
+                    if (consecutiveToolFailures >= MAX_CONSECUTIVE_TOOL_FAILURES) {
+                        publishCheckpoint()
+                        return@runCatching ScriptPluginAgentTurn(
+                            status = "clarify",
+                            reply = "工具已连续失败 $consecutiveToolFailures 次，已停止自动重试，避免继续反复修改。暂存修改和工具结果已保留，请先查看最近一次失败原因。",
+                            draft = null,
+                            progress = "连续工具失败，已停止",
+                            taskGoal = currentRequest.lockedTaskGoal,
+                            toolEvents = toolEvents.toList(),
+                            nativeToolHistory = currentRequest.nativeToolHistory,
+                            protocolTranscript = currentRequest.protocolTranscript
+                        )
+                    }
                     var nextRequest = currentRequest
                     orderedExecutions.forEach { execution ->
                         val resultRecord = JSONObject().apply {
@@ -948,6 +1013,19 @@ object ScriptPluginAgentClient {
                         )
                     }
                     val workspaceTool = ScriptPluginAgentWorkspaceTools.isKnownToolName(toolName)
+                    if (repeatedToolCall(toolName, arguments.toString())) {
+                        publishCheckpoint()
+                        return@runCatching ScriptPluginAgentTurn(
+                            status = "clarify",
+                            reply = "模型重复调用同一工具超过 $MAX_REPEATED_TOOL_CALLS 次，已停止自动重试：$toolName。暂存修改和已有工具结果已保留，请检查该工具之前的失败结果。",
+                            draft = null,
+                            progress = "已停止重复工具调用",
+                            taskGoal = currentRequest.lockedTaskGoal,
+                            toolEvents = toolEvents.toList(),
+                            nativeToolHistory = currentRequest.nativeToolHistory,
+                            protocolTranscript = currentRequest.protocolTranscript
+                        )
+                    }
                     publishWorking(
                         if (workspaceTool) "正在操作插件工作区" else "正在调用内置逆向工具: $toolName"
                     )

@@ -224,7 +224,8 @@ data class ScriptPluginAgentTurn(
     val nativeToolHistory: String = "",
     val protocolTranscript: String = "",
     val nativeToolCalls: List<ScriptPluginAgentNativeToolCall> = emptyList(),
-    val workspaceChange: ScriptPluginAgentWorkspaceChange? = null
+    val workspaceChange: ScriptPluginAgentWorkspaceChange? = null,
+    val diagnosticLogPath: String = ""
 )
 
 data class ScriptPluginAgentStreamUpdate(
