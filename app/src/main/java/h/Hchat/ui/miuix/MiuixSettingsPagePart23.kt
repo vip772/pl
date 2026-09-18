@@ -45,6 +45,8 @@ import h.Hchat.crash.CrashReportSettings
 import h.Hchat.crash.CrashReportSettingsProvider
 import h.Hchat.hooks.api.ui.HchatAgentIconDrawable
 import h.Hchat.hooks.items.specialmessage.SpecialMessageFeature
+import h.Hchat.hooks.items.securemessage.SecureMessageSettings
+
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutFeature
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutGlyph
 import h.Hchat.hooks.items.floatingshortcut.FloatingShortcutGlyphDrawable
@@ -568,6 +570,7 @@ internal const val FAVORITE_BACKGROUND_BATCH_DELAY_MS = 40L
 @Composable
 internal fun SpecialMessageMiuixPage(context: Context, onBack: () -> Unit) {
     val sp = remember { HchatStorage.preferences(context, SpecialMessageFeature.PREFS) }
+    val antiSp = remember { HchatStorage.preferences(context, SecureMessageSettings.ANTI_PREFS) }
     var route by remember { mutableStateOf(0) }
     var allowedTalkers by remember { mutableStateOf(sp.getString("talkers", "").orEmpty()) }
     var picker by remember { mutableStateOf<ContactPickerRequest?>(null) }
@@ -609,6 +612,8 @@ internal fun SpecialMessageMiuixPage(context: Context, onBack: () -> Unit) {
                                 SwitchRow(sp, "link", "链接安全消息", "", false)
                                 InsetDivider()
                                 SwitchRow(sp, "emoji", "表情安全消息", "", false)
+                                InsetDivider()
+                                SwitchRow(antiSp, SecureMessageSettings.KEY_ENABLE, "反安全消息", "恢复安全消息的完整长按菜单", false)
                                 InsetDivider()
                                 InfoRow("图片安全消息", "暂未实现")
                             }

@@ -120,7 +120,10 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         fun refresh() {
             if (!attached) return
             val enabled = HomeSidePanelSettings.enabled(activity)
-            val homeVisible = enabled && !chatVisible && isHomeTab()
+            // LauncherUI 的首页标题在不同微信版本中可能由自定义 View/Compose 渲染，
+            // 不能依赖查找文本“微信”来决定边缘触摸层是否显示。
+            val homeVisible = enabled && !chatVisible
+
             val stateChanged = lastHomeVisible != homeVisible
             if (stateChanged) drawer.setEnabled(homeVisible)
             if (homeVisible && header == null) ensureHeader()

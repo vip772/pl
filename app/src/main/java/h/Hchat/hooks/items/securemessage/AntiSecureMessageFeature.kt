@@ -31,10 +31,10 @@ class AntiSecureMessageFeature : BaseFeature() {
 
     override fun featureId(): String = SecureMessageSettings.ANTI_ID
     override fun name(): String = "反安全消息"
-
     override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(AntiSecureMessageSettingsProvider())
+        // 设置入口统一放在“特殊消息 -> 安全消息”页面，避免单独占用顶层功能项。
     }
+
 
     override fun onFeatureInstall(context: FeatureContext) {
         prefs = HchatStorage.preferences(context.hostContext(), SecureMessageSettings.ANTI_PREFS)

@@ -53,8 +53,12 @@ internal class HomeSidePanelDrawer(
         host = parent
         buildPanel()
         root.visibility = View.GONE
+        root.elevation = dp(100).toFloat()
+        root.isClickable = false
         parent.addView(root, ViewGroup.LayoutParams(dp(72), -1))
+        root.bringToFront()
         resizeRoot(open = false)
+
     }
 
     fun detach() {
