@@ -557,7 +557,8 @@ private class VoiceForwardHooker(
 
     private fun addForwardMenu(param: XC_MethodHook.MethodHookParam) {
         if (!isEnabled()) return
-        val allowForward = chatForwardEnabled() && !messageForwardMenuEnabled()
+        // 语音不能交给普通消息转发处理，必须始终使用语音专用发送链路。
+        val allowForward = chatForwardEnabled()
         val allowSave = chatSaveEnabled()
         if (!allowForward && !allowSave) return
         val args = param.args ?: return
@@ -649,6 +650,12 @@ private class VoiceForwardHooker(
             ?: KavaReflector.invokeMethod(menu, "f", itemId, title as CharSequence)
     }
 
+    private fun isForwardMenuItem(item: MenuItem): Boolean {
+        val title = item.title?.toString()?.trim().orEmpty()
+        if (title.isBlank()) return false
+        return title == "转发" || title.contains("转发") || title.equals("Forward", ignoreCase = true)
+    }
+
     private fun menuIconResId(view: View?, iconName: String): Int {
         val iconContext = view?.context ?: WeChatApis.currentActivity()?.currentActivity() ?: return 0
         val resources = iconContext.resources
@@ -664,12 +671,19 @@ private class VoiceForwardHooker(
         if (!isEnabled()) return
         val args = param.args ?: return
         val menuItem = args.getOrNull(0) as? MenuItem ?: return
-        if (menuItem.itemId != MENU_FORWARD_ID && menuItem.itemId != MENU_SAVE_ID) return
-        if (menuItem.itemId == MENU_FORWARD_ID && !chatForwardEnabled()) return
-        if (menuItem.itemId == MENU_SAVE_ID && !chatSaveEnabled()) return
+        val isCustomForward = menuItem.itemId == MENU_FORWARD_ID
+        val isCustomSave = menuItem.itemId == MENU_SAVE_ID
+        // 微信原生语音“转发”在部分版本中会进入原生转发页，但最终发送 0/1 失败。
+        // 识别原生菜单标题后也交给语音专用发送链路；其他消息类型不会进入这里。
+        val isNativeVoiceForward = !isCustomForward && !isCustomSave && isForwardMenuItem(menuItem)
+        if (!isCustomForward && !isCustomSave && !isNativeVoiceForward) return
+        if ((isCustomForward || isNativeVoiceForward) && !chatForwardEnabled()) return
+        if (isCustomSave && !chatSaveEnabled()) return
         val message = resolveNativeMessage(args)
+        // 该点击 Hook 也会覆盖普通消息菜单；只有确认是语音消息后才能接管原生“转发”。
+        if (message == null || !isVoiceMessage(message)) return
         val activity = resolveActivity(args.getOrNull(1))
-        if (message == null || activity == null) {
+        if (activity == null) {
             toast(activity, "语音消息不可用")
             param.result = true
             return
@@ -1073,7 +1087,8 @@ private class VoiceForwardHooker(
     }
 
     private fun favoriteMenuForwardEnabled(): Boolean {
-        return favoriteForwardEnabled() && !messageFavoriteForwardEnabled()
+        // 收藏语音同样必须走语音专用发送链路，不能被普通收藏转发功能屏蔽。
+        return favoriteForwardEnabled()
     }
 
     private fun messageFavoriteForwardEnabled(): Boolean {
@@ -1781,7 +1796,8 @@ private class VoiceForwardHooker(
             logger("语音转发发送异常", it)
             false
         }
-        return result || WeChatApis.network()?.isReady() == true
+        // network.isReady() 只表示发包器可用，不代表语音已经发送成功，不能据此返回成功。
+        return result
     }
 
     private fun waitBetweenForwards(): Boolean {
