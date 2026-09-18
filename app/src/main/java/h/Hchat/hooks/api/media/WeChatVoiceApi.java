@@ -537,11 +537,26 @@ public final class WeChatVoiceApi {
 
     private boolean finishRecord(String fileName, int durationMillis, int scene) throws Exception {
         Method method = dexFinder.voiceFinishRecordMethod;
-        if (method.getParameterTypes().length == 3) {
-            Object result = KavaReflector.invoke(method, null, fileName, durationMillis, scene);
-            return result instanceof Boolean && (Boolean) result;
+        if (method == null) return false;
+        log("完成voiceinfo调用: method=" + method.toGenericString()
+                + " file=" + safeFileName(fileName)
+                + " duration=" + durationMillis
+                + " scene=" + scene);
+        boolean result = invokeFinishRecord(method, fileName, durationMillis, scene);
+        if (!result) {
+            log("完成voiceinfo失败: method=" + method.toGenericString()
+                    + " durationMillis=" + durationMillis + " scene=" + scene);
         }
-        Object result = KavaReflector.invoke(method, null, fileName, durationMillis, scene, null);
+        return result;
+    }
+
+    private boolean invokeFinishRecord(Method method, String fileName, int duration, int scene) throws Exception {
+        Object result;
+        if (method.getParameterTypes().length == 3) {
+            result = KavaReflector.invoke(method, null, fileName, duration, scene);
+        } else {
+            result = KavaReflector.invoke(method, null, fileName, duration, scene, null);
+        }
         return result instanceof Boolean && (Boolean) result;
     }
 

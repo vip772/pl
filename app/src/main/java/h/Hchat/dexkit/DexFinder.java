@@ -1550,7 +1550,17 @@ public class DexFinder {
             logDetail("语音发送API: start=" + methodName(voiceStartRecordMethod)
                     + " path=" + methodName(voiceFullPathMethod)
                     + " finish=" + methodName(voiceFinishRecordMethod)
-                    + " info=" + methodName(voiceInfoQueryMethod)
+                    + " info=" + methodName(voiceInfoQueryMethod));
+            if (voiceStartRecordMethod != null) {
+                logDetail("语音发送API完整签名 start=" + voiceStartRecordMethod.toGenericString());
+            }
+            if (voiceFullPathMethod != null) {
+                logDetail("语音发送API完整签名 path=" + voiceFullPathMethod.toGenericString());
+            }
+            if (voiceFinishRecordMethod != null) {
+                logDetail("语音发送API完整签名 finish=" + voiceFinishRecordMethod.toGenericString());
+            }
+            logDetail("语音发送API: info=" + methodName(voiceInfoQueryMethod)
                     + " upload=" + (voiceUploadClass != null ? voiceUploadClass.getName() : "null")
                     + " cdnCtor=" + (voiceUploadCdnCtor != null));
         } catch (Throwable e) {
