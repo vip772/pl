@@ -43,6 +43,7 @@ object DexInstallScheduler {
         installer: () -> Boolean
     ) {
         if (key.isBlank()) return
+        HLog.d("$TAG 调度功能: $label key=$key stage=$stage priority=$priority")
         val state = states.computeIfAbsent(key) { State(label) }
         state.label = label
         state.stage = stage
@@ -104,6 +105,7 @@ object DexInstallScheduler {
         if (state.installed.get()) return
         val installer = state.installer ?: return
         if (!state.running.compareAndSet(false, true)) return
+        HLog.d("$TAG 开始安装: ${state.label} key=$key attempt=${state.retryIndex.get() + 1}")
         executor.execute {
             var ok = false
             try {
@@ -116,6 +118,8 @@ object DexInstallScheduler {
                 if (ok) {
                     state.installed.set(true)
                     HLog.i("$TAG 功能生效: ${state.label} key=$key")
+                } else {
+                    HLog.w("$TAG 安装未完成: ${state.label} key=$key attempt=${state.retryIndex.get()}")
                 }
                 state.running.set(false)
             }

@@ -97,6 +97,7 @@ public final class WeChatVoiceApi {
     }
 
     public boolean send(String talker, String voicePath, int durationMillis) {
+        log("发送开始: talker=" + safeTalker(talker) + " file=" + safeFileName(voicePath) + " duration=" + durationMillis);
         if (TextUtils.isEmpty(talker) || TextUtils.isEmpty(voicePath)) {
             log("发送语音失败: talker/voicePath为空");
             return false;
@@ -107,14 +108,20 @@ public final class WeChatVoiceApi {
             return false;
         }
         if (!canSendSilently()) {
-            log("发送语音失败: API未就绪");
+            log("发送语音失败: API未就绪 start=" + (dexFinder != null && dexFinder.voiceStartRecordMethod != null)
+                    + " path=" + (dexFinder != null && dexFinder.voiceFullPathMethod != null)
+                    + " finish=" + (dexFinder != null && dexFinder.voiceFinishRecordMethod != null)
+                    + " upload=" + (dexFinder != null && dexFinder.voiceUploadClass != null));
             return false;
         }
+        log("发送阶段: API已就绪");
         PreparedVoice prepared = prepareVoiceSource(rawSource);
         if (prepared == null || !prepared.source.isFile()) {
-            log("发送语音失败: 音频转换失败 " + voicePath);
+            log("发送语音失败: 音频转换失败 " + safeFileName(voicePath));
             return false;
         }
+        log("发送阶段: 音频已准备 path=" + safeFileName(prepared.source.getAbsolutePath())
+                + " bytes=" + prepared.source.length() + " type=" + prepared.fileType);
         try {
             return runOnMainThread(() -> sendPrepared(talker, prepared, durationMillis));
         } finally {
@@ -176,27 +183,32 @@ public final class WeChatVoiceApi {
         File source = prepared.source;
         try {
             String fileName = startRecord(talker, voicePrefix(source.getAbsolutePath(), prepared.fileType));
+            log("发送阶段: voiceinfo 创建结果=" + (TextUtils.isEmpty(fileName) ? "失败" : "成功"));
             if (TextUtils.isEmpty(fileName)) {
                 log("发送语音失败: 创建voiceinfo失败");
                 return false;
             }
             String targetPath = fullPath(fileName, true);
+            log("发送阶段: 语音目标路径=" + (TextUtils.isEmpty(targetPath) ? "失败" : "成功"));
             if (TextUtils.isEmpty(targetPath)) {
                 log("发送语音失败: 获取语音目标路径失败");
                 return false;
             }
             if (!copyFile(source, new File(targetPath))) {
-                log("发送语音失败: 复制语音文件失败 " + targetPath);
+                log("发送语音失败: 复制语音文件失败 " + safeFileName(targetPath));
                 return false;
             }
+            log("发送阶段: 语音文件复制成功 bytes=" + new File(targetPath).length());
             int actualDuration = actualVoiceDuration(durationMillis);
             int displayDuration = displayVoiceDuration(actualDuration);
             if (!finishRecord(fileName, displayDuration, 0)) {
                 log("发送语音失败: 完成voiceinfo失败");
                 return false;
             }
+            log("发送阶段: voiceinfo 完成成功 duration=" + displayDuration);
             boolean useCdn = shouldUseCdn(source, actualDuration);
             Object request = newUploadRequest(fileName, useCdn);
+            log("发送阶段: 上传请求=" + (request == null ? "创建失败" : "创建成功") + " cdn=" + useCdn);
             if (request == null) {
                 log("发送语音失败: 创建上传请求失败 uploadClass="
                         + voiceUploadClassName() + " ctors=" + voiceUploadConstructors());
@@ -204,9 +216,11 @@ public final class WeChatVoiceApi {
             }
             WeChatNetworkApi network = WeChatApis.network();
             if (network == null || !network.sendRequest(request)) {
-                log("发送语音失败: 网络发包失败");
+                log("发送语音失败: 网络发包失败 network=" + (network != null)
+                        + " ready=" + (network != null && network.isReady()));
                 return false;
             }
+            log("发送阶段: 网络请求已提交");
             return true;
         } catch (Throwable e) {
             log("发送语音异常: " + e.getMessage());
@@ -827,6 +841,16 @@ public final class WeChatVoiceApi {
                 }
             }
         }
+    }
+
+    private String safeTalker(String value) {
+        if (value == null || value.length() <= 4) return value == null ? "null" : value;
+        return value.substring(0, 3) + "..." + value.substring(value.length() - 2);
+    }
+
+    private String safeFileName(String value) {
+        if (value == null || value.trim().isEmpty()) return "<empty>";
+        return new File(value).getName();
     }
 
     private void log(String message) {

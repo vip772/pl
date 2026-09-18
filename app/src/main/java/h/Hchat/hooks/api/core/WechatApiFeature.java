@@ -187,8 +187,13 @@ public class WechatApiFeature implements Feature {
     }
 
     private void log(String message) {
+        if (message == null) return;
+        String line = TAG + " " + message;
+        // 公共 API 的全部阶段日志进入 Hchat 运行日志；重要日志另外写入 LSPosed。
+        // 这样可以还原一次 API 调用经过了哪些阶段，而不是只看到最终失败。
+        h.Hchat.utils.HLog.d(line);
         if (isImportantLog(message)) {
-            XposedBridge.log(TAG + " " + message);
+            XposedBridge.log(line);
         }
     }
 

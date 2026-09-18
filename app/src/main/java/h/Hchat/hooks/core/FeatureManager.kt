@@ -30,6 +30,7 @@ class FeatureManager {
         val initializedFeatures = ArrayList<Feature>()
         for (feature in features) {
             val displayName = safeName(feature)
+            HLog.d("[Hchat:FeatureManager] 功能初始化开始: $displayName (${feature.featureId()})")
             if (!termsAccepted && feature.featureId() != SettingsFeature.ID) {
                 HLog.i("[Hchat:FeatureManager] 跳过功能（未同意协议）: $displayName")
                 continue
