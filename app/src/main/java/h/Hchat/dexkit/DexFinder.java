@@ -1511,6 +1511,9 @@ public class DexFinder {
                 }
             }
 
+            if (voiceFinishRecordMethod != null && !isVoiceFinishRecordMethod(voiceFinishRecordMethod)) {
+                voiceFinishRecordMethod = null;
+            }
             if (voiceFinishRecordMethod == null && voiceStartRecordMethod != null) {
                 Class<?> owner = voiceStartRecordMethod.getDeclaringClass();
                 for (Method method : KavaReflector.declaredMethods(owner)) {
@@ -3736,10 +3739,17 @@ public class DexFinder {
         if (method == null || method.getReturnType() != boolean.class) return false;
         if (!KavaReflector.isStatic(method)) return false;
         Class<?>[] params = method.getParameterTypes();
-        if (params.length != 3 && params.length != 4) return false;
-        return params[0] == String.class
-                && (params[1] == int.class || params[1] == Integer.class)
-                && (params[2] == int.class || params[2] == Integer.class);
+        if (params.length != 3 && params.length != 4 && params.length != 5) return false;
+        if (params[0] != String.class
+                || (params[1] != int.class && params[1] != Integer.class)
+                || (params[2] != int.class && params[2] != Integer.class)) {
+            return false;
+        }
+        if (params.length == 5) {
+            return params[3].getName().equals("com.tencent.mm.storage.e9")
+                    && params[4] == String.class;
+        }
+        return true;
     }
 
     private boolean isSendImageAppInfoMethod(Method method) {
