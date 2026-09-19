@@ -29,13 +29,8 @@ class SpecialMessageFeature : BaseFeature() {
         )
     }
     override fun onFeatureInstall(context: FeatureContext) {
-        // 仅启用已用宿主 APK 交叉确认的版本，避免混淆类碰撞。
+        // 由具体 Hook 定位结果决定是否兼容，不能用旧版本号提前阻断新版本。
         val host = context.hostContext()
-        val version = host.packageManager.getPackageInfo(host.packageName, 0)
-        if (version.versionName != "8.0.76" || version.versionCode != 3140) {
-            logError("当前适配仅确认微信 8.0.76 (3140)，实际为 "+version.versionName+" ("+version.versionCode+")，未安装特殊消息 Hook", null)
-            return
-        }
         val sp = HchatStorage.preferences(host, PREFS)
         sendSubscription = ScriptSendButtonHook.registerHandler(ID) { value ->
             if (!textInstalled) return@registerHandler false

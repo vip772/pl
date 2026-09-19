@@ -30,7 +30,9 @@ class InputHintFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = InputHintRuntime(context.hostContext(), context.hostClassLoader(), ::logError)
+        runtime = InputHintRuntime(context.hostContext(), context.hostClassLoader()) { message, throwable ->
+            if (throwable == null) logIneffective(message) else logError(message, throwable)
+        }
         runtime?.installInputHook()
         installStatistics()
         subscribe(Events.DexReady::class.java) {
@@ -119,7 +121,8 @@ private class InputHintRuntime(
 
     fun installStatistics(): OutgoingMessageStatsRepository.Subscription? {
         if (!OutgoingMessageStatsRepository.install(logger)) {
-            logger("消息变更 API 未就绪，发送统计暂不可用", null)
+            // 启动早期数据库监听可能尚未完成，DexReady 后会再次尝试安装。
+            logger("消息变更 API 尚未就绪，等待后续初始化", null)
             return null
         }
         return OutgoingMessageStatsRepository.subscribe(::refreshAttachedInputs)

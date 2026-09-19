@@ -26,7 +26,9 @@ class CallRingtoneBlockFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        hooker = CallRingtoneBlockHooker(context, ::logRuntimeError)
+        hooker = CallRingtoneBlockHooker(context) { message, throwable ->
+            if (throwable == null) logIneffective(message) else logRuntimeError(message, throwable)
+        }
         scheduleInstall()
         subscribe(Events.DexReady::class.java) { scheduleInstall() }
     }
@@ -152,7 +154,7 @@ private class CallRingtoneBlockHooker(
         val result = methods.distinctBy { it.toGenericString() }
         if (result.isEmpty()) {
             DexMethodCache.clear(methodCache, runtimeKey, CACHE_DIRECTION_METHODS)
-            logger("未定位微信通话铃声入口", null)
+            logger("未定位微信通话铃声入口，等待兼容定位", null)
         } else {
             DexMethodCache.saveList(methodCache, runtimeKey, CACHE_DIRECTION_METHODS, result)
         }
@@ -170,11 +172,26 @@ private class CallRingtoneBlockHooker(
             ?.let { return it }
 
         val routeData = runCatching {
-            context.dexKitBridge().findMethod(
+            val bridge = context.dexKitBridge()
+            val primary = bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply { usingEqStrings(*MULTI_TALK_ROUTE_ANCHORS) })
                 }
             )
+            if (primary.isNotEmpty()) {
+                primary
+            } else {
+                // 8.0.78 可能将两个日志字符串拆到不同方法，逐个锚点查询后再按签名过滤。
+                MULTI_TALK_ROUTE_FALLBACK_ANCHORS
+                    .flatMap { anchor ->
+                        bridge.findMethod(
+                            FindMethod().apply {
+                                matcher(MethodMatcher().apply { usingEqStrings(anchor) })
+                            }
+                        )
+                    }
+                    .distinctBy { data -> data.toString() }
+            }
         }.getOrElse {
             logger("定位微信群通话铃声路由失败", it)
             emptyList()
@@ -212,7 +229,7 @@ private class CallRingtoneBlockHooker(
 
         if (methods.isEmpty()) {
             DexMethodCache.clear(methodCache, runtimeKey, CACHE_MULTI_TALK_DIRECTION_METHODS)
-            logger("未定位微信群通话铃声入口", null)
+            logger("未定位微信群通话铃声入口，等待兼容定位", null)
         } else {
             DexMethodCache.saveList(
                 methodCache,
@@ -418,6 +435,10 @@ private class CallRingtoneBlockHooker(
         )
         val MULTI_TALK_ROUTE_ANCHORS = arrayOf(
             "MicroMsg.MT.MultiTalkAudioManager",
+            "requestAudioDeviceToStartRing but waitting the bt connected",
+            "requestAudioDeviceToStartRing ignore bluetooth or not bt plug"
+        )
+        val MULTI_TALK_ROUTE_FALLBACK_ANCHORS = listOf(
             "requestAudioDeviceToStartRing but waitting the bt connected",
             "requestAudioDeviceToStartRing ignore bluetooth or not bt plug"
         )
