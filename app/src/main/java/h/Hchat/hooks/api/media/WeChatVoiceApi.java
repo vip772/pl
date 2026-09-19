@@ -157,8 +157,7 @@ public final class WeChatVoiceApi {
             int actualDuration = actualVoiceDuration(
                     durationMillis > 0 ? durationMillis : detectDurationMillis(voicePath));
             int displayDuration = displayVoiceDuration(actualDuration);
-            Object voiceInfo = queryVoiceInfo(fileName);
-            if (!finishRecord(fileName, displayDuration, 0, voiceInfo, "masssendapp")) {
+            if (!finishRecord(fileName, displayDuration, 0)) {
                 log("准备群发语音失败: 完成voiceinfo失败");
                 return null;
             }
@@ -202,8 +201,7 @@ public final class WeChatVoiceApi {
             log("发送阶段: 语音文件复制成功 bytes=" + new File(targetPath).length());
             int actualDuration = actualVoiceDuration(durationMillis);
             int displayDuration = displayVoiceDuration(actualDuration);
-            Object voiceInfo = queryVoiceInfo(fileName);
-            if (!finishRecord(fileName, displayDuration, 0, voiceInfo, talker)) {
+            if (!finishRecord(fileName, displayDuration, 0)) {
                 log("发送语音失败: 完成voiceinfo失败");
                 return false;
             }
@@ -537,25 +535,14 @@ public final class WeChatVoiceApi {
         return WeChatInternalServices.getService(dexFinder, method.getDeclaringClass());
     }
 
-    private Object queryVoiceInfo(String fileName) throws Exception {
-        Method queryMethod = dexFinder != null ? dexFinder.voiceInfoQueryMethod : null;
-        if (queryMethod == null || !KavaReflector.isStatic(queryMethod)) return null;
-        Object voiceInfo = KavaReflector.invoke(queryMethod, null, fileName);
-        log("完成voiceinfo查询: result=" + (voiceInfo == null ? "null" : voiceInfo.getClass().getName()));
-        return voiceInfo;
-    }
-
-    private boolean finishRecord(String fileName, int durationMillis, int scene,
-                                 Object voiceInfo, String talker) throws Exception {
+    private boolean finishRecord(String fileName, int durationMillis, int scene) throws Exception {
         Method method = dexFinder.voiceFinishRecordMethod;
         if (method == null) return false;
         log("完成voiceinfo调用: method=" + method.toGenericString()
                 + " file=" + safeFileName(fileName)
                 + " duration=" + durationMillis
-                + " scene=" + scene
-                + " info=" + (voiceInfo == null ? "null" : voiceInfo.getClass().getName())
-                + " talker=" + safeTalker(talker));
-        boolean result = invokeFinishRecord(method, fileName, durationMillis, scene, voiceInfo, talker);
+                + " scene=" + scene);
+        boolean result = invokeFinishRecord(method, fileName, durationMillis, scene);
         if (!result) {
             log("完成voiceinfo失败: method=" + method.toGenericString()
                     + " durationMillis=" + durationMillis + " scene=" + scene);
@@ -563,23 +550,13 @@ public final class WeChatVoiceApi {
         return result;
     }
 
-    private boolean invokeFinishRecord(Method method, String fileName, int duration, int scene,
-                                       Object voiceInfo, String talker) throws Exception {
-        Object result;
-        Class<?>[] params = method.getParameterTypes();
-        if (params.length == 3) {
-            result = KavaReflector.invoke(method, null, fileName, duration, scene);
-        } else if (params.length == 4) {
-            result = KavaReflector.invoke(method, null, fileName, duration, scene, voiceInfo);
-        } else if (params.length == 5) {
-            if (voiceInfo == null) {
-                log("完成voiceinfo失败: 5参数接口所需voiceinfo对象为空");
-                return false;
-            }
-            result = KavaReflector.invoke(method, null, fileName, duration, scene, voiceInfo, talker);
-        } else {
-            return false;
-        }
+    private boolean invokeFinishRecord(Method method, String fileName, int duration, int scene) throws Exception {
+        Object[] args = new Object[method.getParameterCount()];
+        if (args.length < 3 || args.length > 5) return false;
+        args[0] = fileName;
+        args[1] = duration;
+        args[2] = scene;
+        Object result = KavaReflector.invoke(method, null, args);
         return result instanceof Boolean && (Boolean) result;
     }
 
