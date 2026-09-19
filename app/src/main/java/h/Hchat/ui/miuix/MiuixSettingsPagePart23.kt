@@ -615,7 +615,7 @@ internal fun SpecialMessageMiuixPage(context: Context, onBack: () -> Unit) {
                                 InsetDivider()
                                 SwitchRow(antiSp, SecureMessageSettings.KEY_ENABLE, "反安全消息", "恢复安全消息的完整长按菜单", false)
                                 InsetDivider()
-                                InfoRow("图片安全消息", "暂未实现")
+                                SwitchRow(sp, SecureMessageSettings.KEY_IMAGE, "图片安全消息", "通过图片消息的 MsgSource 注入安全标记", false)
                             }
                         }
                     }

@@ -121,7 +121,7 @@ class SpecialMessageFeature : BaseFeature() {
                 textInstalled = true
             }
         }
-        // 图片模式保留配置占位，未验证的图片注入不安装。
+        // 表情使用独立的 MsgSource 和网络分发链路；普通图片由安全消息功能处理。
         if (!emojiInstalled) emojiInstalled = installMediaHook(context)
         if (!emojiDispatchInstalled) emojiDispatchInstalled = installEmojiDispatchHook(context)
         return textInstalled && emojiInstalled && emojiDispatchInstalled

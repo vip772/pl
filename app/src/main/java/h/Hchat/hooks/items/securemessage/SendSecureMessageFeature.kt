@@ -26,6 +26,7 @@ class SendSecureMessageFeature : BaseFeature() {
     private var prefs: android.content.SharedPreferences? = null
     private lateinit var methodPrefs: android.content.SharedPreferences
     @Volatile private var markerLogged = false
+    @Volatile private var imageMarkerLogged = false
     @Volatile private var markerFailureLogged = false
     @Volatile private var hookMissLogged = false
     @Volatile private var emojiSourceTriggeredLogged = false
@@ -73,7 +74,7 @@ class SendSecureMessageFeature : BaseFeature() {
         val insertReady = if (installed) true else runCatching {
             HookRegistry.get().hook(insert, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!enabled()) return
+                    if (!enabled() && !imageEnabled()) return
                     val args = param.args ?: return
                     val msg = args.firstOrNull { it != null && isMessageLike(it) } ?: run {
                         if (!hookMissLogged) {
@@ -83,6 +84,7 @@ class SendSecureMessageFeature : BaseFeature() {
                         return
                     }
                     if (!isSupportedOutgoingMessage(msg)) return
+                    if (isImageMessage(msg) && !imageEnabled()) return
                     addSecureMarker(msg)
                 }
             })
@@ -312,11 +314,12 @@ class SendSecureMessageFeature : BaseFeature() {
             runCatching {
                 HookRegistry.get().hook(method, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (!enabled()) return
+                        if (!enabled() && !imageEnabled()) return
                         val source = param.args?.getOrNull(0) as? String ?: return
                         if (!looksLikeMsgSource(source)) return
                         val message = param.thisObject ?: return
                         if (!isSupportedOutgoingMessage(message)) return
+                        if (isImageMessage(message) && !imageEnabled()) return
                         param.args[0] = SecureMessageSource.addMarker(source)
                     }
                 })
@@ -332,6 +335,13 @@ class SendSecureMessageFeature : BaseFeature() {
 
     private fun enabled(): Boolean = prefs?.getBoolean(SecureMessageSettings.KEY_ENABLE, SecureMessageSettings.DEFAULT_ENABLE) == true
 
+    private fun imageEnabled(): Boolean = prefs?.getBoolean(SecureMessageSettings.KEY_IMAGE, SecureMessageSettings.DEFAULT_IMAGE) == true
+
+    private fun isImageMessage(message: Any): Boolean {
+        val type = readNumber(message, "field_type", "type", "getType", "getMsgType")?.toInt() ?: return false
+        return WeChatMessageTypes.normalize(type) == WeChatMessageTypes.IMAGE
+    }
+
     private fun isMessageLike(value: Any): Boolean =
         readNumber(value, "field_type", "type", "getType", "getMsgType") != null ||
             SOURCE_FIELDS.any { KavaReflector.readField(value, it) != null }
@@ -345,6 +355,9 @@ class SendSecureMessageFeature : BaseFeature() {
                 markerFailureLogged = true
                 logError("安全消息标记注入失败: msgSource 不可写，类型=${message.javaClass.name}", null)
             }
+        } else if (isImageMessage(message) && !imageMarkerLogged) {
+            imageMarkerLogged = true
+            logInfo("图片安全消息标记已写入 MsgSource")
         } else if (!markerLogged) {
             markerLogged = true
             logInfo("安全消息标记已写入消息")
