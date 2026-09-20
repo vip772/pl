@@ -605,15 +605,15 @@ internal fun SpecialMessageMiuixPage(context: Context, onBack: () -> Unit) {
                     item {
                         SettingsCard {
                             if (!safety) {
-                                ActionRow("安全消息", "文本、链接、图片、表情") { route = 1 }
-                                InsetDivider()
-                                SwitchRow(antiSp, SecureMessageSettings.KEY_ENABLE, "反安全消息", "恢复安全消息的完整长按菜单", false)
+                                ActionRow("安全消息", "文本、链接、表情") { route = 1 }
                             } else {
                                 SwitchRow(sp, "enabled", "文本安全消息", "", false)
                                 InsetDivider()
                                 SwitchRow(sp, "link", "链接安全消息", "", false)
                                 InsetDivider()
                                 SwitchRow(sp, "emoji", "表情安全消息", "", false)
+                                InsetDivider()
+                                SwitchRow(antiSp, SecureMessageSettings.KEY_ENABLE, "反安全消息", "恢复安全消息的完整长按菜单", false)
                                 InsetDivider()
                                 SwitchRow(sp, SecureMessageSettings.KEY_IMAGE, "图片安全消息", "通过图片消息的 MsgSource 注入安全标记", false)
                             }
