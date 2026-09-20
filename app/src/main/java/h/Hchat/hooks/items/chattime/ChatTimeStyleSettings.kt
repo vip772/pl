@@ -8,6 +8,7 @@ object ChatTimeStyleSettings {
     const val KEY_TIME_FORMAT = "chat_time_format"
 
     const val MODE_ORIGINAL = "original"
+    const val MODE_EVERY = "every"
     const val MODE_CUSTOM = "custom"
     const val MODE_HIDDEN = "hidden"
 
@@ -19,6 +20,7 @@ object ChatTimeStyleSettings {
     const val NATIVE_INTERVAL_MS = 5 * 60 * 1000L
 
     fun normalizeMode(value: String?): String = when (value) {
+        MODE_EVERY -> MODE_EVERY
         MODE_CUSTOM -> MODE_CUSTOM
         MODE_HIDDEN -> MODE_HIDDEN
         else -> MODE_ORIGINAL
