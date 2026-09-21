@@ -93,8 +93,7 @@ jobs:
 
           version_code=$((
             HCAT_SINGLE_VERSION_CODE_BASE +
-            GITHUB_RUN_NUMBER -
-            HCAT_SINGLE_RUN_NUMBER_BASE
+            GITHUB_RUN_NUMBER
           ))
           if [ "$version_code" -le "$HCAT_SINGLE_VERSION_CODE_BASE" ] \
             || [ "$version_code" -gt 2147483647 ]; then
