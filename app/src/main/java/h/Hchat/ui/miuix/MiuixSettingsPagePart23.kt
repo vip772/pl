@@ -569,77 +569,36 @@ internal const val FAVORITE_BACKGROUND_BATCH_DELAY_MS = 40L
 // QEchat 特殊消息的原生设置入口，复用 Hchat 页面过渡和名单选择器。
 @Composable
 internal fun SpecialMessageMiuixPage(context: Context, onBack: () -> Unit) {
-    val sp = remember { HchatStorage.preferences(context, SpecialMessageFeature.PREFS) }
+    val sp = remember { HchatStorage.preferences(context, SecureMessageSettings.SEND_PREFS) }
     val antiSp = remember { HchatStorage.preferences(context, SecureMessageSettings.ANTI_PREFS) }
     var route by remember { mutableStateOf(0) }
-    var allowedTalkers by remember { mutableStateOf(sp.getString("talkers", "").orEmpty()) }
-    var picker by remember { mutableStateOf<ContactPickerRequest?>(null) }
     val mainList = rememberLazyListState()
     val safetyList = rememberLazyListState()
-    val back = { if (route == 2) { picker = null; route = 1 } else if (route == 1) route = 0 else onBack() }
+    val back = { if (route == 1) route = 0 else onBack() }
     RegisterSettingsBackHandler(back)
     SettingsRouteTransition(targetState = route, label = "SpecialMessageRoute", depthOf = { it }) { current ->
-        if (current == 2) {
-            picker?.let { request ->
-                ContactPickerPage(context, request, onBack = back, onConfirm = { selected ->
-                    request.onValue(formatIds(selected.map { it.id }))
-                    picker = null
-                    route = 1
-                })
-            }
-        } else {
-            val safety = current == 1
-            val behavior = MiuixScrollBehavior()
-            PageScaffold(
-                title = if (safety) "安全消息" else "特殊消息",
-                largeTitle = if (safety) "安全消息" else "特殊消息",
-                scrollBehavior = behavior,
-                bottomBar = { BottomActionBar(primaryText = "返回", onPrimaryClick = back) }
-            ) { padding ->
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().imePadding().nestedScroll(behavior.nestedScrollConnection),
-                    state = if (safety) safetyList else mainList,
-                    contentPadding = padding
-                ) {
-                    item { SmallTitle(text = "功能设置") }
-                    item {
-                        SettingsCard {
-                            if (!safety) {
-                                ActionRow("安全消息", "文本、链接、图片、表情") { route = 1 }
-                                InsetDivider()
-                                SwitchRow(antiSp, SecureMessageSettings.KEY_ENABLE, "反安全消息", "恢复安全消息的完整长按菜单", false)
-                            } else {
-                                SwitchRow(sp, "enabled", "文本安全消息", "", false)
-                                InsetDivider()
-                                SwitchRow(sp, "link", "链接安全消息", "", false)
-                                InsetDivider()
-                                SwitchRow(sp, "emoji", "表情安全消息", "", false)
-                                InsetDivider()
-                                SwitchRow(sp, SecureMessageSettings.KEY_IMAGE, "图片安全消息", "通过图片消息的 MsgSource 注入安全标记", false)
-                            }
-                        }
-                    }
-                    if (safety) {
-                        item { SmallTitle(text = "安全消息配置") }
-                        item {
-                            SettingsCard {
-                                ActionRow("生效名单", autoReplySelectedIdSummary(allowedTalkers) + "；空名单不生效") {
-                                    picker = ContactPickerRequest(
-                                        title = "选择生效名单",
-                                        mode = ContactPickerMode.BOTH,
-                                        multiSelect = true,
-                                        existingValue = allowedTalkers,
-                                        onValue = {
-                                            allowedTalkers = it
-                                            sp.edit().putString("talkers", it).apply()
-                                        },
-                                        enableLabels = true
-                                    )
-                                    route = 2
-                                }
-                                InsetDivider()
-                                InfoRow("当前适配", "微信 8.0.76 (3140)")
-                            }
+        val safety = current == 1
+        val behavior = MiuixScrollBehavior()
+        PageScaffold(
+            title = if (safety) "安全消息" else "特殊消息",
+            largeTitle = if (safety) "安全消息" else "特殊消息",
+            scrollBehavior = behavior,
+            bottomBar = { BottomActionBar(primaryText = "返回", onPrimaryClick = back) }
+        ) { padding ->
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().imePadding().nestedScroll(behavior.nestedScrollConnection),
+                state = if (safety) safetyList else mainList,
+                contentPadding = padding
+            ) {
+                item { SmallTitle(text = "功能设置") }
+                item {
+                    SettingsCard {
+                        if (!safety) {
+                            ActionRow("安全消息", "文字、链接、图片、表情和视频") { route = 1 }
+                            InsetDivider()
+                            SwitchRow(antiSp, SecureMessageSettings.KEY_ENABLE, "反安全消息", "恢复安全消息的完整长按菜单", false)
+                        } else {
+                            SwitchRow(sp, SecureMessageSettings.KEY_ENABLE, "安全消息", "发送文字、链接、图片、表情和视频时添加安全标记", false)
                         }
                     }
                 }

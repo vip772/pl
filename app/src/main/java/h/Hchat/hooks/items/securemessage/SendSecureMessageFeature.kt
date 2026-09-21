@@ -74,7 +74,7 @@ class SendSecureMessageFeature : BaseFeature() {
         val insertReady = if (installed) true else runCatching {
             HookRegistry.get().hook(insert, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!enabled() && !imageEnabled()) return
+                    if (!enabled()) return
                     val args = param.args ?: return
                     val msg = args.firstOrNull { it != null && isMessageLike(it) } ?: run {
                         if (!hookMissLogged) {
@@ -84,7 +84,6 @@ class SendSecureMessageFeature : BaseFeature() {
                         return
                     }
                     if (!isSupportedOutgoingMessage(msg)) return
-                    if (isImageMessage(msg) && !imageEnabled()) return
                     addSecureMarker(msg)
                 }
             })
@@ -314,12 +313,11 @@ class SendSecureMessageFeature : BaseFeature() {
             runCatching {
                 HookRegistry.get().hook(method, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (!enabled() && !imageEnabled()) return
+                        if (!enabled()) return
                         val source = param.args?.getOrNull(0) as? String ?: return
                         if (!looksLikeMsgSource(source)) return
                         val message = param.thisObject ?: return
                         if (!isSupportedOutgoingMessage(message)) return
-                        if (isImageMessage(message) && !imageEnabled()) return
                         param.args[0] = SecureMessageSource.addMarker(source)
                     }
                 })
@@ -334,8 +332,6 @@ class SendSecureMessageFeature : BaseFeature() {
     }
 
     private fun enabled(): Boolean = prefs?.getBoolean(SecureMessageSettings.KEY_ENABLE, SecureMessageSettings.DEFAULT_ENABLE) == true
-
-    private fun imageEnabled(): Boolean = prefs?.getBoolean(SecureMessageSettings.KEY_IMAGE, SecureMessageSettings.DEFAULT_IMAGE) == true
 
     private fun isImageMessage(message: Any): Boolean {
         val type = readNumber(message, "field_type", "type", "getType", "getMsgType")?.toInt() ?: return false
