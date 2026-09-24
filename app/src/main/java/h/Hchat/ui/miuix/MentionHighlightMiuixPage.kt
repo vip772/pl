@@ -12,6 +12,8 @@ import androidx.compose.ui.unit.dp
 import h.Hchat.hooks.items.mentionhighlight.MentionHighlightSettings
 import h.Hchat.preferences.HchatStorage
 import h.Hchat.ui.FeatureSettingsProvider
+import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.SmallTitle
 
 @Composable
 internal fun MentionHighlightMiuixPage(
