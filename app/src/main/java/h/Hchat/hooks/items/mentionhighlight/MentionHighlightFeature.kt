@@ -8,7 +8,6 @@ import android.text.TextPaint
 import android.text.style.ClickableSpan
 import android.text.style.CharacterStyle
 import android.text.style.UpdateAppearance
-import android.view.View
 import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.hooks.core.BaseFeature
@@ -47,17 +46,19 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         if (installed) return true
         val methods = linkedSetOf<Method>()
         val bufferType = TextView.BufferType::class.java
-        val targets = listOf(
+        val targets: List<Class<*>?> = listOf(
             TextView::class.java,
-            "com.tencent.neattextview.textview.view.NeatTextView",
-            "com.tencent.mm.ui.widget.MMNeat7extView"
+            KavaReflector.loadClass(
+                "com.tencent.neattextview.textview.view.NeatTextView",
+                context.hostClassLoader()
+            ),
+            KavaReflector.loadClass(
+                "com.tencent.mm.ui.widget.MMNeat7extView",
+                context.hostClassLoader()
+            )
         )
-        targets.forEach { target ->
-            val clazz = if (target is Class<*>) {
-                target
-            } else {
-                KavaReflector.loadClass(target, context.hostClassLoader())
-            } ?: return@forEach
+        targets.forEach { clazz ->
+            clazz ?: return@forEach
 
             val method = KavaReflector.findMethodRecursive(
                 clazz,
@@ -94,7 +95,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             mentionSpans.forEach { span ->
                 val start = text.getSpanStart(span)
                 val end = text.getSpanEnd(span)
-                if (start < 0 || end <= start || end > text.length()) return@forEach
+                if (start < 0 || end <= start || end > text.length) return@forEach
                 if (hasMentionColor(builder, start, end)) return@forEach
                 builder.setSpan(
                     MentionColorSpan(colors.first, colors.second),
