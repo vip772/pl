@@ -28,16 +28,10 @@ internal fun MentionHighlightMiuixPage(
     onBack: () -> Unit
 ) {
     val sp = remember { HchatStorage.preferences(context, MentionHighlightSettings.PREFS_NAME) }
-    var startColor by remember {
+    var colorSpec by remember {
         mutableStateOf(
             sp.getString(MentionHighlightSettings.KEY_COLOR, MentionHighlightSettings.DEFAULT_COLOR)
-                ?.substringBefore(',') ?: "#FFFF0000"
-        )
-    }
-    var endColor by remember {
-        mutableStateOf(
-            sp.getString(MentionHighlightSettings.KEY_COLOR, MentionHighlightSettings.DEFAULT_COLOR)
-                ?.substringAfter(',', "#FFFF0000") ?: "#FFFF0000"
+                ?: MentionHighlightSettings.DEFAULT_COLOR
         )
     }
     val state = rememberLazyListState()
@@ -50,11 +44,10 @@ internal fun MentionHighlightMiuixPage(
             BottomActionBar(
                 primaryText = "保存设置",
                 onPrimaryClick = {
-                    val normalized = MentionHighlightSettings.cleanColorSpec("$startColor,$endColor")
+                    val normalized = MentionHighlightSettings.cleanColorSpec(colorSpec)
                         .ifEmpty { MentionHighlightSettings.DEFAULT_COLOR }
                     sp.edit().putString(MentionHighlightSettings.KEY_COLOR, normalized).apply()
-                    startColor = normalized.substringBefore(',')
-                    endColor = normalized.substringAfter(',', normalized.substringBefore(','))
+                    colorSpec = normalized
                     Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
                 },
                 secondaryText = "返回",
@@ -86,18 +79,11 @@ internal fun MentionHighlightMiuixPage(
             item {
                 SettingsCard {
                     ColorPickerRow(
-                        "艾特高亮起始色",
-                        "支持 6 位或 8 位十六进制颜色值",
-                        startColor,
-                        onReset = { startColor = "#FFFF0000" }
-                    ) { startColor = it.take(9) }
-                    InsetDivider()
-                    ColorPickerRow(
-                        "艾特高亮结束色",
-                        "渐变终点颜色",
-                        endColor,
-                        onReset = { endColor = "#FFFF0000" }
-                    ) { endColor = it.take(9) }
+                        "艾特高亮渐变颜色",
+                        "调节渐变起始色和结束色",
+                        colorSpec,
+                        onReset = { colorSpec = MentionHighlightSettings.DEFAULT_COLOR }
+                    ) { colorSpec = it.take(19) }
                 }
             }
         }
