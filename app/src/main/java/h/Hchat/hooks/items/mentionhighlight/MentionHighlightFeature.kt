@@ -267,8 +267,6 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         override fun updateDrawState(ds: TextPaint) { ds.isUnderlineText = false }
     }
 
-    private class MentionClickableSpan : ClickableSpan()
-
     companion object {
         private const val TAG = "[Hchat:MentionHighlight]"
     }
