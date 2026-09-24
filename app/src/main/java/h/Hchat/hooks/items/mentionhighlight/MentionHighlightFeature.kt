@@ -74,7 +74,12 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             if (!prefs.getBoolean(MentionHighlightSettings.KEY_ENABLE, false)) return
             val message = findMessage(view) ?: return
             val input = param.args?.firstOrNull() as? CharSequence ?: return
-            val output = buildMentionText(input, message, prefs.getString(MentionHighlightSettings.KEY_COLOR, MentionHighlightSettings.DEFAULT_COLOR))
+            val output = buildMentionText(
+                input,
+                message,
+                prefs.getString(MentionHighlightSettings.KEY_COLOR, MentionHighlightSettings.DEFAULT_COLOR)
+                    ?: MentionHighlightSettings.DEFAULT_COLOR
+            )
             if (output != null) param.args[0] = output
         }
     }
