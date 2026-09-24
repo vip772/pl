@@ -123,21 +123,35 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         if (ids.isEmpty()) return BuildResult(text, 0, 0)
         val colors = MentionHighlightSettings.parseColors(spec)
         val builder = SpannableStringBuilder(text)
+        val ranges = if (text is Spanned) {
+            text.getSpans(0, text.length, ClickableSpan::class.java)
+                .mapNotNull { span ->
+                    val start = text.getSpanStart(span)
+                    val end = text.getSpanEnd(span)
+                    if (start >= 0 && end > start && text[start] == '@') start until end else null
+                }
+                .distinct()
+                .sortedBy { it.first }
+        } else emptyList()
         var cursor = 0
         var index = 0
         var mentionCount = 0
         var appliedCount = 0
         while (index < ids.size) {
-            val at = text.toString().indexOf('@', cursor)
-            if (at < 0) break
-            val separator = text.toString().indexOf(AT_SEPARATOR, at + 1)
-            if (separator < 0) break
-            val end = separator + 1
+            val range = ranges.getOrNull(index) ?: run {
+                val at = text.toString().indexOf('@', cursor)
+                if (at < 0) break
+                val separator = text.toString().indexOf(AT_SEPARATOR, at + 1)
+                if (separator < 0) break
+                at until (separator + 1)
+            }
+            val start = range.first
+            val end = range.last + 1
             val user = ids[index]
             mentionCount++
-            if (!isAtAll(user)) {
-                builder.setSpan(ProfileSpan { view -> openProfile(view, message.talker, user) }, at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                builder.setSpan(MentionColorSpan(colors.first, colors.second), at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            if (!isAtAll(user) && end <= builder.length) {
+                builder.setSpan(ProfileSpan { view -> openProfile(view, message.talker, user) }, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                builder.setSpan(MentionColorSpan(colors.first, colors.second), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 appliedCount++
             }
             cursor = end
