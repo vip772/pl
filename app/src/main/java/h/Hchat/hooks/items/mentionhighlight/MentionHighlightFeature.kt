@@ -257,15 +257,22 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         val talker = stringValue(source, "getTalker", "field_talker", "talker")
             .ifBlank { stored?.talker.orEmpty() }
             .ifBlank { runCatching { WeChatApis.chatPage()?.currentTalker().orEmpty() }.getOrDefault("") }
-        val msgSource = stringValue(source, "getMsgSource", "field_msgSource", "msgSource")
-            .ifBlank { stored?.msgSource.orEmpty() }
-        return WeChatMessage(
+        val msgSource = stringValue(
+            source,
+            "getMsgSource", "field_msgSource", "msgSource",
+            "getG", "field_G", "G", "g"
+        ).ifBlank { stored?.msgSource.orEmpty() }
+        val reserved = stringValue(source, "getReserved", "field_reserved", "reserved")
+            .ifBlank { stored?.reserved.orEmpty() }
+        val merged = WeChatMessage(
             msgId, stored?.msgSvrId ?: 0L, type, stored?.status ?: 0,
             numberValue(source, "getIsSend", "field_isSend", "isSend").toInt(),
             stored?.createTime ?: 0L, talker, content, stored?.imagePath.orEmpty(),
-            stored?.reserved.orEmpty(), stored?.translatedContent.orEmpty(), stored?.flag ?: 0,
+            reserved, stored?.translatedContent.orEmpty(), stored?.flag ?: 0,
             msgSource, stored?.selfWxId.orEmpty()
         )
+        HLog.d(TAG + " message msgId=$msgId contentLen=${content.length} msgSourceLen=${msgSource.length} reservedLen=${reserved.length} atUsers=${merged.getAtUserList().size}")
+        return merged
     }
 
     private fun stringValue(source: Any, vararg names: String): String = names.firstNotNullOfOrNull { name ->
