@@ -132,7 +132,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             if (at < 0) break
             val separator = text.toString().indexOf(AT_SEPARATOR, at + 1)
             if (separator < 0) break
-            val end = separator + AT_SEPARATOR.length
+            val end = separator + 1
             val user = ids[index]
             mentionCount++
             if (!isAtAll(user)) {
@@ -160,7 +160,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
 
     private fun targetTextView(view: View): TextView? {
         if (view is TextView) return view
-        KavaReflector.invokeMethod(view, "getWrappedTextView") as? TextView
+        return (KavaReflector.invokeMethod(view, "getWrappedTextView") as? TextView)
             ?: findTextViewChild(view)
     }
 
@@ -174,8 +174,8 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     }
 
     private fun renderedText(view: View, textView: TextView): CharSequence? {
-        KavaReflector.invokeMethod(view, "a") as? CharSequence
-            ?: KavaReflector.readField(view, "x") as? CharSequence
+        return (KavaReflector.invokeMethod(view, "a") as? CharSequence)
+            ?: (KavaReflector.readField(view, "x") as? CharSequence)
             ?: textView.text
     }
 
@@ -201,7 +201,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         while (current != null && current != Any::class.java) {
             KavaReflector.declaredMethods(current).firstOrNull {
                 it.parameterTypes.size == 1 &&
-                    it.parameterTypes[0] == Int::class.javaPrimitiveType &&
+                    it.parameterTypes[0] == Int::class.java &&
                     it.name in setOf("J0", "getItem", "get")
             }?.let { KavaReflector.invoke(it, adapter, position)?.let { item -> return item } }
             KavaReflector.declaredFields(current).firstOrNull {
@@ -209,7 +209,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             }?.let { field ->
                 val list = KavaReflector.readField(field, adapter)
                 if (list is List<*> && position in list.indices) return list[position]
-                KavaReflector.invoke(KavaReflector.findMethod(list?.javaClass, "get", Int::class.javaPrimitiveType), list, position)
+                KavaReflector.invoke(KavaReflector.findMethod(list?.javaClass, "get", Int::class.java), list, position)
                     ?.let { item -> return item }
             }
             current = current.superclass
@@ -223,7 +223,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
 
     private fun resolveNativeMessage(source: Any?, visited: MutableSet<Any>, depth: Int): Any? {
         if (source == null || depth > 4 || !visited.add(source)) return null
-        if (isLikelyMessage(source) && messageId(source) > 0) return source
+        if (isLikelyMessage(source) && numberValue(source, "getMsgId", "getMsgID", "field_msgId", "msgId", "msgID") > 0) return source
         if (source is View || source is ViewGroup || source.javaClass.name.startsWith("java.")) return null
         if (source is Collection<*>) return source.firstNotNullOfOrNull { resolveNativeMessage(it, visited, depth + 1) }
         var current: Class<*>? = source.javaClass
