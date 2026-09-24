@@ -318,6 +318,8 @@ import h.Hchat.hooks.items.messagebubble.MessageBubbleSlot
 import h.Hchat.hooks.items.messagebubble.MessageBubbleStore
 import h.Hchat.hooks.items.messagebubble.MessageBubbleKind
 import h.Hchat.hooks.items.messagetextcolor.MessageTextColorFeature
+import h.Hchat.hooks.items.mentionhighlight.MentionHighlightFeature
+
 import h.Hchat.hooks.items.messagetextcolor.MessageTextColorSettings
 import h.Hchat.hooks.items.messageblock.MessageBlockBinding
 import h.Hchat.hooks.items.messageblock.MessageBlockDefaultRule
@@ -1169,6 +1171,7 @@ internal fun FeatureSettingsPage(
         MessageBubbleFeature.ID -> MessageBubbleMiuixPage(context, provider, onBack)
         BackgroundBeautyFeature.ID -> BackgroundBeautyMiuixPage(context, provider, onBack)
         MessageTextColorFeature.ID -> MessageTextColorMiuixPage(context, provider, onBack)
+        MentionHighlightFeature.ID -> MentionHighlightMiuixPage(context, provider, onBack)
         HomeTextColorFeature.ID -> HomeTextColorMiuixPage(context, provider, onBack)
         ChatTimeStyleFeature.ID -> ChatTimeStyleMiuixPage(context, provider, onBack)
         ChatToolbarFeature.ID -> ChatToolbarMiuixPage(context, provider, onBack)

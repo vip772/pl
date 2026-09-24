@@ -51,6 +51,7 @@ object FeatureToggleRegistry {
         "message_bubble" to Toggle("Hchat_message_bubble_config", "message_bubble_enable"),
         "message_forward" to Toggle("Hchat_message_forward_config", "message_forward_enable"),
         "message_text_color" to Toggle("Hchat_message_text_color_config", "message_text_color_enable"),
+        "mention_highlight" to Toggle("Hchat_mention_highlight_config", "mention_highlight_enable"),
         "fake_mini_program_base_lib" to Toggle("Hchat_fake_mini_program_base_lib_config", "fake_mini_program_base_lib_enable"),
         "skip_global_mini_program_splash_ads" to Toggle("Hchat_skip_global_mini_program_splash_ads_config", "skip_global_mini_program_splash_ads_enable"),
         "skip_mini_program_video_ads" to Toggle("Hchat_skip_mini_program_video_ads_config", "skip_mini_program_video_ads_enable"),

@@ -313,6 +313,7 @@ import h.Hchat.hooks.items.messagebubble.MessageBubbleSlot
 import h.Hchat.hooks.items.messagebubble.MessageBubbleStore
 import h.Hchat.hooks.items.messagebubble.MessageBubbleKind
 import h.Hchat.hooks.items.messagetextcolor.MessageTextColorFeature
+import h.Hchat.hooks.items.mentionhighlight.MentionHighlightFeature
 import h.Hchat.hooks.items.messagetextcolor.MessageTextColorSettings
 import h.Hchat.hooks.items.messageblock.MessageBlockBinding
 import h.Hchat.hooks.items.messageblock.MessageBlockDefaultRule
@@ -1459,7 +1460,7 @@ internal fun practicalFeatureGroups(
     practicalProviders: List<FeatureSettingsProvider>,
     enhanceProviders: List<FeatureSettingsProvider>
 ): List<FeatureGroupEntry> {
-    val newProviders = newFeatureProviders(practicalProviders)
+    val newProviders = newFeatureProviders(practicalProviders + enhanceProviders)
     val enabledProviders = enabledFeatureProviders(practicalProviders + enhanceProviders)
     return listOf(
         FeatureGroupEntry(
@@ -1548,6 +1549,7 @@ internal fun practicalFeatureGroups(
             providers = practicalProviders.filterByIds(
                 MessageBubbleFeature.ID,
                 MessageTextColorFeature.ID,
+                MentionHighlightFeature.ID,
                 HomeTextColorFeature.ID,
                 ChatTimeStyleFeature.ID,
                 InputHintFeature.ID,
@@ -2361,6 +2363,7 @@ internal fun featureSubSearchTerms(featureId: String): List<String> {
         RemoveMomentsAdsFeature.ID -> listOf("去除朋友圈广告", "朋友圈广告", "广告屏蔽")
         MessageBubbleFeature.ID -> listOf("消息气泡", "聊天气泡", "自定义气泡", "左侧气泡", "右侧气泡", "红包气泡", "转账气泡", "系统消息气泡", "浅色模式", "深色模式", "NinePatch", "九宫格")
         MessageTextColorFeature.ID -> listOf("消息文本颜色", "文字颜色", "聊天气泡文字", "取色器", "浅色模式", "深色模式")
+        MentionHighlightFeature.ID -> listOf("艾特高亮", "艾特", "@我", "@所有人", "点击资料页", "群聊艾特", "高亮颜色")
         HomeTextColorFeature.ID -> listOf("首页文字颜色", "标题颜色", "副标题颜色", "渐变文字", "微信首页", "通讯录", "发现", "我")
         SpecialMessageFeature.ID -> listOf("特殊消息", "安全消息", "文本", "链接", "表情", "生效名单")
         ChatTimeStyleFeature.ID -> listOf("会话时间样式", "聊天时间", "微信时间", "自定义时间", "隐藏时间", "时间格式")

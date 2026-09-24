@@ -48,6 +48,8 @@ import h.Hchat.hooks.items.membertitle.MemberTitleFeature
 import h.Hchat.hooks.items.messageaffix.MessageAffixFeature
 import h.Hchat.hooks.items.messagebubble.MessageBubbleFeature
 import h.Hchat.hooks.items.messagetextcolor.MessageTextColorFeature
+import h.Hchat.hooks.items.mentionhighlight.MentionHighlightFeature
+
 import h.Hchat.hooks.items.messageblock.MessageBlockFeature
 import h.Hchat.hooks.items.messageforward.MessageForwardFeature
 import h.Hchat.hooks.items.miniprogrambaselib.FakeMiniProgramBaseLibFeature
@@ -165,6 +167,7 @@ object FeatureRegistry {
             .register(MessageBubbleFeature())
             .register(BackgroundBeautyFeature())
             .register(MessageTextColorFeature())
+            .register(MentionHighlightFeature())
             .register(HomeTextColorFeature())
             .register(HideChatAvatarFeature())
             .register(MessageBlockFeature())
