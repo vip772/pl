@@ -16,6 +16,7 @@ import java.lang.reflect.Modifier
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import android.util.LruCache
 import de.robv.android.xposed.XC_MethodHook
 import h.Hchat.hooks.api.core.WeChatApis
 import h.Hchat.hooks.api.model.WeChatMessage
@@ -52,6 +53,7 @@ class MentionHighlightFeature : BaseFeature() {
 
 private class MentionHighlightRuntime(private val context: FeatureContext) {
     private val gestures = WeakHashMap<View, Gesture>()
+    private val renderedCache = LruCache<String, CharSequence>(96)
     private val bindStates = ThreadLocal.withInitial { ArrayDeque<BindState>() }
     private var installed = false
     private val reentry = ThreadLocal<Boolean>()
@@ -136,12 +138,17 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                 MentionHighlightSettings.KEY_COLOR,
                 MentionHighlightSettings.DEFAULT_COLOR
             ) ?: MentionHighlightSettings.DEFAULT_COLOR
+            val cacheKey = cacheKey(message, input, colorSpec)
             val result = buildMentionText(input, message, colorSpec)
+            val cached = renderedCache.get(cacheKey)
+            val effective = if (result.appliedCount > 0) {
+                renderedCache.put(cacheKey, result.text)
+                result.text
+            } else cached
             val parsedColors = MentionHighlightSettings.parseColors(colorSpec)
-            HLog.d(TAG + " setText前置 msgId=${message.msgId} enabled=true class=${view.javaClass.name} colorSpec=$colorSpec colors=${parsedColors.first},${parsedColors.second} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount}")
-            if (result.appliedCount == 0) return
-            param.args?.set(0, result.text)
-
+            HLog.d(TAG + " setText前置 msgId=${message.msgId} enabled=true class=${view.javaClass.name} colorSpec=$colorSpec colors=${parsedColors.first},${parsedColors.second} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount} cacheHit=${cached != null}")
+            if (effective == null) return
+            param.args?.set(0, effective)
         }
     }
 
@@ -231,6 +238,9 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         HLog.d(TAG + " bind-before msgId=${message.msgId} talker=${message.talker} atUsers=${message.getEffectiveAtUserList().size}")
         return BindState(message)
     }
+
+    private fun cacheKey(message: WeChatMessage, text: CharSequence, spec: String): String =
+        message.msgId.toString() + "|" + spec + "|" + text.toString()
 
     private fun buildMentionText(text: CharSequence, message: WeChatMessage, spec: String): BuildResult {
         val ids = message.getEffectiveAtUserList().distinct()
