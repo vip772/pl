@@ -88,7 +88,7 @@ private class UploadTransparentAvatarRuntime(
                 }
             })
             compressHookInstalled = true
-            HLog.e("$TAG Bitmap.compress Hook 已安装")
+            HLog.i("$TAG Bitmap.compress Hook 已安装")
             true
         }.getOrElse {
             HLog.e("$TAG 安装 Bitmap.compress Hook 失败: ${it.message}", it)
@@ -129,7 +129,7 @@ private class UploadTransparentAvatarRuntime(
         }
         mediaTailorClassName = className
         saveCachedMediaTailorClass(className)
-        HLog.e("$TAG 媒体裁剪类已定位: $className")
+        HLog.i("$TAG 媒体裁剪类已定位: $className")
         return true
     }
 

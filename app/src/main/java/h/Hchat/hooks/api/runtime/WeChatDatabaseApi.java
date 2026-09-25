@@ -43,6 +43,7 @@ public final class WeChatDatabaseApi {
     private volatile List<Method> insertMethods;
     private volatile Method updateMethod;
     private volatile Method deleteMethod;
+    private final ThreadLocal<String> lastMutationError = ThreadLocal.withInitial(() -> "");
     private final Map<String, String> messageTableCache = new ConcurrentHashMap<>();
     private final Map<String, Object> storageObjectCache = new ConcurrentHashMap<>();
     private volatile List<String> messageTables;
@@ -112,47 +113,67 @@ public final class WeChatDatabaseApi {
     }
 
     public int update(String table, ContentValues values, String whereClause, String[] whereArgs) {
-        if (TextUtils.isEmpty(table) || values == null) return -1;
-        if (!ensureReady()) return -1;
+        lastMutationError.set("");
+        if (TextUtils.isEmpty(table) || values == null) {
+            return failUpdate("SQL 更新参数无效: table=" + table);
+        }
+        if (!ensureReady()) {
+            return failUpdate("SQL 更新失败: 数据库未就绪 table=" + table);
+        }
         Method method = updateMethod;
         if (method == null) {
             method = findUpdateMethod(dbWrapper.getClass());
             updateMethod = method;
         }
         if (method == null) {
-            log("未找到 SqliteDB 更新方法: " + dbWrapper.getClass().getName());
-            return -1;
+            return failUpdate("未找到 SqliteDB 更新方法: " + dbWrapper.getClass().getName());
         }
         try {
-            Object result = KavaReflector.invoke(method, dbWrapper, table, values, whereClause, whereArgs);
-            return result instanceof Number ? ((Number) result).intValue() : -1;
+            Object result = KavaReflector.invokeOrThrow(
+                    method, dbWrapper, table, values, whereClause, whereArgs);
+            int rows = result instanceof Number ? ((Number) result).intValue() : -1;
+            if (rows >= 0) return rows;
+            return failUpdate("SQL 更新返回无效结果: table=" + table
+                    + " method=" + methodName(method));
         } catch (Throwable e) {
-            log("SQL 更新异常: " + e.getMessage() + " table=" + table);
-            return -1;
+            return failUpdate("SQL 更新异常: " + throwableMessage(e) + " table=" + table
+                    + " method=" + methodName(method));
         }
     }
 
     public long insert(String table, String nullColumnHack, ContentValues values) {
-        if (TextUtils.isEmpty(table) || values == null) return -1L;
-        if (!ensureReady()) return -1L;
+        lastMutationError.set("");
+        if (TextUtils.isEmpty(table) || values == null) {
+            return failInsert("SQL 插入参数无效: table=" + table);
+        }
+        if (!ensureReady()) {
+            return failInsert("SQL 插入失败: 数据库未就绪 table=" + table);
+        }
         List<Method> methods = insertMethods;
         if (methods == null) {
             methods = findInsertMethods(dbWrapper.getClass());
             insertMethods = methods;
         }
         if (methods == null || methods.isEmpty()) {
-            log("未找到 SqliteDB 插入方法: " + dbWrapper.getClass().getName());
-            return -1L;
+            return failInsert("未找到 SqliteDB 插入方法: " + dbWrapper.getClass().getName());
         }
+        StringBuilder failures = new StringBuilder();
         for (Method method : methods) {
             try {
-                Object result = KavaReflector.invoke(method, dbWrapper, table, nullColumnHack, values);
+                Object result = KavaReflector.invokeOrThrow(
+                        method, dbWrapper, table, nullColumnHack, values);
                 long rowId = result instanceof Number ? ((Number) result).longValue() : -1L;
                 if (rowId >= 0L) return rowId;
-            } catch (Throwable ignored) {}
+                appendFailure(failures, method, "返回值=" + String.valueOf(result));
+            } catch (Throwable e) {
+                appendFailure(failures, method, throwableMessage(e));
+            }
         }
-        log("SQL 插入失败: table=" + table);
-        return -1L;
+        return failInsert("SQL 插入失败: table=" + table + " attempts=" + failures);
+    }
+
+    public String lastMutationError() {
+        return lastMutationError.get();
     }
 
     public int delete(String table, String whereClause, String[] whereArgs) {
@@ -663,6 +684,38 @@ public final class WeChatDatabaseApi {
             cur = cur.getSuperclass();
         }
         return null;
+    }
+
+    private int failUpdate(String message) {
+        lastMutationError.set(message);
+        log(message);
+        return -1;
+    }
+
+    private long failInsert(String message) {
+        lastMutationError.set(message);
+        log(message);
+        return -1L;
+    }
+
+    private void appendFailure(StringBuilder target, Method method, String reason) {
+        if (target.length() > 0) target.append(" | ");
+        target.append(methodName(method)).append(": ").append(reason);
+    }
+
+    private String methodName(Method method) {
+        if (method == null) return "null";
+        return method.getDeclaringClass().getName() + "#" + method.getName();
+    }
+
+    private String throwableMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null && current.getCause() != current) {
+            current = current.getCause();
+        }
+        String message = current.getMessage();
+        return current.getClass().getName()
+                + (TextUtils.isEmpty(message) ? "" : ": " + message);
     }
 
     private List<Method> findInsertMethods(Class<?> wrapperClass) {

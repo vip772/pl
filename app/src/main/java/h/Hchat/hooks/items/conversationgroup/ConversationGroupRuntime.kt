@@ -1652,14 +1652,23 @@ object ConversationGroupRuntime {
         if (existing != null && rowMatches(existing, values)) {
             return UpsertResult(success = true, changed = false)
         }
-        val success = if (existing != null) {
-            database.update(table, values, "username=?", arrayOf(talker)) > 0 ||
-                queryRow(database, table, talker, columns)?.let { rowMatches(it, values) } == true
+        val operation = if (existing != null) "update" else "insert"
+        val writeResult = if (existing != null) {
+            database.update(table, values, "username=?", arrayOf(talker)).toLong()
         } else {
-            database.insert(table, "username", values) >= 0L ||
-                queryRow(database, table, talker, columns)?.let { rowMatches(it, values) } == true
+            database.insert(table, "username", values)
         }
-        if (!success) HLog.e("$TAG 写入虚拟分组入口失败: table=$table talker=$talker")
+        val writeError = database.lastMutationError()
+        val success = writeResult > 0L ||
+            queryRow(database, table, talker, columns)?.let { rowMatches(it, values) } == true
+        if (!success) {
+            val detail = writeError.ifBlank { "数据库写入返回失败且回查未命中" }
+            val columnNames = values.keySet().toList().sorted().joinToString(",")
+            HLog.e(
+                "$TAG 写入虚拟分组入口失败: table=$table talker=$talker " +
+                    "operation=$operation columns=$columnNames detail=$detail"
+            )
+        }
         return UpsertResult(success = success, changed = success)
     }
 
