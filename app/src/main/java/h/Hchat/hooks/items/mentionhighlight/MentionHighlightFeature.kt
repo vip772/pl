@@ -12,7 +12,10 @@ import android.text.TextPaint
 import android.text.style.ClickableSpan
 import android.text.style.CharacterStyle
 import android.text.style.UpdateAppearance
-import android.text.method.LinkMovementMethod
+import android.graphics.RectF
+import android.view.MotionEvent
+import android.view.ViewConfiguration
+import java.lang.reflect.Modifier
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -51,7 +54,7 @@ class MentionHighlightFeature : BaseFeature() {
 }
 
 private class MentionHighlightRuntime(private val context: FeatureContext) {
-    private val messages = Collections.synchronizedMap(WeakHashMap<View, WeChatMessage>())
+    private val gestures = WeakHashMap<View, Gesture>()
     private val bindStates = ThreadLocal.withInitial { ArrayDeque<BindState>() }
     private var installed = false
     private val reentry = ThreadLocal<Boolean>()
@@ -65,8 +68,15 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         }
         HookRegistry.get().hook(bind, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                val state = captureBinding(param)
-                bindStates.get().addLast(state)
+                // Push a sentinel BEFORE resolving: failures/nested binds must not expose an outer message.
+                val states = bindStates.get()
+                val frame = BindState(null)
+                states.addLast(frame)
+                try {
+                    frame.message = captureBinding(param).message
+                } catch (error: Throwable) {
+                    HLog.e(TAG + " 绑定上下文解析失败", error)
+                }
             }
             override fun afterHookedMethod(param: MethodHookParam) {
                 val states = bindStates.get()
@@ -76,28 +86,40 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         })
         val textMethods = linkedSetOf<Method>()
         val touchMethods = linkedSetOf<Method>()
-        val bufferType = TextView.BufferType::class.java
-        listOf(
-            TextView::class.java,
-            KavaReflector.loadClass("com.tencent.neattextview.textview.view.NeatTextView", context.hostClassLoader()),
-            KavaReflector.loadClass("com.tencent.mm.ui.widget.MMNeat7extView", context.hostClassLoader())
-        ).forEach { clazz ->
-            clazz ?: return@forEach
-            KavaReflector.findMethodRecursive(clazz, "setText", CharSequence::class.java, bufferType)
-                ?.let { method ->
-                    if (textMethods.add(method)) HookRegistry.get().hook(method, textHook)
-                }
-        }
-        listOf(
+        KavaReflector.findMethodRecursive(TextView::class.java, "setText",
+            CharSequence::class.java, TextView.BufferType::class.java)?.let { textMethods.add(it) }
+        val classes = listOfNotNull(
             KavaReflector.loadClass("com.tencent.mm.view.x2c.X2CTextView", context.hostClassLoader()),
             KavaReflector.loadClass("com.tencent.neattextview.textview.view.NeatTextView", context.hostClassLoader()),
             KavaReflector.loadClass("com.tencent.mm.ui.widget.MMNeat7extView", context.hostClassLoader())
-        ).forEach { clazz ->
-            clazz ?: return@forEach
-            KavaReflector.findMethodRecursive(clazz, "onTouchEvent", android.view.MotionEvent::class.java)
-                ?.let { method ->
-                    if (touchMethods.add(method)) HookRegistry.get().hook(method, touchHook)
+        )
+        for (clazz in classes) {
+            var current: Class<*>? = clazz
+            while (current != null && current != View::class.java && current != TextView::class.java) {
+                for (method in KavaReflector.declaredMethods(current)) {
+                    val types = method.parameterTypes
+                    if (Modifier.isStatic(method.modifiers) || Modifier.isAbstract(method.modifiers)) continue
+                    if (types.isEmpty() || types[0] != CharSequence::class.java) continue
+                    val supported = types.size == 1 ||
+                        (types.size == 2 && types[1] == java.lang.Boolean.TYPE) ||
+                        (types.size == 3 && types[1] == TextView.BufferType::class.java &&
+                            types[2] == java.lang.Boolean::class.java)
+                    if (supported) textMethods.add(method)
                 }
+                current = current.superclass
+            }
+        }
+        for (method in textMethods) {
+            HookRegistry.get().hook(method, textHook)
+            HLog.i(TAG + " 文本入口 " + method.toGenericString())
+        }
+        val touchClasses = classes + listOfNotNull(TextView::class.java,
+            KavaReflector.loadClass("com.tencent.mm.view.x2c.X2CTextView", context.hostClassLoader()))
+        for (clazz in touchClasses) {
+            val method = KavaReflector.findMethodRecursive(clazz, "onTouchEvent", MotionEvent::class.java) ?: continue
+            // Never hook View.onTouchEvent globally as an accidental fallback.
+            if (method.declaringClass == View::class.java) continue
+            if (touchMethods.add(method)) HookRegistry.get().hook(method, touchHook)
         }
         installed = textMethods.isNotEmpty()
         HLog.i(TAG + " 安装完成 bind=true textMethods=${textMethods.size} touchMethods=${touchMethods.size}")
@@ -110,41 +132,93 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             val view = param.thisObject as? View ?: return
             val prefs = MentionHighlightSettings.preferences(context.hostContext())
             if (!prefs.getBoolean(MentionHighlightSettings.KEY_ENABLE, false)) return
-            val message = bindStates.get().lastOrNull()?.message ?: findMessage(view) ?: return
+            val message = bindStates.get().peekLast()?.message ?: return
             val input = param.args?.firstOrNull() as? CharSequence ?: return
+            if (!message.isGroupChat() || !message.isText()) return
             val result = buildMentionText(input, message, prefs.getString(
                 MentionHighlightSettings.KEY_COLOR,
                 MentionHighlightSettings.DEFAULT_COLOR
             ) ?: MentionHighlightSettings.DEFAULT_COLOR)
-            HLog.d(TAG + " setText前置 enabled=true class=${view.javaClass.name} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount}")
+            HLog.d(TAG + " setText前置 msgId=${message.msgId} enabled=true class=${view.javaClass.name} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount}")
             if (result.appliedCount == 0) return
             param.args?.set(0, result.text)
-            if (view is TextView && view.movementMethod == null) {
-                view.movementMethod = LinkMovementMethod.getInstance()
-            }
+
         }
     }
 
     private val touchHook = object : XC_MethodHook() {
         override fun beforeHookedMethod(param: MethodHookParam) {
-            val event = param.args?.firstOrNull() as? android.view.MotionEvent ?: return
-            if (event.actionMasked != android.view.MotionEvent.ACTION_UP) return
             val view = param.thisObject as? View ?: return
-            val textView = targetTextView(view) ?: return
-            val text = renderedText(view, textView) ?: return
-            val spanned = text as? Spanned ?: return
-            val layout: Layout = textView.layout ?: return
-            val x = (event.x - view.paddingLeft + view.scrollX).coerceAtLeast(0f)
-            val y = (event.y - view.paddingTop + view.scrollY).coerceAtLeast(0f)
-            val line = layout.getLineForVertical(y.toInt()).coerceIn(0, (layout.lineCount - 1).coerceAtLeast(0))
-            val offset = layout.getOffsetForHorizontal(line, x)
-            val spans = spanned.getSpans(offset, offset, ProfileSpan::class.java)
-            if (spans.isNotEmpty()) {
-                spans[0].onClick(view)
-                param.setResult(true)
-                HLog.d(TAG + " X2C触摸命中 offset=$offset")
+            val event = param.args?.firstOrNull() as? MotionEvent ?: return
+            if (!MentionHighlightSettings.preferences(context.hostContext())
+                    .getBoolean(MentionHighlightSettings.KEY_ENABLE, false)) {
+                gestures.remove(view)
+                return
+            }
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    gestures.remove(view)
+                    val span = hitMention(view, event.x, event.y) ?: return
+                    gestures[view] = Gesture(span, event.x, event.y, event.eventTime)
+                    param.setResult(true)
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val gesture = gestures[view] ?: return
+                    val slop = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()
+                    val dx = event.x - gesture.x
+                    val dy = event.y - gesture.y
+                    if (dx * dx + dy * dy > slop * slop) gesture.cancelled = true
+                    param.setResult(true)
+                }
+                MotionEvent.ACTION_UP -> {
+                    val gesture = gestures.remove(view) ?: return
+                    val slop = ViewConfiguration.get(view.context).scaledTouchSlop.toFloat()
+                    val dx = event.x - gesture.x
+                    val dy = event.y - gesture.y
+                    if (!gesture.cancelled && dx * dx + dy * dy <= slop * slop &&
+                        event.eventTime - gesture.time < ViewConfiguration.getLongPressTimeout() &&
+                        hitMention(view, event.x, event.y) === gesture.span) {
+                        gesture.span.onClick(view)
+                        HLog.d(TAG + " 艾特触摸命中")
+                    }
+                    param.setResult(true)
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    if (gestures.remove(view) != null) param.setResult(true)
+                }
             }
         }
+    }
+
+    private fun hitMention(view: View, eventX: Float, eventY: Float): ProfileSpan? {
+        if (view is TextView) {
+            val text = view.text as? Spanned ?: return null
+            val layout = view.layout ?: return null
+            val x = eventX - view.totalPaddingLeft + view.scrollX
+            val y = eventY - view.totalPaddingTop + view.scrollY
+            if (layout.lineCount == 0 || y < 0 || y >= layout.height) return null
+            val line = layout.getLineForVertical(y.toInt())
+            if (x < layout.getLineLeft(line) || x >= layout.getLineRight(line)) return null
+            val offset = layout.getOffsetForHorizontal(line, x)
+            return text.getSpans(offset, offset, ProfileSpan::class.java).firstOrNull {
+                offset >= text.getSpanStart(it) && offset < text.getSpanEnd(it)
+            }
+        }
+        // sx2/fx2: Neat's layout is NOT android.text.Layout.
+        val text = (KavaReflector.invokeMethod(view, "a") as? CharSequence
+            ?: KavaReflector.readField(view, "x") as? CharSequence) as? Spanned ?: return null
+        val layout = KavaReflector.invokeMethod(view, "getLayout") ?: return null
+        val visual = KavaReflector.invokeMethod(layout, "m") as? Iterable<*> ?: return null
+        val x = eventX - ((KavaReflector.invokeMethod(view, "getHorizontalOffset") as? Number)?.toFloat() ?: 0f)
+        val y = eventY - ((KavaReflector.invokeMethod(view, "getVerticalOffset") as? Number)?.toFloat() ?: 0f)
+        for (entry in visual) {
+            if (entry == null) continue
+            val span = KavaReflector.readField(entry, "g") as? ProfileSpan ?: continue
+            if (text.getSpanStart(span) < 0) continue
+            val rects = KavaReflector.readField(entry, "d") as? Iterable<*> ?: continue
+            if (rects.any { it is RectF && it.contains(x, y) }) return span
+        }
+        return null
     }
 
     private fun captureBinding(param: XC_MethodHook.MethodHookParam): BindState {
@@ -154,98 +228,73 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         val item = adapterItem(param.thisObject ?: return BindState(null), position) ?: return BindState(null)
         val native = resolveNativeMessage(item) ?: return BindState(null)
         val message = messageFromNative(native) ?: return BindState(null)
-        messages[root] = message
+        gestures.remove(root)
         HLog.d(TAG + " bind-before msgId=${message.msgId} talker=${message.talker} atUsers=${message.getEffectiveAtUserList().size}")
         return BindState(message)
     }
 
     private fun buildMentionText(text: CharSequence, message: WeChatMessage, spec: String): BuildResult {
-        val ids = message.getEffectiveAtUserList()
-        if (ids.isEmpty()) return BuildResult(text, 0, 0)
+        val ids = message.getEffectiveAtUserList().distinct()
+        if (ids.isEmpty() || ids.size > 64 || text.length > 32768) return BuildResult(text, 0, 0)
+        if (text is Spanned && text.getSpans(0, text.length, ProfileSpan::class.java).isNotEmpty()) {
+            return BuildResult(text, 0, 0) // Nested text setter; never duplicate our spans.
+        }
+        val contacts = WeChatApis.contacts()
+        val names = LinkedHashMap<String, List<String>>()
+        for (user in ids) {
+            names[user] = if (isAtAll(user)) listOf("所有人", "all", "everyone", "全員", "모두") else {
+                val contact = runCatching { contacts?.getContact(user) }.getOrNull()
+                listOf(
+                    runCatching { contacts?.getGroupMemberRoomDisplayName(message.talker, user) }.getOrNull(),
+                    contact?.nickname, contact?.remarkName, user
+                ).filterNotNull().filter { it.isNotBlank() }.distinct().sortedByDescending { it.length }
+            }
+        }
         val colors = MentionHighlightSettings.parseColors(spec)
         val builder = SpannableStringBuilder(text)
-        val nativeSpans = if (text is Spanned) {
-            text.getSpans(0, text.length, ClickableSpan::class.java)
-                .filter { span ->
-                    val name = span.javaClass.name
-                    name == "lx2" || name.endsWith(".lx2")
-                }
-                .mapNotNull { span ->
-                    val start = text.getSpanStart(span)
-                    val end = text.getSpanEnd(span)
-                    if (start >= 0 && end > start) start until end else null
-                }
-                .distinct()
-                .sortedBy { it.first }
-        } else emptyList()
-        val ranges = if (nativeSpans.isNotEmpty()) nativeSpans else if (text is Spanned) {
-            text.getSpans(0, text.length, ClickableSpan::class.java)
-                .mapNotNull { span ->
-                    val start = text.getSpanStart(span)
-                    val end = text.getSpanEnd(span)
-                    if (start >= 0 && end > start && text[start] == '@') start until end else null
-                }
-                .distinct()
-                .sortedBy { it.first }
-        } else emptyList()
-        val rendered = text.toString()
-        val fallbackRanges: List<IntRange?> = if (ranges.isEmpty()) {
-            val result = ArrayList<IntRange?>()
-            var searchFrom = 0
-            ids.forEach { user ->
-                if (isAtAll(user)) {
-                    result += null
-                } else {
-                    val displayName = runCatching {
-                        WeChatApis.contacts()?.getGroupMemberDisplayName(message.talker, user).orEmpty()
-                    }.getOrDefault("")
-                    val atName = if (displayName.isNotBlank()) "@$displayName" else ""
-                    val at = if (atName.isNotEmpty()) rendered.indexOf(atName, searchFrom) else -1
-                    if (at >= 0) {
-                        result += at until (at + atName.length)
-                        searchFrom = at + atName.length
-                    } else {
-                        val marker = rendered.indexOf('@', searchFrom)
-                        val separator = if (marker >= 0) rendered.indexOf(AT_SEPARATOR, marker + 1) else -1
-                        if (marker >= 0 && separator >= 0) {
-                            result += marker until (separator + 1)
-                            searchFrom = separator + 1
-                        } else {
-                            result += null
-                        }
-                    }
-                }
-            }
-            result
-        } else emptyList()
+        val raw = text.toString()
         var cursor = 0
-        var index = 0
-        var mentionCount = 0
-        var appliedCount = 0
-        while (index < ids.size) {
-            val range = ranges.getOrNull(index) ?: fallbackRanges.getOrNull(index) ?: run {
-                val at = rendered.indexOf('@', cursor)
-                if (at < 0) break
-                val separator = rendered.indexOf(AT_SEPARATOR, at + 1)
-                if (separator < 0) break
-                at until (separator + 1)
+        var applied = 0
+        var found = 0
+        while (cursor < raw.length) {
+            val at = raw.indexOf('@', cursor)
+            if (at < 0) break
+            // Bind an explicit (range,user) pair. Never zip unrelated clickable ranges to IDs.
+            val matches = ArrayList<Triple<String, Int, String>>()
+            for ((user, candidates) in names) {
+                for (name in candidates) {
+                    val end = at + 1 + name.length
+                    if (end > raw.length || !raw.startsWith(name, at + 1)) continue
+                    val boundary = end == raw.length || raw[end] == '@' ||
+                        Character.isWhitespace(raw[end]) || Character.isSpaceChar(raw[end])
+                    if (boundary) matches.add(Triple(user, end, name))
+                }
             }
-            val start = range.first
-            val end = range.last + 1
-            val user = ids[index]
-            mentionCount++
-            if (!isAtAll(user) && end <= builder.length) {
-                builder.setSpan(ProfileSpan { view -> openProfile(view, message.talker, user) }, start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                builder.setSpan(MentionColorSpan(colors.first, colors.second), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-                appliedCount++
+            val longest = matches.maxOfOrNull { it.second }
+            val best = matches.filter { it.second == longest }.distinctBy { it.first }
+            if (best.size != 1) { cursor = at + 1; continue } // Ambiguous names: do not open a wrong person.
+            val match = best[0]
+            val end = match.second
+            found++
+            val overlaps = builder.getSpans(at, end, ClickableSpan::class.java)
+            if (overlaps.any { builder.getSpanStart(it) < at || builder.getSpanEnd(it) > end }) {
+                cursor = end
+                continue
             }
+            if (!isAtAll(match.first)) {
+                for (span in overlaps) builder.removeSpan(span)
+                builder.setSpan(ProfileSpan { view -> openProfile(view, message.talker, match.first) },
+                    at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            builder.setSpan(MentionColorSpan(colors.first, colors.second, raw.substring(at, end)),
+                at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            applied++
             cursor = end
-            index++
         }
-        return BuildResult(if (appliedCount > 0) builder else text, mentionCount, appliedCount)
+        return BuildResult(if (applied > 0) builder else text, found, applied)
     }
-
     private fun openProfile(view: View, room: String, user: String) {
+        HLog.d(TAG + " 请求打开艾特成员资料页")
         val intent = Intent().setComponent(ComponentName(view.context.packageName, "com.tencent.mm.plugin.profile.ui.ContactInfoUI"))
             .putExtra("Contact_User", user)
             .putExtra("Contact_ChatRoomId", room)
@@ -255,36 +304,6 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         if (view.context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         runCatching { view.context.startActivity(intent) }
             .onFailure { HLog.e(TAG + " 资料页打开失败 user=$user room=$room", it) }
-    }
-
-    private fun targetTextView(view: View): TextView? {
-        if (view is TextView) return view
-        return (KavaReflector.invokeMethod(view, "getWrappedTextView") as? TextView)
-            ?: findTextViewChild(view)
-    }
-
-    private fun findTextViewChild(view: View): TextView? {
-        if (view is TextView) return view
-        if (view !is ViewGroup) return null
-        for (index in 0 until view.childCount) {
-            findTextViewChild(view.getChildAt(index))?.let { return it }
-        }
-        return null
-    }
-
-    private fun renderedText(view: View, textView: TextView): CharSequence? {
-        return (KavaReflector.invokeMethod(view, "a") as? CharSequence)
-            ?: (KavaReflector.readField(view, "x") as? CharSequence)
-            ?: textView.text
-    }
-
-    private fun findMessage(view: View): WeChatMessage? {
-        var current: View? = view
-        while (current != null) {
-            messages[current]?.let { return it }
-            current = current.parent as? View
-        }
-        return null
     }
 
     private fun findRoot(value: Any): View? {
@@ -404,7 +423,9 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     private fun isAtAll(user: String): Boolean =
         user.equals("notify@all", true) || user.equals("announcement@all", true)
 
-    private data class BindState(val message: WeChatMessage?)
+    private data class BindState(var message: WeChatMessage?)
+    private data class Gesture(val span: ProfileSpan, val x: Float, val y: Float,
+        val time: Long, var cancelled: Boolean = false)
     private data class BuildResult(val text: CharSequence, val mentionCount: Int, val appliedCount: Int)
 
     private class ProfileSpan(private val action: (View) -> Unit) : ClickableSpan() {
@@ -412,9 +433,9 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         override fun updateDrawState(ds: TextPaint) { ds.isUnderlineText = false }
     }
 
-    private class MentionColorSpan(private val start: Int, private val end: Int) : CharacterStyle(), UpdateAppearance {
+    private class MentionColorSpan(private val start: Int, private val end: Int, private val label: String) : CharacterStyle(), UpdateAppearance {
         override fun updateDrawState(paint: TextPaint) {
-            paint.shader = LinearGradient(0f, 0f, paint.measureText("艾特对象").coerceAtLeast(1f), 0f, start, end, Shader.TileMode.CLAMP)
+            paint.shader = LinearGradient(0f, 0f, paint.measureText(label).coerceAtLeast(1f), 0f, start, end, Shader.TileMode.CLAMP)
             paint.isFakeBoldText = true
         }
     }
