@@ -11,6 +11,7 @@ import android.text.TextPaint
 import android.text.style.ClickableSpan
 import android.text.style.CharacterStyle
 import android.text.style.UpdateAppearance
+import android.text.method.LinkMovementMethod
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
@@ -83,26 +84,22 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     }
 
     private val textHook = object : XC_MethodHook() {
-        override fun afterHookedMethod(param: MethodHookParam) {
+        override fun beforeHookedMethod(param: MethodHookParam) {
             if (reentry.get() == true) return
             val view = param.thisObject as? View ?: return
             val prefs = MentionHighlightSettings.preferences(context.hostContext())
-            val enabled = prefs.getBoolean(MentionHighlightSettings.KEY_ENABLE, false)
-            if (!enabled) return
+            if (!prefs.getBoolean(MentionHighlightSettings.KEY_ENABLE, false)) return
             val message = findMessage(view) ?: return
-            val textView = targetTextView(view) ?: return
-            val text = renderedText(view, textView) ?: return
-            val result = buildMentionText(text, message, prefs.getString(
+            val input = param.args?.firstOrNull() as? CharSequence ?: return
+            val result = buildMentionText(input, message, prefs.getString(
                 MentionHighlightSettings.KEY_COLOR,
                 MentionHighlightSettings.DEFAULT_COLOR
             ) ?: MentionHighlightSettings.DEFAULT_COLOR)
-            HLog.d(TAG + " setText enabled=true class=${view.javaClass.name} spanned=${text is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount}")
+            HLog.d(TAG + " setText前置 enabled=true class=${view.javaClass.name} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount}")
             if (result.appliedCount == 0) return
-            reentry.set(true)
-            try {
-                textView.setText(result.text, TextView.BufferType.SPANNABLE)
-            } finally {
-                reentry.remove()
+            param.args?.set(0, result.text)
+            if (view is TextView && view.movementMethod == null) {
+                view.movementMethod = LinkMovementMethod.getInstance()
             }
         }
     }
@@ -119,11 +116,25 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     }
 
     private fun buildMentionText(text: CharSequence, message: WeChatMessage, spec: String): BuildResult {
-        val ids = message.getAtUserList()
+        val ids = message.getEffectiveAtUserList()
         if (ids.isEmpty()) return BuildResult(text, 0, 0)
         val colors = MentionHighlightSettings.parseColors(spec)
         val builder = SpannableStringBuilder(text)
-        val ranges = if (text is Spanned) {
+        val nativeSpans = if (text is Spanned) {
+            text.getSpans(0, text.length, ClickableSpan::class.java)
+                .filter { span ->
+                    val name = span.javaClass.name
+                    name == "lx2" || name.endsWith(".lx2")
+                }
+                .mapNotNull { span ->
+                    val start = text.getSpanStart(span)
+                    val end = text.getSpanEnd(span)
+                    if (start >= 0 && end > start) start until end else null
+                }
+                .distinct()
+                .sortedBy { it.first }
+        } else emptyList()
+        val ranges = if (nativeSpans.isNotEmpty()) nativeSpans else if (text is Spanned) {
             text.getSpans(0, text.length, ClickableSpan::class.java)
                 .mapNotNull { span ->
                     val start = text.getSpanStart(span)
@@ -133,15 +144,45 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                 .distinct()
                 .sortedBy { it.first }
         } else emptyList()
+        val rendered = text.toString()
+        val fallbackRanges: List<IntRange?> = if (ranges.isEmpty()) {
+            val result = ArrayList<IntRange?>()
+            var searchFrom = 0
+            ids.forEach { user ->
+                if (isAtAll(user)) {
+                    result += null
+                } else {
+                    val displayName = runCatching {
+                        WeChatApis.contacts()?.getGroupMemberDisplayName(message.talker, user).orEmpty()
+                    }.getOrDefault("")
+                    val atName = if (displayName.isNotBlank()) "@$displayName" else ""
+                    val at = if (atName.isNotEmpty()) rendered.indexOf(atName, searchFrom) else -1
+                    if (at >= 0) {
+                        result += at until (at + atName.length)
+                        searchFrom = at + atName.length
+                    } else {
+                        val marker = rendered.indexOf('@', searchFrom)
+                        val separator = if (marker >= 0) rendered.indexOf(AT_SEPARATOR, marker + 1) else -1
+                        if (marker >= 0 && separator >= 0) {
+                            result += marker until (separator + 1)
+                            searchFrom = separator + 1
+                        } else {
+                            result += null
+                        }
+                    }
+                }
+            }
+            result
+        } else emptyList()
         var cursor = 0
         var index = 0
         var mentionCount = 0
         var appliedCount = 0
         while (index < ids.size) {
-            val range = ranges.getOrNull(index) ?: run {
-                val at = text.toString().indexOf('@', cursor)
+            val range = ranges.getOrNull(index) ?: fallbackRanges.getOrNull(index) ?: run {
+                val at = rendered.indexOf('@', cursor)
                 if (at < 0) break
-                val separator = text.toString().indexOf(AT_SEPARATOR, at + 1)
+                val separator = rendered.indexOf(AT_SEPARATOR, at + 1)
                 if (separator < 0) break
                 at until (separator + 1)
             }
