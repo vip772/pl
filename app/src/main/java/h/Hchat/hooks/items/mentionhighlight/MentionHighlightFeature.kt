@@ -90,8 +90,9 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         })
         val textMethods = linkedSetOf<Method>()
         val touchMethods = linkedSetOf<Method>()
-        KavaReflector.findMethodRecursive(TextView::class.java, "setText",
-            CharSequence::class.java, TextView.BufferType::class.java)?.let { textMethods.add(it) }
+        // Do not hook TextView.setText globally.  The original implementation
+        // only processes the message renderer's text methods; a global hook
+        // also sees timestamps, labels and recycled child views.
         val classes = listOfNotNull(
             KavaReflector.loadClass("com.tencent.mm.view.x2c.X2CTextView", context.hostClassLoader()),
             KavaReflector.loadClass("com.tencent.neattextview.textview.view.NeatTextView", context.hostClassLoader()),
@@ -154,11 +155,10 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             // result by message. The bind ThreadLocal is the safety boundary, so a
             // recycled holder cannot receive another message's spans.
             val cached = when {
-                // The bind ThreadLocal identifies the exact message currently
-                // being rendered.  Do not require CharSequence equality here:
-                // X2C intentionally changes the representation between its
-                // plain-text pass and the final Neat pass.
-                messageCached != null -> messageCached
+                // A recycled X2C view can call setText while another message is
+                // being bound. Never inject a cached Spannable unless the
+                // visible text is exactly the same; msgId alone is not enough.
+                messageCached != null && messageCached.toString() == input.toString() -> messageCached
                 inputCached != null -> inputCached
                 else -> null
             }
