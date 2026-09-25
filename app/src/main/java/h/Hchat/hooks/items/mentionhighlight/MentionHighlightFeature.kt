@@ -10,8 +10,7 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextPaint
 import android.text.style.ClickableSpan
-import android.text.style.CharacterStyle
-import android.text.style.UpdateAppearance
+import android.text.style.ForegroundColorSpan
 import android.graphics.RectF
 import android.view.MotionEvent
 import android.view.ViewConfiguration
@@ -135,11 +134,13 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             val message = bindStates.get().peekLast()?.message ?: return
             val input = param.args?.firstOrNull() as? CharSequence ?: return
             if (!message.isGroupChat() || !message.isText()) return
-            val result = buildMentionText(input, message, prefs.getString(
+            val colorSpec = prefs.getString(
                 MentionHighlightSettings.KEY_COLOR,
                 MentionHighlightSettings.DEFAULT_COLOR
-            ) ?: MentionHighlightSettings.DEFAULT_COLOR)
-            HLog.d(TAG + " setText前置 msgId=${message.msgId} enabled=true class=${view.javaClass.name} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount}")
+            ) ?: MentionHighlightSettings.DEFAULT_COLOR
+            val result = buildMentionText(input, message, colorSpec)
+            val parsedColors = MentionHighlightSettings.parseColors(colorSpec)
+            HLog.d(TAG + " setText前置 msgId=${message.msgId} enabled=true class=${view.javaClass.name} colorSpec=$colorSpec colors=${parsedColors.first},${parsedColors.second} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount}")
             if (result.appliedCount == 0) return
             param.args?.set(0, result.text)
 
@@ -253,13 +254,40 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         val colors = MentionHighlightSettings.parseColors(spec)
         val builder = SpannableStringBuilder(text)
         val raw = text.toString()
+        val nativeRanges = if (text is Spanned) {
+            text.getSpans(0, text.length, ClickableSpan::class.java)
+                .mapNotNull { span ->
+                    val start = text.getSpanStart(span)
+                    val end = text.getSpanEnd(span)
+                    if (start >= 0 && end > start && start < raw.length && raw[start] == '@') start until end else null
+                }
+                .distinct()
+                .sortedBy { it.first }
+        } else emptyList()
         var cursor = 0
+        var rangeIndex = 0
         var applied = 0
         var found = 0
         while (cursor < raw.length) {
-            val at = raw.indexOf('@', cursor)
+            val explicitRange = nativeRanges.getOrNull(rangeIndex)
+            val at = explicitRange?.first ?: raw.indexOf('@', cursor)
             if (at < 0) break
-            // Bind an explicit (range,user) pair. Never zip unrelated clickable ranges to IDs.
+            // Prefer the actual WeChat span range. This preserves emoji, variation selectors and combining characters.
+            if (explicitRange != null) {
+                val user = ids.getOrNull(rangeIndex) ?: break
+                val end = explicitRange.last + 1
+                found++
+                if (!isAtAll(user)) {
+                    builder.setSpan(ProfileSpan { view -> openProfile(view, message.talker, user) },
+                        at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                applyForegroundColors(builder, raw, at, end, colors.first, colors.second)
+                applied++
+                cursor = end
+                rangeIndex++
+                continue
+            }
+            // Fallback only when the platform did not provide an explicit mention span.
             val matches = ArrayList<Triple<String, Int, String>>()
             for ((user, candidates) in names) {
                 for (name in candidates) {
@@ -293,6 +321,24 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         }
         return BuildResult(if (applied > 0) builder else text, found, applied)
     }
+    private fun applyForegroundColors(builder: SpannableStringBuilder, raw: String, start: Int, end: Int, from: Int, to: Int) {
+        val length = (end - start).coerceAtLeast(1)
+        var index = start
+        while (index < end) {
+            val codePoint = raw.codePointAt(index)
+            val count = Character.charCount(codePoint)
+            val fraction = ((index - start).toFloat() / length).coerceIn(0f, 1f)
+            val color = android.graphics.Color.argb(
+                (android.graphics.Color.alpha(from) + (android.graphics.Color.alpha(to) - android.graphics.Color.alpha(from)) * fraction).toInt(),
+                (android.graphics.Color.red(from) + (android.graphics.Color.red(to) - android.graphics.Color.red(from)) * fraction).toInt(),
+                (android.graphics.Color.green(from) + (android.graphics.Color.green(to) - android.graphics.Color.green(from)) * fraction).toInt(),
+                (android.graphics.Color.blue(from) + (android.graphics.Color.blue(to) - android.graphics.Color.blue(from)) * fraction).toInt()
+            )
+            builder.setSpan(ForegroundColorSpan(color), index, (index + count).coerceAtMost(end), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            index += count
+        }
+    }
+
     private fun openProfile(view: View, room: String, user: String) {
         HLog.d(TAG + " 请求打开艾特成员资料页")
         val intent = Intent().setComponent(ComponentName(view.context.packageName, "com.tencent.mm.plugin.profile.ui.ContactInfoUI"))
