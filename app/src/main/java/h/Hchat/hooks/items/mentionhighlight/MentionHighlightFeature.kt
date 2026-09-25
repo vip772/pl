@@ -118,12 +118,14 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             HookRegistry.get().hook(method, textHook)
             HLog.i(TAG + " 文本入口 " + method.toGenericString())
         }
-        val touchClasses = classes + listOfNotNull(TextView::class.java,
-            KavaReflector.loadClass("com.tencent.mm.view.x2c.X2CTextView", context.hostClassLoader()))
+        // Do not hook TextView.onTouchEvent globally.  Only the message renderer
+        // classes are allowed to consume touch events.
+        val touchClasses = classes
         for (clazz in touchClasses) {
             val method = KavaReflector.findMethodRecursive(clazz, "onTouchEvent", MotionEvent::class.java) ?: continue
             // Never hook View.onTouchEvent globally as an accidental fallback.
-            if (method.declaringClass == View::class.java) continue
+            if (method.declaringClass == View::class.java ||
+                method.declaringClass == TextView::class.java) continue
             if (touchMethods.add(method)) HookRegistry.get().hook(method, touchHook)
         }
         installed = textMethods.isNotEmpty()
@@ -219,6 +221,12 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     }
 
     private fun hitMention(view: View, eventX: Float, eventY: Float): ProfileSpan? {
+        // MMNeat7extView extends TextView, but its glyph hit-test is not
+        // android.text.Layout.  The Neat layout must be checked first.
+        if (view.javaClass.name.contains("MMNeat7extView") ||
+            view.javaClass.name.contains("NeatTextView")) {
+            return hitNeatMention(view, eventX, eventY)
+        }
         if (view is TextView) {
             val text = view.text as? Spanned ?: return null
             val layout = view.layout ?: return null
@@ -239,12 +247,45 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         val visual = KavaReflector.invokeMethod(layout, "m") as? Iterable<*> ?: return null
         val x = eventX - ((KavaReflector.invokeMethod(view, "getHorizontalOffset") as? Number)?.toFloat() ?: 0f)
         val y = eventY - ((KavaReflector.invokeMethod(view, "getVerticalOffset") as? Number)?.toFloat() ?: 0f)
-        for (entry in visual) {
+        for (entry in visual ?: emptyList<Any>()) {
             if (entry == null) continue
             val span = KavaReflector.readField(entry, "g") as? ProfileSpan ?: continue
             if (text.getSpanStart(span) < 0) continue
             val rects = KavaReflector.readField(entry, "d") as? Iterable<*> ?: continue
             if (rects.any { it is RectF && it.contains(x, y) }) return span
+        }
+        return null
+    }
+
+    private fun hitNeatMention(view: View, eventX: Float, eventY: Float): ProfileSpan? {
+        val text = (KavaReflector.invokeMethod(view, "a") as? CharSequence
+            ?: KavaReflector.readField(view, "x") as? CharSequence) as? Spanned ?: return null
+        val layout = KavaReflector.invokeMethod(view, "getLayout") ?: return null
+        val visual = KavaReflector.invokeMethod(layout, "m") as? Iterable<*>
+        val horizontal = (KavaReflector.invokeMethod(view, "getHorizontalOffset") as? Number)?.toFloat() ?: 0f
+        val vertical = (KavaReflector.invokeMethod(view, "getVerticalOffset") as? Number)?.toFloat() ?: 0f
+        val x = eventX - horizontal
+        val y = eventY - vertical
+        for (entry in visual ?: emptyList<Any>()) {
+            if (entry == null) continue
+            val span = KavaReflector.readField(entry, "g") as? ProfileSpan ?: continue
+            val start = text.getSpanStart(span)
+            val end = text.getSpanEnd(span)
+            if (start < 0 || end <= start) continue
+            val rects = KavaReflector.readField(entry, "d") as? Iterable<*> ?: continue
+            if (rects.any { it is RectF && it.contains(x, y) }) return span
+        }
+        // Neat's internal hit-test returns a UTF-16 offset and handles emoji /
+        // combining marks correctly.  Use it only as a fallback when the
+        // visual span records do not expose rectangles.
+        val offset = KavaReflector.invokeMethod(
+            layout, "k", x.toInt(), y.toInt()
+        ) as? Number
+        if (offset != null) {
+            val safe = offset.toInt().coerceIn(0, text.length)
+            return text.getSpans(safe, safe, ProfileSpan::class.java).firstOrNull {
+                safe >= text.getSpanStart(it) && safe < text.getSpanEnd(it)
+            }
         }
         return null
     }
