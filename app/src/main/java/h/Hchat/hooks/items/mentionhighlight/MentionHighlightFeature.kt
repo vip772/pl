@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Intent
 import android.graphics.LinearGradient
 import android.graphics.Shader
+import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.Spanned
 import android.text.TextPaint
@@ -27,6 +28,7 @@ import h.Hchat.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Method
+import java.util.ArrayDeque
 import java.util.Collections
 import java.util.WeakHashMap
 
@@ -50,6 +52,7 @@ class MentionHighlightFeature : BaseFeature() {
 
 private class MentionHighlightRuntime(private val context: FeatureContext) {
     private val messages = Collections.synchronizedMap(WeakHashMap<View, WeChatMessage>())
+    private val bindStates = ThreadLocal.withInitial { ArrayDeque<BindState>() }
     private var installed = false
     private val reentry = ThreadLocal<Boolean>()
 
@@ -61,11 +64,18 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             return false
         }
         HookRegistry.get().hook(bind, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val state = captureBinding(param)
+                bindStates.get().addLast(state)
+            }
             override fun afterHookedMethod(param: MethodHookParam) {
-                captureBinding(param)
+                val states = bindStates.get()
+                if (states.isNotEmpty()) states.removeLast()
+                if (states.isEmpty()) bindStates.remove()
             }
         })
         val textMethods = linkedSetOf<Method>()
+        val touchMethods = linkedSetOf<Method>()
         val bufferType = TextView.BufferType::class.java
         listOf(
             TextView::class.java,
@@ -78,8 +88,19 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                     if (textMethods.add(method)) HookRegistry.get().hook(method, textHook)
                 }
         }
+        listOf(
+            KavaReflector.loadClass("com.tencent.mm.view.x2c.X2CTextView", context.hostClassLoader()),
+            KavaReflector.loadClass("com.tencent.neattextview.textview.view.NeatTextView", context.hostClassLoader()),
+            KavaReflector.loadClass("com.tencent.mm.ui.widget.MMNeat7extView", context.hostClassLoader())
+        ).forEach { clazz ->
+            clazz ?: return@forEach
+            KavaReflector.findMethodRecursive(clazz, "onTouchEvent", android.view.MotionEvent::class.java)
+                ?.let { method ->
+                    if (touchMethods.add(method)) HookRegistry.get().hook(method, touchHook)
+                }
+        }
         installed = textMethods.isNotEmpty()
-        HLog.i(TAG + " 安装完成 bind=true textMethods=${textMethods.size}")
+        HLog.i(TAG + " 安装完成 bind=true textMethods=${textMethods.size} touchMethods=${touchMethods.size}")
         return installed
     }
 
@@ -89,7 +110,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             val view = param.thisObject as? View ?: return
             val prefs = MentionHighlightSettings.preferences(context.hostContext())
             if (!prefs.getBoolean(MentionHighlightSettings.KEY_ENABLE, false)) return
-            val message = findMessage(view) ?: return
+            val message = bindStates.get().lastOrNull()?.message ?: findMessage(view) ?: return
             val input = param.args?.firstOrNull() as? CharSequence ?: return
             val result = buildMentionText(input, message, prefs.getString(
                 MentionHighlightSettings.KEY_COLOR,
@@ -104,15 +125,38 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         }
     }
 
-    private fun captureBinding(param: XC_MethodHook.MethodHookParam) {
-        val holder = param.args?.firstOrNull() ?: return
-        val position = param.args?.getOrNull(1) as? Int ?: return
-        val root = findRoot(holder) ?: return
-        val item = adapterItem(param.thisObject ?: return, position) ?: return
-        val native = resolveNativeMessage(item) ?: return
-        val message = messageFromNative(native) ?: return
+    private val touchHook = object : XC_MethodHook() {
+        override fun beforeHookedMethod(param: MethodHookParam) {
+            val event = param.args?.firstOrNull() as? android.view.MotionEvent ?: return
+            if (event.actionMasked != android.view.MotionEvent.ACTION_UP) return
+            val view = param.thisObject as? View ?: return
+            val textView = targetTextView(view) ?: return
+            val text = renderedText(view, textView) ?: return
+            val spanned = text as? Spanned ?: return
+            val layout: Layout = textView.layout ?: return
+            val x = (event.x - view.paddingLeft + view.scrollX).coerceAtLeast(0f)
+            val y = (event.y - view.paddingTop + view.scrollY).coerceAtLeast(0f)
+            val line = layout.getLineForVertical(y.toInt()).coerceIn(0, (layout.lineCount - 1).coerceAtLeast(0))
+            val offset = layout.getOffsetForHorizontal(line, x)
+            val spans = spanned.getSpans(offset, offset, ProfileSpan::class.java)
+            if (spans.isNotEmpty()) {
+                spans[0].onClick(view)
+                param.setResult(true)
+                HLog.d(TAG + " X2C触摸命中 offset=$offset")
+            }
+        }
+    }
+
+    private fun captureBinding(param: XC_MethodHook.MethodHookParam): BindState {
+        val holder = param.args?.firstOrNull() ?: return BindState(null)
+        val position = param.args?.getOrNull(1) as? Int ?: return BindState(null)
+        val root = findRoot(holder) ?: return BindState(null)
+        val item = adapterItem(param.thisObject ?: return BindState(null), position) ?: return BindState(null)
+        val native = resolveNativeMessage(item) ?: return BindState(null)
+        val message = messageFromNative(native) ?: return BindState(null)
         messages[root] = message
-        HLog.d(TAG + " bind msgId=${message.msgId} talker=${message.talker} atUsers=${message.getAtUserList().size}")
+        HLog.d(TAG + " bind-before msgId=${message.msgId} talker=${message.talker} atUsers=${message.getEffectiveAtUserList().size}")
+        return BindState(message)
     }
 
     private fun buildMentionText(text: CharSequence, message: WeChatMessage, spec: String): BuildResult {
@@ -360,6 +404,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     private fun isAtAll(user: String): Boolean =
         user.equals("notify@all", true) || user.equals("announcement@all", true)
 
+    private data class BindState(val message: WeChatMessage?)
     private data class BuildResult(val text: CharSequence, val mentionCount: Int, val appliedCount: Int)
 
     private class ProfileSpan(private val action: (View) -> Unit) : ClickableSpan() {
