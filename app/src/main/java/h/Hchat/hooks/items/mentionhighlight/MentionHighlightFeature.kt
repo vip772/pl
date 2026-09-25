@@ -54,6 +54,11 @@ class MentionHighlightFeature : BaseFeature() {
 private class MentionHighlightRuntime(private val context: FeatureContext) {
     private val gestures = WeakHashMap<View, Gesture>()
     private val renderedCache = LruCache<String, CharSequence>(96)
+    // X2C may receive the same message again with a different CharSequence
+    // representation (plain text vs. the Neat Spannable).  The original
+    // implementation carries the rendered result by its hx2 message context,
+    // not by the incoming CharSequence identity.  Keep that association too.
+    private val renderedByMessage = LruCache<String, CharSequence>(96)
     private val bindStates = ThreadLocal.withInitial { ArrayDeque<BindState>() }
     private var installed = false
     private val reentry = ThreadLocal<Boolean>()
@@ -139,14 +144,31 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                 MentionHighlightSettings.DEFAULT_COLOR
             ) ?: MentionHighlightSettings.DEFAULT_COLOR
             val cacheKey = cacheKey(message, input, colorSpec)
+            val messageCacheKey = messageCacheKey(message, colorSpec)
             val result = buildMentionText(input, message, colorSpec)
-            val cached = renderedCache.get(cacheKey)
+            val inputCached = renderedCache.get(cacheKey)
+            val messageCached = renderedByMessage.get(messageCacheKey)
+            // X2C calls its final text entry again with a new/plain CharSequence
+            // after MMNeat has already produced the coloured Spannable.  The
+            // input-based key can never hit in that case; carry the rendered
+            // result by message. The bind ThreadLocal is the safety boundary, so a
+            // recycled holder cannot receive another message's spans.
+            val cached = when {
+                // The bind ThreadLocal identifies the exact message currently
+                // being rendered.  Do not require CharSequence equality here:
+                // X2C intentionally changes the representation between its
+                // plain-text pass and the final Neat pass.
+                messageCached != null -> messageCached
+                inputCached != null -> inputCached
+                else -> null
+            }
             val effective = if (result.appliedCount > 0) {
                 renderedCache.put(cacheKey, result.text)
+                renderedByMessage.put(messageCacheKey, result.text)
                 result.text
             } else cached
             val parsedColors = MentionHighlightSettings.parseColors(colorSpec)
-            HLog.d(TAG + " setText前置 msgId=${message.msgId} enabled=true class=${view.javaClass.name} colorSpec=$colorSpec colors=${parsedColors.first},${parsedColors.second} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount} cacheHit=${cached != null}")
+            HLog.d(TAG + " setText前置 msgId=${message.msgId} enabled=true class=${view.javaClass.name} colorSpec=$colorSpec colors=${parsedColors.first},${parsedColors.second} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount} cacheHit=${cached != null} messageCache=${messageCached != null}")
             if (effective == null) return
             param.args?.set(0, effective)
         }
@@ -241,6 +263,9 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
 
     private fun cacheKey(message: WeChatMessage, text: CharSequence, spec: String): String =
         message.msgId.toString() + "|" + spec + "|" + text.toString()
+
+    private fun messageCacheKey(message: WeChatMessage, spec: String): String =
+        message.msgId.toString() + "|" + spec
 
     private fun buildMentionText(text: CharSequence, message: WeChatMessage, spec: String): BuildResult {
         val ids = message.getEffectiveAtUserList().distinct()
