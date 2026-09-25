@@ -3,8 +3,6 @@ package h.Hchat.hooks.items.mentionhighlight
 import android.app.Activity
 import android.content.ComponentName
 import android.content.Intent
-import android.graphics.LinearGradient
-import android.graphics.Shader
 import android.text.Layout
 import android.text.SpannableStringBuilder
 import android.text.Spanned
@@ -314,8 +312,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                 builder.setSpan(ProfileSpan { view -> openProfile(view, message.talker, match.first) },
                     at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
-            builder.setSpan(MentionColorSpan(colors.first, colors.second, raw.substring(at, end)),
-                at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            applyForegroundColors(builder, raw, at, end, colors.first, colors.second)
             applied++
             cursor = end
         }
@@ -477,13 +474,6 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     private class ProfileSpan(private val action: (View) -> Unit) : ClickableSpan() {
         override fun onClick(widget: View) = action(widget)
         override fun updateDrawState(ds: TextPaint) { ds.isUnderlineText = false }
-    }
-
-    private class MentionColorSpan(private val start: Int, private val end: Int, private val label: String) : CharacterStyle(), UpdateAppearance {
-        override fun updateDrawState(paint: TextPaint) {
-            paint.shader = LinearGradient(0f, 0f, paint.measureText(label).coerceAtLeast(1f), 0f, start, end, Shader.TileMode.CLAMP)
-            paint.isFakeBoldText = true
-        }
     }
 
     companion object {
