@@ -19,6 +19,10 @@ class ConversationGroupFeature : BaseFeature() {
         }
     }
 
+    override fun onFeatureDestroy(context: FeatureContext) {
+        ConversationGroupRuntime.destroy()
+    }
+
     companion object {
         const val ID = "conversation_group"
     }

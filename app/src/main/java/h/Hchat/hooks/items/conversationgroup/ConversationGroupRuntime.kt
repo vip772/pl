@@ -97,8 +97,11 @@ object ConversationGroupRuntime {
     private const val CHILD_MENU_PIN_ID = 0x48434762
     private const val CHILD_MENU_BOTTOM_ID = 0x48434764
     private const val CONVERSATION_TOP_FLAG = 1L shl 62
+    private const val DATABASE_READY_RETRY_DELAY_MS = 1_000L
+    private const val DATABASE_READY_MAX_ATTEMPTS = 15
 
     private val initialized = AtomicBoolean(false)
+    private val active = AtomicBoolean(false)
     private val syncScheduled = AtomicBoolean(false)
     private val syncRequested = AtomicBoolean(false)
     private val hookedMethods = ConcurrentHashMap.newKeySet<Method>()
@@ -131,6 +134,7 @@ object ConversationGroupRuntime {
 
     @JvmStatic
     fun install(context: FeatureContext): Boolean {
+        active.set(true)
         val query = locateQueryMethod(context) ?: return false
         val shareRecentAdapterReset = locateShareRecentAdapterResetMethod(context) ?: return false
         val shareRecentForwardQuery = locateShareRecentForwardQueryMethod(context) ?: return false
@@ -297,20 +301,44 @@ object ConversationGroupRuntime {
 
     @JvmStatic
     fun syncAsync(context: Context) {
+        if (!active.get()) return
         syncRequested.set(true)
         if (!syncScheduled.compareAndSet(false, true)) return
+        val appContext = context.applicationContext
         executor.execute {
             try {
-                do {
+                var databaseReadyAttempt = 0
+                while (active.get()) {
                     syncRequested.set(false)
-                    runCatching { syncDatabase(context.applicationContext) }
+                    val database = WeChatApis.database()
+                    if (database == null || !database.prepare()) {
+                        databaseReadyAttempt++
+                        if (databaseReadyAttempt >= DATABASE_READY_MAX_ATTEMPTS) {
+                            HLog.w(
+                                "$TAG 微信数据库等待超时，已跳过本次同步: " +
+                                    "attempts=$databaseReadyAttempt"
+                            )
+                            break
+                        }
+                        SystemClock.sleep(DATABASE_READY_RETRY_DELAY_MS)
+                        continue
+                    }
+                    databaseReadyAttempt = 0
+                    runCatching { syncDatabase(appContext) }
                         .onFailure { HLog.e("$TAG 同步聊天分组失败: ${it.message}", it) }
-                } while (syncRequested.get())
+                    if (!syncRequested.get()) break
+                }
             } finally {
                 syncScheduled.set(false)
-                if (syncRequested.get()) syncAsync(context)
+                if (active.get() && syncRequested.get()) syncAsync(appContext)
             }
         }
+    }
+
+    @JvmStatic
+    fun destroy() {
+        active.set(false)
+        syncRequested.set(false)
     }
 
     @JvmStatic

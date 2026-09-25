@@ -63,6 +63,15 @@ public final class WeChatDatabaseApi {
         return dbWrapper != null && queryMethod != null;
     }
 
+    /**
+     * Attempts to resolve the live WeChat database wrapper without executing a query.
+     * Startup-sensitive features can use this to defer their first write until the
+     * database is actually available.
+     */
+    public boolean prepare() {
+        return ensureReady();
+    }
+
     public Cursor rawQuery(String sql, String[] args) {
         if (TextUtils.isEmpty(sql)) return null;
         if (!ensureReady()) return null;
