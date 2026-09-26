@@ -361,7 +361,7 @@ object ScriptPluginAgentLocalReverseTools {
             put("source", "Hchat 内置逆向工具")
             put(
                 "instructions",
-                "默认目标是当前微信 APK。查询当前微信时不要传 session_id；只有分析其它版本时才用 open_target_session(input) 注册 APK，并在后续查询中传返回的外部 session_id。多版本初筛优先使用 compare_methods_using_strings。find/list 首次查询优先 brief=true，确有需要再选择 fields。Java/Smali/XML 按 nextOffset 分页读取。"
+                "默认目标是当前微信 APK。分析其它版本时先用 open_target_session(input) 注册 APK，并在后续每次查询中传返回的 session_id；多版本初筛优先使用 compare_methods_using_strings。find/list 首次查询优先 brief=true，确有需要再选择 fields。Java/Smali/XML 按 nextOffset 分页读取。"
             )
             put("tools", tools)
             put("target", "当前微信 APK，可按 session_id 查询已注册的其它微信 APK")
@@ -475,7 +475,7 @@ object ScriptPluginAgentLocalReverseTools {
         if (normalizedName !in SESSION_MANAGEMENT_TOOLS && normalizedName != "read_tool_result") {
             scopedProperties.putIfAbsent(
                 "session_id",
-                stringValue("仅分析外部微信 APK 时填写；分析当前运行微信 APK 时必须省略")
+                stringValue("可选目标 session_id；省略时查询当前运行微信 APK")
             )
         }
         tools.put(JSONObject().apply {
@@ -583,7 +583,7 @@ object ScriptPluginAgentLocalReverseTools {
         val items = targetSessions.values.map { targetView(host, it) }
         return JSONObject().apply {
             put("total", items.size)
-            put("default_target", "current_wechat_apk")
+            put("default_session_id", host.sessionId)
             put("items", JSONArray(items))
         }.toString()
     }
@@ -673,12 +673,6 @@ object ScriptPluginAgentLocalReverseTools {
     private fun openExternalTarget(host: Binding, input: String, allowedRoots: List<File>): Binding {
         val file = runCatching { File(input).canonicalFile }
             .getOrElse { throw IllegalArgumentException("APK 路径无效: $input", it) }
-
-        // The running WeChat APK is already bound to the shared DexKit instance.
-        // It is a valid default target even when the model supplied its runtime path
-        // rather than a path explicitly written in the user's message.
-        if (sameFile(file, File(host.apkPath))) return host
-
         val allowed = allowedRoots.any { root ->
             val canonicalRoot = runCatching { root.canonicalFile }.getOrNull() ?: return@any false
             file.path == canonicalRoot.path ||
@@ -686,6 +680,7 @@ object ScriptPluginAgentLocalReverseTools {
         }
         require(allowed) { "只能打开用户消息中明确提供的 APK 路径或其子项" }
         validateApk(file)
+        if (sameFile(file, File(host.apkPath))) return host
         val sessionId = targetId(file)
         targetSessions[sessionId]?.let { return resolveTarget(host, sessionId) }
         val supersededSessionIds = targetSessions.values
@@ -716,13 +711,7 @@ object ScriptPluginAgentLocalReverseTools {
         val sessionId = requestedSessionId.trim().ifBlank { host.sessionId }
         if (sessionId == host.sessionId) return host
         val session = targetSessions[sessionId]
-            ?: if (isLegacyHostSessionId(host, sessionId)) {
-                // Older Agent turns used a file-metadata-based ID for the host APK.
-                // Resolve that legacy ID to the current bound bridge after a restart.
-                return host
-            } else {
-                throw IllegalArgumentException("没有找到目标会话: $sessionId")
-            }
+            ?: throw IllegalArgumentException("没有找到目标会话: $sessionId")
         val file = File(session.apkPath)
         if (!file.isFile || file.length() != session.fileLength || file.lastModified() != session.lastModified) {
             throw IllegalStateException("目标 APK 已移动或发生变化，请使用 open_target_session(input) 重新打开")
@@ -741,15 +730,7 @@ object ScriptPluginAgentLocalReverseTools {
     private fun attachTarget(rawResult: String, target: Binding): String {
         return runCatching {
             JSONObject(rawResult).apply {
-                if (target.kind == TARGET_KIND_EXTERNAL) {
-                    // Only external APKs need a session_id for subsequent calls.
-                    put("session_id", target.sessionId)
-                } else {
-                    // Do not teach the model to carry a runtime-specific host ID
-                    // through the conversation. The current WeChat target is implicit.
-                    remove("session_id")
-                    put("defaultTarget", true)
-                }
+                put("session_id", target.sessionId)
                 put("sourcePath", target.apkPath)
                 put("targetKind", target.kind)
             }.toString()
@@ -759,7 +740,7 @@ object ScriptPluginAgentLocalReverseTools {
     private fun targetView(host: Binding, session: TargetSession): JSONObject {
         val packageInfo = archivePackageInfo(host.context, session.apkPath)
         return JSONObject().apply {
-            if (session.kind == TARGET_KIND_EXTERNAL) put("session_id", session.sessionId)
+            put("session_id", session.sessionId)
             put("input", session.apkPath)
             put("sourcePath", session.apkPath)
             put("kind", session.kind)
@@ -1408,15 +1389,6 @@ object ScriptPluginAgentLocalReverseTools {
         return "hchat-local-$hash"
     }
 
-    private fun isLegacyHostSessionId(host: Binding, sessionId: String): Boolean {
-        if (!sessionId.startsWith("hchat-local-") || sessionId == host.sessionId) return false
-        // Valid external sessions are checked in targetSessions before this fallback.
-        // An unknown legacy ID can only come from the old host target, whose ID was
-        // derived from mutable APK metadata and therefore cannot be recomputed after
-        // an APK update or process restart.
-        return targetSessions.values.none { it.sessionId == sessionId && it.kind == TARGET_KIND_EXTERNAL }
-    }
-
     private fun classSearchResult(
         binding: Binding,
         candidates: List<ClassData>,
@@ -1663,7 +1635,7 @@ object ScriptPluginAgentLocalReverseTools {
                     context = context,
                     dex = holder.dexKitBridge,
                     apkPath = file.path,
-                    sessionId = HOST_SESSION_ID,
+                    sessionId = targetId(file),
                     kind = TARGET_KIND_HOST,
                     classLoaderDescription = holder.hostClassLoader.toString(),
                     ownsDex = false
@@ -1685,7 +1657,6 @@ object ScriptPluginAgentLocalReverseTools {
     }
 
     private const val TARGET_KIND_HOST = "current_wechat_apk"
-    private const val HOST_SESSION_ID = "hchat-current-wechat"
     private const val TARGET_KIND_EXTERNAL = "external_wechat_apk"
     private const val TARGET_PREFS_NAME = "Hchat_agent_reverse_targets"
     private const val TARGET_PREFS_KEY = "targets_v1"

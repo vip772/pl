@@ -2293,7 +2293,7 @@ fun ScriptPluginAgentWorkspacePage(
     fun createProfile(name: String) {
         runCatching {
             ScriptPluginAgentSettings.save(context, currentConfig())
-            val created = ScriptPluginAgentSettings.createProfile(context, name, currentConfig())
+            val created = ScriptPluginAgentSettings.createProfile(context, name)
             applyProfile(created)
             profileVersion++
         }.onFailure {
