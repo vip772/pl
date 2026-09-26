@@ -105,8 +105,10 @@ internal object ConversationAnalysisDetailsDialog {
         val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         root.addView(ScrollView(activity).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
         root.addView(TextView(activity).apply { text = "关闭"; gravity = Gravity.CENTER; textSize = 16f; setTextColor(Color.rgb(38, 150, 92)); setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(-1, dp(activity, 48)))
-        dialog.setContentView(root); dialog.show()
-        dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .82f).toInt())
+        dialog.setContentView(root)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.setOnShowListener { dialog.window?.setLayout(-1, -1) }
+        dialog.show()
         if (details.error != null) { body.addView(line(activity, details.error)); return }
         body.addView(line(activity, "活跃排行"))
         details.ranking.take(20).forEachIndexed { index, row -> body.addView(line(activity, "${index + 1}. ${row.name}  ${row.count} 条")) }
