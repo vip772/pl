@@ -20,7 +20,6 @@ import java.util.Locale
 import java.util.LinkedHashMap
 import java.util.concurrent.Executors
 import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.Toast
@@ -46,15 +45,16 @@ internal object ConversationAnalysisReportDialog {
         scroll.addView(page)
         val header = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         val titles = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        titles.addView(label(activity, "分析报告", 29f, 0xff1e1c21.toInt(), true), LinearLayout.LayoutParams(-1, dp(activity, 43)))
+        titles.addView(label(activity, "分析报告", 26f, textColor(activity), true), LinearLayout.LayoutParams(-1, dp(activity, 43)))
         val range = label(activity, rangeText(days), 18f, 0xfff57c00.toInt(), true)
         titles.addView(range, LinearLayout.LayoutParams(-1, dp(activity, 34)))
         header.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
-        val screenshot = label(activity, "≡", 27f, 0xfff57c00.toInt(), true).apply {
-            gravity = Gravity.CENTER
-            setOnClickListener { captureAndSend(activity, page, talker) }
-        }
-        header.addView(screenshot, LinearLayout.LayoutParams(dp(activity, 42), dp(activity, 42)))
+        val screenshot = label(activity, "≡", 27f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { captureAndSend(activity, page, talker) } }
+        val topSampling = label(activity, "▤", 27f, 0xffff7a00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { showTopSamplingDialog(activity) } }
+        val topTools = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
+        topTools.addView(topSampling, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)))
+        topTools.addView(screenshot, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)))
+        header.addView(topTools, LinearLayout.LayoutParams(dp(activity, 104), dp(activity, 48)))
         page.addView(header)
         page.addView(section(activity, "核心指标"), marginParams(activity, -1, 48, 0, 20, 0, 0))
         val metrics = LinearLayout(activity).apply {
@@ -70,16 +70,8 @@ internal object ConversationAnalysisReportDialog {
         metricRows.forEach { metrics.addView(it, LinearLayout.LayoutParams(0, dp(activity, 112), 1f)) }
         page.addView(metrics, marginParams(activity, -1, 0, 0, 18, 0, 0))
 
-        val samplePanel = sampleSettings(activity, dialog, talker, days, range, metrics, logger)
-        samplePanel.visibility = View.GONE
-        val sampleIcon = label(activity, "≡", 27f, 0xfff57c00.toInt(), true).apply {
-            gravity = Gravity.CENTER
-            setOnClickListener { samplePanel.visibility = if (samplePanel.visibility == View.VISIBLE) View.GONE else View.VISIBLE }
-        }
-        (header.getChildAt(1) as? ViewGroup)?.let { }
         header.removeViewAt(1)
-        header.addView(sampleIcon, LinearLayout.LayoutParams(dp(activity, 42), dp(activity, 42)))
-        page.addView(samplePanel, 1)
+        header.addView(topTools, LinearLayout.LayoutParams(dp(activity, 104), dp(activity, 48)))
         page.addView(section(activity, "智能洞察"), marginParams(activity, -1, 48, 0, 12, 0, 0))
         val insightContent = buildInsight(activity, dialog, talker, days, logger)
         addCollapsible(activity, page, "✦", "智能总结消息", insightContent, false, true)
@@ -116,7 +108,7 @@ internal object ConversationAnalysisReportDialog {
     }
 
     private fun label(activity: Activity, text: String, size: Float, color: Int, bold: Boolean) = TextView(activity).apply {
-        this.text = text; textSize = size; setTextColor(color); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        this.text = text; textSize = (size - 3f).coerceAtLeast(10f); setTextColor(if (isDark(activity) && (color == 0xff1e1c21.toInt() || color == 0xff292522.toInt() || color == 0xff302b28.toInt() || color == 0xff4e4b54.toInt() || color == 0xff6f6862.toInt() || color == 0xff77716d.toInt() || color == 0xff5d5148.toInt())) textColor(activity) else color); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
 
     private fun section(activity: Activity, text: String) = label(activity, text, 20f, textColor(activity), true)
@@ -173,6 +165,52 @@ internal object ConversationAnalysisReportDialog {
         return holder
     }
 
+    private fun showTopSamplingDialog(activity: Activity) {
+        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 22), dp(activity, 18), dp(activity, 22), dp(activity, 14)); background = rounded(pageColor(activity), dp(activity, 22)) }
+        root.addView(label(activity, "采样设置", 21f, textColor(activity), true), marginParams(activity, -1, 46, 0, 0, 0, 10))
+        val card = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 16), dp(activity, 10), dp(activity, 16), dp(activity, 10)); background = rounded(panelColor(activity), dp(activity, 18)) }
+        addSettingSlider(activity, card, "分析深度", "条", 100, 50000, 500)
+        addSettingSlider(activity, card, "词云提取数", "个", 10, 80, 40)
+        addSettingSlider(activity, card, "最小词长", "字", 2, 10, 2)
+        root.addView(card)
+        lateinit var dialog: Dialog
+        val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
+        actions.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(0, dp(activity, 50), 1f))
+        actions.addView(actionButton(activity, "保存", 0xffffa13a.toInt()) { dialog.dismiss() }, LinearLayout.LayoutParams(0, dp(activity, 50), 1f))
+        root.addView(actions, marginParams(activity, -1, 50, 0, 12, 0, 0))
+        dialog = Dialog(activity); dialog.setContentView(root); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent); dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .90f).toInt(), (activity.resources.displayMetrics.heightPixels * .72f).toInt()) }; dialog.show()
+    }
+
+    private fun showSamplingDialog(activity: Activity) {
+        val store = ConversationAnalysisAiConfigStore(activity)
+        var window = store.contextWindow()
+        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 28), dp(activity, 24), dp(activity, 28), dp(activity, 18)); background = rounded(pageColor(activity), dp(activity, 26)) }
+        root.addView(label(activity, "模型容量与采样", 24f, textColor(activity), true), marginParams(activity, -1, 54, 0, 0, 0, 16))
+        root.addView(label(activity, "模型上下文容量", 17f, textColor(activity), true), marginParams(activity, -1, 34, 0, 0, 0, 8))
+        val capacityBar = LinearLayout(activity).apply { background = rounded(panelColor(activity), dp(activity, 18)); setPadding(dp(activity, 5), dp(activity, 5), dp(activity, 5), dp(activity, 5)) }
+        val capacities = listOf("128k", "256k", "512k", "1m", "2m")
+        capacities.forEach { value ->
+            val item = label(activity, value.uppercase(Locale.ROOT), 16f, if (value == window) 0xffffa13a.toInt() else if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff5c5652.toInt(), value == window).apply { gravity = Gravity.CENTER; setOnClickListener { window = value; capacityBar.children().forEach { (it as TextView).setTextColor(if ((it as TextView).text.toString().lowercase(Locale.ROOT) == value) 0xffffa13a.toInt() else if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff5c5652.toInt()) } } }
+            capacityBar.addView(item, LinearLayout.LayoutParams(0, dp(activity, 68), 1f))
+        }
+        root.addView(capacityBar, marginParams(activity, -1, 78, 0, 0, 0, 26))
+        val limitTitle = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
+        limitTitle.addView(label(activity, "提取消息数量上限", 17f, textColor(activity), true), LinearLayout.LayoutParams(0, dp(activity, 34), 1f))
+        val limitValue = label(activity, if (store.sampleLimit() == 0) "自动" else store.sampleLimit().toString(), 17f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL }
+        limitTitle.addView(limitValue, LinearLayout.LayoutParams(dp(activity, 90), dp(activity, 34)))
+        root.addView(limitTitle)
+        val seek = SeekBar(activity).apply { max = 50000; progress = store.sampleLimit(); progressTintList = android.content.res.ColorStateList.valueOf(0xffffa13a.toInt()); thumbTintList = android.content.res.ColorStateList.valueOf(0xffffa13a.toInt()); setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener { override fun onProgressChanged(b: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) limitValue.text = if (p == 0) "自动" else p.toString() }; override fun onStartTrackingTouch(b: SeekBar?) = Unit; override fun onStopTrackingTouch(b: SeekBar?) = Unit }) }
+        root.addView(seek, LinearLayout.LayoutParams(-1, dp(activity, 54)))
+        root.addView(label(activity, "注：设为 0 时根据容量自动计算（3000 条）。当指定时段的消息总数超出上限时，会自动进行全局均匀抽样，保障整体逻辑连贯。", 14f, if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff77716d.toInt(), false).apply { setLineSpacing(4f, 1f) }, marginParams(activity, -1, 0, 0, 12, 0, 18))
+        lateinit var dialog: Dialog
+        val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
+        actions.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(0, dp(activity, 54), 1f))
+        val save = actionButton(activity, "保存", 0xffffa13a.toInt()) { store.setSampling(window, seek.progress); dialog.dismiss() }
+        actions.addView(save, LinearLayout.LayoutParams(0, dp(activity, 54), 1f))
+        root.addView(actions)
+        dialog = Dialog(activity); dialog.setContentView(root); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent); dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .78f).toInt()) }; dialog.show()
+    }
+
     private fun addSettingSlider(activity: Activity, parent: LinearLayout, title: String, unit: String, min: Int, max: Int, initial: Int) {
         val row = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         val labels = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -199,9 +237,11 @@ internal object ConversationAnalysisReportDialog {
         val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 16), dp(activity, 10), dp(activity, 16), dp(activity, 16)) }
         content.addView(divider(activity), marginParams(activity, -1, 1, 0, 4, 0, 12))
         val top = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
-        top.addView(label(activity, "选择总结时段", 16f, 0xff292522.toInt(), true), LinearLayout.LayoutParams(0, dp(activity, 40), 1f))
-        val config = label(activity, "⚙", 22f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { showAiConfig(activity) } }
-        top.addView(config, LinearLayout.LayoutParams(dp(activity, 42), dp(activity, 40)))
+        top.addView(label(activity, "选择总结时段", 16f, textColor(activity), true), LinearLayout.LayoutParams(0, dp(activity, 40), 1f))
+        val sampling = label(activity, "▤", 22f, 0xffff7a00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { showSamplingDialog(activity) } }
+        val api = label(activity, "⚙", 22f, 0xffff7a00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { showAiConfig(activity) } }
+        top.addView(sampling, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 40)))
+        top.addView(api, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 40)))
         content.addView(top)
         val tabs = LinearLayout(activity).apply { gravity = Gravity.CENTER; background = rounded(panelColor(activity), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
         val tabScroll = HorizontalScrollView(activity).apply { isHorizontalScrollBarEnabled = false; addView(tabs) }
@@ -365,7 +405,7 @@ internal object ConversationAnalysisReportDialog {
                 val colors = listOf(0xffffe7c2, 0xffffd6c5, 0xffd9e9ff, 0xffe4d8ff).map { it.toInt() }
                 val card = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; background = rounded(colors[groups.indexOf(item) % colors.size], dp(activity, 18)); setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8)) }
                 card.addView(label(activity, "◷", 25f, 0xffe65c00.toInt(), true), LinearLayout.LayoutParams(-1, dp(activity, 30)))
-                card.addView(label(activity, item.first, 16f, textColor(activity), true), LinearLayout.LayoutParams(-1, dp(activity, 25)))
+                card.addView(label(activity, item.first, 13f, textColor(activity), true), LinearLayout.LayoutParams(-1, dp(activity, 25)))
                 card.addView(label(activity, item.third.toString() + " 条", 27f, textColor(activity), true), LinearLayout.LayoutParams(-1, dp(activity, 30)))
                 row.addView(card, LinearLayout.LayoutParams(0, dp(activity, 154), 1f).apply { setMargins(if (index == 0) 0 else dp(activity, 6), 0, if (index == 1) 0 else dp(activity, 6), dp(activity, 8)) })
             }
@@ -424,52 +464,90 @@ internal object ConversationAnalysisReportDialog {
 
     private fun showLowActivityMembers(activity: Activity, members: List<ConversationLowActivityRow>) {
         val dialog = Dialog(activity)
-        val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 22), dp(activity, 20), dp(activity, 22), dp(activity, 16)); background = rounded(pageColor(activity), dp(activity, 22)) }
-        box.addView(label(activity, "低活跃成员（${members.count { it.count == 0 }}人）", 22f, textColor(activity), true), marginParams(activity, -1, 48, 0, 0, 0, 8))
-        val selectBar = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
-        val selected = ArrayList<String>()
-        val selectAll = label(activity, "全选", 14f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { selected.clear(); members.filter { it.count == 0 }.forEach { selected.add(it.wxId) } } }
-        val clear = label(activity, "清空", 14f, 0xff77716d.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { selected.clear() } }
-        selectBar.addView(selectAll, LinearLayout.LayoutParams(0, dp(activity, 38), 1f)); selectBar.addView(clear, LinearLayout.LayoutParams(0, dp(activity, 38), 1f))
-        box.addView(selectBar)
+        val lowMembers = members.filter { it.count == 0 }
+        val selected = linkedSetOf<String>()
+        val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 22), dp(activity, 18), dp(activity, 22), dp(activity, 12)); background = rounded(pageColor(activity), dp(activity, 22)) }
+        val titleRow = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
+        titleRow.addView(label(activity, "低活跃成员（${lowMembers.size}人）", 19f, textColor(activity), true), LinearLayout.LayoutParams(-1, dp(activity, 42)))
+        box.addView(titleRow)
+        box.addView(label(activity, "按所选检测周期的发言数从少到多排列，其中未发言 ${lowMembers.size} 人。勾选后可批量移出群聊。", 13f, if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff77716d.toInt(), false), marginParams(activity, -1, 0, 0, 4, 0, 8))
+        val search = EditText(activity).apply { hint = "搜索昵称或微信号"; textSize = 15f; setTextColor(textColor(activity)); setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff77716d.toInt()); setSingleLine(true); setPadding(dp(activity, 14), 0, dp(activity, 14), 0); background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xff8b8b93.toInt(), dp(activity, 18), dp(activity, 1)) }
+        box.addView(search, LinearLayout.LayoutParams(-1, dp(activity, 54)))
         val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        members.filter { it.count == 0 }.forEach { member ->
-            val check = CheckBox(activity).apply { text = member.name; textSize = 16f; setTextColor(textColor(activity)); buttonTintList = android.content.res.ColorStateList.valueOf(0xfff57c00.toInt()); setPadding(0, dp(activity, 5), 0, dp(activity, 5)); setOnCheckedChangeListener { _, checked -> if (checked) selected.add(member.wxId) else selected.remove(member.wxId) } }
-            body.addView(check, LinearLayout.LayoutParams(-1, dp(activity, 48)))
+        lateinit var removeButton: TextView
+        fun redraw(filter: String = "") {
+            body.removeAllViews()
+            lowMembers.filter { filter.isBlank() || it.name.contains(filter, true) || it.wxId.contains(filter, true) }.forEach { member ->
+                val row = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(activity, 0), dp(activity, 5), 0, dp(activity, 5)); setOnClickListener { if (!selected.add(member.wxId)) selected.remove(member.wxId); val mark = getChildAt(1) as TextView; mark.text = if (selected.contains(member.wxId)) "✓" else "□"; removeButton.text = "移出群聊（${selected.size}）"; removeButton.background = rounded(if (selected.isEmpty()) 0xff686868.toInt() else 0xffff8a00.toInt(), dp(activity, 16)) } }
+                val name = label(activity, "${member.name}\n${member.wxId}  ·  未发言", 15f, 0xffd34242.toInt(), false)
+                row.addView(name, LinearLayout.LayoutParams(0, dp(activity, 58), 1f))
+                row.addView(label(activity, "□", 28f, if (isDark(activity)) 0xffc7c2c8.toInt() else 0xff77716d.toInt(), false).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 58)))
+                body.addView(row)
+                body.addView(divider(activity), LinearLayout.LayoutParams(-1, dp(activity, 1)))
+            }
         }
+        search.addTextChangedListener(object : android.text.TextWatcher { override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit; override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { redraw(s?.toString().orEmpty()) }; override fun afterTextChanged(s: android.text.Editable?) = Unit })
+        redraw()
         box.addView(ScrollView(activity).apply { isFillViewport = true; addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        box.addView(label(activity, "完成", 16f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(-1, dp(activity, 48)))
+        val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
+        actions.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
+        removeButton = actionButton(activity, "移出群聊（0）", 0xff686868.toInt()) { dialog.dismiss() }
+        actions.addView(removeButton, LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
+        box.addView(actions)
         dialog.setContentView(box)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .86f).toInt(), (activity.resources.displayMetrics.heightPixels * .72f).toInt()) }
+        dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .86f).toInt()) }
         dialog.show()
     }
     private fun divider(activity: Activity) = View(activity).apply { setBackgroundColor(0xffeee2d6.toInt()) }
     private fun LinearLayout.children(): List<View> = (0 until childCount).map { getChildAt(it) }
 
+    private fun showModelPicker(activity: Activity, models: List<String>, onSelected: (String) -> Unit) {
+        val dialog = Dialog(activity)
+        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 22), dp(activity, 18), dp(activity, 22), dp(activity, 14)); background = rounded(pageColor(activity), dp(activity, 22)) }
+        root.addView(label(activity, "选择模型", 21f, textColor(activity), true), marginParams(activity, -1, 46, 0, 0, 0, 10))
+        val list = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        models.forEach { model ->
+            list.addView(label(activity, model, 15f, textColor(activity), false).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(activity, 12), 0, dp(activity, 12), 0); setOnClickListener { onSelected(model); dialog.dismiss() } }, LinearLayout.LayoutParams(-1, dp(activity, 48)))
+            list.addView(divider(activity), LinearLayout.LayoutParams(-1, dp(activity, 1)))
+        }
+        root.addView(ScrollView(activity).apply { isFillViewport = true; addView(list) }, LinearLayout.LayoutParams(-1, dp(activity, 240)))
+        root.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(-1, dp(activity, 50)))
+        dialog.setContentView(root); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent); dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .86f).toInt(), (activity.resources.displayMetrics.heightPixels * .72f).toInt()) }; dialog.show()
+    }
+
     private fun showAiConfig(activity: Activity) {
         val ai = ConversationAnalysisAi(activity)
         val store = ConversationAnalysisAiConfigStore(activity)
         var selected = store.activeProfileId()
-        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 18), dp(activity, 16), dp(activity, 18), dp(activity, 16)); background = rounded(pageColor(activity), dp(activity, 24)) }
+        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 26), dp(activity, 22), dp(activity, 26), dp(activity, 18)); background = rounded(pageColor(activity), dp(activity, 26)) }
         val titleRow = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         titleRow.addView(label(activity, "API 接口配置", 24f, textColor(activity), true), LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
         titleRow.addView(label(activity, "▾", 22f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 52)))
         root.addView(titleRow)
         val profileBar = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; background = rounded(panelColor(activity), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
         val fields = arrayOf(EditText(activity), EditText(activity), EditText(activity), EditText(activity), EditText(activity))
-        fields[0].hint = "方案名称"; fields[1].hint = "API 地址"; fields[2].hint = "API 路径"; fields[3].hint = "API Key"; fields[4].hint = "模型名称"
-        fields.forEach { it.setTextColor(textColor(activity)); it.setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt()); it.setPadding(dp(activity, 14), 0, dp(activity, 14), 0); it.background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); root.addView(it, marginParams(activity, -1, 46, 0, 4, 0, 0)) }
-        val capacity = EditText(activity).apply { hint = "上下文容量：128k / 256k / 512k / 1m / 2m"; setTextColor(textColor(activity)); setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt()); background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); setPadding(dp(activity, 14), 0, dp(activity, 14), 0) }
-        val limit = EditText(activity).apply { hint = "消息上限，0 为自动"; inputType = android.text.InputType.TYPE_CLASS_NUMBER; setTextColor(textColor(activity)); setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt()); background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); setPadding(dp(activity, 14), 0, dp(activity, 14), 0) }
-        root.addView(capacity, LinearLayout.LayoutParams(-1, dp(activity, 46)))
-        root.addView(limit, LinearLayout.LayoutParams(-1, dp(activity, 46)))
+        val fieldNames = listOf("方案名称", "API 地址", "API 路径", "API Key（Bearer Token）", "模型名称")
+        fields.forEachIndexed { index, field ->
+            root.addView(label(activity, fieldNames[index], 16f, if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff5c5652.toInt(), true), marginParams(activity, -1, 30, 0, 10, 0, 2))
+            field.hint = fieldNames[index]
+            field.setTextColor(textColor(activity)); field.setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt()); field.setPadding(dp(activity, 14), 0, dp(activity, 14), 0); field.background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); root.addView(field, marginParams(activity, -1, 58, 0, 0, 0, 2))
+        }
+// API configuration does not edit sampling values; sampling has its own dialog.
+
         fun loadProfile(id: Int) { selected = id; val p = ai.profiles()[id - 1]; fields[0].setText(p.name); fields[1].setText(p.address); fields[2].setText(p.path); fields[3].setText(p.key); fields[4].setText(p.model) }
-        (1..2).forEach { id -> profileBar.addView(label(activity, "方案$id", 15f, 0xff5d5148.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { loadProfile(id) } }, LinearLayout.LayoutParams(0, dp(activity, 38), 1f)) }
-        root.addView(profileBar, 0)
+        (1..2).forEach { id -> profileBar.addView(label(activity, "方案$id", 15f, if (id == selected) 0xffffa13a.toInt() else textColor(activity), true).apply { gravity = Gravity.CENTER; setOnClickListener { loadProfile(id) } }, LinearLayout.LayoutParams(0, dp(activity, 38), 1f)) }
+        root.addView(profileBar, 1)
         lateinit var dialog: Dialog
-        val save = actionButton(activity, "保存并启用", 0xfff57c00.toInt()) { ai.saveProfile(ConversationAiProfile(selected, fields[0].text.toString(), fields[1].text.toString(), fields[2].text.toString(), fields[3].text.toString(), fields[4].text.toString())); ai.selectProfile(selected); ConversationAnalysisAiConfigStore(activity).setSampling(capacity.text.toString(), limit.text.toString().toIntOrNull() ?: 0); dialog.dismiss() }
-        root.addView(save, marginParams(activity, -1, 46, 0, 10, 0, 0))
+        val utilityButtons = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
+        utilityButtons.addView(actionButton(activity, "测试连接", 0x00ffffff) { ai.testConnection(fields[1].text.toString(), fields[2].text.toString(), fields[3].text.toString()) { ok, message -> Toast.makeText(activity, if (ok) "连接成功：$message" else "连接失败：$message", Toast.LENGTH_SHORT).show() } }.apply { background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 18), dp(activity, 2)); setTextColor(0xffffa13a.toInt()) }, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
+        utilityButtons.addView(actionButton(activity, "获取模型", 0x00ffffff) { ai.fetchModels(fields[1].text.toString(), fields[3].text.toString()) { models, error -> if (models.isNotEmpty()) showModelPicker(activity, models) { fields[4].setText(it) } else Toast.makeText(activity, "获取模型失败：${error ?: "返回为空"}", Toast.LENGTH_SHORT).show() } }.apply { background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 18), dp(activity, 2)); setTextColor(0xffffa13a.toInt()) }, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
+        root.addView(utilityButtons, marginParams(activity, -1, 48, 0, 14, 0, 0))
+        val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
+        actions.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
+        val save = actionButton(activity, "保存", 0xffffa13a.toInt()) { ai.saveProfile(ConversationAiProfile(selected, fields[0].text.toString(), fields[1].text.toString(), fields[2].text.toString(), fields[3].text.toString(), fields[4].text.toString())); ai.selectProfile(selected); dialog.dismiss() }
+        actions.addView(save, LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
+        root.addView(actions)
         dialog = Dialog(activity)
         dialog.setContentView(root)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)

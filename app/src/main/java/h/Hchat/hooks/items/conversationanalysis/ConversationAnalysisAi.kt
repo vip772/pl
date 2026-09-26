@@ -50,7 +50,35 @@ internal class ConversationAnalysisAi(private val context: Context) {
     }
 
     fun saveProfile(profile: ConversationAiProfile) = configStore.save(profile)
-
+    fun testConnection(address: String, path: String, key: String, onResult: (Boolean, String) -> Unit) {
+        executor.execute {
+            val result = runCatching {
+                val conn = URL(join(address, path)).openConnection() as HttpURLConnection
+                try {
+                    conn.requestMethod = "POST"; conn.doOutput = true; conn.connectTimeout = 10000; conn.readTimeout = 10000
+                    conn.setRequestProperty("Authorization", "Bearer $key"); conn.setRequestProperty("Content-Type", "application/json")
+                    conn.outputStream.use { it.write("{}".toByteArray(StandardCharsets.UTF_8)) }
+                    conn.responseCode in 200..499 to "HTTP ${conn.responseCode}"
+                } finally { conn.disconnect() }
+            }.getOrElse { false to (it.message ?: it.javaClass.simpleName) }
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(result.first, result.second) }
+        }
+    }
+    fun fetchModels(address: String, key: String, onResult: (List<String>, String?) -> Unit) {
+        executor.execute {
+            val result = runCatching {
+                val conn = URL(join(address, "models")).openConnection() as HttpURLConnection
+                try {
+                    conn.requestMethod = "GET"; conn.connectTimeout = 10000; conn.readTimeout = 10000
+                    conn.setRequestProperty("Authorization", "Bearer $key")
+                    val response = BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { it.readText() }
+                    val data = JSONObject(response).optJSONArray("data") ?: JSONArray()
+                    (0 until data.length()).mapNotNull { data.optJSONObject(it)?.optString("id")?.takeIf(String::isNotBlank) }
+                } finally { conn.disconnect() }
+            }.fold(onSuccess = { it to null }, onFailure = { emptyList<String>() to (it.message ?: it.javaClass.simpleName) })
+            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(result.first, result.second) }
+        }
+    }
     private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (String) -> Unit): String {
         val cfg = config()
         require(configured()) { "请先配置 AI 地址、密钥和模型" }
