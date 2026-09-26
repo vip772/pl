@@ -31,12 +31,12 @@ internal object ConversationAnalysisReportDialog {
     }
     fun show(activity: Activity, talker: String, logger: (String, Throwable?) -> Unit) {
         if (activity.isFinishing || activity.isDestroyed) return
-        val dialog = Dialog(activity)
+        val dialog = Dialog(activity, android.R.style.Theme_Material_Light_NoActionBar)
         var days = 1
         val root = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(activity, 22), dp(activity, 22), dp(activity, 22), dp(activity, 18))
-            background = rounded(0xfffff8f0.toInt(), dp(activity, 24))
+            setPadding(dp(activity, 22), dp(activity, 28), dp(activity, 22), dp(activity, 18))
+            setBackgroundColor(0xfffff8f0.toInt())
         }
         val scroll = ScrollView(activity).apply { isFillViewport = true }
         val page = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -197,7 +197,18 @@ internal object ConversationAnalysisReportDialog {
         content.addView(top)
         val tabs = LinearLayout(activity).apply { gravity = Gravity.CENTER; background = rounded(0xfff6ece2.toInt(), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
         listOf("今日" to 1, "昨日" to 2, "本周" to 7, "本月" to 30, "全部" to 60).forEachIndexed { index, pair ->
-            val tab = label(activity, pair.first, 14f, if (index == 0) 0xfff57c00.toInt() else 0xff4e4b54.toInt(), index == 0).apply { gravity = Gravity.CENTER; setOnClickListener { tabs.children().forEach { it.background = null }; background = rounded(0xfffffdf9.toInt(), dp(activity, 12)); showAi(activity, dialog, talker, pair.second, logger) } }
+            val tab = label(activity, pair.first, 14f, if (index == 0) 0xfff57c00.toInt() else 0xff4e4b54.toInt(), index == 0).apply {
+                gravity = Gravity.CENTER
+                setOnClickListener {
+                    tabs.children().forEach { child ->
+                        child.background = null
+                        (child as? TextView)?.apply { setTextColor(0xff4e4b54.toInt()); setTypeface(typeface, android.graphics.Typeface.NORMAL) }
+                    }
+                    background = rounded(0xfffffdf9.toInt(), dp(activity, 12))
+                    setTextColor(0xfff57c00.toInt())
+                    setTypeface(typeface, android.graphics.Typeface.BOLD)
+                }
+            }
             tabs.addView(tab, LinearLayout.LayoutParams(0, dp(activity, 34), 1f))
         }
         content.addView(tabs, marginParams(activity, -1, 42, 0, 10, 0, 10))
@@ -215,13 +226,36 @@ internal object ConversationAnalysisReportDialog {
     private fun buildDeepCharts(activity: Activity, dialog: Dialog, talker: String, days: Int, metrics: LinearLayout, range: TextView, logger: (String, Throwable?) -> Unit): LinearLayout {
         val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; background = rounded(0xfffffdf9.toInt(), dp(activity, 20)); setPadding(dp(activity, 10), dp(activity, 8), dp(activity, 10), dp(activity, 10)) }
         val activityBody = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8)) }
-        activityBody.addView(actionRow(activity, "◷", "检测周期    最近 $days 天"))
-        val seek = SeekBar(activity).apply { max = 59; progress = days - 1; progressTintList = android.content.res.ColorStateList.valueOf(0xfff57c00.toInt()) }
-        activityBody.addView(seek, LinearLayout.LayoutParams(-1, dp(activity, 48)))
+        val activityTitle = actionRow(activity, "◷", "检测周期    最近 $days 天")
+        val activitySeek = SeekBar(activity).apply { max = 59; progress = days - 1; progressTintList = android.content.res.ColorStateList.valueOf(0xfff57c00.toInt()) }
+        activityBody.addView(activityTitle)
+        activityBody.addView(activitySeek, LinearLayout.LayoutParams(-1, dp(activity, 48)))
+        val activeValue = label(activity, "0", 23f, 0xff292522.toInt(), true)
+        val memberValue = label(activity, "0", 23f, 0xff292522.toInt(), true)
         val stats = LinearLayout(activity).apply { background = rounded(0xfffff4e6.toInt(), dp(activity, 18)); setPadding(dp(activity, 8), dp(activity, 12), dp(activity, 8), dp(activity, 12)) }
-        stats.addView(metricSmall(activity, "0", "活跃发言人数"), LinearLayout.LayoutParams(0, dp(activity, 62), 1f)); stats.addView(metricSmall(activity, "0", "当前群聊总人数"), LinearLayout.LayoutParams(0, dp(activity, 62), 1f)); activityBody.addView(stats)
-        activityBody.addView(label(activity, "查看/清理未发言成员（0人）", 15f, 0xffb82d25.toInt(), true).apply { gravity = Gravity.CENTER; setPadding(0, dp(activity, 12), 0, dp(activity, 12)); background = rounded(0xfff1e2df.toInt(), dp(activity, 15)) }, marginParams(activity, -1, 48, 0, 10, 0, 0))
+        stats.addView(metricSmallView(activity, activeValue, "活跃发言人数"), LinearLayout.LayoutParams(0, dp(activity, 62), 1f))
+        stats.addView(metricSmallView(activity, memberValue, "当前群聊总人数"), LinearLayout.LayoutParams(0, dp(activity, 62), 1f))
+        activityBody.addView(stats)
+        val inactive = label(activity, "查看/清理未发言成员（0人）", 15f, 0xffb82d25.toInt(), true).apply { gravity = Gravity.CENTER; setPadding(0, dp(activity, 12), 0, dp(activity, 12)); background = rounded(0xfff1e2df.toInt(), dp(activity, 15)) }
+        activityBody.addView(inactive, marginParams(activity, -1, 48, 0, 10, 0, 0))
         addCollapsible(activity, root, "♟", "群聊活跃检测", activityBody, false)
+        fun reloadActivity(nextDays: Int) {
+            executor.execute {
+                val result = runCatching { ConversationAnalysisDetailsRepository().load(talker, nextDays) }.getOrElse { ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), it.message) }
+                Handler(Looper.getMainLooper()).post {
+                    activeValue.text = result.ranking.count { it.count > 0 }.toString()
+                    memberValue.text = result.lowActivity.size.toString()
+                    inactive.text = "查看/清理未发言成员（${result.lowActivity.count { it.count == 0 }}人）"
+                    inactive.setOnClickListener { showLowActivityMembers(activity, result.lowActivity) }
+                }
+            }
+        }
+        activitySeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(b: SeekBar?, value: Int, fromUser: Boolean) { if (fromUser) activityTitleText(activityTitle, "检测周期    最近 ${value + 1} 天") }
+            override fun onStartTrackingTouch(b: SeekBar?) = Unit
+            override fun onStopTrackingTouch(b: SeekBar?) { reloadActivity((b?.progress ?: 0) + 1) }
+        })
+        reloadActivity(days)
         val names = listOf("活跃发言排行" to "▥", "高频语义特征" to "✦", "聊天作息图鉴" to "◕", "情绪指纹探测" to "☺", "废话程度鉴定" to "π", "多维属性探测" to "◎", "全天活跃频次" to "⌁", "内容载体偏好" to "◌")
         val bodies = LinkedHashMap<String, LinearLayout>()
         names.forEach { pair ->
@@ -301,7 +335,23 @@ internal object ConversationAnalysisReportDialog {
     }
 
     private fun actionButton(activity: Activity, text: String, color: Int, click: () -> Unit) = TextView(activity).apply { this.text = text; textSize = 15f; setTextColor(Color.WHITE); gravity = Gravity.CENTER; setTypeface(typeface, android.graphics.Typeface.BOLD); background = rounded(color, dp(activity, 16)); setOnClickListener { click() } }
-    private fun metricSmall(activity: Activity, value: String, title: String) = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; addView(label(activity, value, 23f, 0xff292522.toInt(), true)); addView(label(activity, title, 11f, 0xff4e4b54.toInt(), false)) }
+    private fun metricSmallView(activity: Activity, value: TextView, title: String) = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; addView(value, LinearLayout.LayoutParams(-1, dp(activity, 34))); addView(label(activity, title, 11f, 0xff4e4b54.toInt(), false)) }
+    private fun metricSmall(activity: Activity, value: String, title: String) = metricSmallView(activity, label(activity, value, 23f, 0xff292522.toInt(), true), title)
+    private fun activityTitleText(row: LinearLayout, text: String) { (row.getChildAt(1) as? TextView)?.text = text }
+
+    private fun showLowActivityMembers(activity: Activity, members: List<ConversationLowActivityRow>) {
+        val dialog = Dialog(activity)
+        val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 22), dp(activity, 20), dp(activity, 22), dp(activity, 16)); background = rounded(0xfffffdf9.toInt(), dp(activity, 22)) }
+        box.addView(label(activity, "未发言成员", 22f, 0xff292522.toInt(), true), marginParams(activity, -1, 48, 0, 0, 0, 8))
+        val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        members.filter { it.count == 0 }.forEach { body.addView(label(activity, it.name, 16f, 0xff302b28.toInt(), false).apply { setPadding(0, dp(activity, 8), 0, dp(activity, 8)) }) }
+        box.addView(ScrollView(activity).apply { addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        box.addView(label(activity, "关闭", 16f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(-1, dp(activity, 48)))
+        dialog.setContentView(box)
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .86f).toInt(), (activity.resources.displayMetrics.heightPixels * .72f).toInt()) }
+        dialog.show()
+    }
     private fun divider(activity: Activity) = View(activity).apply { setBackgroundColor(0xffeee2d6.toInt()) }
     private fun LinearLayout.children(): List<View> = (0 until childCount).map { getChildAt(it) }
 
@@ -327,7 +377,7 @@ internal object ConversationAnalysisReportDialog {
         dialog = Dialog(activity)
         dialog.setContentView(root)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        dialog.setOnShowListener { dialog.window?.setLayout(-1, -1) }
+        dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .90f).toInt(), (activity.resources.displayMetrics.heightPixels * .78f).toInt()) }
         dialog.show()
         loadProfile(selected)
     }
@@ -347,7 +397,7 @@ internal object ConversationAnalysisReportDialog {
             configDialog = Dialog(activity)
             configDialog.setContentView(box)
             configDialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-            configDialog.setOnShowListener { configDialog.window?.setLayout(-1, -1) }
+            configDialog.setOnShowListener { configDialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .86f).toInt(), (activity.resources.displayMetrics.heightPixels * .55f).toInt()) }
             configDialog.show()
             return
         }
@@ -361,7 +411,7 @@ internal object ConversationAnalysisReportDialog {
         wrapper.addView(send, LinearLayout.LayoutParams(-1, dp(activity, 48)))
         resultDialog.setContentView(wrapper)
         resultDialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        resultDialog.setOnShowListener { resultDialog.window?.setLayout(-1, -1) }
+        resultDialog.setOnShowListener { resultDialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .82f).toInt()) }
         resultDialog.setOnDismissListener { ai.cancel() }
         resultDialog.show()
         ai.generateStreaming(talker, days, { partial -> reportView.update(talker, days, partial) }, { final -> reportView.update(talker, days, final) })

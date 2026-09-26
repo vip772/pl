@@ -107,7 +107,7 @@ internal object ConversationAnalysisDetailsDialog {
         root.addView(TextView(activity).apply { text = "关闭"; gravity = Gravity.CENTER; textSize = 16f; setTextColor(Color.rgb(38, 150, 92)); setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(-1, dp(activity, 48)))
         dialog.setContentView(root)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        dialog.setOnShowListener { dialog.window?.setLayout(-1, -1) }
+        dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .82f).toInt()) }
         dialog.show()
         if (details.error != null) { body.addView(line(activity, details.error)); return }
         body.addView(line(activity, "活跃排行"))
