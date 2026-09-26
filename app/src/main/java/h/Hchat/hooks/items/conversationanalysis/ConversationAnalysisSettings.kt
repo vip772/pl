@@ -1,6 +1,7 @@
 package h.Hchat.hooks.items.conversationanalysis
 
 import android.content.Context
+import h.Hchat.preferences.HchatStorage
 
 object ConversationAnalysisSettings {
     const val PREFS_NAME = "Hchat_conversation_analysis_config"
@@ -8,6 +9,6 @@ object ConversationAnalysisSettings {
     const val DEFAULT_ENABLE = false
 
     fun isEnabled(context: Context): Boolean =
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        HchatStorage.preferences(context, PREFS_NAME)
             .getBoolean(KEY_ENABLE, DEFAULT_ENABLE)
 }

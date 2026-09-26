@@ -239,6 +239,8 @@ import h.Hchat.hooks.items.securemessage.SecureMessageSettings
 import h.Hchat.hooks.items.transparentavatar.UploadTransparentAvatarFeature
 import h.Hchat.hooks.items.conversationgroup.ConversationGroup
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupFeature
+import h.Hchat.hooks.items.conversationanalysis.ConversationAnalysisFeature
+import h.Hchat.hooks.items.conversationanalysis.ConversationAnalysisSettings
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupPickerSupport
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupRuntime
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupStore
@@ -1150,6 +1152,7 @@ internal fun FeatureSettingsPage(
         AutoReplyFeature.ID -> AutoReplyMiuixPage(context, provider, onBack)
         AutoMessageForwardFeature.ID -> AutoMessageForwardMiuixPage(context, provider, onBack)
         ConversationGroupFeature.ID -> ConversationGroupMiuixPage(context, provider, onBack)
+        ConversationAnalysisFeature.ID -> ConversationAnalysisMiuixPage(context, provider, onBack)
         CustomNotificationFeature.ID -> CustomNotificationMiuixPage(context, provider, onBack)
         KeywordNotificationFeature.ID -> KeywordNotificationMiuixPage(context, provider, onBack)
         TextSpeechFeature.ID -> TextSpeechMiuixPage(context, provider, onBack)
