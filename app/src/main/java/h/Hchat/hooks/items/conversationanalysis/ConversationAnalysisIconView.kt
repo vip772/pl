@@ -28,10 +28,16 @@ internal class ConversationAnalysisIconView(
         val cy = height * 0.5f
         when (kind) {
             Kind.PEOPLE -> {
-                canvas.drawCircle(cx - 5 * d, cy - 5 * d, 4 * d, paint)
-                canvas.drawCircle(cx + 6 * d, cy - 3 * d, 3.2f * d, paint)
-                canvas.drawArc(cx - 14 * d, cy + 1 * d, cx + 3 * d, cy + 14 * d, 200f, 140f, false, paint)
-                canvas.drawArc(cx + 1 * d, cy + 2 * d, cx + 14 * d, cy + 13 * d, 205f, 130f, false, paint)
+                canvas.drawCircle(cx, cy - 8 * d, 5 * d, paint)
+                val shoulders = Path().apply {
+                    moveTo(cx - 12 * d, cy + 12 * d)
+                    lineTo(cx - 9 * d, cy + 2 * d)
+                    cubicTo(cx - 6 * d, cy - 2 * d, cx + 6 * d, cy - 2 * d, cx + 9 * d, cy + 2 * d)
+                    lineTo(cx + 12 * d, cy + 12 * d)
+                    close()
+                }
+                canvas.drawPath(shoulders, paint)
+                canvas.drawLine(cx - 12 * d, cy + 12 * d, cx + 12 * d, cy + 12 * d, paint)
             }
             Kind.MESSAGE -> {
                 canvas.drawRoundRect(cx - 14 * d, cy - 10 * d, cx + 14 * d, cy + 8 * d, 5 * d, 5 * d, paint)
