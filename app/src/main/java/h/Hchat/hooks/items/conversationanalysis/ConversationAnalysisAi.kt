@@ -52,15 +52,16 @@ internal class ConversationAnalysisAi(private val context: Context) {
     fun saveProfile(profile: ConversationAiProfile) = configStore.save(profile)
     fun testConnection(address: String, path: String, key: String, onResult: (Boolean, String) -> Unit) {
         executor.execute {
-            val result = runCatching {
+            val result: Pair<Boolean, String> = runCatching<Pair<Boolean, String>> {
                 val conn = URL(join(address, path)).openConnection() as HttpURLConnection
                 try {
                     conn.requestMethod = "POST"; conn.doOutput = true; conn.connectTimeout = 10000; conn.readTimeout = 10000
                     conn.setRequestProperty("Authorization", "Bearer $key"); conn.setRequestProperty("Content-Type", "application/json")
                     conn.outputStream.use { it.write("{}".toByteArray(StandardCharsets.UTF_8)) }
-                    conn.responseCode in 200..499 to "HTTP ${conn.responseCode}"
+                    val code = conn.responseCode
+                    Pair(code in 200..499, "HTTP $code")
                 } finally { conn.disconnect() }
-            }.getOrElse { false to (it.message ?: it.javaClass.simpleName) }
+            }.getOrElse { Pair(false, it.message ?: it.javaClass.simpleName) }
             android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(result.first, result.second) }
         }
     }
