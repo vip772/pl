@@ -25,8 +25,8 @@ internal class ConversationAnalysisRepository {
         val database = WeChatApis.database() ?: return unavailable(cleanTalker, "微信数据库API尚未初始化")
         if (!database.prepare()) return unavailable(cleanTalker, "微信消息数据库尚未就绪")
 
-        val now = System.currentTimeMillis()
-        val start = localPeriodStart(days.coerceIn(1, 60))
+        val start = localPeriodStart(days)
+        val end = localPeriodEnd(days)
         val self = WeChatApis.account()?.selfWxId().orEmpty()
         val sql = "SELECT COUNT(*) AS total, " +
             "COUNT(DISTINCT CASE WHEN isSend = 1 THEN ? " +
@@ -38,14 +38,14 @@ internal class ConversationAnalysisRepository {
             "FROM message WHERE talker = ? AND type NOT IN (10000) AND createTime >= ? AND createTime <= ?"
         val row = database.query(
             sql,
-            arrayOf(self, cleanTalker, start.toString(), now.toString())
+            arrayOf(self, cleanTalker, start.toString(), end.toString())
         ).firstOrNull().orEmpty()
         val history = database.query(
             "SELECT COUNT(*) AS total FROM message WHERE talker = ?",
             arrayOf(cleanTalker)
         ).firstOrNull().orEmpty()
         val members = WeChatApis.contacts()?.getGroupMemberIds(cleanTalker).orEmpty()
-        val active = queryActiveMemberCount(database, cleanTalker, start, now, self)
+        val active = queryActiveMemberCount(database, cleanTalker, start, end, self)
         return ConversationAnalysisSummary(
             talker = cleanTalker,
             historyTotal = number(history["total"]),
@@ -79,13 +79,21 @@ internal class ConversationAnalysisRepository {
     }
 
     private fun localPeriodStart(days: Int): Long {
-        val start = Calendar.getInstance()
-        start.set(Calendar.HOUR_OF_DAY, 0)
-        start.set(Calendar.MINUTE, 0)
-        start.set(Calendar.SECOND, 0)
-        start.set(Calendar.MILLISECOND, 0)
-        start.add(Calendar.DAY_OF_YEAR, -(days - 1))
-        return start.timeInMillis
+        val start = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
+        return when (days) {
+            -1 -> start.apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            -7 -> start.apply { add(Calendar.DAY_OF_YEAR, -7) }.timeInMillis
+            -30 -> start.apply { add(Calendar.MONTH, -1); set(Calendar.DAY_OF_MONTH, 1) }.timeInMillis
+            else -> if (days >= 60) 0L else start.apply { add(Calendar.DAY_OF_YEAR, -(days.coerceAtLeast(1) - 1)) }.timeInMillis
+        }
+    }
+    private fun localPeriodEnd(days: Int): Long {
+        val end = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999) }
+        return when (days) {
+            -1, -7 -> end.apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            -30 -> end.apply { set(Calendar.DAY_OF_MONTH, 1); add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            else -> if (days >= 60) System.currentTimeMillis() else end.timeInMillis
+        }
     }
 
     private fun number(value: Any?): Long = when (value) {

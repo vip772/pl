@@ -35,7 +35,7 @@ internal class ConversationAnalysisDetailsRepository {
         val db = WeChatApis.database() ?: return error("微信数据库API尚未初始化")
         if (!db.prepare()) return error("微信消息数据库尚未就绪")
         val start = periodStart(days)
-        val end = System.currentTimeMillis()
+        val end = periodEnd(days)
         val self = WeChatApis.account()?.selfWxId().orEmpty()
         val rankingSql = "SELECT CASE WHEN isSend = 1 THEN ? " +
             "WHEN instr(content, ':\\n') > 0 THEN substr(content, 1, instr(content, ':\\n') - 1) " +
@@ -85,10 +85,23 @@ internal class ConversationAnalysisDetailsRepository {
     }.getOrDefault(id)
     private fun periodStart(days: Int): Long {
         if (days >= 60) return 0L
-        return Calendar.getInstance().apply {
-            set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
-            add(Calendar.DAY_OF_YEAR, -(days.coerceAtLeast(1) - 1))
-        }.timeInMillis
+        val now = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
+        return when (days) {
+            -1 -> now.apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            -7 -> now.apply { add(Calendar.DAY_OF_YEAR, -7) }.timeInMillis
+            -30 -> now.apply { add(Calendar.MONTH, -1); set(Calendar.DAY_OF_MONTH, 1) }.timeInMillis
+            else -> now.apply { add(Calendar.DAY_OF_YEAR, -(days.coerceAtLeast(1) - 1)) }.timeInMillis
+        }
+    }
+    private fun periodEnd(days: Int): Long {
+        if (days >= 60) return System.currentTimeMillis()
+        val end = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999) }
+        return when (days) {
+            -1 -> end.apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            -7 -> end.apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            -30 -> end.apply { set(Calendar.DAY_OF_MONTH, 1); add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            else -> end.timeInMillis
+        }
     }
     private fun error(message: String) = ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), message)
     private fun Any?.text() = this?.toString().orEmpty()

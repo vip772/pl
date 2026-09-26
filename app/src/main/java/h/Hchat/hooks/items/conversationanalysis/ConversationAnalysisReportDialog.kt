@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Dialog
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
+import android.content.res.Configuration
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
@@ -38,7 +39,7 @@ internal object ConversationAnalysisReportDialog {
         val root = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(activity, 18), dp(activity, 22), dp(activity, 18), dp(activity, 40))
-            setBackgroundColor(0xfffff8f0.toInt())
+            setBackgroundColor(pageColor(activity))
         }
         val scroll = ScrollView(activity).apply { isFillViewport = true }
         val page = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -58,7 +59,7 @@ internal object ConversationAnalysisReportDialog {
         page.addView(section(activity, "核心指标"), marginParams(activity, -1, 48, 0, 20, 0, 0))
         val metrics = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
-            background = rounded(0xfffffdf9.toInt(), dp(activity, 28))
+            background = rounded(cardColor(activity), dp(activity, 28))
             setPadding(dp(activity, 16), dp(activity, 16), dp(activity, 16), dp(activity, 16))
         }
         val metricRows = listOf(
@@ -86,14 +87,12 @@ internal object ConversationAnalysisReportDialog {
         val deepRoot = buildDeepCharts(activity, dialog, talker, days, metrics, range, logger)
         page.addView(deepRoot)
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        val close = label(activity, "关闭", 16f, 0xffd86522.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }
-        root.addView(close, LinearLayout.LayoutParams(-1, dp(activity, 46)))
         dialog.setContentView(root)
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
         dialog.setOnShowListener {
             dialog.window?.setLayout(-1, -1)
-            dialog.window?.setStatusBarColor(0xfffff8f0.toInt())
-            dialog.window?.setNavigationBarColor(0xfffff8f0.toInt())
+            dialog.window?.setStatusBarColor(pageColor(activity))
+            dialog.window?.setNavigationBarColor(pageColor(activity))
             load(activity, dialog, metrics, talker, days, logger)
         }
         dialog.show()
@@ -120,19 +119,19 @@ internal object ConversationAnalysisReportDialog {
         this.text = text; textSize = size; setTextColor(color); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
 
-    private fun section(activity: Activity, text: String) = label(activity, text, 19f, 0xff302b28.toInt(), true)
+    private fun section(activity: Activity, text: String) = label(activity, text, 20f, textColor(activity), true)
 
     private fun metricCard(activity: Activity, icon: ConversationAnalysisIconView.Kind, value: String, caption: String) = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(dp(activity, 4), 0, dp(activity, 4), 0)
         addView(ConversationAnalysisIconView(activity, icon).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-1, dp(activity, 44)))
-        addView(label(activity, value, 25f, 0xff292522.toInt(), true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-1, dp(activity, 38)))
-        addView(label(activity, caption, 11f, 0xff77716d.toInt(), false).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-1, dp(activity, 28)))
+        addView(label(activity, value, 32f, textColor(activity), true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-1, dp(activity, 38)))
+        addView(label(activity, caption, 16f, if (isDark(activity)) 0xffc0bac5.toInt() else 0xff77716d.toInt(), false).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(-1, dp(activity, 28)))
     }
 
     private fun actionRow(activity: Activity, icon: String, title: String) = LinearLayout(activity).apply {
         gravity = Gravity.CENTER_VERTICAL; setPadding(dp(activity, 17), 0, dp(activity, 14), 0); background = rounded(0xfffffdf9.toInt(), dp(activity, 20))
         addView(label(activity, icon, 23f, 0xffd86522.toInt(), false), LinearLayout.LayoutParams(dp(activity, 42), -1))
-        addView(label(activity, title, 16f, 0xff302b28.toInt(), true), LinearLayout.LayoutParams(0, -1, 1f))
+        addView(label(activity, title, 16f, textColor(activity), true), LinearLayout.LayoutParams(0, -1, 1f))
         addView(label(activity, "›", 28f, 0xffaaa29b.toInt(), false), LinearLayout.LayoutParams(dp(activity, 25), -1))
     }
 
@@ -142,7 +141,7 @@ internal object ConversationAnalysisReportDialog {
     private fun addCollapsible(activity: Activity, parent: LinearLayout, iconText: String, titleText: String, body: View, open: Boolean, insight: Boolean = false) {
         val card = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
-            background = if (insight) strokeRounded(0xfffff8f0.toInt(), 0xffe69150.toInt(), dp(activity, 28), dp(activity, 2)) else rounded(0xfffffdf9.toInt(), dp(activity, 28))
+            background = if (insight) strokeRounded(pageColor(activity), 0xffe69150.toInt(), dp(activity, 28), dp(activity, 2)) else rounded(cardColor(activity), dp(activity, 28))
             setPadding(if (insight) dp(activity, 16) else 0, if (insight) dp(activity, 12) else 0, if (insight) dp(activity, 16) else 0, if (insight) dp(activity, 14) else 0)
         }
         var arrowRef: TextView? = null
@@ -153,7 +152,7 @@ internal object ConversationAnalysisReportDialog {
         } }
         val icon = label(activity, iconText, 18f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER; background = rounded(0xffffe0bd.toInt(), dp(activity, 16)) }
         header.addView(icon, LinearLayout.LayoutParams(dp(activity, 32), dp(activity, 32)))
-        val title = label(activity, titleText, 18f, 0xff1e1c21.toInt(), true).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(activity, 12), 0, 0, 0) }
+        val title = label(activity, titleText, 20f, textColor(activity), true).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(activity, 12), 0, 0, 0) }
         header.addView(title, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
         val arrow = label(activity, if (open) "⌃" else "⌄", 25f, 0xffbdbdbd.toInt(), true).apply { gravity = Gravity.CENTER; arrowRef = this }
         header.addView(arrow, LinearLayout.LayoutParams(dp(activity, 32), dp(activity, 48)))
@@ -177,7 +176,7 @@ internal object ConversationAnalysisReportDialog {
     private fun addSettingSlider(activity: Activity, parent: LinearLayout, title: String, unit: String, min: Int, max: Int, initial: Int) {
         val row = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         val labels = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
-        labels.addView(label(activity, title, 16f, 0xff292522.toInt(), true), LinearLayout.LayoutParams(0, dp(activity, 34), 1f))
+        labels.addView(label(activity, title, 16f, textColor(activity), true), LinearLayout.LayoutParams(0, dp(activity, 34), 1f))
         val value = label(activity, "$initial $unit", 16f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER_VERTICAL or Gravity.RIGHT }
         labels.addView(value, LinearLayout.LayoutParams(dp(activity, 110), dp(activity, 34)))
         row.addView(labels)
@@ -196,6 +195,7 @@ internal object ConversationAnalysisReportDialog {
     }
 
     private fun buildInsight(activity: Activity, dialog: Dialog, talker: String, days: Int, logger: (String, Throwable?) -> Unit): LinearLayout {
+        var selectedDays = days
         val content = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 16), dp(activity, 10), dp(activity, 16), dp(activity, 16)) }
         content.addView(divider(activity), marginParams(activity, -1, 1, 0, 4, 0, 12))
         val top = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -203,12 +203,13 @@ internal object ConversationAnalysisReportDialog {
         val config = label(activity, "⚙", 22f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { showAiConfig(activity) } }
         top.addView(config, LinearLayout.LayoutParams(dp(activity, 42), dp(activity, 40)))
         content.addView(top)
-        val tabs = LinearLayout(activity).apply { gravity = Gravity.CENTER; background = rounded(0xfff6ece2.toInt(), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
+        val tabs = LinearLayout(activity).apply { gravity = Gravity.CENTER; background = rounded(panelColor(activity), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
         val tabScroll = HorizontalScrollView(activity).apply { isHorizontalScrollBarEnabled = false; addView(tabs) }
-        listOf("今日" to 1, "昨日" to 2, "本周" to 7, "上周" to 14, "本月" to 30, "上月" to 60, "全部" to 365).forEachIndexed { index, pair ->
+        listOf("今日" to 1, "昨日" to -1, "本周" to 7, "上周" to -7, "本月" to 30, "上月" to -30, "全部" to 365).forEachIndexed { index, pair ->
             val tab = label(activity, pair.first, 14f, if (index == 0) 0xfff57c00.toInt() else 0xff4e4b54.toInt(), index == 0).apply {
                 gravity = Gravity.CENTER
                 setOnClickListener {
+                    selectedDays = pair.second
                     tabs.children().forEach { child ->
                         child.background = null
                         (child as? TextView)?.apply { setTextColor(0xff4e4b54.toInt()); setTypeface(typeface, android.graphics.Typeface.NORMAL) }
@@ -224,7 +225,7 @@ internal object ConversationAnalysisReportDialog {
         val focus = EditText(activity).apply { hint = "（可选）让 AI 重点关注什么？例如：大家聊了吃的吗"; gravity = Gravity.CENTER; setPadding(dp(activity, 14), dp(activity, 8), dp(activity, 14), dp(activity, 8)); background = rounded(0x00ffffff, dp(activity, 14)) }
         content.addView(focus, LinearLayout.LayoutParams(-1, dp(activity, 58)))
         val buttons = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
-        val generate = actionButton(activity, "✦  开始生成", 0xfff57c00.toInt()) { showAi(activity, dialog, talker, days, logger) }
+        val generate = actionButton(activity, "✦  开始生成", 0xfff57c00.toInt()) { showAi(activity, dialog, talker, selectedDays, logger) }
         val screenshot = actionButton(activity, "生成截图", 0xffe65c00.toInt()) { Toast.makeText(activity, "请先生成 AI 报告", Toast.LENGTH_SHORT).show() }
         buttons.addView(generate, LinearLayout.LayoutParams(0, dp(activity, 46), 1f)); buttons.addView(Space(activity), LinearLayout.LayoutParams(dp(activity, 10), 1)); buttons.addView(screenshot, LinearLayout.LayoutParams(0, dp(activity, 46), 1f))
         content.addView(buttons, marginParams(activity, -1, 46, 0, 12, 0, 12))
@@ -233,9 +234,9 @@ internal object ConversationAnalysisReportDialog {
     }
 
     private fun buildDeepCharts(activity: Activity, dialog: Dialog, talker: String, days: Int, metrics: LinearLayout, range: TextView, logger: (String, Throwable?) -> Unit): LinearLayout {
-        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; background = rounded(0xfffffdf9.toInt(), dp(activity, 28)); setPadding(dp(activity, 16), dp(activity, 12), dp(activity, 16), dp(activity, 14)) }
+        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; background = rounded(cardColor(activity), dp(activity, 28)); setPadding(dp(activity, 16), dp(activity, 12), dp(activity, 16), dp(activity, 14)) }
         val activityBody = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        val cycle = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 16), dp(activity, 18), dp(activity, 16), dp(activity, 18)); background = rounded(0xfffff4e6.toInt(), dp(activity, 22)) }
+        val cycle = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 16), dp(activity, 18), dp(activity, 16), dp(activity, 18)); background = rounded(panelColor(activity), dp(activity, 22)) }
         val activityTitle = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         activityTitle.addView(label(activity, "检测周期", 18f, 0xff292522.toInt(), true), LinearLayout.LayoutParams(0, dp(activity, 34), 1f))
         val activityPeriod = label(activity, "最近 $days 天", 18f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL }
@@ -246,7 +247,7 @@ internal object ConversationAnalysisReportDialog {
         activityBody.addView(cycle)
         val activeValue = label(activity, "0", 23f, 0xff292522.toInt(), true)
         val memberValue = label(activity, "0", 23f, 0xff292522.toInt(), true)
-        val stats = LinearLayout(activity).apply { background = rounded(0xfffff4e6.toInt(), dp(activity, 18)); setPadding(dp(activity, 8), dp(activity, 12), dp(activity, 8), dp(activity, 12)) }
+        val stats = LinearLayout(activity).apply { background = rounded(panelColor(activity), dp(activity, 18)); setPadding(dp(activity, 8), dp(activity, 12), dp(activity, 8), dp(activity, 12)) }
         stats.addView(metricSmallView(activity, activeValue, "活跃发言人数"), LinearLayout.LayoutParams(0, dp(activity, 62), 1f))
         stats.addView(metricSmallView(activity, memberValue, "当前群聊总人数"), LinearLayout.LayoutParams(0, dp(activity, 62), 1f))
         activityBody.addView(stats, marginParams(activity, -1, 0, 0, 12, 0, 0))
@@ -272,11 +273,20 @@ internal object ConversationAnalysisReportDialog {
         reloadActivity(days)
         val names = listOf("活跃发言排行" to "▥", "高频语义特征" to "✦", "聊天作息图鉴" to "◕", "情绪指纹探测" to "☺", "废话程度鉴定" to "π", "多维属性探测" to "◎", "全天活跃频次" to "⌁", "内容载体偏好" to "◌")
         val bodies = LinkedHashMap<String, LinearLayout>()
+        var reloadRanking: ((Int) -> Unit)? = null
         names.forEach { pair ->
-            val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 16), dp(activity, 8), dp(activity, 16), dp(activity, 12)); background = rounded(0xfffff4e6.toInt(), dp(activity, 16)) }
+            val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 16), dp(activity, 8), dp(activity, 16), dp(activity, 12)); background = rounded(panelColor(activity), dp(activity, 16)) }
             body.addView(label(activity, "正在读取群聊数据…", 14f, 0xff4e4b54.toInt(), false).apply { gravity = Gravity.CENTER; setPadding(0, dp(activity, 18), 0, dp(activity, 18)) })
             bodies[pair.first] = body
             addCollapsible(activity, root, pair.second, pair.first, body, false)
+        }
+        reloadRanking = { periodDays ->
+            executor.execute {
+                val refreshed = runCatching { ConversationAnalysisDetailsRepository().load(talker, periodDays) }.getOrElse {
+                    ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), it.message)
+                }
+                Handler(Looper.getMainLooper()).post { renderRanking(activity, bodies["活跃发言排行"], refreshed.ranking, reloadRanking) }
+            }
         }
         executor.execute {
             val details = runCatching { ConversationAnalysisDetailsRepository().load(talker, days) }.getOrElse {
@@ -296,7 +306,7 @@ internal object ConversationAnalysisReportDialog {
             bodies.values.forEach { box -> box.removeAllViews(); box.addView(label(activity, details.error, 14f, 0xffb82d25.toInt(), false).apply { gravity = Gravity.CENTER }) }
             return
         }
-        renderRanking(activity, bodies["活跃发言排行"], details.ranking)
+        renderRanking(activity, bodies["活跃发言排行"], details.ranking, reloadRanking)
         renderBars(activity, bodies["高频语义特征"], listOf("平均文本长度" to details.deep.avgLength, "问题消息" to details.deep.questionCount, "欢乐表达" to details.deep.laughCount), 0xfff57c00.toInt())
         renderBars(activity, bodies["情绪指纹探测"], listOf("快乐浓度" to details.deep.laughCount, "疑惑指数" to details.deep.questionCount, "表达强度" to details.deep.longest), 0xffe65c00.toInt())
         renderBars(activity, bodies["废话程度鉴定"], listOf("平均文本长度" to details.deep.avgLength, "最长文本" to details.deep.longest), 0xff2196f3.toInt())
@@ -306,7 +316,7 @@ internal object ConversationAnalysisReportDialog {
         renderHourly(activity, bodies["全天活跃频次"], details.deep.hourly)
     }
 
-    private fun renderRanking(activity: Activity, box: LinearLayout?, rows: List<ConversationRankingRow>) {
+    private fun renderRanking(activity: Activity, box: LinearLayout?, rows: List<ConversationRankingRow>, reload: ((Int) -> Unit)? = null) {
         if (box == null) return
         box.removeAllViews()
         val tabs = LinearLayout(activity).apply { gravity = Gravity.CENTER; background = rounded(0xffffead2.toInt(), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
@@ -315,6 +325,8 @@ internal object ConversationAnalysisReportDialog {
             val tab = label(activity, text, 13f, if (index == 0) 0xfff57c00.toInt() else 0xff6f6862.toInt(), index == 0).apply {
                 gravity = Gravity.CENTER
                 setOnClickListener {
+                    val periodDays = listOf(1, -1, 7, -7, 30, -30, 365)[index]
+                    reload?.invoke(periodDays)
                     tabs.children().forEach { it.background = null; (it as? TextView)?.setTextColor(0xff6f6862.toInt()) }
                     background = rounded(0xfffffdf9.toInt(), dp(activity, 10)); setTextColor(0xfff57c00.toInt())
                 }
@@ -353,8 +365,8 @@ internal object ConversationAnalysisReportDialog {
                 val colors = listOf(0xffffe7c2, 0xffffd6c5, 0xffd9e9ff, 0xffe4d8ff).map { it.toInt() }
                 val card = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; background = rounded(colors[groups.indexOf(item) % colors.size], dp(activity, 18)); setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8)) }
                 card.addView(label(activity, "◷", 25f, 0xffe65c00.toInt(), true), LinearLayout.LayoutParams(-1, dp(activity, 30)))
-                card.addView(label(activity, item.first, 14f, 0xff302b28.toInt(), true), LinearLayout.LayoutParams(-1, dp(activity, 25)))
-                card.addView(label(activity, item.third.toString() + " 条", 20f, 0xff292522.toInt(), true), LinearLayout.LayoutParams(-1, dp(activity, 30)))
+                card.addView(label(activity, item.first, 16f, textColor(activity), true), LinearLayout.LayoutParams(-1, dp(activity, 25)))
+                card.addView(label(activity, item.third.toString() + " 条", 27f, textColor(activity), true), LinearLayout.LayoutParams(-1, dp(activity, 30)))
                 row.addView(card, LinearLayout.LayoutParams(0, dp(activity, 154), 1f).apply { setMargins(if (index == 0) 0 else dp(activity, 6), 0, if (index == 1) 0 else dp(activity, 6), dp(activity, 8)) })
             }
             grid.addView(row)
@@ -412,8 +424,8 @@ internal object ConversationAnalysisReportDialog {
 
     private fun showLowActivityMembers(activity: Activity, members: List<ConversationLowActivityRow>) {
         val dialog = Dialog(activity)
-        val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 22), dp(activity, 20), dp(activity, 22), dp(activity, 16)); background = rounded(0xfffff8f0.toInt(), dp(activity, 22)) }
-        box.addView(label(activity, "未发言成员", 22f, 0xff292522.toInt(), true), marginParams(activity, -1, 48, 0, 0, 0, 8))
+        val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 22), dp(activity, 20), dp(activity, 22), dp(activity, 16)); background = rounded(pageColor(activity), dp(activity, 22)) }
+        box.addView(label(activity, "低活跃成员（${members.count { it.count == 0 }}人）", 22f, textColor(activity), true), marginParams(activity, -1, 48, 0, 0, 0, 8))
         val selectBar = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         val selected = ArrayList<String>()
         val selectAll = label(activity, "全选", 14f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { selected.clear(); members.filter { it.count == 0 }.forEach { selected.add(it.wxId) } } }
@@ -422,7 +434,7 @@ internal object ConversationAnalysisReportDialog {
         box.addView(selectBar)
         val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         members.filter { it.count == 0 }.forEach { member ->
-            val check = CheckBox(activity).apply { text = member.name; textSize = 16f; setTextColor(0xff302b28.toInt()); buttonTintList = android.content.res.ColorStateList.valueOf(0xfff57c00.toInt()); setPadding(0, dp(activity, 5), 0, dp(activity, 5)); setOnCheckedChangeListener { _, checked -> if (checked) selected.add(member.wxId) else selected.remove(member.wxId) } }
+            val check = CheckBox(activity).apply { text = member.name; textSize = 16f; setTextColor(textColor(activity)); buttonTintList = android.content.res.ColorStateList.valueOf(0xfff57c00.toInt()); setPadding(0, dp(activity, 5), 0, dp(activity, 5)); setOnCheckedChangeListener { _, checked -> if (checked) selected.add(member.wxId) else selected.remove(member.wxId) } }
             body.addView(check, LinearLayout.LayoutParams(-1, dp(activity, 48)))
         }
         box.addView(ScrollView(activity).apply { isFillViewport = true; addView(body) }, LinearLayout.LayoutParams(-1, 0, 1f))
@@ -439,13 +451,17 @@ internal object ConversationAnalysisReportDialog {
         val ai = ConversationAnalysisAi(activity)
         val store = ConversationAnalysisAiConfigStore(activity)
         var selected = store.activeProfileId()
-        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 18), dp(activity, 16), dp(activity, 18), dp(activity, 16)); background = rounded(0xfffff8f0.toInt(), dp(activity, 24)) }
-        val profileBar = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; background = rounded(0xffffead2.toInt(), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
+        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 18), dp(activity, 16), dp(activity, 18), dp(activity, 16)); background = rounded(pageColor(activity), dp(activity, 24)) }
+        val titleRow = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
+        titleRow.addView(label(activity, "API 接口配置", 24f, textColor(activity), true), LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
+        titleRow.addView(label(activity, "▾", 22f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 52)))
+        root.addView(titleRow)
+        val profileBar = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; background = rounded(panelColor(activity), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
         val fields = arrayOf(EditText(activity), EditText(activity), EditText(activity), EditText(activity), EditText(activity))
         fields[0].hint = "方案名称"; fields[1].hint = "API 地址"; fields[2].hint = "API 路径"; fields[3].hint = "API Key"; fields[4].hint = "模型名称"
-        fields.forEach { it.setTextColor(0xff292522.toInt()); it.setHintTextColor(0xff8b8178.toInt()); it.setPadding(dp(activity, 14), 0, dp(activity, 14), 0); it.background = strokeRounded(0xfffffdf9.toInt(), 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); root.addView(it, marginParams(activity, -1, 46, 0, 4, 0, 0)) }
-        val capacity = EditText(activity).apply { hint = "上下文容量：128k / 256k / 512k / 1m / 2m"; setTextColor(0xff292522.toInt()); setHintTextColor(0xff8b8178.toInt()); background = strokeRounded(0xfffffdf9.toInt(), 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); setPadding(dp(activity, 14), 0, dp(activity, 14), 0) }
-        val limit = EditText(activity).apply { hint = "消息上限，0 为自动"; inputType = android.text.InputType.TYPE_CLASS_NUMBER; setTextColor(0xff292522.toInt()); setHintTextColor(0xff8b8178.toInt()); background = strokeRounded(0xfffffdf9.toInt(), 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); setPadding(dp(activity, 14), 0, dp(activity, 14), 0) }
+        fields.forEach { it.setTextColor(textColor(activity)); it.setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt()); it.setPadding(dp(activity, 14), 0, dp(activity, 14), 0); it.background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); root.addView(it, marginParams(activity, -1, 46, 0, 4, 0, 0)) }
+        val capacity = EditText(activity).apply { hint = "上下文容量：128k / 256k / 512k / 1m / 2m"; setTextColor(textColor(activity)); setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt()); background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); setPadding(dp(activity, 14), 0, dp(activity, 14), 0) }
+        val limit = EditText(activity).apply { hint = "消息上限，0 为自动"; inputType = android.text.InputType.TYPE_CLASS_NUMBER; setTextColor(textColor(activity)); setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt()); background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); setPadding(dp(activity, 14), 0, dp(activity, 14), 0) }
         root.addView(capacity, LinearLayout.LayoutParams(-1, dp(activity, 46)))
         root.addView(limit, LinearLayout.LayoutParams(-1, dp(activity, 46)))
         fun loadProfile(id: Int) { selected = id; val p = ai.profiles()[id - 1]; fields[0].setText(p.name); fields[1].setText(p.address); fields[2].setText(p.path); fields[3].setText(p.key); fields[4].setText(p.model) }
@@ -465,7 +481,7 @@ internal object ConversationAnalysisReportDialog {
     private fun showAi(activity: Activity, reportDialog: Dialog, talker: String, days: Int, logger: (String, Throwable?) -> Unit) {
         val ai = ConversationAnalysisAi(activity)
         if (!ai.configured()) {
-            val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 20), dp(activity, 18), dp(activity, 20), dp(activity, 18)); background = rounded(0xfffff8f0.toInt(), dp(activity, 22)) }
+            val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 20), dp(activity, 18), dp(activity, 20), dp(activity, 18)); background = rounded(pageColor(activity), dp(activity, 22)) }
             val address = EditText(activity).apply { hint = "API 地址" }
             val path = EditText(activity).apply { hint = "API 路径"; setText("/chat/completions") }
             val key = EditText(activity).apply { hint = "API Key" }
@@ -559,5 +575,10 @@ internal object ConversationAnalysisReportDialog {
     }
     private fun rounded(color: Int, radius: Int) = GradientDrawable().apply { setColor(color); cornerRadius = radius.toFloat() }
     private fun strokeRounded(color: Int, strokeColor: Int, radius: Int, strokeWidth: Int) = GradientDrawable().apply { setColor(color); cornerRadius = radius.toFloat(); setStroke(strokeWidth, strokeColor) }
+    private fun isDark(activity: Activity): Boolean = (activity.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+    private fun pageColor(activity: Activity): Int = if (isDark(activity)) 0xff111111.toInt() else 0xfffff8f0.toInt()
+    private fun cardColor(activity: Activity): Int = if (isDark(activity)) 0xff1f1f1f.toInt() else 0xfffffdf9.toInt()
+    private fun panelColor(activity: Activity): Int = if (isDark(activity)) 0xff292522.toInt() else 0xfffff4e6.toInt()
+    private fun textColor(activity: Activity): Int = if (isDark(activity)) Color.WHITE else 0xff292522.toInt()
     private fun dp(activity: Activity, value: Int): Int = (value * activity.resources.displayMetrics.density).toInt()
 }
