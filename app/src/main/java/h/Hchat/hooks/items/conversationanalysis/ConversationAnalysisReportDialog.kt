@@ -346,8 +346,8 @@ internal object ConversationAnalysisReportDialog {
         groups.chunked(2).forEach { pair ->
             val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
             pair.forEachIndexed { index, item ->
-                val colors = listOf(0xffffe7c2, 0xffffd6c5, 0xffd9e9ff, 0xffe4d8ff)
-                val card = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; background = rounded(colors[(groups.indexOf(item)) % colors.size], dp(activity, 18)); setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8)) }
+                val colors = listOf(0xffffe7c2, 0xffffd6c5, 0xffd9e9ff, 0xffe4d8ff).map { it.toInt() }
+                val card = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; background = rounded(colors[groups.indexOf(item) % colors.size], dp(activity, 18)); setPadding(dp(activity, 8), dp(activity, 8), dp(activity, 8), dp(activity, 8)) }
                 card.addView(label(activity, "◷", 25f, 0xffe65c00.toInt(), true), LinearLayout.LayoutParams(-1, dp(activity, 30)))
                 card.addView(label(activity, item.first, 14f, 0xff302b28.toInt(), true), LinearLayout.LayoutParams(-1, dp(activity, 25)))
                 card.addView(label(activity, item.third.toString() + " 条", 20f, 0xff292522.toInt(), true), LinearLayout.LayoutParams(-1, dp(activity, 30)))
