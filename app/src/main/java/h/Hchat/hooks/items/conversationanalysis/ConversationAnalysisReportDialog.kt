@@ -293,7 +293,7 @@ internal object ConversationAnalysisReportDialog {
                 ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), it.message)
             }
             Handler(Looper.getMainLooper()).post {
-                renderDeepData(activity, bodies, details)
+                renderDeepData(activity, bodies, details, reloadRanking)
                 val active = details.ranking.size
                 updateMetric(metrics, 0, active.toString())
             }
@@ -301,7 +301,7 @@ internal object ConversationAnalysisReportDialog {
         return root
     }
 
-    private fun renderDeepData(activity: Activity, bodies: Map<String, LinearLayout>, details: ConversationAnalysisDetails) {
+    private fun renderDeepData(activity: Activity, bodies: Map<String, LinearLayout>, details: ConversationAnalysisDetails, reloadRanking: ((Int) -> Unit)? = null) {
         if (details.error != null) {
             bodies.values.forEach { box -> box.removeAllViews(); box.addView(label(activity, details.error, 14f, 0xffb82d25.toInt(), false).apply { gravity = Gravity.CENTER }) }
             return
