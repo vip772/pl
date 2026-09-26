@@ -235,9 +235,13 @@ public final class WeChatContactApi {
             String[] members = splitMembers(memberList);
             String[] names = splitDisplayNames(displayNames, members.length);
             if (members.length == 0 || members.length != names.length) {
-                log("chatroom.displayname无法对齐: group=" + groupId
+                // displayname is not a reliable parallel array on newer WeChat
+                // versions. roomdata remains usable, so keep those entries and
+                // skip only the unsafe positional mapping below.
+                log("chatroom.displayname无法对齐，保留roomdata映射: group=" + groupId
                         + " members=" + members.length
-                        + " names=" + names.length);
+                        + " names=" + names.length
+                        + " roomdataNames=" + result.size());
                 return result;
             }
 

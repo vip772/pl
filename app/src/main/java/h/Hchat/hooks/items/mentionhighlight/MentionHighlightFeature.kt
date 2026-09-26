@@ -309,7 +309,10 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         message.msgId.toString() + "|" + spec
 
     private fun buildMentionText(text: CharSequence, message: WeChatMessage, spec: String): BuildResult {
-        val ids = message.getEffectiveAtUserList().distinct()
+        // Keep the wire order intact. The text ranges and atuserlist are
+        // positional; distinct() would shift every later mention when the same
+        // member is mentioned more than once.
+        val ids = message.getEffectiveAtUserList()
         if (ids.isEmpty() || ids.size > 64 || text.length > 32768) return BuildResult(text, 0, 0)
         if (text is Spanned && text.getSpans(0, text.length, ProfileSpan::class.java).isNotEmpty()) {
             return BuildResult(text, 0, 0) // Nested text setter; never duplicate our spans.
@@ -320,6 +323,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             names[user] = if (isAtAll(user)) listOf("所有人", "all", "everyone", "全員", "모두") else {
                 val contact = runCatching { contacts?.getContact(user) }.getOrNull()
                 listOf(
+                    runCatching { contacts?.getGroupMemberDisplayName(message.talker, user) }.getOrNull(),
                     runCatching { contacts?.getGroupMemberRoomDisplayName(message.talker, user) }.getOrNull(),
                     contact?.nickname, contact?.remarkName, user
                 ).filterNotNull().filter { it.isNotBlank() }.distinct().sortedByDescending { it.length }
@@ -338,12 +342,19 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                 .distinct()
                 .sortedBy { it.first }
         } else emptyList()
+        val orderedNativeRanges = if (nativeRanges.size == ids.size) {
+            nativeRanges
+        } else {
+            HLog.d(TAG + " 原生艾特范围未对齐: msgId=${message.msgId} " +
+                "ranges=${nativeRanges.size} atUsers=${ids.size} reason=name-fallback")
+            emptyList()
+        }
         var cursor = 0
         var rangeIndex = 0
         var applied = 0
         var found = 0
         while (cursor < raw.length) {
-            val explicitRange = nativeRanges.getOrNull(rangeIndex)
+            val explicitRange = orderedNativeRanges.getOrNull(rangeIndex)
             val at = explicitRange?.first ?: raw.indexOf('@', cursor)
             if (at < 0) break
             // Prefer the actual WeChat span range. This preserves emoji, variation selectors and combining characters.
@@ -351,12 +362,18 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                 val user = ids.getOrNull(rangeIndex) ?: break
                 val end = explicitRange.last + 1
                 found++
-                if (!isAtAll(user)) {
-                    builder.setSpan(ProfileSpan { view -> openProfile(view, message.talker, user) },
-                        at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                if (isAtAll(user)) {
+                    HLog.d(TAG + " 艾特跳过: msgId=${message.msgId} range=$at..$end user=$user reason=at-all")
+                    cursor = end
+                    rangeIndex++
+                    continue
                 }
+                // A highlighted mention must always carry our profile span.
+                builder.setSpan(ProfileSpan { view -> openProfile(view, message.talker, user) },
+                    at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 applyForegroundColors(builder, raw, at, end, colors.first, colors.second)
                 applied++
+                HLog.d(TAG + " 艾特处理成功: msgId=${message.msgId} range=$at..$end user=$user source=native")
                 cursor = end
                 rangeIndex++
                 continue
@@ -374,22 +391,34 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             }
             val longest = matches.maxOfOrNull { it.second }
             val best = matches.filter { it.second == longest }.distinctBy { it.first }
-            if (best.size != 1) { cursor = at + 1; continue } // Ambiguous names: do not open a wrong person.
+            if (best.size != 1) {
+                HLog.d(TAG + " 艾特未处理: msgId=${message.msgId} offset=$at reason=" +
+                    if (best.isEmpty()) "name-not-resolved" else "ambiguous-name")
+                cursor = at + 1
+                continue
+            }
             val match = best[0]
             val end = match.second
             found++
-            val overlaps = builder.getSpans(at, end, ClickableSpan::class.java)
-            if (overlaps.any { builder.getSpanStart(it) < at || builder.getSpanEnd(it) > end }) {
+            if (isAtAll(match.first)) {
+                HLog.d(TAG + " 艾特跳过: msgId=${message.msgId} range=$at..$end user=${match.first} reason=at-all")
                 cursor = end
                 continue
             }
-            if (!isAtAll(match.first)) {
-                for (span in overlaps) builder.removeSpan(span)
-                builder.setSpan(ProfileSpan { view -> openProfile(view, message.talker, match.first) },
-                    at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            val overlaps = builder.getSpans(at, end, ClickableSpan::class.java)
+            if (overlaps.any { builder.getSpanStart(it) < at || builder.getSpanEnd(it) > end }) {
+                HLog.d(TAG + " 艾特未处理: msgId=${message.msgId} range=$at..$end user=${match.first} reason=span-overlap")
+                cursor = end
+                continue
             }
+            // Replace only spans fully contained by this mention. The profile
+            // span and the color are committed together, so color implies click.
+            for (span in overlaps) builder.removeSpan(span)
+            builder.setSpan(ProfileSpan { view -> openProfile(view, message.talker, match.first) },
+                at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             applyForegroundColors(builder, raw, at, end, colors.first, colors.second)
             applied++
+            HLog.d(TAG + " 艾特处理成功: msgId=${message.msgId} range=$at..$end user=${match.first} source=name")
             cursor = end
         }
         return BuildResult(if (applied > 0) builder else text, found, applied)
