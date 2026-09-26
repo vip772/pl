@@ -14,6 +14,8 @@ import h.Hchat.hooks.items.callmedialimit.CallRingtoneBlockFeature
 import h.Hchat.hooks.items.chattime.ChatTimeStyleFeature
 import h.Hchat.hooks.items.chattoolbar.ChatToolbarFeature
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupFeature
+import h.Hchat.hooks.items.conversationanalysis.ConversationAnalysisFeature
+
 import h.Hchat.hooks.items.homesidepanel.HomeSidePanelFeature
 import h.Hchat.hooks.items.monetgenerator.MonetModuleGeneratorFeature
 import h.Hchat.hooks.items.securemessage.AntiSecureMessageFeature
@@ -143,6 +145,7 @@ object FeatureRegistry {
             .register(AutoReplyFeature())
             .register(AutoMessageForwardFeature())
             .register(ConversationGroupFeature())
+            .register(ConversationAnalysisFeature())
             .register(MessageAffixFeature())
             .register(TypingReportBlockFeature())
             .register(PatBlockFeature())

@@ -2,6 +2,8 @@ package h.Hchat.ui
 
 import android.content.Context
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupStore
+import h.Hchat.hooks.items.conversationanalysis.ConversationAnalysisFeature
+import h.Hchat.hooks.items.conversationanalysis.ConversationAnalysisSettings
 
 import h.Hchat.hooks.items.hchatextra.HchatExtraSettings
 import h.Hchat.hooks.items.momentsfake.MomentsFakeInteractionSettings
@@ -105,6 +107,7 @@ object FeatureToggleRegistry {
                 sp.getBoolean("enabled", false) || sp.getBoolean("link", false)
             }
             "conversation_group" -> boolean(context, ConversationGroupStore.PREFS_NAME, ConversationGroupStore.KEY_ENABLE, ConversationGroupStore.DEFAULT_ENABLE)
+            ConversationAnalysisFeature.ID -> ConversationAnalysisSettings.isEnabled(context)
             "group_chat_label" -> boolean(context, "Hchat_group_chat_labels", "enabled")
             "group_rename_monitor" -> boolean(context, "Hchat_group_rename_monitor_config", "group_rename_notice_enable") ||
                 boolean(context, "Hchat_group_rename_monitor_config", "group_rename_send_enable")

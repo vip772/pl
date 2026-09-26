@@ -234,6 +234,7 @@ import h.Hchat.hooks.items.chattime.ChatTimeStyleFeature
 import h.Hchat.hooks.items.chattime.ChatTimeStyleSettings
 import h.Hchat.hooks.items.conversationgroup.ConversationGroup
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupFeature
+import h.Hchat.hooks.items.conversationanalysis.ConversationAnalysisFeature
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupPickerSupport
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupRuntime
 import h.Hchat.hooks.items.conversationgroup.ConversationGroupStore
@@ -1518,6 +1519,7 @@ internal fun practicalFeatureGroups(
             title = "群组",
             providers = practicalProviders.filterByIds(
                 GroupChatLabelFeature.ID,
+                ConversationAnalysisFeature.ID,
                 AtAllNotificationBlockFeature.ID,
                 GroupLeaveMonitorFeature.ID,
                 GroupRenameMonitorFeature.ID,
