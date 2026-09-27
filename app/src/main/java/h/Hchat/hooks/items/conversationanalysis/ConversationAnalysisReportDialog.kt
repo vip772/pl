@@ -28,6 +28,7 @@ import h.Hchat.hooks.api.core.WeChatApis
 import java.io.File
 
 internal object ConversationAnalysisReportDialog {
+    private var generatedReportView: ConversationAnalysisAiReportView? = null
     private val executor = Executors.newSingleThreadExecutor { task ->
         Thread(task, "Hchat-ConversationAnalysis").apply { isDaemon = true }
     }
@@ -68,8 +69,6 @@ internal object ConversationAnalysisReportDialog {
         metricRows.forEach { metrics.addView(it, LinearLayout.LayoutParams(0, dp(activity, 112), 1f)) }
         page.addView(metrics, marginParams(activity, -1, 0, 0, 18, 0, 0))
 
-        header.removeViewAt(1)
-        header.addView(topTools, LinearLayout.LayoutParams(dp(activity, 104), dp(activity, 48)))
         page.addView(section(activity, "智能洞察"), marginParams(activity, -1, 48, 0, 12, 0, 0))
         val insightContent = buildInsight(activity, dialog, talker, days, logger)
         addCollapsible(activity, page, "✦", "智能总结消息", insightContent, false, true)
@@ -263,11 +262,13 @@ internal object ConversationAnalysisReportDialog {
         val focus = EditText(activity).apply { hint = "（可选）让 AI 重点关注什么？例如：大家聊了吃的吗"; gravity = Gravity.CENTER; setPadding(dp(activity, 14), dp(activity, 8), dp(activity, 14), dp(activity, 8)); background = rounded(0x00ffffff, dp(activity, 14)) }
         content.addView(focus, LinearLayout.LayoutParams(-1, dp(activity, 58)))
         val buttons = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
-        val generate = actionButton(activity, "✦  开始生成", 0xfff57c00.toInt()) { showAi(activity, dialog, talker, selectedDays, logger) }
-        val screenshot = actionButton(activity, "生成截图", 0xffe65c00.toInt()) { Toast.makeText(activity, "请先生成 AI 报告", Toast.LENGTH_SHORT).show() }
+        val reportHost = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        val generate = actionButton(activity, "✦  开始生成", 0xfff57c00.toInt()) { showAi(activity, dialog, talker, selectedDays, logger, reportHost) }
+        val screenshot = actionButton(activity, "生成截图", 0xffe65c00.toInt()) { showGeneratedReportPicker(activity, dialog, talker) }
         buttons.addView(generate, LinearLayout.LayoutParams(0, dp(activity, 46), 1f)); buttons.addView(Space(activity), LinearLayout.LayoutParams(dp(activity, 10), 1)); buttons.addView(screenshot, LinearLayout.LayoutParams(0, dp(activity, 46), 1f))
         content.addView(buttons, marginParams(activity, -1, 46, 0, 12, 0, 12))
-        content.addView(label(activity, "点击上方按钮，让分析实时生成报告", 15f, 0xff7e7984.toInt(), false).apply { gravity = Gravity.CENTER; setPadding(dp(activity, 12), dp(activity, 18), dp(activity, 12), dp(activity, 18)); background = rounded(0xfffffdf9.toInt(), dp(activity, 18)) })
+        reportHost.addView(label(activity, "点击上方按钮，让分析实时生成报告", 15f, 0xff7e7984.toInt(), false).apply { gravity = Gravity.CENTER; setPadding(dp(activity, 12), dp(activity, 18), dp(activity, 12), dp(activity, 18)); background = rounded(0xfffffdf9.toInt(), dp(activity, 18)) })
+        content.addView(reportHost, marginParams(activity, -1, 0, 0, 0, 0, 0))
         return content
     }
 
@@ -428,8 +429,10 @@ internal object ConversationAnalysisReportDialog {
             top.addView(label(activity, pair.first, 13f, 0xff302b28.toInt(), true), LinearLayout.LayoutParams(0, dp(activity, 24), 1f))
             top.addView(label(activity, pair.second.toString(), 13f, color, true).apply { gravity = Gravity.RIGHT }, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 24)))
             row.addView(top)
-            val track = LinearLayout(activity).apply { background = rounded(0xffffe0bd.toInt(), dp(activity, 8)) }
-            track.addView(View(activity).apply { background = rounded(color, dp(activity, 8)) }, LinearLayout.LayoutParams(0, dp(activity, 9), (pair.second.toFloat() / max).coerceAtLeast(.04f)))
+            val track = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; background = rounded(if (isDark(activity)) 0xff4a3424.toInt() else 0xffffe0bd.toInt(), dp(activity, 8)) }
+            val ratio = (pair.second.toFloat() / max).coerceIn(.02f, 1f)
+            track.addView(View(activity).apply { background = rounded(color, dp(activity, 8)) }, LinearLayout.LayoutParams(0, dp(activity, 9), ratio))
+            track.addView(Space(activity), LinearLayout.LayoutParams(0, dp(activity, 9), 1f - ratio))
             row.addView(track, LinearLayout.LayoutParams(-1, dp(activity, 9)))
             box.addView(row)
         }
@@ -542,10 +545,11 @@ internal object ConversationAnalysisReportDialog {
         utilityButtons.addView(actionButton(activity, "测试连接", 0x00ffffff) { ai.testConnection(fields[1].text.toString(), fields[2].text.toString(), fields[3].text.toString()) { ok, message -> Toast.makeText(activity, if (ok) "连接成功：$message" else "连接失败：$message", Toast.LENGTH_SHORT).show() } }.apply { background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 18), dp(activity, 2)); setTextColor(0xffffa13a.toInt()) }, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
         utilityButtons.addView(actionButton(activity, "获取模型", 0x00ffffff) { ai.fetchModels(fields[1].text.toString(), fields[3].text.toString()) { models, error -> if (models.isNotEmpty()) showModelPicker(activity, models) { fields[4].setText(it) } else Toast.makeText(activity, "获取模型失败：${error ?: "返回为空"}", Toast.LENGTH_SHORT).show() } }.apply { background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 18), dp(activity, 2)); setTextColor(0xffffa13a.toInt()) }, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
         root.addView(utilityButtons, marginParams(activity, -1, 48, 0, 14, 0, 0))
-        val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
-        actions.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
+        val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(activity, 8), 0, 0) }
+        val cancel = label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 14), dp(activity, 1)); setOnClickListener { dialog.dismiss() } }
         val save = actionButton(activity, "保存", 0xffffa13a.toInt()) { ai.saveProfile(ConversationAiProfile(selected, fields[0].text.toString(), fields[1].text.toString(), fields[2].text.toString(), fields[3].text.toString(), fields[4].text.toString())); ai.selectProfile(selected); dialog.dismiss() }
-        actions.addView(save, LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
+        actions.addView(cancel, LinearLayout.LayoutParams(0, dp(activity, 50), 1f).apply { setMargins(0, 0, dp(activity, 6), 0) })
+        actions.addView(save, LinearLayout.LayoutParams(0, dp(activity, 50), 1f).apply { setMargins(dp(activity, 6), 0, 0, 0) })
         root.addView(actions)
         dialog = Dialog(activity)
         dialog.setContentView(ScrollView(activity).apply { isFillViewport = true; addView(root) })
@@ -556,7 +560,7 @@ internal object ConversationAnalysisReportDialog {
         loadProfile(selected)
     }
 
-    private fun showAi(activity: Activity, reportDialog: Dialog, talker: String, days: Int, logger: (String, Throwable?) -> Unit) {
+    private fun showAi(activity: Activity, reportDialog: Dialog, talker: String, days: Int, logger: (String, Throwable?) -> Unit, reportHost: LinearLayout) {
         val ai = ConversationAnalysisAi(activity)
         if (!ai.configured()) {
             val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 20), dp(activity, 18), dp(activity, 20), dp(activity, 18)); background = rounded(pageColor(activity), dp(activity, 22)) }
@@ -566,7 +570,7 @@ internal object ConversationAnalysisReportDialog {
             val model = EditText(activity).apply { hint = "模型名称" }
             listOf(address, path, key, model).forEach { it.setTextColor(0xff292522.toInt()); it.setHintTextColor(0xff8b8178.toInt()); it.background = strokeRounded(0xfffffdf9.toInt(), 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); it.setPadding(dp(activity, 14), 0, dp(activity, 14), 0); box.addView(it, marginParams(activity, -1, 48, 0, 4, 0, 0)) }
             lateinit var configDialog: Dialog
-            val save = actionButton(activity, "保存并生成", 0xfff57c00.toInt()) { ai.save(address.text.toString(), path.text.toString(), key.text.toString(), model.text.toString()); configDialog.dismiss(); showAi(activity, reportDialog, talker, days, logger) }
+            val save = actionButton(activity, "保存并生成", 0xfff57c00.toInt()) { ai.save(address.text.toString(), path.text.toString(), key.text.toString(), model.text.toString()); configDialog.dismiss(); showAi(activity, reportDialog, talker, days, logger, reportHost) }
             box.addView(save, marginParams(activity, -1, 46, 0, 10, 0, 0))
             configDialog = Dialog(activity)
             configDialog.setContentView(box)
@@ -575,26 +579,82 @@ internal object ConversationAnalysisReportDialog {
             configDialog.show()
             return
         }
+        reportHost.removeAllViews()
         val reportView = ConversationAnalysisAiReportView(activity)
         reportView.update(talker, days, "正在生成…")
-        val resultDialog = Dialog(activity)
-        resultDialog.setTitle("AI 群聊总结 · 方案${ai.activeProfileId()}")
-        val wrapper = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        wrapper.addView(ScrollView(activity).apply { addView(reportView) }, LinearLayout.LayoutParams(-1, 0, 1f))
-        val send = Button(activity).apply { text = "发送 AI 报告截图"; setAllCaps(false); setOnClickListener { captureAndSend(activity, reportView, talker) } }
-        wrapper.addView(send, LinearLayout.LayoutParams(-1, dp(activity, 48)))
-        resultDialog.setContentView(wrapper)
-        resultDialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        resultDialog.setOnShowListener { resultDialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .82f).toInt()) }
-        resultDialog.setOnDismissListener { ai.cancel() }
-        resultDialog.show()
-        ai.generateStreaming(talker, days, { partial -> reportView.update(talker, days, partial) }, { final -> reportView.update(talker, days, final) })
+        generatedReportView = reportView
+        reportHost.addView(reportView, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
+        reportHost.requestLayout()
+        ai.generateStreaming(talker, days, { partial ->
+            reportView.update(talker, days, partial)
+            reportHost.requestLayout()
+        }, { final ->
+            reportView.update(talker, days, final)
+            reportHost.requestLayout()
+        })
     }
 
-    private fun captureAndSend(activity: Activity, root: View, talker: String) {
+    private fun showGeneratedReportPicker(activity: Activity, reportDialog: Dialog, currentTalker: String) {
+        val report = generatedReportView ?: run {
+            Toast.makeText(activity, "请先点击开始生成", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val talkers = WeChatApis.conversations()?.getRecentConversationUsernames(10000).orEmpty()
+            .filter { it != currentTalker && WeChatApis.contacts()?.isGroup(it) == true }
+            .distinct()
+        if (talkers.isEmpty()) {
+            Toast.makeText(activity, "没有可发送的群聊", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val selected = linkedSetOf<String>()
+        lateinit var picker: Dialog
+        val root = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(activity, 22), dp(activity, 18), dp(activity, 22), dp(activity, 14))
+            background = rounded(pageColor(activity), dp(activity, 24))
+        }
+        root.addView(label(activity, "选择群聊", 22f, textColor(activity), true), marginParams(activity, -1, 44, 0, 0, 0, 4))
+        root.addView(label(activity, "选择要发送群聊分析截图的群聊", 14f, if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff77716d.toInt(), false), marginParams(activity, -1, 32, 0, 0, 0, 8))
+        val list = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        talkers.forEach { talker ->
+            val row = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(activity, 4), 0, 0, 0) }
+            val name = WeChatApis.conversations()?.getConversationTitle(talker).orEmpty().ifBlank { talker }
+            row.addView(label(activity, name, 16f, textColor(activity), false), LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
+            val check = label(activity, "□", 26f, if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff6f6862.toInt(), false).apply { gravity = Gravity.CENTER }
+            row.addView(check, LinearLayout.LayoutParams(dp(activity, 42), dp(activity, 52)))
+            row.setOnClickListener {
+                if (selected.add(talker)) { check.text = "✓"; check.setTextColor(0xffffa13a.toInt()) }
+                else { selected.remove(talker); check.text = "□"; check.setTextColor(if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff6f6862.toInt()) }
+            }
+            list.addView(row)
+            list.addView(divider(activity))
+        }
+        root.addView(ScrollView(activity).apply { isFillViewport = true; addView(list) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(activity, 10), 0, 0) }
+        val cancel = label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 14), dp(activity, 1)); setOnClickListener { picker.dismiss() } }
+        val send = actionButton(activity, "发送", 0xffffa13a.toInt()) {
+            if (selected.isEmpty()) {
+                Toast.makeText(activity, "请选择群聊", Toast.LENGTH_SHORT).show()
+            } else {
+                picker.dismiss()
+                captureAndSend(activity, report, selected.toList())
+            }
+        }
+        actions.addView(cancel, LinearLayout.LayoutParams(0, dp(activity, 50), 1f).apply { setMargins(0, 0, dp(activity, 6), 0) })
+        actions.addView(send, LinearLayout.LayoutParams(0, dp(activity, 50), 1f).apply { setMargins(dp(activity, 6), 0, 0, 0) })
+        root.addView(actions)
+        picker = Dialog(activity)
+        picker.setContentView(root)
+        picker.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        picker.window?.setWindowAnimations(0)
+        picker.setOnShowListener { picker.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .84f).toInt()) }
+        picker.show()
+    }
+
+    private fun captureAndSend(activity: Activity, root: View, talkers: List<String>) {
         ConversationAnalysisScreenshot.capture(root, File(activity.cacheDir, "conversation_analysis")) { file ->
-            if (file == null || WeChatApis.media()?.sendImage(talker, file.absolutePath) != true) Toast.makeText(activity, "截图发送失败", Toast.LENGTH_SHORT).show()
-            else Toast.makeText(activity, "截图已发送", Toast.LENGTH_SHORT).show()
+            val ok = file != null && talkers.all { WeChatApis.media()?.sendImage(it, file.absolutePath) == true }
+            Toast.makeText(activity, if (ok) "截图已发送" else "部分群聊发送失败", Toast.LENGTH_SHORT).show()
         }
     }
 

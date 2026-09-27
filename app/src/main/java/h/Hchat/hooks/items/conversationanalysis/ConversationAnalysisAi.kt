@@ -93,7 +93,7 @@ internal class ConversationAnalysisAi(private val context: Context) {
             raw.substringAfter(":\n", raw).replace('\n', ' ').trim().takeIf { it.isNotBlank() }?.take(500)
         }
         require(records.isNotEmpty()) { "所选时段暂无文本消息" }
-        val prompt = "请根据以下群聊记录生成中文群聊总结，包含主题、关键人物、整体氛围和有趣细节。只能依据记录，不得编造。\\n" + records.joinToString("\\n")
+        val prompt = "你是群聊分析报告生成器。请严格按照以下固定格式输出中文报告，只输出报告正文，不要 Markdown 代码块、不要额外解释。只能依据聊天记录，不得编造；没有证据时写‘暂无明确信息’。每个章节之间空一行，消息引用必须单独成行。格式如下：\\n\\n整体氛围\\n用一段话概括群聊整体氛围。\\n\\n重点人物与群体画像\\n用一段话概括重点人物和群体画像。\\n\\n有趣的点\\n列出 2-4 条有证据的有趣观察。\\n\\n主题/话题\\n概括主要讨论主题。\\n\\n一、主题名称\\n本节内容概述。\\n◆ 关键消息人名：消息原文\\n◆ 关键消息人名：消息原文\\n结论：本节结论。\\n\\n二、主题名称\\n本节内容概述。\\n◆ 关键消息人名：消息原文\\n结论：本节结论。\\n\\n最后补充‘有趣的点’或‘总结’章节。标题使用中文，章节数量根据记录决定。\\n\\n群聊记录：\\n" + records.joinToString("\\n")
         val body = JSONObject().put("model", cfg.model).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt))).put("stream", true)
         val conn = URL(join(cfg.address, cfg.path)).openConnection() as HttpURLConnection
         activeConnection = conn
@@ -137,7 +137,7 @@ internal class ConversationAnalysisAi(private val context: Context) {
             content.takeIf { it.isNotBlank() }?.take(500)
         }
         require(records.isNotEmpty()) { "所选时段暂无文本消息" }
-        val prompt = "请根据以下群聊记录生成中文群聊总结，包含主题、关键人物、整体氛围和有趣细节。只能依据记录，不得编造。\n" + records.joinToString("\n")
+        val prompt = "你是群聊分析报告生成器。请严格按照固定格式输出中文报告，只输出报告正文，不要 Markdown 代码块、不要额外解释。只能依据聊天记录，不得编造；没有证据时写‘暂无明确信息’。每个章节之间空一行，消息引用必须单独成行。格式如下：\n\n整体氛围\n用一段话概括群聊整体氛围。\n\n重点人物与群体画像\n用一段话概括重点人物和群体画像。\n\n有趣的点\n列出 2-4 条有证据的有趣观察。\n\n主题/话题\n概括主要讨论主题。\n\n一、主题名称\n本节内容概述。\n◆ 关键消息人名：消息原文\n◆ 关键消息人名：消息原文\n结论：本节结论。\n\n二、主题名称\n本节内容概述。\n◆ 关键消息人名：消息原文\n结论：本节结论。\n\n最后补充‘有趣的点’或‘总结’章节。标题使用中文，章节数量根据记录决定。\n\n群聊记录：\n" + records.joinToString("\n")
         val body = JSONObject().put("model", cfg.model).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt))).put("stream", false)
         val conn = URL(join(cfg.address, cfg.path)).openConnection() as HttpURLConnection
         try {
