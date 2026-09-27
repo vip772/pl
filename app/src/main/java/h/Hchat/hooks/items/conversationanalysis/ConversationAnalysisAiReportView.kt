@@ -13,6 +13,8 @@ import java.util.Locale
 
 internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout(context) {
     private val body = LinearLayout(context)
+    private val reportTitle = TextView(context)
+    private val reportFooter = TextView(context)
     private val meta = TextView(context)
     private var memberCount = 0
     private var speakerCount = 0
@@ -23,16 +25,17 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
         orientation = VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
         setPadding(dp(0), dp(0), dp(0), dp(0))
-        setBackgroundColor(Color.rgb(226, 240, 250))
-        setPadding(dp(10), dp(12), dp(10), dp(12))
+        setBackgroundColor(Color.TRANSPARENT)
+        setPadding(dp(0), dp(0), dp(0), dp(0))
 
-        addView(TextView(context).apply {
+        reportTitle.apply {
             text = "群聊分析报告"
             textSize = 20f
             setTextColor(Color.rgb(45, 74, 106))
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-        }, LayoutParams(-1, dp(34)))
+        }
+        addView(reportTitle, LayoutParams(-1, dp(34)))
         meta.textSize = 8f
         meta.setTextColor(Color.rgb(83, 91, 105))
         meta.gravity = Gravity.CENTER
@@ -40,19 +43,16 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
 
         body.orientation = VERTICAL
         body.setPadding(dp(12), dp(8), dp(12), dp(8))
-        body.background = GradientDrawable().apply {
-            setColor(Color.rgb(255, 252, 248))
-            setStroke(dp(1), Color.rgb(224, 137, 159))
-            cornerRadius = dp(8).toFloat()
-        }
+        body.background = null
         addView(body, LayoutParams(-1, LayoutParams.WRAP_CONTENT))
-        addView(TextView(context).apply {
+        reportFooter.apply {
             text = "—— 群聊分析助手"
             textSize = 8f
             setTextColor(Color.rgb(135, 135, 145))
             gravity = Gravity.RIGHT
             setPadding(0, dp(6), dp(4), 0)
-        }, LayoutParams(-1, dp(22)))
+        }
+        addView(reportFooter, LayoutParams(-1, dp(22)))
     }
 
     fun updateMeta(talker: String, memberCount: Int, speakerCount: Int, sampleCount: Int) {
@@ -65,6 +65,20 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
 
     private fun refreshMeta() {
         meta.text = "$reportTalker\n群员总数：$memberCount    发言人数：$speakerCount    抽样消息：$sampleCount\n生成时间：${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}"
+    }
+
+    fun setScreenshotMode(enabled: Boolean) {
+        setBackgroundColor(if (enabled) Color.rgb(226, 240, 250) else Color.TRANSPARENT)
+        setPadding(if (enabled) dp(10) else dp(0), if (enabled) dp(12) else dp(0), if (enabled) dp(10) else dp(0), if (enabled) dp(12) else dp(0))
+        reportTitle.visibility = if (enabled) VISIBLE else GONE
+        meta.visibility = if (enabled) VISIBLE else GONE
+        reportFooter.visibility = if (enabled) VISIBLE else GONE
+        body.background = if (enabled) GradientDrawable().apply {
+            setColor(Color.rgb(255, 252, 248))
+            setStroke(dp(1), Color.rgb(224, 137, 159))
+            cornerRadius = dp(8).toFloat()
+        } else null
+        requestLayout()
     }
 
     fun update(talker: String, days: Int, text: String) {

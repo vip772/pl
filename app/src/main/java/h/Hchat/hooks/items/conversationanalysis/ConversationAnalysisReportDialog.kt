@@ -259,7 +259,8 @@ internal object ConversationAnalysisReportDialog {
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                 }
             }
-            tabs.addView(tab, LinearLayout.LayoutParams(dp(activity, tabWidth), dp(activity, 34)).apply { setMargins(0, 0, dp(activity, 4), 0) })
+            tabs.addView(tab, LinearLayout.LayoutParams(dp(activity, tabWidth), dp(activity, 34)))
+            if (index < 6) tabs.addView(Space(activity), LinearLayout.LayoutParams(dp(activity, 4), 1))
         }
         content.addView(tabScroll, marginParams(activity, -1, 42, 0, 10, 0, 10))
         val focus = EditText(activity).apply { hint = "（可选）让 AI 重点关注什么？例如：大家聊了吃的吗"; gravity = Gravity.CENTER; setPadding(dp(activity, 14), dp(activity, 8), dp(activity, 14), dp(activity, 8)); background = rounded(0x00ffffff, dp(activity, 14)) }
@@ -381,7 +382,8 @@ internal object ConversationAnalysisReportDialog {
                     background = rounded(0xfffffdf9.toInt(), dp(activity, 10)); setTextColor(0xfff57c00.toInt())
                 }
             }
-            tabs.addView(tab, LinearLayout.LayoutParams(dp(activity, tabWidth), dp(activity, 32)).apply { setMargins(0, 0, dp(activity, 4), 0) })
+            tabs.addView(tab, LinearLayout.LayoutParams(dp(activity, tabWidth), dp(activity, 32)))
+            if (index < 6) tabs.addView(Space(activity), LinearLayout.LayoutParams(dp(activity, 4), 1))
         }
         box.addView(tabScroll, marginParams(activity, -1, 40, 0, 0, 0, 8))
         if (rows.isEmpty()) { box.addView(label(activity, "所选周期暂无数据", 14f, 0xff4e4b54.toInt(), false)); return }
@@ -685,7 +687,7 @@ internal object ConversationAnalysisReportDialog {
         }
         fun renderTalkers(query: String) {
             list.removeAllViews()
-            rows.filter { it.first == currentTalker || query.isBlank() || it.second.contains(query, true) || it.first.contains(query, true) }.forEach { (talker, name) ->
+            rows.filter { query.isBlank() || it.second.contains(query, true) || it.first.contains(query, true) }.forEach { (talker, name) ->
                 val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(activity, 4), 0, 0, 0) }
                 val check = label(activity, if (talker in selected) "✓" else "□", 26f, if (talker in selected) 0xffffa13a.toInt() else if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff6f6862.toInt(), false).apply { gravity = Gravity.CENTER }
                 row.addView(label(activity, name, 16f, textColor(activity), false).apply { gravity = Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
@@ -723,9 +725,14 @@ internal object ConversationAnalysisReportDialog {
     }
 
     private fun captureAndSend(activity: Activity, root: View, talkers: List<String>) {
-        ConversationAnalysisScreenshot.capture(root, File(activity.cacheDir, "conversation_analysis")) { file ->
-            val ok = file != null && talkers.all { WeChatApis.media()?.sendImage(it, file.absolutePath) == true }
-            Toast.makeText(activity, if (ok) "截图已发送" else "部分群聊发送失败", Toast.LENGTH_SHORT).show()
+        val report = root as? ConversationAnalysisAiReportView
+        report?.setScreenshotMode(true)
+        root.post {
+            ConversationAnalysisScreenshot.capture(root, File(activity.cacheDir, "conversation_analysis")) { file ->
+                val ok = file != null && talkers.all { WeChatApis.media()?.sendImage(it, file.absolutePath) == true }
+                report?.setScreenshotMode(false)
+                Toast.makeText(activity, if (ok) "截图已发送" else "部分群聊发送失败", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 

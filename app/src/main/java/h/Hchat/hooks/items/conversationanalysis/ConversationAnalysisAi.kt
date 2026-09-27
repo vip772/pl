@@ -81,6 +81,47 @@ internal class ConversationAnalysisAi(private val context: Context) {
             android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(result.first, result.second) }
         }
     }
+    private fun buildPrompt(records: List<String>): String {
+        return """
+你是中文群聊分析报告生成器。请严格依据下面的聊天记录生成报告，只输出报告正文，不要输出 Markdown 代码块、说明文字或自我解释。
+
+【固定结构】
+一、群聊总结
+用一句有信息量的长标题，概括主要事件、话题跨度和群聊气质。
+
+二、内容概览
+概述聊天主线、重要话题、代表人物和总体氛围。
+
+三、主题章节
+根据聊天记录生成一个或多个主题章节。每章必须包含：
+1. 主题标题；
+2. 起因或发展；
+3. 具体关键词、人物细节或可核实的消息依据；
+4. 单独一行的“结论：”。
+合并重复话题，优先保留持续时间长、参与人数多、信息量高或情绪明显的内容。
+消息较少时减少主题数量，不要为了凑数强行生成主题。
+
+四、重点人物与群像
+根据发言特点、参与作用和互动关系概括参与者，只写记录能够支持的内容。
+
+五、整体氛围
+概括群聊气质，并列出 3 至 6 个真实可验证的特征。消息不足时可以少于 3 个，但不得编造。
+
+六、有趣的点
+列出 3 至 8 个有代表性或值得回看的真实细节。消息不足时减少数量，不要强行凑满。
+
+【严格规则】
+- 只能依据聊天记录，不得编造人物、结论、时间线、关系或原话。
+- 无法确认的信息必须明确写“记录中未确认”。
+- 合并重复内容，避免同一事件反复描述。
+- 主题数量、人物数量和有趣的点数量都必须服从实际消息信息量。
+- 不要把分析要求、规则或聊天记录原文之外的内容写进报告。
+
+【聊天记录】
+${records.joinToString("\n")}
+        """.trimIndent()
+    }
+
     private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (String) -> Unit): String {
         val cfg = config()
         require(configured()) { "请先配置 AI 地址、密钥和模型" }
@@ -95,7 +136,7 @@ internal class ConversationAnalysisAi(private val context: Context) {
             raw.substringAfter(":\n", raw).replace('\n', ' ').trim().takeIf { it.isNotBlank() }?.take(500)
         }
         require(records.isNotEmpty()) { "所选时段暂无文本消息" }
-        val prompt = "你是群聊分析报告生成器。请严格按照以下固定格式输出中文报告，只输出报告正文，不要 Markdown 代码块、不要额外解释。只能依据聊天记录，不得编造；没有证据时写‘暂无明确信息’。每个章节之间空一行，消息引用必须单独成行。格式如下：\\n\\n整体氛围\\n用一段话概括群聊整体氛围。\\n\\n重点人物与群体画像\\n用一段话概括重点人物和群体画像。\\n\\n有趣的点\\n列出 2-4 条有证据的有趣观察。\\n\\n主题/话题\\n概括主要讨论主题。\\n\\n一、主题名称\\n本节内容概述。\\n◆ 关键消息人名：消息原文\\n◆ 关键消息人名：消息原文\\n结论：本节结论。\\n\\n二、主题名称\\n本节内容概述。\\n◆ 关键消息人名：消息原文\\n结论：本节结论。\\n\\n最后补充‘有趣的点’或‘总结’章节。标题使用中文，章节数量根据记录决定。\\n\\n群聊记录：\\n" + records.joinToString("\\n")
+        val prompt = buildPrompt(records)
         val body = JSONObject().put("model", cfg.model).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt))).put("stream", true)
         val conn = URL(join(cfg.address, cfg.path)).openConnection() as HttpURLConnection
         activeConnection = conn
@@ -147,7 +188,7 @@ internal class ConversationAnalysisAi(private val context: Context) {
             content.takeIf { it.isNotBlank() }?.take(500)
         }
         require(records.isNotEmpty()) { "所选时段暂无文本消息" }
-        val prompt = "你是群聊分析报告生成器。请严格按照固定格式输出中文报告，只输出报告正文，不要 Markdown 代码块、不要额外解释。只能依据聊天记录，不得编造；没有证据时写‘暂无明确信息’。每个章节之间空一行，消息引用必须单独成行。格式如下：\n\n整体氛围\n用一段话概括群聊整体氛围。\n\n重点人物与群体画像\n用一段话概括重点人物和群体画像。\n\n有趣的点\n列出 2-4 条有证据的有趣观察。\n\n主题/话题\n概括主要讨论主题。\n\n一、主题名称\n本节内容概述。\n◆ 关键消息人名：消息原文\n◆ 关键消息人名：消息原文\n结论：本节结论。\n\n二、主题名称\n本节内容概述。\n◆ 关键消息人名：消息原文\n结论：本节结论。\n\n最后补充‘有趣的点’或‘总结’章节。标题使用中文，章节数量根据记录决定。\n\n群聊记录：\n" + records.joinToString("\n")
+        val prompt = buildPrompt(records)
         val body = JSONObject().put("model", cfg.model).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", prompt))).put("stream", false)
         val conn = URL(join(cfg.address, cfg.path)).openConnection() as HttpURLConnection
         try {
