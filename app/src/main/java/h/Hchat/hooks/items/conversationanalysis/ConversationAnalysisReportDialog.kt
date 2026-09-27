@@ -49,12 +49,10 @@ internal object ConversationAnalysisReportDialog {
         val range = label(activity, rangeText(days), 18f, 0xfff57c00.toInt(), true)
         titles.addView(range, LinearLayout.LayoutParams(-1, dp(activity, 34)))
         header.addView(titles, LinearLayout.LayoutParams(0, -2, 1f))
-        val screenshot = label(activity, "≡", 27f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { captureAndSend(activity, page, talker) } }
         val topSampling = label(activity, "▤", 27f, 0xffff7a00.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { showTopSamplingDialog(activity) } }
         val topTools = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         topTools.addView(topSampling, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)))
-        topTools.addView(screenshot, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 48)))
-        header.addView(topTools, LinearLayout.LayoutParams(dp(activity, 104), dp(activity, 48)))
+        header.addView(topTools, LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 48)))
         page.addView(header)
         page.addView(section(activity, "核心指标"), marginParams(activity, -1, 48, 0, 20, 0, 0))
         val metrics = LinearLayout(activity).apply {
@@ -108,7 +106,7 @@ internal object ConversationAnalysisReportDialog {
     }
 
     private fun label(activity: Activity, text: String, size: Float, color: Int, bold: Boolean) = TextView(activity).apply {
-        this.text = text; textSize = (size - 3f).coerceAtLeast(10f); setTextColor(if (isDark(activity) && (color == 0xff1e1c21.toInt() || color == 0xff292522.toInt() || color == 0xff302b28.toInt() || color == 0xff4e4b54.toInt() || color == 0xff6f6862.toInt() || color == 0xff77716d.toInt() || color == 0xff5d5148.toInt())) textColor(activity) else color); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        this.text = text; textSize = (size - 5f).coerceAtLeast(10f); setTextColor(if (isDark(activity) && (color == 0xff1e1c21.toInt() || color == 0xff292522.toInt() || color == 0xff302b28.toInt() || color == 0xff4e4b54.toInt() || color == 0xff6f6862.toInt() || color == 0xff77716d.toInt() || color == 0xff5d5148.toInt())) textColor(activity) else color); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
 
     private fun section(activity: Activity, text: String) = label(activity, text, 20f, textColor(activity), true)
@@ -178,7 +176,7 @@ internal object ConversationAnalysisReportDialog {
         actions.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(0, dp(activity, 50), 1f))
         actions.addView(actionButton(activity, "保存", 0xffffa13a.toInt()) { dialog.dismiss() }, LinearLayout.LayoutParams(0, dp(activity, 50), 1f))
         root.addView(actions, marginParams(activity, -1, 50, 0, 12, 0, 0))
-        dialog = Dialog(activity); dialog.setContentView(root); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent); dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .90f).toInt(), (activity.resources.displayMetrics.heightPixels * .72f).toInt()) }; dialog.show()
+        dialog = Dialog(activity); dialog.setContentView(root); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent); dialog.window?.setWindowAnimations(0); dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .90f).toInt(), (activity.resources.displayMetrics.heightPixels * .72f).toInt()) }; dialog.show()
     }
 
     private fun showSamplingDialog(activity: Activity) {
@@ -208,7 +206,7 @@ internal object ConversationAnalysisReportDialog {
         val save = actionButton(activity, "保存", 0xffffa13a.toInt()) { store.setSampling(window, seek.progress); dialog.dismiss() }
         actions.addView(save, LinearLayout.LayoutParams(0, dp(activity, 54), 1f))
         root.addView(actions)
-        dialog = Dialog(activity); dialog.setContentView(root); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent); dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .78f).toInt()) }; dialog.show()
+        dialog = Dialog(activity); dialog.setContentView(root); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent); dialog.window?.setWindowAnimations(0); dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .78f).toInt()) }; dialog.show()
     }
 
     private fun addSettingSlider(activity: Activity, parent: LinearLayout, title: String, unit: String, min: Int, max: Int, initial: Int) {
@@ -380,9 +378,10 @@ internal object ConversationAnalysisReportDialog {
             val item = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(activity, 5), 0, dp(activity, 5)) }
             item.addView(label(activity, (index + 1).toString(), 16f, if (index < 3) 0xfff57c00.toInt() else 0xff77716d.toInt(), true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(activity, 30), dp(activity, 42)))
             item.addView(label(activity, row.name.take(8), 14f, 0xff302b28.toInt(), true).apply { gravity = Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(dp(activity, 78), dp(activity, 42)))
-            val track = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; background = rounded(0xffffe0bd.toInt(), dp(activity, 8)) }
-            val fill = View(activity).apply { background = rounded(0xfff57c00.toInt(), dp(activity, 8)) }
-            track.addView(fill, LinearLayout.LayoutParams(0, dp(activity, 9), (row.count.toFloat() / max).coerceAtLeast(.04f)))
+            val track = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; background = rounded(if (isDark(activity)) 0xff4a3424.toInt() else 0xffffe0bd.toInt(), dp(activity, 8)) }
+            val fill = View(activity).apply { background = rounded(0xffffa13a.toInt(), dp(activity, 8)) }
+            val ratio = (row.count.toFloat() / max).coerceIn(.02f, 1f)
+            track.addView(fill, LinearLayout.LayoutParams(0, dp(activity, 9), ratio))
             item.addView(track, LinearLayout.LayoutParams(0, dp(activity, 42), 1f))
             item.addView(label(activity, row.count.toString(), 13f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(activity, 42), dp(activity, 42)))
             box.addView(item)
@@ -513,7 +512,7 @@ internal object ConversationAnalysisReportDialog {
         }
         root.addView(ScrollView(activity).apply { isFillViewport = true; addView(list) }, LinearLayout.LayoutParams(-1, dp(activity, 240)))
         root.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(-1, dp(activity, 50)))
-        dialog.setContentView(root); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent); dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .86f).toInt(), (activity.resources.displayMetrics.heightPixels * .72f).toInt()) }; dialog.show()
+        dialog.setContentView(root); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent); dialog.window?.setWindowAnimations(0); dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .86f).toInt(), (activity.resources.displayMetrics.heightPixels * .72f).toInt()) }; dialog.show()
     }
 
     private fun showAiConfig(activity: Activity) {
@@ -549,9 +548,10 @@ internal object ConversationAnalysisReportDialog {
         actions.addView(save, LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
         root.addView(actions)
         dialog = Dialog(activity)
-        dialog.setContentView(root)
+        dialog.setContentView(ScrollView(activity).apply { isFillViewport = true; addView(root) })
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .90f).toInt(), (activity.resources.displayMetrics.heightPixels * .78f).toInt()) }
+        dialog.window?.setWindowAnimations(0)
+        dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .88f).toInt()) }
         dialog.show()
         loadProfile(selected)
     }
