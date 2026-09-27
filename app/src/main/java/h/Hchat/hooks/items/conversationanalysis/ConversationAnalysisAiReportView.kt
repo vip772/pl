@@ -18,8 +18,8 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
     init {
         orientation = VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
-        setPadding(dp(10), dp(8), dp(10), dp(10))
-        setBackgroundColor(Color.rgb(231, 240, 255))
+        setPadding(dp(0), dp(0), dp(0), dp(0))
+        setBackgroundColor(Color.TRANSPARENT)
 
         addView(TextView(context).apply {
             text = "群聊分析报告"
@@ -33,18 +33,9 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
         meta.gravity = Gravity.CENTER
         addView(meta, LayoutParams(-1, dp(42)))
 
-        val card = LinearLayout(context).apply {
-            orientation = VERTICAL
-            setPadding(dp(12), dp(12), dp(12), dp(12))
-            background = GradientDrawable().apply {
-                setColor(Color.rgb(255, 249, 250))
-                setStroke(dp(1), Color.rgb(203, 132, 147))
-                cornerRadius = dp(5).toFloat()
-            }
-        }
         body.orientation = VERTICAL
-        card.addView(body, LayoutParams(-1, LayoutParams.WRAP_CONTENT))
-        addView(card, LayoutParams(-1, LayoutParams.WRAP_CONTENT))
+        body.setPadding(dp(12), dp(8), dp(12), dp(8))
+        addView(body, LayoutParams(-1, LayoutParams.WRAP_CONTENT))
         addView(TextView(context).apply {
             text = "—— 群聊分析助手"
             textSize = 8f

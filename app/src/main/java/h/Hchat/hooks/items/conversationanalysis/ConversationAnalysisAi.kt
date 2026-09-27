@@ -86,9 +86,10 @@ internal class ConversationAnalysisAi(private val context: Context) {
         require(configured()) { "请先配置 AI 地址、密钥和模型" }
         val db = WeChatApis.database() ?: error("数据库API尚未初始化")
         require(db.prepare()) { "消息数据库尚未就绪" }
-        val start = if (days >= 60) 0L else System.currentTimeMillis() - (days - 1L) * 86_400_000L
+        val start = aiPeriodStart(days)
+        val end = aiPeriodEnd(days)
         val limit = configStore.sampleLimit().let { if (it == 0) 3000 else it }
-        val rows = db.query("SELECT content,isSend,type FROM message WHERE talker = ? AND type NOT IN (10000) AND createTime >= ? ORDER BY createTime ASC LIMIT $limit", arrayOf(talker, start.toString()))
+        val rows = db.query("SELECT content,isSend,type FROM message WHERE talker = ? AND type NOT IN (10000) AND createTime >= ? AND createTime <= ? ORDER BY createTime ASC LIMIT $limit", arrayOf(talker, start.toString(), end.toString()))
         val records = rows.mapNotNull { row ->
             val raw = row["content"].toString()
             raw.substringAfter(":\n", raw).replace('\n', ' ').trim().takeIf { it.isNotBlank() }?.take(500)
@@ -109,8 +110,15 @@ internal class ConversationAnalysisAi(private val context: Context) {
                 var line: String? = null
                 while (token == requestToken.get() && reader.readLine().also { line = it } != null) {
                     val data = line.orEmpty().trim().removePrefix("data:").trim()
+                    // Parse the response once below so non-stream responses are not duplicated.
                     if (data.isBlank() || data == "[DONE]") continue
-                    val chunk = runCatching { JSONObject(data).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta")?.optString("content").orEmpty() }.getOrDefault("")
+                    val chunk = runCatching {
+                        val choice = JSONObject(data).optJSONArray("choices")?.optJSONObject(0)
+                        choice?.optJSONObject("delta")?.optString("content")?.takeIf { it.isNotBlank() }
+                            ?: choice?.optJSONObject("message")?.optString("content")?.takeIf { it.isNotBlank() }
+                            ?: JSONObject(data).optString("content").takeIf { it.isNotBlank() }
+                            ?: ""
+                    }.getOrDefault("")
                     if (chunk.isNotEmpty()) {
                         output.append(chunk)
                         val snapshot = output.toString()
