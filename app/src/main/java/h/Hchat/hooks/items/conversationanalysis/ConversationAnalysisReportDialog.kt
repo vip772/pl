@@ -667,7 +667,8 @@ internal object ConversationAnalysisReportDialog {
         root.addView(label(activity, "选择要发送群聊分析截图的群聊", 14f, if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff77716d.toInt(), false), marginParams(activity, -1, 32, 0, 0, 0, 8))
         val search = EditText(activity).apply {
             hint = "搜索群聊"
-            singleLine = true
+            setSingleLine(true)
+
             setTextColor(textColor(activity)); setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt())
             background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1))
             setPadding(dp(activity, 14), 0, dp(activity, 14), 0)
