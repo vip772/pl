@@ -31,8 +31,6 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
     private var sampleCount = 0
     private var reportTalker = ""
     private var reportDays = 1
-    private var currentText = ""
-
     init {
         orientation = VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
@@ -86,7 +84,7 @@ fun updateMeta(talker: String, days: Int, memberCount: Int, speakerCount: Int) {
         draw.style = Paint.Style.FILL; draw.textAlign = Paint.Align.CENTER; draw.color = Color.rgb(34, 74, 121); draw.typeface = Typeface.DEFAULT_BOLD; draw.textSize = 50f
         canvas.drawText("群聊分析报告", imageWidth / 2f, 76f, draw)
         draw.color = Color.rgb(65, 100, 139); draw.textSize = 25f
-        canvas.drawText(fitLine("${dateRange(days)}", draw, imageWidth - 136f), imageWidth / 2f, 119f, draw)
+        canvas.drawText(fitLine(dateRange(days), draw, imageWidth - 136f), imageWidth / 2f, 119f, draw)
         draw.color = Color.rgb(73, 91, 112); draw.typeface = Typeface.DEFAULT; draw.textSize = 22f
         canvas.drawText(fitLine("分析群聊：$groupName", draw, imageWidth - 136f), imageWidth / 2f, 158f, draw)
         draw.color = Color.rgb(34, 74, 121); draw.typeface = Typeface.DEFAULT_BOLD
@@ -124,6 +122,15 @@ fun updateMeta(talker: String, days: Int, memberCount: Int, speakerCount: Int) {
             offset += line.length + 1
         }
         return StaticLayout(styled, paint, width, Layout.Alignment.ALIGN_NORMAL, 1.28f, 0f, false)
+    }
+    private fun dateRange(days: Int): String {
+        if (days == 0 || days >= 60) return "全部历史消息"
+        val start = java.util.Calendar.getInstance().apply {
+            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
+            add(java.util.Calendar.DAY_OF_YEAR, -maxOf(0, days - 1))
+        }
+        val format = SimpleDateFormat("yyyy/MM/dd", Locale.CHINA)
+        return "${format.format(start.time)} ~ ${format.format(Date())}"
     }
     private fun fitLine(value: String, paint: Paint, maxWidth: Float): String {
         var text = value

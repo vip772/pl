@@ -182,7 +182,6 @@ private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (
         start.add(Calendar.DAY_OF_YEAR, -(days.coerceAtLeast(1) - 1))
         return start.timeInMillis..System.currentTimeMillis()
     }
-    }
     private fun config() = configStore.activeProfile()
     private fun join(address: String, path: String) = address.trimEnd('/') + "/" + path.trimStart('/')
 }
