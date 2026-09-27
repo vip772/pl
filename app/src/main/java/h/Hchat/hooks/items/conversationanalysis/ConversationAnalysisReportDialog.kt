@@ -107,7 +107,7 @@ internal object ConversationAnalysisReportDialog {
     }
 
     private fun label(activity: Activity, text: String, size: Float, color: Int, bold: Boolean) = TextView(activity).apply {
-        this.text = text; textSize = (size - 5f).coerceAtLeast(10f); setTextColor(if (isDark(activity) && (color == 0xff1e1c21.toInt() || color == 0xff292522.toInt() || color == 0xff302b28.toInt() || color == 0xff4e4b54.toInt() || color == 0xff6f6862.toInt() || color == 0xff77716d.toInt() || color == 0xff5d5148.toInt())) textColor(activity) else color); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
+        this.text = text; textSize = (size - 3f).coerceAtLeast(10f); setTextColor(if (isDark(activity) && (color == 0xff1e1c21.toInt() || color == 0xff292522.toInt() || color == 0xff302b28.toInt() || color == 0xff4e4b54.toInt() || color == 0xff6f6862.toInt() || color == 0xff77716d.toInt() || color == 0xff5d5148.toInt())) textColor(activity) else color); if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
     }
 
     private fun section(activity: Activity, text: String) = label(activity, text, 20f, textColor(activity), true)
@@ -244,7 +244,7 @@ internal object ConversationAnalysisReportDialog {
         content.addView(top)
         val tabs = LinearLayout(activity).apply { gravity = Gravity.CENTER; background = rounded(panelColor(activity), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
         val tabScroll = HorizontalScrollView(activity).apply { isHorizontalScrollBarEnabled = false; addView(tabs) }
-        val tabWidth = ((activity.resources.displayMetrics.widthPixels / activity.resources.displayMetrics.density - 32f) / 6f).toInt().coerceAtLeast(52)
+        val tabWidth = ((activity.resources.displayMetrics.widthPixels / activity.resources.displayMetrics.density - 32f - 20f) / 6f).toInt().coerceAtLeast(52)
         listOf("今日" to 1, "昨日" to -1, "本周" to 7, "上周" to -7, "本月" to 30, "上月" to -30, "全部" to 365).forEachIndexed { index, pair ->
             val tab = label(activity, pair.first, 14f, if (index == 0) 0xfff57c00.toInt() else 0xff4e4b54.toInt(), index == 0).apply {
                 gravity = Gravity.CENTER
@@ -368,7 +368,7 @@ internal object ConversationAnalysisReportDialog {
         box.removeAllViews()
         val tabs = LinearLayout(activity).apply { gravity = Gravity.CENTER; background = rounded(0xffffead2.toInt(), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
         val tabScroll = HorizontalScrollView(activity).apply { isHorizontalScrollBarEnabled = false; addView(tabs) }
-        val tabWidth = ((activity.resources.displayMetrics.widthPixels / activity.resources.displayMetrics.density - 32f) / 6f).toInt().coerceAtLeast(52)
+        val tabWidth = ((activity.resources.displayMetrics.widthPixels / activity.resources.displayMetrics.density - 32f - 20f) / 6f).toInt().coerceAtLeast(52)
         val periods = listOf(1, -1, 7, -7, 30, -30, 365)
         listOf("今日", "昨日", "本周", "上周", "本月", "上月", "全部").forEachIndexed { index, text ->
             val selected = periods[index] == selectedPeriod
@@ -649,9 +649,12 @@ internal object ConversationAnalysisReportDialog {
         }
         val talkers = buildList {
             add(currentTalker)
+            addAll(WeChatApis.contacts()?.getContacts().orEmpty()
+                .filter { it.isGroup() }
+                .map { it.wxId })
             addAll(WeChatApis.conversations()?.getRecentConversationUsernames(10000).orEmpty()
-                .filter { it != currentTalker && WeChatApis.contacts()?.isGroup(it) == true })
-        }.distinct()
+                .filter { WeChatApis.contacts()?.isGroup(it) == true })
+        }.filter { it.isNotBlank() }.distinct()
         if (talkers.isEmpty()) {
             Toast.makeText(activity, "没有可发送的群聊", Toast.LENGTH_SHORT).show()
             return
@@ -676,7 +679,10 @@ internal object ConversationAnalysisReportDialog {
         root.addView(search, marginParams(activity, -1, 48, 0, 0, 0, 8))
         val list = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         val listScroll = ScrollView(activity).apply { isFillViewport = true; addView(list) }
-        val rows = talkers.map { talker -> talker to (WeChatApis.conversations()?.getConversationTitle(talker).orEmpty().ifBlank { talker }) }
+        val rows = talkers.map { talker ->
+            val contact = WeChatApis.contacts()?.getContact(talker)
+            talker to (contact?.displayName().orEmpty().ifBlank { WeChatApis.conversations()?.getConversationTitle(talker).orEmpty().ifBlank { talker } })
+        }
         fun renderTalkers(query: String) {
             list.removeAllViews()
             rows.filter { it.first == currentTalker || query.isBlank() || it.second.contains(query, true) || it.first.contains(query, true) }.forEach { (talker, name) ->

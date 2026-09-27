@@ -3,6 +3,7 @@ package h.Hchat.hooks.items.conversationanalysis
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -22,7 +23,8 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
         orientation = VERTICAL
         gravity = Gravity.CENTER_HORIZONTAL
         setPadding(dp(0), dp(0), dp(0), dp(0))
-        setBackgroundColor(Color.TRANSPARENT)
+        setBackgroundColor(Color.rgb(226, 240, 250))
+        setPadding(dp(10), dp(12), dp(10), dp(12))
 
         addView(TextView(context).apply {
             text = "群聊分析报告"
@@ -30,7 +32,7 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
             setTextColor(Color.rgb(45, 74, 106))
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER
-        }, LayoutParams(-1, dp(30)))
+        }, LayoutParams(-1, dp(34)))
         meta.textSize = 8f
         meta.setTextColor(Color.rgb(83, 91, 105))
         meta.gravity = Gravity.CENTER
@@ -38,6 +40,11 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
 
         body.orientation = VERTICAL
         body.setPadding(dp(12), dp(8), dp(12), dp(8))
+        body.background = GradientDrawable().apply {
+            setColor(Color.rgb(255, 252, 248))
+            setStroke(dp(1), Color.rgb(224, 137, 159))
+            cornerRadius = dp(8).toFloat()
+        }
         addView(body, LayoutParams(-1, LayoutParams.WRAP_CONTENT))
         addView(TextView(context).apply {
             text = "—— 群聊分析助手"
@@ -61,7 +68,7 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
     }
 
     fun update(talker: String, days: Int, text: String) {
-        reportTalker = talker
+        if (reportTalker.isBlank()) reportTalker = talker
         refreshMeta()
         body.removeAllViews()
         text.replace("\r", "").split("\n").forEach(::addLine)
