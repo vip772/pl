@@ -81,6 +81,17 @@ internal class ConversationAnalysisAi(private val context: Context) {
             android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(result.first, result.second) }
         }
     }
+    private fun normalizeRecord(talker: String, raw: String): String {
+        var value = raw.substringAfter(":\\n", raw).replace('\\n', ' ').trim()
+        val names = WeChatApis.contacts()?.getGroupMemberDisplayNames(talker).orEmpty()
+            .filter { it.key.isNotBlank() && it.value.isNotBlank() && it.key != it.value }
+            .entries.sortedByDescending { it.key.length }
+        names.forEach { entry -> value = value.replace(entry.key, entry.value) }
+        value = value.replace(Regex("wxid_[A-Za-z0-9_-]+"), "群成员")
+            .replace(Regex("[A-Za-z0-9._-]+@(chatroom|im\\.chatroom)"), "群聊")
+        return value.takeIf { it.isNotBlank() }?.take(500).orEmpty()
+    }
+
     private fun buildPrompt(records: List<String>): String {
         return """
 你是中文群聊分析报告生成器。请严格依据下面的聊天记录生成报告，只输出报告正文，不要输出 Markdown 代码块、说明文字或自我解释。
@@ -98,6 +109,7 @@ internal class ConversationAnalysisAi(private val context: Context) {
 2. 起因或发展；
 3. 具体关键词、人物细节或可核实的消息依据；
 4. 单独一行的“结论：”。
+每章必须严格按“主题标题\n起因或发展\n关键词/人物细节\n💥 关键消息：真实消息依据\n结论：本章结论”分行输出。
 合并重复话题，优先保留持续时间长、参与人数多、信息量高或情绪明显的内容。
 消息较少时减少主题数量，不要为了凑数强行生成主题。
 
@@ -112,6 +124,7 @@ internal class ConversationAnalysisAi(private val context: Context) {
 
 【严格规则】
 - 只能依据聊天记录，不得编造人物、结论、时间线、关系或原话。
+- 群成员只能使用聊天记录中可确认的昵称，绝对禁止输出 wxid、微信号、群聊 ID、@chatroom 等账号标识；无法确认昵称时写“群成员”或“记录中未确认”。
 - 无法确认的信息必须明确写“记录中未确认”。
 - 合并重复内容，避免同一事件反复描述。
 - 主题数量、人物数量和有趣的点数量都必须服从实际消息信息量。
@@ -132,8 +145,8 @@ ${records.joinToString("\n")}
         val limit = configStore.sampleLimit().let { if (it == 0) 3000 else it }
         val rows = db.query("SELECT content,isSend,type FROM message WHERE talker = ? AND type NOT IN (10000) AND createTime >= ? AND createTime <= ? ORDER BY createTime ASC LIMIT $limit", arrayOf(talker, start.toString(), end.toString()))
         val records = rows.mapNotNull { row ->
-            val raw = row["content"].toString()
-            raw.substringAfter(":\n", raw).replace('\n', ' ').trim().takeIf { it.isNotBlank() }?.take(500)
+val raw = row["content"].toString()
+            normalizeRecord(talker, raw).takeIf { it.isNotBlank() }
         }
         require(records.isNotEmpty()) { "所选时段暂无文本消息" }
         val prompt = buildPrompt(records)
@@ -184,8 +197,7 @@ ${records.joinToString("\n")}
         val end = aiPeriodEnd(days)
         val rows = db.query("SELECT content,isSend,type FROM message WHERE talker = ? AND type NOT IN (10000) AND createTime >= ? AND createTime <= ? ORDER BY createTime ASC LIMIT 3000", arrayOf(talker, start.toString(), end.toString()))
         val records = rows.mapNotNull { row ->
-            val content = row["content"].toString().substringAfter(":\n", row["content"].toString()).replace('\n', ' ').trim()
-            content.takeIf { it.isNotBlank() }?.take(500)
+normalizeRecord(talker, row["content"].toString()).takeIf { it.isNotBlank() }
         }
         require(records.isNotEmpty()) { "所选时段暂无文本消息" }
         val prompt = buildPrompt(records)

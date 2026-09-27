@@ -85,27 +85,92 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
         if (reportTalker.isBlank()) reportTalker = talker
         refreshMeta()
         body.removeAllViews()
-        text.replace("\r", "").split("\n").forEach(::addLine)
+        renderStructured(text)
         requestLayout()
     }
 
-    private fun addLine(raw: String) {
-        val line = raw.trim()
-        if (line.isBlank()) {
-            body.addView(TextView(context), LayoutParams(1, dp(5)))
+    private fun renderStructured(source: String) {
+        // Some models omit line breaks between a heading, its paragraph and the next heading.
+        // Insert boundaries before known report markers so the visual hierarchy remains stable.
+        val normalized = source.replace("\r", "")
+            .replace(Regex("\\s+(?=(?:一|二|三|四|五|六|七|八|九|十)、)"), "\n")
+            .replace(Regex("\\s+(?=结论：)"), "\n")
+            .replace(Regex("\\s+(?=(?:重点人物与群像|整体氛围|有趣的点|内容概览|群聊总结)[：:]?)"), "\n")
+            .replace(Regex("\\s+(?=\\d+[、.]\\s*)"), "\n")
+        normalized.split("\n").forEach { raw ->
+            val line = raw.trim()
+            if (line.isBlank()) {
+                addGap(6)
+            } else {
+                renderBlock(line)
+            }
+        }
+    }
+
+    private fun renderBlock(line: String) {
+        val sectionMatch = Regex("^([一二三四五六七八九十]+、[^：:。]+)(?:[：:]?)(.*)$").matchEntire(line)
+        if (sectionMatch != null) {
+            addSection(sectionMatch.groupValues[1].trim())
+            val remainder = sectionMatch.groupValues[2].trim()
+            if (remainder.isNotBlank()) renderParagraph(remainder)
             return
         }
-        val isSection = line.matches(Regex("^[一二三四五六七八九十]+、.*")) || line in listOf("整体氛围", "重点人物与群体画像", "有趣的点", "主题/话题", "总结")
-        val isConclusion = line.startsWith("结论：") || line.startsWith("总结：")
-        val isQuote = line.startsWith("◆") || line.startsWith("❖") || line.startsWith("◇")
+        val namedSection = listOf("群聊总结", "内容概览", "重点人物与群像", "整体氛围", "有趣的点", "主题章节", "总结")
+            .firstOrNull { line == it || line.startsWith("$it：") || line.startsWith("$it:") }
+        if (namedSection != null) {
+            addSection(namedSection)
+            val remainder = line.removePrefix(namedSection).removePrefix("：").removePrefix(":").trim()
+            if (remainder.isNotBlank()) renderParagraph(remainder)
+            return
+        }
+        if (line.startsWith("结论：") || line.startsWith("结论:")) {
+            addConclusion(line)
+        } else if (line.startsWith("💥") || line.startsWith("◆") || line.startsWith("❖") || line.startsWith("◇") || line.startsWith("关键词：") || line.startsWith("关键词:")) {
+            addQuote(line)
+        } else if (line.matches(Regex("^\\d+[、.]\\s*[^：:]+(?:：|:).*$"))) {
+            val split = line.indexOfAny(charArrayOf('：', ':'))
+            addSection(line.substring(0, split).trim())
+            renderParagraph(line.substring(split + 1).trim())
+        } else {
+            renderParagraph(line)
+        }
+    }
+
+    private fun addSection(text: String) {
+        addText(text, 13f, Color.rgb(176, 46, 65), Typeface.DEFAULT_BOLD, dp(10), dp(3), 1.15f)
+    }
+
+    private fun addConclusion(text: String) {
+        addText(text, 11.5f, Color.rgb(176, 46, 65), Typeface.DEFAULT_BOLD, dp(4), dp(5), 1.2f)
+    }
+
+    private fun addQuote(text: String) {
+        addText(text, 10.5f, Color.rgb(176, 46, 65), Typeface.DEFAULT_BOLD, dp(4), dp(3), 1.2f)
+    }
+
+    private fun renderParagraph(text: String) {
+        addText(text, 10.8f, Color.rgb(48, 45, 48), Typeface.DEFAULT, dp(2), dp(3), 1.22f)
+    }
+
+    private fun addGap(height: Int) {
+        body.addView(TextView(context), LayoutParams(1, dp(height)))
+    }
+
+    private fun cleanMemberIdentifiers(text: String): String {
+        return text.replace(Regex("wxid_[A-Za-z0-9_-]+"), "群成员")
+            .replace(Regex("[A-Za-z0-9._-]+@(chatroom|im\\.chatroom)"), "群聊")
+            .replace(Regex("\\b(?:微信号|微信ID|群聊ID)[:：]\\s*[A-Za-z0-9._@-]+"), "群成员")
+    }
+
+    private fun addText(text: String, size: Float, color: Int, face: Typeface, top: Int, bottom: Int, spacing: Float) {
         body.addView(TextView(context).apply {
-            text = line
-            textSize = when { isSection -> 13f; isConclusion -> 11f; isQuote -> 10f; else -> 10.5f }
-            setTextColor(if (isSection || isConclusion || isQuote) Color.rgb(176, 46, 65) else Color.rgb(48, 45, 48))
-            typeface = if (isSection || isConclusion) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-            setLineSpacing(0f, 1.12f)
+            this.text = cleanMemberIdentifiers(text)
+            textSize = size
+            setTextColor(color)
+            typeface = face
+            setLineSpacing(0f, spacing)
             gravity = Gravity.LEFT
-            setPadding(0, if (isSection) dp(5) else dp(1), 0, if (isSection) dp(2) else dp(1))
+            setPadding(0, top, 0, bottom)
         }, LayoutParams(-1, LayoutParams.WRAP_CONTENT))
     }
 
