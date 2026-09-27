@@ -9,6 +9,8 @@ import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
 import android.view.View
+import android.text.Editable
+import android.text.TextWatcher
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -257,7 +259,7 @@ internal object ConversationAnalysisReportDialog {
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                 }
             }
-            tabs.addView(tab, LinearLayout.LayoutParams(dp(activity, tabWidth), dp(activity, 34)))
+            tabs.addView(tab, LinearLayout.LayoutParams(dp(activity, tabWidth), dp(activity, 34)).apply { setMargins(0, 0, dp(activity, 4), 0) })
         }
         content.addView(tabScroll, marginParams(activity, -1, 42, 0, 10, 0, 10))
         val focus = EditText(activity).apply { hint = "（可选）让 AI 重点关注什么？例如：大家聊了吃的吗"; gravity = Gravity.CENTER; setPadding(dp(activity, 14), dp(activity, 8), dp(activity, 14), dp(activity, 8)); background = rounded(0x00ffffff, dp(activity, 14)) }
@@ -379,7 +381,7 @@ internal object ConversationAnalysisReportDialog {
                     background = rounded(0xfffffdf9.toInt(), dp(activity, 10)); setTextColor(0xfff57c00.toInt())
                 }
             }
-            tabs.addView(tab, LinearLayout.LayoutParams(dp(activity, tabWidth), dp(activity, 32)))
+            tabs.addView(tab, LinearLayout.LayoutParams(dp(activity, tabWidth), dp(activity, 32)).apply { setMargins(0, 0, dp(activity, 4), 0) })
         }
         box.addView(tabScroll, marginParams(activity, -1, 40, 0, 0, 0, 8))
         if (rows.isEmpty()) { box.addView(label(activity, "所选周期暂无数据", 14f, 0xff4e4b54.toInt(), false)); return }
@@ -438,8 +440,8 @@ internal object ConversationAnalysisReportDialog {
         values.forEach { pair ->
             val row = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(0, dp(activity, 5), 0, dp(activity, 5)) }
             val top = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
-            top.addView(label(activity, pair.first, 13f, 0xff302b28.toInt(), true), LinearLayout.LayoutParams(0, dp(activity, 24), 1f))
-            top.addView(label(activity, pair.second.toString(), 13f, color, true).apply { gravity = Gravity.RIGHT }, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 24)))
+            top.addView(label(activity, pair.first, 15f, textColor(activity), true), LinearLayout.LayoutParams(0, dp(activity, 24), 1f))
+            top.addView(label(activity, pair.second.toString(), 15f, color, true).apply { gravity = Gravity.RIGHT }, LinearLayout.LayoutParams(dp(activity, 48), dp(activity, 24)))
             row.addView(top)
             val track = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; background = rounded(if (isDark(activity)) 0xff4a3424.toInt() else 0xffffe0bd.toInt(), dp(activity, 8)) }
             val ratio = (pair.second.toFloat() / max).coerceIn(.02f, 1f)
@@ -615,8 +617,16 @@ internal object ConversationAnalysisReportDialog {
         screenshot.setTextColor(0xff999999.toInt())
         screenshot.background = rounded(0xffd8d8d8.toInt(), dp(activity, 16))
         val reportView = ConversationAnalysisAiReportView(activity)
-        reportView.update(talker, days, "正在生成…")
+        val reportTitle = WeChatApis.conversations()?.getConversationTitle(talker).orEmpty().ifBlank { talker }
+        reportView.update(reportTitle, days, "正在生成…")
         generatedReportView = reportView
+        executor.execute {
+            val summary = runCatching { ConversationAnalysisRepository().loadSummary(talker, days) }.getOrNull()
+            val members = WeChatApis.contacts()?.getGroupMemberIds(talker).orEmpty().distinct().size
+            Handler(Looper.getMainLooper()).post {
+                if (summary != null) reportView.updateMeta(reportTitle, members, summary.periodSpeakers, summary.periodTotal)
+            }
+        }
         reportHost.addView(reportView, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
         reportHost.requestLayout()
         ai.generateStreaming(talker, days, { partial ->
@@ -637,9 +647,11 @@ internal object ConversationAnalysisReportDialog {
             Toast.makeText(activity, "请先点击开始生成", Toast.LENGTH_SHORT).show()
             return
         }
-        val talkers = WeChatApis.conversations()?.getRecentConversationUsernames(10000).orEmpty()
-            .filter { it != currentTalker && WeChatApis.contacts()?.isGroup(it) == true }
-            .distinct()
+        val talkers = buildList {
+            add(currentTalker)
+            addAll(WeChatApis.conversations()?.getRecentConversationUsernames(10000).orEmpty()
+                .filter { it != currentTalker && WeChatApis.contacts()?.isGroup(it) == true })
+        }.distinct()
         if (talkers.isEmpty()) {
             Toast.makeText(activity, "没有可发送的群聊", Toast.LENGTH_SHORT).show()
             return
@@ -653,21 +665,35 @@ internal object ConversationAnalysisReportDialog {
         }
         root.addView(label(activity, "选择群聊", 22f, textColor(activity), true), marginParams(activity, -1, 44, 0, 0, 0, 4))
         root.addView(label(activity, "选择要发送群聊分析截图的群聊", 14f, if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff77716d.toInt(), false), marginParams(activity, -1, 32, 0, 0, 0, 8))
-        val list = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        talkers.forEach { talker ->
-            val row = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(activity, 4), 0, 0, 0) }
-            val name = WeChatApis.conversations()?.getConversationTitle(talker).orEmpty().ifBlank { talker }
-            row.addView(label(activity, name, 16f, textColor(activity), false), LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
-            val check = label(activity, "□", 26f, if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff6f6862.toInt(), false).apply { gravity = Gravity.CENTER }
-            row.addView(check, LinearLayout.LayoutParams(dp(activity, 42), dp(activity, 52)))
-            row.setOnClickListener {
-                if (selected.add(talker)) { check.text = "✓"; check.setTextColor(0xffffa13a.toInt()) }
-                else { selected.remove(talker); check.text = "□"; check.setTextColor(if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff6f6862.toInt()) }
-            }
-            list.addView(row)
-            list.addView(divider(activity))
+        val search = EditText(activity).apply {
+            hint = "搜索群聊"
+            singleLine = true
+            setTextColor(textColor(activity)); setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt())
+            background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1))
+            setPadding(dp(activity, 14), 0, dp(activity, 14), 0)
         }
-        root.addView(ScrollView(activity).apply { isFillViewport = true; addView(list) }, LinearLayout.LayoutParams(-1, 0, 1f))
+        root.addView(search, marginParams(activity, -1, 48, 0, 0, 0, 8))
+        val list = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        val listScroll = ScrollView(activity).apply { isFillViewport = true; addView(list) }
+        val rows = talkers.map { talker -> talker to (WeChatApis.conversations()?.getConversationTitle(talker).orEmpty().ifBlank { talker }) }
+        fun renderTalkers(query: String) {
+            list.removeAllViews()
+            rows.filter { it.first == currentTalker || query.isBlank() || it.second.contains(query, true) || it.first.contains(query, true) }.forEach { (talker, name) ->
+                val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(activity, 4), 0, 0, 0) }
+                val check = label(activity, if (talker in selected) "✓" else "□", 26f, if (talker in selected) 0xffffa13a.toInt() else if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff6f6862.toInt(), false).apply { gravity = Gravity.CENTER }
+                row.addView(label(activity, name, 16f, textColor(activity), false).apply { gravity = Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
+                row.addView(check, LinearLayout.LayoutParams(dp(activity, 42), dp(activity, 52)))
+                row.setOnClickListener { if (selected.add(talker)) { check.text = "✓"; check.setTextColor(0xffffa13a.toInt()) } else { selected.remove(talker); check.text = "□"; check.setTextColor(if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff6f6862.toInt()) } }
+                list.addView(row); list.addView(divider(activity))
+            }
+        }
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) = Unit
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) { renderTalkers(s?.toString().orEmpty()) }
+            override fun afterTextChanged(s: Editable?) = Unit
+        })
+        renderTalkers("")
+        root.addView(listScroll, LinearLayout.LayoutParams(-1, 0, 1f))
         val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(activity, 10), 0, 0) }
         val cancel = label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 14), dp(activity, 1)); setOnClickListener { picker.dismiss() } }
         val send = actionButton(activity, "发送", 0xffffa13a.toInt()) {

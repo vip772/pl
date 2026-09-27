@@ -3,7 +3,6 @@ package h.Hchat.hooks.items.conversationanalysis
 import android.content.Context
 import android.graphics.Color
 import android.graphics.Typeface
-import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -14,6 +13,10 @@ import java.util.Locale
 internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout(context) {
     private val body = LinearLayout(context)
     private val meta = TextView(context)
+    private var memberCount = 0
+    private var speakerCount = 0
+    private var sampleCount = 0
+    private var reportTalker = ""
 
     init {
         orientation = VERTICAL
@@ -45,8 +48,21 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
         }, LayoutParams(-1, dp(22)))
     }
 
+    fun updateMeta(talker: String, memberCount: Int, speakerCount: Int, sampleCount: Int) {
+        reportTalker = talker
+        this.memberCount = memberCount
+        this.speakerCount = speakerCount
+        this.sampleCount = sampleCount
+        refreshMeta()
+    }
+
+    private fun refreshMeta() {
+        meta.text = "$reportTalker\n群员总数：$memberCount    发言人数：$speakerCount    抽样消息：$sampleCount\n生成时间：${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}"
+    }
+
     fun update(talker: String, days: Int, text: String) {
-        meta.text = "2026/09/27 - 2026/09/27\n群聊：$talker    生成周期：最近 $days 天\n生成时间：${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())}"
+        reportTalker = talker
+        refreshMeta()
         body.removeAllViews()
         text.replace("\r", "").split("\n").forEach(::addLine)
         requestLayout()
@@ -63,7 +79,7 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
         val isQuote = line.startsWith("◆") || line.startsWith("❖") || line.startsWith("◇")
         body.addView(TextView(context).apply {
             text = line
-            textSize = when { isSection -> 11f; isConclusion -> 9f; isQuote -> 8f; else -> 8.5f }
+            textSize = when { isSection -> 13f; isConclusion -> 11f; isQuote -> 10f; else -> 10.5f }
             setTextColor(if (isSection || isConclusion || isQuote) Color.rgb(176, 46, 65) else Color.rgb(48, 45, 48))
             typeface = if (isSection || isConclusion) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
             setLineSpacing(0f, 1.12f)
