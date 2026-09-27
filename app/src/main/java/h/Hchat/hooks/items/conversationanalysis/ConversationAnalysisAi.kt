@@ -82,7 +82,7 @@ internal class ConversationAnalysisAi(private val context: Context) {
         }
     }
     private fun normalizeRecord(talker: String, raw: String): String {
-        var value = raw.substringAfter(":\\n", raw).replace('\\n', ' ').trim()
+        var value = raw.substringAfter(":\n", raw).replace('\n', ' ').trim()
         val names = WeChatApis.contacts()?.getGroupMemberDisplayNames(talker).orEmpty()
             .filter { it.key.isNotBlank() && it.value.isNotBlank() && it.key != it.value }
             .entries.sortedByDescending { it.key.length }
