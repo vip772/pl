@@ -263,8 +263,11 @@ internal object ConversationAnalysisReportDialog {
         content.addView(focus, LinearLayout.LayoutParams(-1, dp(activity, 58)))
         val buttons = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         val reportHost = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        val generate = actionButton(activity, "✦  开始生成", 0xfff57c00.toInt()) { showAi(activity, dialog, talker, selectedDays, logger, reportHost) }
-        val screenshot = actionButton(activity, "生成截图", 0xffe65c00.toInt()) { showGeneratedReportPicker(activity, dialog, talker) }
+        val screenshot = actionButton(activity, "生成截图", 0xffd8d8d8.toInt()) { showGeneratedReportPicker(activity, dialog, talker) }.apply {
+            isEnabled = false
+            setTextColor(0xff999999.toInt())
+        }
+        val generate = actionButton(activity, "✦  开始生成", 0xfff57c00.toInt()) { showAi(activity, dialog, talker, selectedDays, logger, reportHost, screenshot) }
         buttons.addView(generate, LinearLayout.LayoutParams(0, dp(activity, 46), 1f)); buttons.addView(Space(activity), LinearLayout.LayoutParams(dp(activity, 10), 1)); buttons.addView(screenshot, LinearLayout.LayoutParams(0, dp(activity, 46), 1f))
         content.addView(buttons, marginParams(activity, -1, 46, 0, 12, 0, 12))
         reportHost.addView(label(activity, "点击上方按钮，让分析实时生成报告", 15f, 0xff7e7984.toInt(), false).apply { gravity = Gravity.CENTER; setPadding(dp(activity, 12), dp(activity, 18), dp(activity, 12), dp(activity, 18)); background = rounded(0xfffffdf9.toInt(), dp(activity, 18)) })
@@ -312,6 +315,7 @@ internal object ConversationAnalysisReportDialog {
         reloadActivity(days)
         val names = listOf("活跃发言排行" to "▥", "高频语义特征" to "✦", "聊天作息图鉴" to "◕", "情绪指纹探测" to "☺", "废话程度鉴定" to "π", "多维属性探测" to "◎", "全天活跃频次" to "⌁", "内容载体偏好" to "◌")
         val bodies = LinkedHashMap<String, LinearLayout>()
+        var rankingPeriod = days
         var reloadRanking: ((Int) -> Unit)? = null
         names.forEach { pair ->
             val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 16), dp(activity, 8), dp(activity, 16), dp(activity, 12)); background = rounded(panelColor(activity), dp(activity, 16)) }
@@ -320,11 +324,12 @@ internal object ConversationAnalysisReportDialog {
             addCollapsible(activity, root, pair.second, pair.first, body, false)
         }
         reloadRanking = { periodDays ->
+            rankingPeriod = periodDays
             executor.execute {
                 val refreshed = runCatching { ConversationAnalysisDetailsRepository().load(talker, periodDays) }.getOrElse {
                     ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), it.message)
                 }
-                Handler(Looper.getMainLooper()).post { renderRanking(activity, bodies["活跃发言排行"], refreshed.ranking, reloadRanking) }
+                Handler(Looper.getMainLooper()).post { renderRanking(activity, bodies["活跃发言排行"], refreshed.ranking, reloadRanking, rankingPeriod) }
             }
         }
         executor.execute {
@@ -355,16 +360,18 @@ internal object ConversationAnalysisReportDialog {
         renderHourly(activity, bodies["全天活跃频次"], details.deep.hourly)
     }
 
-    private fun renderRanking(activity: Activity, box: LinearLayout?, rows: List<ConversationRankingRow>, reload: ((Int) -> Unit)? = null) {
+    private fun renderRanking(activity: Activity, box: LinearLayout?, rows: List<ConversationRankingRow>, reload: ((Int) -> Unit)? = null, selectedPeriod: Int = 1) {
         if (box == null) return
         box.removeAllViews()
         val tabs = LinearLayout(activity).apply { gravity = Gravity.CENTER; background = rounded(0xffffead2.toInt(), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
         val tabScroll = HorizontalScrollView(activity).apply { isHorizontalScrollBarEnabled = false; addView(tabs) }
+        val periods = listOf(1, -1, 7, -7, 30, -30, 365)
         listOf("今日", "昨日", "本周", "上周", "本月", "上月", "全部").forEachIndexed { index, text ->
-            val tab = label(activity, text, 13f, if (index == 0) 0xfff57c00.toInt() else 0xff6f6862.toInt(), index == 0).apply {
+            val selected = periods[index] == selectedPeriod
+            val tab = label(activity, text, 13f, if (selected) 0xfff57c00.toInt() else 0xff6f6862.toInt(), selected).apply {
                 gravity = Gravity.CENTER
                 setOnClickListener {
-                    val periodDays = listOf(1, -1, 7, -7, 30, -30, 365)[index]
+                    val periodDays = periods[index]
                     reload?.invoke(periodDays)
                     tabs.children().forEach { it.background = null; (it as? TextView)?.setTextColor(0xff6f6862.toInt()) }
                     background = rounded(0xfffffdf9.toInt(), dp(activity, 10)); setTextColor(0xfff57c00.toInt())
@@ -379,10 +386,11 @@ internal object ConversationAnalysisReportDialog {
             val item = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(activity, 5), 0, dp(activity, 5)) }
             item.addView(label(activity, (index + 1).toString(), 16f, if (index < 3) 0xfff57c00.toInt() else 0xff77716d.toInt(), true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(activity, 30), dp(activity, 42)))
             item.addView(label(activity, row.name.take(8), 14f, 0xff302b28.toInt(), true).apply { gravity = Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(dp(activity, 78), dp(activity, 42)))
-            val track = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; background = rounded(if (isDark(activity)) 0xff4a3424.toInt() else 0xffffe0bd.toInt(), dp(activity, 8)) }
+            val track = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; background = rounded(if (isDark(activity)) 0xff4a3424.toInt() else 0xffffe0bd.toInt(), dp(activity, 8)) }
             val fill = View(activity).apply { background = rounded(0xffffa13a.toInt(), dp(activity, 8)) }
             val ratio = (row.count.toFloat() / max).coerceIn(.02f, 1f)
             track.addView(fill, LinearLayout.LayoutParams(0, dp(activity, 9), ratio))
+            track.addView(Space(activity), LinearLayout.LayoutParams(0, dp(activity, 9), 1f - ratio))
             item.addView(track, LinearLayout.LayoutParams(0, dp(activity, 42), 1f))
             item.addView(label(activity, row.count.toString(), 13f, 0xfff57c00.toInt(), true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(activity, 42), dp(activity, 42)))
             box.addView(item)
@@ -560,7 +568,7 @@ internal object ConversationAnalysisReportDialog {
         loadProfile(selected)
     }
 
-    private fun showAi(activity: Activity, reportDialog: Dialog, talker: String, days: Int, logger: (String, Throwable?) -> Unit, reportHost: LinearLayout) {
+    private fun showAi(activity: Activity, reportDialog: Dialog, talker: String, days: Int, logger: (String, Throwable?) -> Unit, reportHost: LinearLayout, screenshot: TextView) {
         val ai = ConversationAnalysisAi(activity)
         if (!ai.configured()) {
             val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 20), dp(activity, 18), dp(activity, 20), dp(activity, 18)); background = rounded(pageColor(activity), dp(activity, 22)) }
@@ -570,7 +578,7 @@ internal object ConversationAnalysisReportDialog {
             val model = EditText(activity).apply { hint = "模型名称" }
             listOf(address, path, key, model).forEach { it.setTextColor(0xff292522.toInt()); it.setHintTextColor(0xff8b8178.toInt()); it.background = strokeRounded(0xfffffdf9.toInt(), 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); it.setPadding(dp(activity, 14), 0, dp(activity, 14), 0); box.addView(it, marginParams(activity, -1, 48, 0, 4, 0, 0)) }
             lateinit var configDialog: Dialog
-            val save = actionButton(activity, "保存并生成", 0xfff57c00.toInt()) { ai.save(address.text.toString(), path.text.toString(), key.text.toString(), model.text.toString()); configDialog.dismiss(); showAi(activity, reportDialog, talker, days, logger, reportHost) }
+            val save = actionButton(activity, "保存并生成", 0xfff57c00.toInt()) { ai.save(address.text.toString(), path.text.toString(), key.text.toString(), model.text.toString()); configDialog.dismiss(); showAi(activity, reportDialog, talker, days, logger, reportHost, screenshot) }
             box.addView(save, marginParams(activity, -1, 46, 0, 10, 0, 0))
             configDialog = Dialog(activity)
             configDialog.setContentView(box)
@@ -580,6 +588,9 @@ internal object ConversationAnalysisReportDialog {
             return
         }
         reportHost.removeAllViews()
+        screenshot.isEnabled = false
+        screenshot.setTextColor(0xff999999.toInt())
+        screenshot.background = rounded(0xffd8d8d8.toInt(), dp(activity, 16))
         val reportView = ConversationAnalysisAiReportView(activity)
         reportView.update(talker, days, "正在生成…")
         generatedReportView = reportView
@@ -590,6 +601,10 @@ internal object ConversationAnalysisReportDialog {
             reportHost.requestLayout()
         }, { final ->
             reportView.update(talker, days, final)
+            val success = !final.startsWith("AI 总结失败：") && !final.startsWith("所选时段暂无") && !final.startsWith("请先配置")
+            screenshot.isEnabled = success
+            screenshot.setTextColor(if (success) Color.WHITE else 0xff999999.toInt())
+            screenshot.background = rounded(if (success) 0xffe65c00.toInt() else 0xffd8d8d8.toInt(), dp(activity, 16))
             reportHost.requestLayout()
         })
     }

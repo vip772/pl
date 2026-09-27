@@ -9,6 +9,7 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.util.Calendar
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 
@@ -85,9 +86,9 @@ internal class ConversationAnalysisAi(private val context: Context) {
         require(configured()) { "请先配置 AI 地址、密钥和模型" }
         val db = WeChatApis.database() ?: error("数据库API尚未初始化")
         require(db.prepare()) { "消息数据库尚未就绪" }
-        val start = System.currentTimeMillis() - (days - 1L) * 86_400_000L
+        val start = if (days >= 60) 0L else System.currentTimeMillis() - (days - 1L) * 86_400_000L
         val limit = configStore.sampleLimit().let { if (it == 0) 3000 else it }
-        val rows = db.query("SELECT content,isSend FROM message WHERE talker = ? AND type = 1 AND createTime >= ? ORDER BY createTime ASC LIMIT $limit", arrayOf(talker, start.toString()))
+        val rows = db.query("SELECT content,isSend,type FROM message WHERE talker = ? AND type NOT IN (10000) AND createTime >= ? ORDER BY createTime ASC LIMIT $limit", arrayOf(talker, start.toString()))
         val records = rows.mapNotNull { row ->
             val raw = row["content"].toString()
             raw.substringAfter(":\n", raw).replace('\n', ' ').trim().takeIf { it.isNotBlank() }?.take(500)
@@ -130,8 +131,9 @@ internal class ConversationAnalysisAi(private val context: Context) {
         require(configured()) { "请先配置 AI 地址、密钥和模型" }
         val db = WeChatApis.database() ?: error("数据库API尚未初始化")
         require(db.prepare()) { "消息数据库尚未就绪" }
-        val start = System.currentTimeMillis() - (days - 1L) * 86_400_000L
-        val rows = db.query("SELECT content,isSend FROM message WHERE talker = ? AND type = 1 AND createTime >= ? ORDER BY createTime ASC LIMIT 3000", arrayOf(talker, start.toString()))
+        val start = aiPeriodStart(days)
+        val end = aiPeriodEnd(days)
+        val rows = db.query("SELECT content,isSend,type FROM message WHERE talker = ? AND type NOT IN (10000) AND createTime >= ? AND createTime <= ? ORDER BY createTime ASC LIMIT 3000", arrayOf(talker, start.toString(), end.toString()))
         val records = rows.mapNotNull { row ->
             val content = row["content"].toString().substringAfter(":\n", row["content"].toString()).replace('\n', ' ').trim()
             content.takeIf { it.isNotBlank() }?.take(500)
@@ -149,6 +151,26 @@ internal class ConversationAnalysisAi(private val context: Context) {
             if (conn.responseCode !in 200..299) error("HTTP ${conn.responseCode}: $response")
             return JSONObject(response).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty().ifBlank { "AI 返回内容为空" }
         } finally { conn.disconnect() }
+    }
+    private fun aiPeriodStart(days: Int): Long {
+        if (days >= 60) return 0L
+        val day = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
+        return when (days) {
+            -1 -> day.apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            -7 -> day.apply { add(Calendar.DAY_OF_YEAR, -7) }.timeInMillis
+            -30 -> day.apply { add(Calendar.MONTH, -1); set(Calendar.DAY_OF_MONTH, 1) }.timeInMillis
+            else -> day.apply { add(Calendar.DAY_OF_YEAR, -(days.coerceAtLeast(1) - 1)) }.timeInMillis
+        }
+    }
+    private fun aiPeriodEnd(days: Int): Long {
+        if (days >= 60) return System.currentTimeMillis()
+        val end = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999) }
+        return when (days) {
+            -1 -> end.apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            -7 -> end.apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            -30 -> end.apply { set(Calendar.DAY_OF_MONTH, 1); add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
+            else -> end.timeInMillis
+        }
     }
     private fun config() = configStore.activeProfile()
     private fun join(address: String, path: String) = address.trimEnd('/') + "/" + path.trimStart('/')
