@@ -626,7 +626,7 @@ internal object ConversationAnalysisReportDialog {
             val summary = runCatching { ConversationAnalysisRepository().loadSummary(talker, days) }.getOrNull()
             val members = WeChatApis.contacts()?.getGroupMemberIds(talker).orEmpty().distinct().size
             Handler(Looper.getMainLooper()).post {
-                if (summary != null) reportView.updateMeta(reportTitle, members, summary.periodSpeakers, summary.periodTotal)
+                if (summary != null) reportView.updateMeta(reportTitle, days, members, summary.periodSpeakers)
             }
         }
         reportHost.addView(reportView, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
@@ -636,6 +636,7 @@ internal object ConversationAnalysisReportDialog {
             reportHost.requestLayout()
         }, { final ->
             reportView.update(talker, days, final)
+            reportView.updateSampleCount(ai.lastSampleCount())
             val success = !final.startsWith("AI 总结失败：") && !final.startsWith("所选时段暂无") && !final.startsWith("请先配置")
             screenshot.isEnabled = success
             screenshot.setTextColor(if (success) Color.WHITE else 0xff999999.toInt())
@@ -725,13 +726,15 @@ internal object ConversationAnalysisReportDialog {
     }
 
     private fun captureAndSend(activity: Activity, root: View, talkers: List<String>) {
-        val report = root as? ConversationAnalysisAiReportView
-        report?.setScreenshotMode(true)
-        root.post {
-            ConversationAnalysisScreenshot.capture(root, File(activity.cacheDir, "conversation_analysis")) { file ->
-                val ok = file != null && talkers.all { WeChatApis.media()?.sendImage(it, file.absolutePath) == true }
-                report?.setScreenshotMode(false)
-                Toast.makeText(activity, if (ok) "截图已发送" else "部分群聊发送失败", Toast.LENGTH_SHORT).show()
+        val report = root as? ConversationAnalysisAiReportView ?: return
+        executor.execute {
+            val groupTitle = report.getReportTalker().let { id ->
+                WeChatApis.conversations()?.getConversationTitle(id).orEmpty().ifBlank { id }
+            }
+            val file = runCatching { report.renderScreenshot(groupTitle, report.getReportDays(), File(activity.cacheDir, "conversation_analysis")) }.getOrNull()
+            val ok = file != null && talkers.all { WeChatApis.media()?.sendImage(it, file.absolutePath) == true }
+            Handler(Looper.getMainLooper()).post {
+                Toast.makeText(activity, if (ok) "截图已发送" else "截图生成或发送失败", Toast.LENGTH_SHORT).show()
             }
         }
     }
