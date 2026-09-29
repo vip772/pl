@@ -1,7 +1,8 @@
 package t.mma.preferences
+import t.mma.utils.HLog
 
 import android.content.Context
-import t.mma.utils.HLog
+import HLog
 
 object TermsGate {
     const val AGREEMENT_TEXT = "我同意"

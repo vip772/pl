@@ -1,4 +1,5 @@
 package t.mma.hooks.items.payment.notify;
+import t.mma.utils.HLog
 
 import android.app.Notification;
 import android.app.NotificationChannel;
@@ -78,7 +79,7 @@ public class RedPacketNotifier {
                     hostContext.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
             if (Build.VERSION.SDK_INT >= 24 && !nm.areNotificationsEnabled()) {
-                t.mma.utils.HLog.e(tag + " 通知失败: 微信通知权限已关闭");
+                HLog.e(tag + " 通知失败: 微信通知权限已关闭");
                 return;
             }
 
@@ -95,7 +96,7 @@ public class RedPacketNotifier {
                 nm.createNotificationChannel(channel);
                 channel = nm.getNotificationChannel(channelId);
                 if (channel != null && channel.getImportance() == NotificationManager.IMPORTANCE_NONE) {
-                    t.mma.utils.HLog.e(tag + " 通知失败: " + channelName + "通知渠道已关闭");
+                    HLog.e(tag + " 通知失败: " + channelName + "通知渠道已关闭");
                     return;
                 }
             }
@@ -135,7 +136,7 @@ public class RedPacketNotifier {
                 playManualNotificationSound(resolveSoundUri(soundUri));
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(tag + " 通知失败: " + e.getMessage(), e);
+            HLog.e(tag + " 通知失败: " + e.getMessage(), e);
         }
     }
 
@@ -166,7 +167,7 @@ public class RedPacketNotifier {
             try {
                 ringtone = RingtoneManager.getRingtone(hostContext, uri);
             } catch (Throwable e) {
-                t.mma.utils.HLog.e(tag + " 铃声加载失败: " + e.getMessage(), e);
+                HLog.e(tag + " 铃声加载失败: " + e.getMessage(), e);
                 return;
             }
             if (ringtone == null) return;
@@ -177,7 +178,7 @@ public class RedPacketNotifier {
                 ringtone.play();
                 mainHandler.postDelayed(() -> stopRingtone(ringtone), MANUAL_SOUND_STOP_DELAY_MS);
             } catch (Throwable e) {
-                t.mma.utils.HLog.e(tag + " 铃声播放失败: " + e.getMessage(), e);
+                HLog.e(tag + " 铃声播放失败: " + e.getMessage(), e);
             }
         });
     }

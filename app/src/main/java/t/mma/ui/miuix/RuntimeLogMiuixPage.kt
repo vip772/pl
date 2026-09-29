@@ -1,4 +1,5 @@
 package t.mma.ui.miuix
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.content.Intent
@@ -21,7 +22,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.core.HookRegistry
-import t.mma.utils.HLog
+import HLog
 import t.mma.utils.KavaReflector
 import t.mma.utils.RuntimeLogStore
 import java.text.SimpleDateFormat

@@ -1,4 +1,5 @@
 package t.mma.hooks.items.autooriginal
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.content.Intent
@@ -8,7 +9,7 @@ import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import t.mma.utils.KavaReflector
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier

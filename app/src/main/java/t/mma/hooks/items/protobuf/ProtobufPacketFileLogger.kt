@@ -1,4 +1,5 @@
 package t.mma.hooks.items.protobuf
+import t.mma.utils.HLog
 
 import android.content.Context
 import de.robv.android.xposed.XposedBridge
@@ -30,7 +31,7 @@ class ProtobufPacketFileLogger(context: Context) {
                 append("Json: ").append(json).append("\n\n")
             })
         } catch (e: Throwable) {
-            t.mma.utils.HLog.e("[Hchat:Protobuf] 写入抓包文件失败: ${e.message}", e)
+            HLog.e("[Hchat:Protobuf] 写入抓包文件失败: ${e.message}", e)
         }
     }
 

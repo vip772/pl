@@ -1,4 +1,5 @@
 package t.mma.hooks.items.tablet
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -11,7 +12,7 @@ import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.api.runtime.WeChatVersionApi
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import org.luckypray.dexkit.wrap.DexMethod

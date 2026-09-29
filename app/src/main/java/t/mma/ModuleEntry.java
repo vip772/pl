@@ -1,4 +1,5 @@
 package t.mma;
+import t.mma.utils.HLog
 
 import android.app.Application;
 import android.content.Context;
@@ -27,7 +28,7 @@ import t.mma.preferences.TermsGate;
 import t.mma.dexkit.DexBridgeHolder;
 import t.mma.event.EventBus;
 import t.mma.ui.UIRegistry;
-import t.mma.utils.HLog;
+import HLog;
 
 import org.luckypray.dexkit.DexKitBridge;
 

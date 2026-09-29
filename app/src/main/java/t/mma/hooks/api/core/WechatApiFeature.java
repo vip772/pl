@@ -1,4 +1,5 @@
 package t.mma.hooks.api.core;
+import t.mma.utils.HLog
 
 import t.mma.hooks.api.contact.*;
 import t.mma.hooks.api.conversation.*;
@@ -191,7 +192,7 @@ public class WechatApiFeature implements Feature {
         String line = TAG + " " + message;
         // 公共 API 的全部阶段日志进入 Hchat 运行日志；重要日志另外写入 LSPosed。
         // 这样可以还原一次 API 调用经过了哪些阶段，而不是只看到最终失败。
-        t.mma.utils.HLog.d(line);
+        HLog.d(line);
         if (isImportantLog(message)) {
             XposedBridge.log(line);
         }

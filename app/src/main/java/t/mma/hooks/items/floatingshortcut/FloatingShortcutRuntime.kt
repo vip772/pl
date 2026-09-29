@@ -1,4 +1,5 @@
 package t.mma.hooks.items.floatingshortcut
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.app.Application
@@ -35,7 +36,7 @@ import t.mma.hooks.api.ui.HchatAgentIconDrawable
 import t.mma.preferences.HchatStorage
 import t.mma.ui.SettingsUI
 import t.mma.ui.miuix.MiuixSettingsPage
-import t.mma.utils.HLog
+import HLog
 import java.lang.ref.WeakReference
 import kotlin.math.abs
 

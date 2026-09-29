@@ -1,11 +1,12 @@
 package t.mma.hooks.items.script.market
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.system.Os
 import android.util.Base64
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.items.script.ScriptPluginRuntime
-import t.mma.utils.HLog
+import HLog
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream

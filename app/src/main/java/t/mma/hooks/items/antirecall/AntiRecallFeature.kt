@@ -1,4 +1,5 @@
 package t.mma.hooks.items.antirecall
+import t.mma.utils.HLog
 
 import android.content.ContentValues
 import de.robv.android.xposed.XC_MethodHook
@@ -539,12 +540,12 @@ class AntiRecallFeature : BaseFeature() {
         selfRecall: Boolean
     ) {
         if (talker.isBlank() || svrId <= 0L) {
-            t.mma.utils.HLog.e("$TAG 插入提示失败: talker/newmsgid为空 talker=$talker newmsgid=$svrId")
+            HLog.e("$TAG 插入提示失败: talker/newmsgid为空 talker=$talker newmsgid=$svrId")
             return
         }
         val localMessages = WeChatApis.localMessages()
         if (localMessages == null) {
-            t.mma.utils.HLog.e("$TAG 插入提示失败: LocalMessage API为空")
+            HLog.e("$TAG 插入提示失败: LocalMessage API为空")
             return
         }
         localMessages.ensureReady()
@@ -555,7 +556,7 @@ class AntiRecallFeature : BaseFeature() {
             noticeText(context, talker, recalledInfo, targetCreateTime, recallTime)
         }
         if (targetCreateTime <= 0L) {
-            t.mma.utils.HLog.e(
+            HLog.e(
                 "$TAG 插入提示失败: 未定位原消息时间 talker=$talker id=$svrId " +
                     "origin=${recalledInfo?.originSvrId ?: 0L} new=${recalledInfo?.newMsgId ?: 0L}"
             )
@@ -563,7 +564,7 @@ class AntiRecallFeature : BaseFeature() {
         }
         val result = localMessages.insertSystemMessageAt(talker, notice, targetCreateTime + 1L)
         if (result <= 0L) {
-            t.mma.utils.HLog.e("$TAG 插入提示失败: talker=$talker newmsgid=$svrId")
+            HLog.e("$TAG 插入提示失败: talker=$talker newmsgid=$svrId")
         }
     }
 

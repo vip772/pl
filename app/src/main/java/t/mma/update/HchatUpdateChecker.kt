@@ -1,4 +1,5 @@
 package t.mma.update
+import t.mma.utils.HLog
 
 import android.Manifest
 import android.app.Notification
@@ -10,7 +11,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader

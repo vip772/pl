@@ -1,4 +1,5 @@
 package t.mma.hooks.items.profileid
+import t.mma.utils.HLog
 
 import android.app.Activity
 import t.mma.hooks.api.contact.WeContactHeaderApi
@@ -61,7 +62,7 @@ class ProfileGroupInfoFeature {
                     .mapNotNull { it.wxId.takeIf { id -> id.endsWith("@chatroom") || id.endsWith("@im.chatroom") } }
                     .forEach { scheduleGroup(it, run) }
             }.onFailure {
-                t.mma.utils.HLog.e("[Hchat:profile_group_info] 预热群成员进群时间失败", it)
+                HLog.e("[Hchat:profile_group_info] 预热群成员进群时间失败", it)
             }
         }
 
@@ -78,7 +79,7 @@ class ProfileGroupInfoFeature {
                         WeContactHeaderApi.refreshCurrentProfile(groupId, memberId)
                     }
                 } catch (t: Throwable) {
-                    t.mma.utils.HLog.e("[Hchat:profile_group_info] 群成员进群时间索引失败: $groupId", t)
+                    HLog.e("[Hchat:profile_group_info] 群成员进群时间索引失败: $groupId", t)
                 } finally {
                     loadingGroups.remove(groupId)
                 }

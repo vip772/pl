@@ -1,4 +1,5 @@
 package t.mma.hooks.items.conversationgroup
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.os.Handler
@@ -11,7 +12,7 @@ import t.mma.hooks.items.messageblock.MessageBlockSettings
 import t.mma.hooks.items.quickread.QuickMarkReadRuntime
 import t.mma.ui.SettingsUI
 import t.mma.ui.miuix.VoiceForwardMiuixDialog
-import t.mma.utils.HLog
+import HLog
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 

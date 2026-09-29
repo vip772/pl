@@ -1,6 +1,7 @@
 package t.mma.hooks.api.message
-
 import t.mma.utils.HLog
+
+import HLog
 import java.util.concurrent.CopyOnWriteArrayList
 
 object OutgoingTextDecoratorRegistry {

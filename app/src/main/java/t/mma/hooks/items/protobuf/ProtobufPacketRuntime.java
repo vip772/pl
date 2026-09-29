@@ -1,4 +1,5 @@
 package t.mma.hooks.items.protobuf;
+import t.mma.utils.HLog
 
 import org.json.JSONObject;
 
@@ -7,7 +8,7 @@ import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import t.mma.utils.HLog;
+import HLog;
 
 public final class ProtobufPacketRuntime {
     public static final String DIRECTION_REQUEST = "request";

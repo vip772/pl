@@ -1,4 +1,5 @@
 package t.mma.hooks.api.ui;
+import t.mma.utils.HLog
 
 import android.app.Activity;
 import android.content.Context;
@@ -181,7 +182,7 @@ public class SettingsInjector {
 
                                 logDetail("[Legacy] 设置条目已插入");
                             } catch (Throwable e) {
-                                t.mma.utils.HLog.e(TAG + " [Legacy] 插入失败: " + e.getMessage(), e);
+                                HLog.e(TAG + " [Legacy] 插入失败: " + e.getMessage(), e);
                             }
                         }
                     }));
@@ -223,7 +224,7 @@ public class SettingsInjector {
 
             logDetail("[Legacy] 已安装");
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " [Legacy] Hook 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " [Legacy] Hook 失败: " + e.getMessage(), e);
         }
     }
 
@@ -439,7 +440,7 @@ public class SettingsInjector {
                                 Object location = newSettingLocation(parentClass, proxyClass);
                                 param.setResult(location);
                             } catch (Throwable e) {
-                                t.mma.utils.HLog.e(TAG + " [Modern] SettingLocation 构造失败: " + e.getMessage(), e);
+                                HLog.e(TAG + " [Modern] SettingLocation 构造失败: " + e.getMessage(), e);
                             }
                         }
                     });
@@ -496,7 +497,7 @@ public class SettingsInjector {
                             patched.put(pageKey, newSet);
                             param.setResult(patched);
                         } catch (Throwable e) {
-                            t.mma.utils.HLog.e(TAG + " [Modern] ClassesProvider 注入失败: " + e.getMessage(), e);
+                            HLog.e(TAG + " [Modern] ClassesProvider 注入失败: " + e.getMessage(), e);
                         }
                     }
                 });
@@ -510,7 +511,7 @@ public class SettingsInjector {
 
             logDetail("[Modern] 已安装");
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " [Modern] 安装失败: " + e.getMessage(), e);
+            HLog.e(TAG + " [Modern] 安装失败: " + e.getMessage(), e);
         }
     }
 
@@ -588,7 +589,7 @@ public class SettingsInjector {
                     logDetail("[Modern] superImportUIComponents 注入完成: "
                             + ownerClass.getName());
                 } catch (Throwable e) {
-                    t.mma.utils.HLog.e(TAG + " [Modern] superImportUIComponents 失败: "
+                    HLog.e(TAG + " [Modern] superImportUIComponents 失败: "
                             + ownerClass.getName() + ", " + e.getMessage(), e);
                 }
             }
@@ -720,7 +721,7 @@ public class SettingsInjector {
 
             logDetail("[LauncherUI] 已安装");
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " [LauncherUI] Hook 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " [LauncherUI] Hook 失败: " + e.getMessage(), e);
         }
     }
 
@@ -736,7 +737,7 @@ public class SettingsInjector {
                 logDetail("[PlusLongPress] PlusActionView 未安装");
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " [PlusLongPress] Hook 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " [PlusLongPress] Hook 失败: " + e.getMessage(), e);
         }
     }
 
@@ -753,7 +754,7 @@ public class SettingsInjector {
                             try {
                                 markPlusView(resolvePlusActionRealView(param.thisObject));
                             } catch (Throwable e) {
-                                t.mma.utils.HLog.e(TAG + " [PlusLongPress] 绑定加号入口失败: " + e.getMessage(), e);
+                                HLog.e(TAG + " [PlusLongPress] 绑定加号入口失败: " + e.getMessage(), e);
                             }
                         }
                     })) {
@@ -787,7 +788,7 @@ public class SettingsInjector {
             showModuleSettingsPage(context);
             return true;
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " [PlusLongPress] 长按打开失败: " + e.getMessage(), e);
+            HLog.e(TAG + " [PlusLongPress] 长按打开失败: " + e.getMessage(), e);
             return false;
         }
     }
@@ -841,7 +842,7 @@ public class SettingsInjector {
                                 : null;
                         appendEnabledPlusMenuItems(param.thisObject, adapter);
                     } catch (Throwable e) {
-                        t.mma.utils.HLog.e(TAG + " [PlusMenu] 添加入口失败: " + e.getMessage(), e);
+                        HLog.e(TAG + " [PlusMenu] 添加入口失败: " + e.getMessage(), e);
                     }
                 }
             });
@@ -874,7 +875,7 @@ public class SettingsInjector {
                             QuickMarkReadRuntime.markAllRead(context, true);
                         }
                     } catch (Throwable e) {
-                        t.mma.utils.HLog.e(TAG + " [PlusMenu] 处理菜单点击失败: " + e.getMessage(), e);
+                        HLog.e(TAG + " [PlusMenu] 处理菜单点击失败: " + e.getMessage(), e);
                     }
                 }
             });
@@ -883,7 +884,7 @@ public class SettingsInjector {
 
             logDetail("[PlusMenu] 已安装: " + dex.plusSubMenuHelperClass.getName());
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " [PlusMenu] Hook 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " [PlusMenu] Hook 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1218,7 +1219,7 @@ public class SettingsInjector {
                         if (itemId == Integer.MIN_VALUE) return;
                         applyPlusMenuIcon((View) result, itemId);
                     } catch (Throwable e) {
-                        t.mma.utils.HLog.e(TAG + " [PlusMenu] 设置菜单图标失败: " + e.getMessage(), e);
+                        HLog.e(TAG + " [PlusMenu] 设置菜单图标失败: " + e.getMessage(), e);
                     }
                 }
             });
@@ -1308,7 +1309,7 @@ public class SettingsInjector {
             BaseAdapter adapter = findBaseAdapterFieldValue(helper);
             appendEnabledPlusMenuItems(helper, adapter);
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " [PlusMenu] 显示时添加入口失败: " + e.getMessage(), e);
+            HLog.e(TAG + " [PlusMenu] 显示时添加入口失败: " + e.getMessage(), e);
         }
     }
 

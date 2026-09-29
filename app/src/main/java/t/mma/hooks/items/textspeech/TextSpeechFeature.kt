@@ -1,4 +1,5 @@
 package t.mma.hooks.items.textspeech
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.view.KeyEvent
@@ -8,7 +9,7 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
-import t.mma.utils.HLog
+import HLog
 import t.mma.utils.KavaReflector
 
 class TextSpeechFeature : BaseFeature() {

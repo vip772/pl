@@ -1,11 +1,12 @@
 package t.mma.hooks.items.customfriendavatar
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files

@@ -1,4 +1,5 @@
 package t.mma.ui.miuix
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.app.DatePickerDialog
@@ -1059,15 +1060,15 @@ object MiuixSettingsPage {
             runCatching {
                 page.findViewById<ComposeView>(android.R.id.content)?.disposeComposition()
             }.onFailure {
-                t.mma.utils.HLog.e("[Hchat:MiuixSettings] 销毁页面 Composition 失败: ${it.message}", it)
+                HLog.e("[Hchat:MiuixSettings] 销毁页面 Composition 失败: ${it.message}", it)
             }
             runCatching {
                 if (page.parent === decor) decor.removeView(page)
             }.onFailure {
-                t.mma.utils.HLog.e("[Hchat:MiuixSettings] 移除页面失败: ${it.message}", it)
+                HLog.e("[Hchat:MiuixSettings] 移除页面失败: ${it.message}", it)
             }
             runCatching { owner.destroy() }.onFailure {
-                t.mma.utils.HLog.e("[Hchat:MiuixSettings] 销毁页面 Owner 失败: ${it.message}", it)
+                HLog.e("[Hchat:MiuixSettings] 销毁页面 Owner 失败: ${it.message}", it)
             }
         }
         fun hideImeIfVisible(): Boolean {
@@ -1320,7 +1321,7 @@ object MiuixSettingsPage {
             }
         } catch (throwable: Throwable) {
             closePage()
-            t.mma.utils.HLog.e(
+            HLog.e(
                 "[Hchat:MiuixSettings] 创建页面 ComposeView 失败: ${throwable.message}",
                 throwable
             )
@@ -1339,7 +1340,7 @@ object MiuixSettingsPage {
             composeView.createComposition()
         } catch (throwable: Throwable) {
             closePage()
-            t.mma.utils.HLog.e(
+            HLog.e(
                 "[Hchat:MiuixSettings] 创建页面 Composition 失败: ${throwable.message}",
                 throwable
             )
@@ -1458,7 +1459,7 @@ internal object NativeFakeLocationPickerBridge {
         }.onSuccess { unhooks ->
             if (unhooks.isNotEmpty()) hookedClasses.add(clazz)
         }.onFailure {
-            t.mma.utils.HLog.e("[Hchat:FakeLocation] 地图选点结果 Hook 安装失败: ${clazz.name}", it)
+            HLog.e("[Hchat:FakeLocation] 地图选点结果 Hook 安装失败: ${clazz.name}", it)
         }
     }
 

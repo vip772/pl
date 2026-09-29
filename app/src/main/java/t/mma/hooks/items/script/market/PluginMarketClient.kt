@@ -1,7 +1,8 @@
 package t.mma.hooks.items.script.market
+import t.mma.utils.HLog
 
 import android.content.Context
-import t.mma.utils.HLog
+import HLog
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType

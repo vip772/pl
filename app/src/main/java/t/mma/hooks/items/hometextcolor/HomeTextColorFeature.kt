@@ -1,4 +1,5 @@
 package t.mma.hooks.items.hometextcolor
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.content.Context
@@ -30,7 +31,7 @@ import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.items.membertitle.MemberTitleStore
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindClass
 import org.luckypray.dexkit.query.FindMethod

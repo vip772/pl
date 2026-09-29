@@ -1,4 +1,5 @@
 package t.mma.hooks.items.textspeech
+import t.mma.utils.HLog
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -23,7 +24,7 @@ import t.mma.hooks.api.media.WeChatVoiceApi
 import t.mma.hooks.api.message.WeChatMessageObserveApi
 import t.mma.hooks.api.model.WeChatMessage
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import t.mma.utils.KavaReflector
 import java.io.File
 import java.util.ArrayDeque

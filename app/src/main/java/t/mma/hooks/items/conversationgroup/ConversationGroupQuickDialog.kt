@@ -1,4 +1,5 @@
 package t.mma.hooks.items.conversationgroup
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.content.Context
@@ -57,7 +58,7 @@ import androidx.savedstate.SavedStateRegistryOwner
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import t.mma.ui.miuix.EmbeddedComposeOwnerInstaller
-import t.mma.utils.HLog
+import HLog
 import java.io.ByteArrayOutputStream
 import java.lang.ref.WeakReference
 import java.text.SimpleDateFormat

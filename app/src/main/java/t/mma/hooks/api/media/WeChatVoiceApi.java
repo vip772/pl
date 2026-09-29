@@ -1,4 +1,5 @@
 package t.mma.hooks.api.media;
+import t.mma.utils.HLog
 
 import android.content.ContentValues;
 import android.content.Context;
@@ -11,7 +12,7 @@ import t.mma.dexkit.DexFinder;
 import t.mma.hooks.api.core.WeChatApis;
 import t.mma.hooks.api.net.WeChatNetworkApi;
 import t.mma.hooks.items.fakevoiceduration.FakeVoiceDurationFeature;
-import t.mma.utils.HLog;
+import HLog;
 import t.mma.utils.KavaReflector;
 import me.yun.silk.AacCodec;
 import me.yun.silk.SilkCodec;

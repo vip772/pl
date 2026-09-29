@@ -1,4 +1,5 @@
 package t.mma.hooks.items.settings
+import t.mma.utils.HLog
 
 import t.mma.crash.CrashReportSettingsProvider
 import t.mma.dexkit.SettingsDexFinder
@@ -9,7 +10,7 @@ import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.items.quickread.QuickMarkReadRuntime
 import t.mma.hooks.items.quickterminate.QuickTerminateRuntime
 import t.mma.ui.FeatureSettingsProvider
-import t.mma.utils.HLog
+import HLog
 
 /**
  * 微信内设置入口注入功能。

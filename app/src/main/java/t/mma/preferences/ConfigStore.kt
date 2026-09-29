@@ -1,8 +1,9 @@
 package t.mma.preferences
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.content.SharedPreferences
-import t.mma.utils.HLog
+import HLog
 
 class ConfigStore(private val hostContext: Context) {
     fun getFeaturePrefs(featureId: String): SharedPreferences {

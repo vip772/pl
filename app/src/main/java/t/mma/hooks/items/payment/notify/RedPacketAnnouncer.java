@@ -1,4 +1,5 @@
 package t.mma.hooks.items.payment.notify;
+import t.mma.utils.HLog
 
 import android.content.Context;
 import android.media.AudioAttributes;
@@ -21,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import t.mma.hooks.items.payment.core.RedPacketEffectiveRule;
 import t.mma.hooks.items.payment.core.RedPacketRuleResolver;
 import t.mma.hooks.items.payment.core.RedPacketSettings;
-import t.mma.utils.HLog;
+import HLog;
 
 /**
  * 红包领取成功后的本机 TTS 播报。

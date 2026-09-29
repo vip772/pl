@@ -1,4 +1,5 @@
 package t.mma.dexkit;
+import t.mma.utils.HLog
 
 import t.mma.dexkit.DexFinder;
 
@@ -65,7 +66,7 @@ public final class DexBridgeHolder {
                 result.add(cd.getName());
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " findClassesByStrings 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " findClassesByStrings 失败: " + e.getMessage(), e);
         }
         return result;
     }
@@ -87,7 +88,7 @@ public final class DexBridgeHolder {
                 result.add(new MethodInfo(md.getClassName(), md.getName()));
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " findMethodsByStrings 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " findMethodsByStrings 失败: " + e.getMessage(), e);
         }
         return result;
     }

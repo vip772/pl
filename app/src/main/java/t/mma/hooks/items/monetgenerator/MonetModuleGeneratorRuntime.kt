@@ -1,4 +1,5 @@
 package t.mma.hooks.items.monetgenerator
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.os.Build
@@ -16,7 +17,7 @@ import t.mma.hooks.items.monetgenerator.engine.MonetGenerationRequest
 import t.mma.hooks.items.monetgenerator.engine.MonetLogLevel
 import t.mma.hooks.items.monetgenerator.engine.MonetModuleGenerator
 import t.mma.hooks.items.monetgenerator.engine.MonetResourceDexEvidence
-import t.mma.utils.HLog
+import HLog
 import org.luckypray.dexkit.DexKitBridge
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean

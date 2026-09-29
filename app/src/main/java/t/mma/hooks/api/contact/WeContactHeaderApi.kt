@@ -1,4 +1,5 @@
 package t.mma.hooks.api.contact
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.content.ContextWrapper
@@ -14,7 +15,7 @@ import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
-import t.mma.utils.HLog
+import HLog
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher

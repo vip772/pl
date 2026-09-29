@@ -1,4 +1,5 @@
 package t.mma.hooks.items.script
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.os.Build
@@ -248,7 +249,7 @@ object ScriptPluginRuntime {
             hostAppContext,
             cleanupOrphanImportStages = true
         ).onFailure { error ->
-            t.mma.utils.HLog.e("$TAG 恢复插件文件事务失败: ${error.message}", error)
+            HLog.e("$TAG 恢复插件文件事务失败: ${error.message}", error)
         }
         startPluginObservers(hostAppContext)
     }
@@ -271,14 +272,14 @@ object ScriptPluginRuntime {
             try {
                 val result = loadEnabledAppBrandPlugins(hostAppContext, currentBridge)
                 if (result.isFailure) {
-                    t.mma.utils.HLog.e(
+                    HLog.e(
                         "$TAG 小程序进程插件加载失败: ${runtimeProcessName} " +
                             "${result.exceptionOrNull()?.message}",
                         result.exceptionOrNull()
                     )
                 }
             } catch (error: Throwable) {
-                t.mma.utils.HLog.e(
+                HLog.e(
                     "$TAG 小程序进程插件加载线程异常: ${runtimeProcessName} ${error.message}",
                     error
                 )
@@ -298,19 +299,19 @@ object ScriptPluginRuntime {
             try {
                 if (!awaitScriptApiReady(hostAppContext)) {
                     if (isPluginRuntimeEnabled(hostAppContext)) {
-                        t.mma.utils.HLog.e("$TAG 等待联系人数据库就绪超时，跳过本次自动加载")
+                        HLog.e("$TAG 等待联系人数据库就绪超时，跳过本次自动加载")
                     }
                     return@Thread
                 }
                 val result = loadEnabledPlugins(hostAppContext, currentBridge(hostAppContext))
                 if (result.isFailure) {
-                    t.mma.utils.HLog.e(
+                    HLog.e(
                         "$TAG 自动加载已启用插件失败: ${result.exceptionOrNull()?.message}",
                         result.exceptionOrNull()
                     )
                 }
             } catch (error: Throwable) {
-                t.mma.utils.HLog.e("$TAG 自动加载线程异常: ${error.message}", error)
+                HLog.e("$TAG 自动加载线程异常: ${error.message}", error)
             }
         }, "Hchat-Script-InitialLoad").apply {
             isDaemon = true
@@ -455,7 +456,7 @@ object ScriptPluginRuntime {
         Thread({
             val result = reloadPlugin(context, pluginId)
             if (result.isFailure) {
-                t.mma.utils.HLog.e(
+                HLog.e(
                     "$TAG 插件重载失败: $pluginId ${result.exceptionOrNull()?.message}",
                     result.exceptionOrNull()
                 )
@@ -602,7 +603,7 @@ object ScriptPluginRuntime {
                                     }
                                 }
                             }.onFailure {
-                                t.mma.utils.HLog.e(
+                                HLog.e(
                                     "$TAG 朋友圈媒体准备回调失败: $pluginId ${it.message}",
                                     it
                                 )
@@ -729,7 +730,7 @@ object ScriptPluginRuntime {
                 loaded.interpreter.eval("openSettings();")
             }
         }.map { Unit }.onFailure {
-            t.mma.utils.HLog.e("$TAG 插件设置入口失败: ${loaded.plugin.name} ${it.message}", it)
+            HLog.e("$TAG 插件设置入口失败: ${loaded.plugin.name} ${it.message}", it)
             bridge?.log(loaded.plugin.name, loaded.plugin.dir, "设置入口失败: ${it.message}")
         }
     }
@@ -749,7 +750,7 @@ object ScriptPluginRuntime {
                 loaded.interpreter.eval("$functionName(${names.joinToString(",")});")
             }
         }.onFailure {
-            t.mma.utils.HLog.e("$TAG 调用插件函数失败: ${loaded.plugin.name}#$functionName ${it.message}", it)
+            HLog.e("$TAG 调用插件函数失败: ${loaded.plugin.name}#$functionName ${it.message}", it)
             bridge?.log(loaded.plugin.name, loaded.plugin.dir, "调用插件函数失败: $functionName ${it.message}")
         }
     }
@@ -800,7 +801,7 @@ object ScriptPluginRuntime {
                     && !message.contains("not found", ignoreCase = true)
                 ) {
                     val label = if (longClick) "长按发送按钮" else "发送按钮"
-                    t.mma.utils.HLog.e("$TAG ${label}回调失败: ${loaded.plugin.name} ${t.message}", t)
+                    HLog.e("$TAG ${label}回调失败: ${loaded.plugin.name} ${t.message}", t)
                     bridge?.log(loaded.plugin.name, loaded.plugin.dir, "${label}回调失败: ${t}")
                 }
             } finally {
@@ -848,7 +849,7 @@ object ScriptPluginRuntime {
                     }
                 } catch (t: Throwable) {
                     if (!isMissingCallbackError(t, "onHandleMsg")) {
-                        t.mma.utils.HLog.e(TAG + " 消息监听回调失败: " + loaded.plugin.name + " " + t.message, t)
+                        HLog.e(TAG + " 消息监听回调失败: " + loaded.plugin.name + " " + t.message, t)
                         bridge?.log(loaded.plugin.name, loaded.plugin.dir, "消息监听回调失败: " + t)
                     }
                 }
@@ -900,7 +901,7 @@ object ScriptPluginRuntime {
                             }
                         } catch (t: Throwable) {
                             if (!isMissingCallbackError(t, "onImageDownload")) {
-                                t.mma.utils.HLog.e(
+                                HLog.e(
                                     "$TAG 图片下载回调失败: ${loaded.plugin.name} ${t.message}",
                                     t
                                 )
@@ -915,7 +916,7 @@ object ScriptPluginRuntime {
                     imageDownloadTasks[taskKey] = System.currentTimeMillis()
                 } catch (t: Throwable) {
                     imageDownloadTasks.remove(taskKey)
-                    t.mma.utils.HLog.e("$TAG 图片下载监听任务失败: ${t.message}", t)
+                    HLog.e("$TAG 图片下载监听任务失败: ${t.message}", t)
                 }
             }
         } catch (_: RejectedExecutionException) {
@@ -1003,7 +1004,7 @@ object ScriptPluginRuntime {
                                 }
                             } catch (t: Throwable) {
                                 if (!isMissingCallbackError(t, "onVideoDownload")) {
-                                    t.mma.utils.HLog.e(
+                                    HLog.e(
                                         "$TAG 视频下载回调失败: ${loaded.plugin.name} ${t.message}",
                                         t
                                     )
@@ -1020,7 +1021,7 @@ object ScriptPluginRuntime {
                     }
                 } catch (t: Throwable) {
                     videoDownloadTasks.remove(taskKey)
-                    t.mma.utils.HLog.e("$TAG 视频下载监听任务失败: ${t.message}", t)
+                    HLog.e("$TAG 视频下载监听任务失败: ${t.message}", t)
                 }
             }
         } catch (_: RejectedExecutionException) {
@@ -1110,7 +1111,7 @@ object ScriptPluginRuntime {
                                     }
                                 } catch (t: Throwable) {
                                     if (!isMissingCallbackError(t, "onFinderMediaDownload")) {
-                                        t.mma.utils.HLog.e(
+                                        HLog.e(
                                             "$TAG 视频号媒体下载回调失败: ${loaded.plugin.name} ${t.message}",
                                             t
                                         )
@@ -1129,7 +1130,7 @@ object ScriptPluginRuntime {
                     finderMediaDownloadTasks[taskKey] = System.currentTimeMillis()
                 } catch (t: Throwable) {
                     finderMediaDownloadTasks.remove(taskKey)
-                    t.mma.utils.HLog.e("$TAG 视频号媒体下载监听任务失败: ${t.message}", t)
+                    HLog.e("$TAG 视频号媒体下载监听任务失败: ${t.message}", t)
                 }
             }
         } catch (_: RejectedExecutionException) {
@@ -1269,7 +1270,7 @@ object ScriptPluginRuntime {
                         }
                     } catch (t: Throwable) {
                         if (!isMissingCallbackError(t, "onProtobufPacket")) {
-                            t.mma.utils.HLog.e(
+                            HLog.e(
                                 "$TAG 数据包监听回调失败: ${loaded.plugin.name} ${t.message}",
                                 t
                             )
@@ -1315,7 +1316,7 @@ object ScriptPluginRuntime {
                     && !message.contains("undefined", ignoreCase = true)
                     && !message.contains("not found", ignoreCase = true)
                 ) {
-                    t.mma.utils.HLog.e("$TAG 成员变动回调失败: ${loaded.plugin.name} ${t.message}", t)
+                    HLog.e("$TAG 成员变动回调失败: ${loaded.plugin.name} ${t.message}", t)
                     bridge?.log(loaded.plugin.name, loaded.plugin.dir, "成员变动回调失败: ${t.message}")
                 }
             }
@@ -1351,7 +1352,7 @@ object ScriptPluginRuntime {
                     && !message.contains("undefined", ignoreCase = true)
                     && !message.contains("not found", ignoreCase = true)
                 ) {
-                    t.mma.utils.HLog.e("$TAG 好友申请回调失败: ${loaded.plugin.name} ${t.message}", t)
+                    HLog.e("$TAG 好友申请回调失败: ${loaded.plugin.name} ${t.message}", t)
                     bridge?.log(loaded.plugin.name, loaded.plugin.dir, "好友申请回调失败: ${t.message}")
                 }
             }
@@ -1483,7 +1484,7 @@ object ScriptPluginRuntime {
                     requireScriptApiReady = false
                 )
                 if (result.isFailure) {
-                    t.mma.utils.HLog.e(
+                    HLog.e(
                         "$TAG 小程序进程插件加载失败: ${plugin.name} process=$runtimeProcessName " +
                             "${result.exceptionOrNull()?.message}",
                         result.exceptionOrNull()
@@ -1564,7 +1565,7 @@ object ScriptPluginRuntime {
             if (!hasHandleMsgCallbacks()) ScriptMessageHook.clearPendingMessages()
             updateProtobufPacketListener()
             currentBridge.unhookPlugin(plugin.id)
-            t.mma.utils.HLog.e("$TAG 插件加载失败: ${plugin.name} ${it.message}", it)
+            HLog.e("$TAG 插件加载失败: ${plugin.name} ${it.message}", it)
             writePluginLoadError(plugin, it)
             notifyPluginCatalogChanged()
         }
@@ -1580,7 +1581,7 @@ object ScriptPluginRuntime {
         runCatching {
             callLifecycle(loaded.interpreter, "onUnload")
         }.onFailure {
-            t.mma.utils.HLog.e("$TAG 插件卸载回调失败: ${loaded.plugin.name} ${it.message}", it)
+            HLog.e("$TAG 插件卸载回调失败: ${loaded.plugin.name} ${it.message}", it)
         }
         bridge?.unhookPlugin(pluginId)
         notifyPluginCatalogChanged()
@@ -2048,7 +2049,7 @@ object ScriptPluginRuntime {
         runCatching {
             info.reader(Charsets.UTF_8).use { properties.load(it) }
         }.onFailure {
-            t.mma.utils.HLog.e("$TAG 读取插件信息失败: ${pluginDir.name} ${it.message}", it)
+            HLog.e("$TAG 读取插件信息失败: ${pluginDir.name} ${it.message}", it)
         }
         return properties
     }
@@ -2065,7 +2066,7 @@ object ScriptPluginRuntime {
         if (invalid.isNotEmpty()) {
             val warningKey = "$pluginId:${rawValue.trim()}"
             if (invalidProcessWarnings.add(warningKey)) {
-                t.mma.utils.HLog.e(
+                HLog.e(
                     "$TAG 插件进程配置无效，已拒绝加载: plugin=$pluginId process=${rawValue.trim()}"
                 )
             }
@@ -2137,7 +2138,7 @@ object ScriptPluginRuntime {
                     ProtobufPacketRuntime.registerListener(protobufPacketListener)
                 }.onFailure {
                     protobufListenerRegistered.set(false)
-                    t.mma.utils.HLog.e("$TAG 注册数据包监听器失败: ${it.message}", it)
+                    HLog.e("$TAG 注册数据包监听器失败: ${it.message}", it)
                 }
                 return
             }
@@ -2146,7 +2147,7 @@ object ScriptPluginRuntime {
                 ProtobufPacketRuntime.unregisterListener(protobufPacketListener)
             }.onFailure {
                 protobufListenerRegistered.set(true)
-                t.mma.utils.HLog.e("$TAG 注销数据包监听器失败: ${it.message}", it)
+                HLog.e("$TAG 注销数据包监听器失败: ${it.message}", it)
             }
         }
     }
@@ -2160,7 +2161,7 @@ object ScriptPluginRuntime {
         runCatching {
             callback.accept(SendResult(success, message.orEmpty()))
         }.onFailure {
-            t.mma.utils.HLog.e("$TAG 数据包发送结果回调失败: ${it.message}", it)
+            HLog.e("$TAG 数据包发送结果回调失败: ${it.message}", it)
         }
     }
 
@@ -2171,7 +2172,7 @@ object ScriptPluginRuntime {
         if (previous != 0L && now - previous < PROTOBUF_DROP_LOG_COOLDOWN_MS) return
         if (!protobufDropLogAt.compareAndSet(previous, now)) return
         val dropped = protobufDroppedPacketCount.getAndSet(0L)
-        t.mma.utils.HLog.e("$TAG 数据包回调队列已满，已丢弃 $dropped 个事件")
+        HLog.e("$TAG 数据包回调队列已满，已丢弃 $dropped 个事件")
     }
 
     private fun logDroppedImageDownload() {
@@ -2181,7 +2182,7 @@ object ScriptPluginRuntime {
         if (previous != 0L && now - previous < IMAGE_DOWNLOAD_DROP_LOG_COOLDOWN_MS) return
         if (!imageDownloadDropLogAt.compareAndSet(previous, now)) return
         val dropped = imageDownloadDroppedCount.getAndSet(0L)
-        t.mma.utils.HLog.e("$TAG 图片下载回调队列已满，已丢弃 $dropped 个事件")
+        HLog.e("$TAG 图片下载回调队列已满，已丢弃 $dropped 个事件")
     }
 
     private fun logDroppedVideoDownload() {
@@ -2191,7 +2192,7 @@ object ScriptPluginRuntime {
         if (previous != 0L && now - previous < VIDEO_DOWNLOAD_DROP_LOG_COOLDOWN_MS) return
         if (!videoDownloadDropLogAt.compareAndSet(previous, now)) return
         val dropped = videoDownloadDroppedCount.getAndSet(0L)
-        t.mma.utils.HLog.e("$TAG 视频下载回调队列已满，已丢弃 $dropped 个事件")
+        HLog.e("$TAG 视频下载回调队列已满，已丢弃 $dropped 个事件")
     }
 
     private fun logDroppedFinderMediaDownload() {
@@ -2201,7 +2202,7 @@ object ScriptPluginRuntime {
         if (previous != 0L && now - previous < FINDER_MEDIA_DOWNLOAD_DROP_LOG_COOLDOWN_MS) return
         if (!finderMediaDownloadDropLogAt.compareAndSet(previous, now)) return
         val dropped = finderMediaDownloadDroppedCount.getAndSet(0L)
-        t.mma.utils.HLog.e("$TAG 视频号媒体下载回调队列已满，已丢弃 $dropped 个事件")
+        HLog.e("$TAG 视频号媒体下载回调队列已满，已丢弃 $dropped 个事件")
     }
 
     private fun logBusySendButtonPlugin(loaded: LoadedPlugin, longClick: Boolean) {
@@ -2224,7 +2225,7 @@ object ScriptPluginRuntime {
                 previous
             }
         }
-        if (shouldLog) t.mma.utils.HLog.e("$TAG $message")
+        if (shouldLog) HLog.e("$TAG $message")
     }
 
     private fun writePluginLoadError(plugin: ScriptPlugin, throwable: Throwable) {
@@ -2239,7 +2240,7 @@ object ScriptPluginRuntime {
                 }
             )
         }.onFailure {
-            t.mma.utils.HLog.e("$TAG 写入插件加载错误日志失败: ${plugin.name} ${it.message}", it)
+            HLog.e("$TAG 写入插件加载错误日志失败: ${plugin.name} ${it.message}", it)
         }
     }
 

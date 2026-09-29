@@ -1,4 +1,5 @@
 package t.mma.hooks.items.profileid
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.content.ClipData
@@ -44,7 +45,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
         }
     }
     override fun onFeatureInstall(context: FeatureContext) {
-        t.mma.utils.HLog.initialize(context.hostContext())
+        HLog.initialize(context.hostContext())
         WeContactHeaderApi.install(context)
         WeContactHeaderApi.addProvider(this)
         ProfileAddTimeFeature.installProvider(context.hostContext())
@@ -122,7 +123,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
         private fun hookContactProfile(context: Context, classLoader: ClassLoader) {
             val clazz = KavaReflector.loadClass(CONTACT_INFO_UI, classLoader)
             if (clazz == null) {
-                t.mma.utils.HLog.e("$TAG 未找到好友资料页类")
+                HLog.e("$TAG 未找到好友资料页类")
                 return
             }
             // ContactInfoUI's header is handled by WeContactHeaderApi.
@@ -132,7 +133,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
         private fun hookChatroomProfile(context: Context, classLoader: ClassLoader) {
             val clazz = KavaReflector.loadClass(CHATROOM_INFO_UI, classLoader)
             if (clazz == null) {
-                t.mma.utils.HLog.e("$TAG 未找到群聊资料页类")
+                HLog.e("$TAG 未找到群聊资料页类")
                 return
             }
             hookAfter(clazz, "initView") { param ->
@@ -156,7 +157,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
                         }
                     })
                 }
-                ?: t.mma.utils.HLog.e("$TAG 未找到群聊资料页 Preference 点击方法")
+                ?: HLog.e("$TAG 未找到群聊资料页 Preference 点击方法")
         }
 
         private fun injectChatroomProfileId(context: Context, activity: Activity?) {
@@ -175,13 +176,13 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
         ) {
             val method = KavaReflector.findMethodRecursive(clazz, methodName, *parameterTypes)
             if (method == null) {
-                t.mma.utils.HLog.e("$TAG 未找到 ${clazz.name}#$methodName")
+                HLog.e("$TAG 未找到 ${clazz.name}#$methodName")
                 return
             }
             HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     runCatching { block(param) }.onFailure {
-                        t.mma.utils.HLog.e("$TAG 注入资料页 ID 失败: ${it.message}", it)
+                        HLog.e("$TAG 注入资料页 ID 失败: ${it.message}", it)
                     }
                 }
             })
@@ -252,7 +253,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
             bindPreferenceClick(preference, activity, profileId)
             val anchor = findChatroomAnchorPreference(screen)
             if (!addPreferenceBeforeAnchor(screen, preference, anchor)) {
-                t.mma.utils.HLog.e("$TAG 群聊 ID Preference 插入失败")
+                HLog.e("$TAG 群聊 ID Preference 插入失败")
                 return
             }
             notifyPreferenceChanged(screen)

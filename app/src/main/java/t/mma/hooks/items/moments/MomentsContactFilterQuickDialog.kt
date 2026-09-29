@@ -1,4 +1,5 @@
 package t.mma.hooks.items.moments
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.widget.Toast
@@ -6,7 +7,7 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.model.WeChatContact
 import t.mma.preferences.HchatStorage
 import t.mma.ui.miuix.VoiceForwardMiuixDialog
-import t.mma.utils.HLog
+import HLog
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 

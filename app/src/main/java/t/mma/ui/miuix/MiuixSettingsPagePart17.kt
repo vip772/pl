@@ -1,4 +1,5 @@
 package t.mma.ui.miuix
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.app.DatePickerDialog
@@ -976,7 +977,7 @@ fun ScriptPluginAgentWorkspacePage(
                 runCatching {
                     ScriptPluginAgentSessionStore.discardEmptySession(context, emptySessionId)
                 }.onFailure { error ->
-                    t.mma.utils.HLog.e(
+                    HLog.e(
                         "[Hchat:ScriptAgent] 清理空会话失败: $emptySessionId",
                         error
                     )
@@ -1433,7 +1434,7 @@ fun ScriptPluginAgentWorkspacePage(
         Thread({
             runCatching { ScriptPluginAgentWorkspaceTools.discard(context, checkpoint) }
                 .onFailure { error ->
-                    t.mma.utils.HLog.e("[Hchat:ScriptAgent] 清理恢复工作区失败", error)
+                    HLog.e("[Hchat:ScriptAgent] 清理恢复工作区失败", error)
                 }
         }, "Hchat-Script-Agent-Workspace-Discard").start()
     }
@@ -2389,7 +2390,7 @@ fun ScriptPluginAgentWorkspacePage(
                         mutationState.applyingFileOperation.value = false
                         val applied = runCatching { onReady(restoredHistory) }
                             .onFailure { error ->
-                                t.mma.utils.HLog.e(
+                                HLog.e(
                                     "[Hchat:ScriptAgent] ${actionName}失败",
                                     error
                                 )
@@ -2412,13 +2413,13 @@ fun ScriptPluginAgentWorkspacePage(
                                     runCatching {
                                         if (removedMessages.isNotEmpty()) deleteToolResults(removedMessages)
                                     }.onFailure { error ->
-                                        t.mma.utils.HLog.e(
+                                        HLog.e(
                                             "[Hchat:ScriptAgent] ${actionName}清理工具结果失败",
                                             error
                                         )
                                     }
                                 }.onFailure { error ->
-                                    t.mma.utils.HLog.e(
+                                    HLog.e(
                                         "[Hchat:ScriptAgent] ${actionName}保存会话失败",
                                         error
                                     )
@@ -2435,7 +2436,7 @@ fun ScriptPluginAgentWorkspacePage(
                     },
                     onFailure = { error ->
                         mutationState.applyingFileOperation.value = false
-                        t.mma.utils.HLog.e("[Hchat:ScriptAgent] ${actionName}重建历史失败", error)
+                        HLog.e("[Hchat:ScriptAgent] ${actionName}重建历史失败", error)
                         Toast.makeText(context, "${actionName}失败，请重试", Toast.LENGTH_SHORT).show()
                     }
                 )
@@ -2501,7 +2502,7 @@ fun ScriptPluginAgentWorkspacePage(
                     Toast.makeText(context, "已从此处创建分支", Toast.LENGTH_SHORT).show()
                     historyVersion++
                 }.onFailure { error ->
-                    t.mma.utils.HLog.e("[Hchat:ScriptAgent] 创建会话分支失败", error)
+                    HLog.e("[Hchat:ScriptAgent] 创建会话分支失败", error)
                     Toast.makeText(context, error.message ?: "创建分支失败", Toast.LENGTH_LONG).show()
                 }
             }
@@ -2770,7 +2771,7 @@ fun ScriptPluginAgentWorkspacePage(
             }.onSuccess {
                 Handler(Looper.getMainLooper()).post { historyVersion++ }
             }.onFailure { error ->
-                t.mma.utils.HLog.e("[Hchat:ScriptAgent] 保存历史会话排序失败", error)
+                HLog.e("[Hchat:ScriptAgent] 保存历史会话排序失败", error)
             }
         }, "Hchat-Agent-Session-Order").start()
     }

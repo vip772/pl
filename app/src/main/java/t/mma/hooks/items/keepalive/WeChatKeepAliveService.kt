@@ -1,4 +1,5 @@
 package t.mma.hooks.items.keepalive
+import t.mma.utils.HLog
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -11,7 +12,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import t.mma.R
-import t.mma.utils.HLog
+import HLog
 
 class WeChatKeepAliveService : Service() {
     private val handler = Handler(Looper.getMainLooper())

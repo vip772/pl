@@ -1,8 +1,9 @@
 package t.mma.preferences
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.content.SharedPreferences
-import t.mma.utils.HLog
+import HLog
 import io.fastkv.FastKV
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap

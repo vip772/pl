@@ -1,4 +1,5 @@
 package t.mma.hooks.items.autoreply
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.media.MediaCodec
@@ -13,7 +14,7 @@ import android.widget.Toast
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.message.WeChatMessageObserveApi
 import t.mma.hooks.items.script.ScriptPluginRuntime
-import t.mma.utils.HLog
+import HLog
 import me.yun.silk.AacCodec
 import me.yun.silk.SilkCodec
 import okhttp3.MediaType.Companion.toMediaType

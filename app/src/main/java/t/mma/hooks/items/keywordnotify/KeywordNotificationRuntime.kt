@@ -1,4 +1,5 @@
 package t.mma.hooks.items.keywordnotify
+import t.mma.utils.HLog
 
 import android.app.Notification
 import android.app.NotificationChannel
@@ -31,7 +32,7 @@ import t.mma.hooks.items.customfriendavatar.CustomFriendAvatarSettings
 import t.mma.hooks.items.customfriendavatar.CustomFriendAvatarStore
 import t.mma.hooks.items.notification.NotificationNameResolver
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import java.io.File
 import java.net.URL
 import java.security.MessageDigest

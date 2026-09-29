@@ -1,10 +1,11 @@
 package t.mma.hooks.items.script.agent
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.net.Uri
 import android.os.SystemClock
 import android.util.Base64
-import t.mma.utils.HLog
+import HLog
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request

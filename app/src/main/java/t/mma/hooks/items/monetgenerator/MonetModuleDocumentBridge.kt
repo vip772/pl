@@ -1,4 +1,5 @@
 package t.mma.hooks.items.monetgenerator
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.content.Context
@@ -7,7 +8,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
-import t.mma.utils.HLog
+import HLog
 import java.lang.ref.WeakReference
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger

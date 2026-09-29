@@ -1,4 +1,5 @@
 package t.mma.dexkit;
+import t.mma.utils.HLog
 
 import android.os.Bundle;
 import android.content.Context;
@@ -408,7 +409,7 @@ public class DexFinder {
 
             logDetail("AddMsg类: " + addMsgClasses.size());
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveAddMsg 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveAddMsg 失败: " + e.getMessage(), e);
         }
     }
 
@@ -473,7 +474,7 @@ public class DexFinder {
             logDetail("收红包类: " +
                     (receiveLuckyMoneyClass != null ? receiveLuckyMoneyClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveReceive 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveReceive 失败: " + e.getMessage(), e);
         }
     }
 
@@ -550,7 +551,7 @@ public class DexFinder {
             logDetail("拆红包类: " +
                     (openLuckyMoneyClass != null ? openLuckyMoneyClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveOpen 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveOpen 失败: " + e.getMessage(), e);
         }
     }
 
@@ -594,7 +595,7 @@ public class DexFinder {
                     (netQueueClass != null ? netQueueClass.getName() : "null")
                     + " candidates=" + netQueueCandidateClasses.size());
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveQueue 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveQueue 失败: " + e.getMessage(), e);
         }
     }
 
@@ -624,7 +625,7 @@ public class DexFinder {
             logDetail("祝福语类: " +
                     (wishWxHbClass != null ? wishWxHbClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveWish 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveWish 失败: " + e.getMessage(), e);
         }
     }
 
@@ -645,7 +646,7 @@ public class DexFinder {
             }
             logDetail("服务容器方法: " + methodName(serviceGetterMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveServiceManagerApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveServiceManagerApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -689,7 +690,7 @@ public class DexFinder {
                     + " longCtor=" + (sendTextMsgCtorLong != null)
                     + " objectCtor=" + (sendTextMsgCtorObject != null));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSendText 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSendText 失败: " + e.getMessage(), e);
         }
     }
 
@@ -704,7 +705,7 @@ public class DexFinder {
             }
             logDetail("联系人资料服务方法: " + getContactAddMethods.size());
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveGetContactServiceApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveGetContactServiceApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -792,7 +793,7 @@ public class DexFinder {
             resolveSendImageAsyncAppInfoApi();
             resolveImageBestPathApi();
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSendImageApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSendImageApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -920,7 +921,7 @@ public class DexFinder {
                     + " submit=" + methodName(imageCdnSubmitMethod)
                     + " getter=" + methodName(imageCdnServiceGetterMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveImageCdnDownloadApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveImageCdnDownloadApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -995,7 +996,7 @@ public class DexFinder {
                     + " callback=" + className(marsCdnDownloadCallbackClass)
                     + " start=" + methodName(marsCdnStartDownloadMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveMarsCdnDownloadApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveMarsCdnDownloadApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1073,7 +1074,7 @@ public class DexFinder {
                     + " storage=" + methodName(imageStorageGetterMethod)
                     + " token=" + methodName(imageTokenPathMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveImageBestPathApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveImageBestPathApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1111,7 +1112,7 @@ public class DexFinder {
                     + " appinfo=" + className(sendImageAppInfoClass)
                     + " submit=" + methodName(sendImageAsyncSubmitMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSendImageAsyncAppInfoApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSendImageAsyncAppInfoApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1210,7 +1211,7 @@ public class DexFinder {
 
             logDetail("文件发送方法: " + methodName(sendFileMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSendFileApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSendFileApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1237,7 +1238,7 @@ public class DexFinder {
             logDetail("XML发送方法: " + methodName(sendXmlAppMsgMethod)
                     + " parse=" + methodName(appMsgParseMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSendXmlApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSendXmlApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1258,7 +1259,7 @@ public class DexFinder {
                 logDetail("消息描述文本兜底方法: " + msgDescTextMethods.size() + " 个");
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveMsgDescTextApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveMsgDescTextApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1337,7 +1338,7 @@ public class DexFinder {
 
             logDetail("视频发送方法: " + methodName(sendVideoMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSendVideoApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSendVideoApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1350,7 +1351,7 @@ public class DexFinder {
             logDetail("视频静默Task: "
                     + (sendVideoTaskClass != null ? sendVideoTaskClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSendVideoTaskApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSendVideoTaskApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1390,7 +1391,7 @@ public class DexFinder {
             logDetail("视频消息路径API: path=" + methodName(videoPathMethod)
                     + " owner=" + methodName(videoPathOwnerGetterMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveVideoPathApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveVideoPathApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1457,7 +1458,7 @@ public class DexFinder {
             }
             logDetail("视频信息查询API: " + methodName(videoInfoByFileNameMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveVideoInfoApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveVideoInfoApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1569,7 +1570,7 @@ public class DexFinder {
                     + " upload=" + (voiceUploadClass != null ? voiceUploadClass.getName() : "null")
                     + " cdnCtor=" + (voiceUploadCdnCtor != null));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSendVoiceApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSendVoiceApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1833,7 +1834,7 @@ public class DexFinder {
                     + " accPath=" + methodName(emojiAccPathMethod)
                     + " decode=" + methodName(emojiDecodeDataMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSendEmojiApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSendEmojiApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1848,7 +1849,7 @@ public class DexFinder {
                     + " list=" + methodName(favoriteListMethod)
                     + " send=" + methodName(favoriteSendMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveFavoriteApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveFavoriteApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -1924,7 +1925,7 @@ public class DexFinder {
                 return;
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveFavoriteListApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveFavoriteListApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2051,7 +2052,7 @@ public class DexFinder {
                 if (favoriteItemConvertFromCursorMethod != null) return;
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveFavoriteItemApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveFavoriteItemApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2076,7 +2077,7 @@ public class DexFinder {
                 return;
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveFavoriteSendApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveFavoriteSendApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2202,7 +2203,7 @@ public class DexFinder {
             logDetail("转账操作类: "
                     + (transferOperationClass != null ? transferOperationClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveTransferOperationApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveTransferOperationApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2228,7 +2229,7 @@ public class DexFinder {
                     + (transferQueryClass != null ? transferQueryClass.getName() : "null")
                     + " response=" + methodName(transferQueryResponseMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveTransferQueryApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveTransferQueryApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2264,7 +2265,7 @@ public class DexFinder {
             logDetail("好友申请验证类: "
                     + (verifyUserClass != null ? verifyUserClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveVerifyUserApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveVerifyUserApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2297,7 +2298,7 @@ public class DexFinder {
 
             logDetail("名片XML方法: " + methodName(contactCardXmlMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveContactCardApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveContactCardApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2324,7 +2325,7 @@ public class DexFinder {
                     + " suffix=" + methodName(patSuffixMethod)
                     + " scene=" + (sendPatSceneClass != null ? sendPatSceneClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolvePatMessageApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolvePatMessageApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2396,7 +2397,7 @@ public class DexFinder {
                 break;
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolvePatExtensionApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolvePatExtensionApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2467,7 +2468,7 @@ public class DexFinder {
                 break;
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSendPatSceneApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSendPatSceneApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2515,7 +2516,7 @@ public class DexFinder {
                     + " config=" + (configStorageClass != null ? configStorageClass.getName() : "null")
                     + " sqlite=" + (sqliteDbWrapperClass != null ? sqliteDbWrapperClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveDatabaseApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveDatabaseApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2541,11 +2542,11 @@ public class DexFinder {
                 conversationDeleteMethod = candidates.get(0);
                 logDetail("原生会话删除API: " + methodName(conversationDeleteMethod));
             } else {
-                t.mma.utils.HLog.e(TAG + " 原生会话删除API定位失败: candidates="
+                HLog.e(TAG + " 原生会话删除API定位失败: candidates="
                         + candidates.size() + " key=" + shortKey(runtimeCacheKey));
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveConversationDeleteApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveConversationDeleteApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2603,13 +2604,13 @@ public class DexFinder {
                             + " batch=" + methodName(messageClearBatchMethod));
                     return;
                 }
-                t.mma.utils.HLog.e(TAG + " 原生单会话消息清理API定位失败: candidates="
+                HLog.e(TAG + " 原生单会话消息清理API定位失败: candidates="
                         + singleCandidates.size() + " key=" + shortKey(runtimeCacheKey));
             }
-            t.mma.utils.HLog.e(TAG + " 原生批量消息清理API定位失败: candidates="
+            HLog.e(TAG + " 原生批量消息清理API定位失败: candidates="
                     + batchCandidates.size() + " key=" + shortKey(runtimeCacheKey));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveMessageClearApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveMessageClearApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2668,7 +2669,7 @@ public class DexFinder {
                     + " roomBuild=" + methodName(chatroomMuteBuildMethod)
                     + " roomSubmit=" + methodName(chatroomMuteSubmitMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveConversationMuteApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveConversationMuteApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2763,7 +2764,7 @@ public class DexFinder {
             contactStorageQueryMethod = KavaReflector.accessible(pairs.get(0)[1]);
             return;
         }
-        t.mma.utils.HLog.e(TAG + " 原生联系人查询API定位失败: pairs="
+        HLog.e(TAG + " 原生联系人查询API定位失败: pairs="
                 + pairs.size() + " invokes=" + invokes.size()
                 + " key=" + shortKey(runtimeCacheKey));
     }
@@ -2829,7 +2830,7 @@ public class DexFinder {
                 return;
             }
         }
-        t.mma.utils.HLog.e(TAG + " 原生群聊免打扰API定位失败: entries="
+        HLog.e(TAG + " 原生群聊免打扰API定位失败: entries="
                 + entries.size() + " key=" + shortKey(runtimeCacheKey));
     }
 
@@ -2881,11 +2882,11 @@ public class DexFinder {
                     + " msg=" + (localMessageClass != null ? localMessageClass.getName() : "null")
                     + " ctor=" + (localMessageCtor != null ? localMessageCtor.getParameterTypes().length : -1));
             if (!hasLocalMessageApi()) {
-                t.mma.utils.HLog.e(TAG + " 本地消息API未找到: candidates=" + candidateCount
+                HLog.e(TAG + " 本地消息API未找到: candidates=" + candidateCount
                         + " key=" + shortKey(runtimeCacheKey));
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveLocalMessageApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveLocalMessageApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2938,7 +2939,7 @@ public class DexFinder {
                 } catch (Throwable ignored) {}
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveLocalSystemMessageMethod 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveLocalSystemMessageMethod 失败: " + e.getMessage(), e);
         }
     }
 
@@ -2984,7 +2985,7 @@ public class DexFinder {
                     + "#" + groupMemberDisplayNameMethod.getName()
                     : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveGroupMemberDisplayName 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveGroupMemberDisplayName 失败: " + e.getMessage(), e);
         }
     }
 
@@ -3016,7 +3017,7 @@ public class DexFinder {
             logDetail("邀请群成员API: "
                     + (inviteChatroomMemberClass != null ? inviteChatroomMemberClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveInviteChatroomMemberApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveInviteChatroomMemberApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -3048,7 +3049,7 @@ public class DexFinder {
             logDetail("添加群成员API: "
                     + (addChatroomMemberClass != null ? addChatroomMemberClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveAddChatroomMemberApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveAddChatroomMemberApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -3078,7 +3079,7 @@ public class DexFinder {
             logDetail("移除群成员API: "
                     + (delChatroomMemberClass != null ? delChatroomMemberClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveDelChatroomMemberApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveDelChatroomMemberApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -3109,7 +3110,7 @@ public class DexFinder {
             logDetail("撤回消息API: "
                     + (revokeMsgClass != null ? revokeMsgClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveRevokeMsgApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveRevokeMsgApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -3140,7 +3141,7 @@ public class DexFinder {
             logDetail("上传步数API: "
                     + (uploadDeviceStepClass != null ? uploadDeviceStepClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveUploadDeviceStepApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveUploadDeviceStepApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -3204,7 +3205,7 @@ public class DexFinder {
                     + " modify="
                     + (modifyContactLabelListClass != null ? modifyContactLabelListClass.getName() : "null"));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveContactLabelNetworkApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveContactLabelNetworkApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -3270,7 +3271,7 @@ public class DexFinder {
                     + " shareAppMsg=" + methodName(snsShareAppMsgMethod)
                     + " check=" + methodName(snsUploadCheckMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveSnsUploadApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveSnsUploadApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -3363,7 +3364,7 @@ public class DexFinder {
                     + " fragmentEnter=" + methodName(chatPageFragmentEnterMethod)
                     + " fragmentExit=" + methodName(chatPageFragmentExitMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveChatPageApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveChatPageApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -3399,7 +3400,7 @@ public class DexFinder {
             }
             logDetail("脚本发送按钮API: click=" + methodName(chatFooterSendClickMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveScriptSendHookApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveScriptSendHookApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -4794,7 +4795,7 @@ public class DexFinder {
             editor.putBoolean(CACHE_COMPLETE, true);
             editor.apply();
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " 保存缓存失败: " + e.getMessage(), e);
+            HLog.e(TAG + " 保存缓存失败: " + e.getMessage(), e);
         }
     }
 
@@ -4974,7 +4975,7 @@ public class DexFinder {
                     + " queue=" + packetQueueClasses.size()
                     + " fake=" + fakePacketClasses.size());
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolvePacketCompat 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolvePacketCompat 失败: " + e.getMessage(), e);
         }
     }
 
@@ -5097,7 +5098,7 @@ public class DexFinder {
                     + (groupSolitairePluginClass != null ? groupSolitairePluginClass.getName() : "null")
                     + " method=" + methodName(groupSolitaireSendMethod));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveGroupSolitaireApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveGroupSolitaireApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -5257,27 +5258,27 @@ public class DexFinder {
 
     private void logMissingCritical() {
         if (addMsgClasses == null || addMsgClasses.isEmpty()) {
-            t.mma.utils.HLog.e(TAG + " AddMsg类未找到");
+            HLog.e(TAG + " AddMsg类未找到");
         }
         if (receiveLuckyMoneyClass == null) {
-            t.mma.utils.HLog.e(TAG + " 收红包类未找到");
+            HLog.e(TAG + " 收红包类未找到");
         }
         if (openLuckyMoneyClass == null) {
-            t.mma.utils.HLog.e(TAG + " 拆红包类未找到");
+            HLog.e(TAG + " 拆红包类未找到");
         }
         if (netQueueClass == null) {
-            t.mma.utils.HLog.e(TAG + " 网络队列类未找到");
+            HLog.e(TAG + " 网络队列类未找到");
         }
         if (sendTextMsgClass == null) {
-            t.mma.utils.HLog.e(TAG + " 文本发送类未找到");
+            HLog.e(TAG + " 文本发送类未找到");
         }
         if (sqliteDbWrapperClass == null) {
-            t.mma.utils.HLog.e(TAG + " 数据库wrapper未找到");
+            HLog.e(TAG + " 数据库wrapper未找到");
         }
             if (chatPageStartMethod == null
                     || chatPageFragmentEnterMethod == null
                     || chatPageFragmentExitMethod == null) {
-                t.mma.utils.HLog.e(TAG + " 聊天页API方法未找到: start="
+                HLog.e(TAG + " 聊天页API方法未找到: start="
                         + methodName(chatPageStartMethod)
                         + " fragmentEnter=" + methodName(chatPageFragmentEnterMethod)
                         + " fragmentExit=" + methodName(chatPageFragmentExitMethod));
@@ -5319,7 +5320,7 @@ public class DexFinder {
                     + " dispatch=" + methodName(protobufStaticDispatchMethod)
                     + " sceneEnd=" + (protobufSceneEndMethods == null ? 0 : protobufSceneEndMethods.size()));
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " resolveProtobufPacketApi 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " resolveProtobufPacketApi 失败: " + e.getMessage(), e);
         }
     }
 
@@ -5474,7 +5475,7 @@ public class DexFinder {
                 }
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " findNativeNetSceneClass 失败: uri=" + uri + " type=" + cgiId + " | " + e.getMessage(), e);
+            HLog.e(TAG + " findNativeNetSceneClass 失败: uri=" + uri + " type=" + cgiId + " | " + e.getMessage(), e);
         }
         return null;
     }

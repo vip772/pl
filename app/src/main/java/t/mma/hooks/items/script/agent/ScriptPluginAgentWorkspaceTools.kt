@@ -1,4 +1,5 @@
 package t.mma.hooks.items.script.agent
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.system.Os
@@ -6,7 +7,7 @@ import t.mma.hooks.items.script.ScriptPluginRuntime
 import t.mma.hooks.items.script.ScriptPluginSettings
 import t.mma.hooks.items.script.ScriptPluginTransactionCoordinator
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File

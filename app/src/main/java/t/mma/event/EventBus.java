@@ -1,4 +1,5 @@
 package t.mma.event;
+import t.mma.utils.HLog
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -130,7 +131,7 @@ public final class EventBus {
     }
 
     private void logHandlerError(Class<?> eventType, EventHandler<?> handler, Throwable e) {
-        t.mma.utils.HLog.e(TAG + " 处理事件异常: " + eventType.getSimpleName()
+        HLog.e(TAG + " 处理事件异常: " + eventType.getSimpleName()
                 + ", handler=" + handler.getClass().getSimpleName()
                 + ", error=" + e.getMessage(), e);
     }

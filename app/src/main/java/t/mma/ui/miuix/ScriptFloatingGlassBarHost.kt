@@ -1,4 +1,5 @@
 package t.mma.ui.miuix
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.content.res.Configuration
@@ -391,7 +392,7 @@ internal object ScriptFloatingGlassBarHost {
                     barHost = barHost
                 )
             }.onFailure {
-                t.mma.utils.HLog.e("[Hchat:Script] 恢复模块悬浮底栏失败: ${it.message}", it)
+                HLog.e("[Hchat:Script] 恢复模块悬浮底栏失败: ${it.message}", it)
             }
             owner.clear(composeView)
             owner.destroy()

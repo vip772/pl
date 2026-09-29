@@ -1,9 +1,10 @@
 package t.mma.hooks.items.conversationgroup
+import t.mma.utils.HLog
 
 import android.content.Context
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID

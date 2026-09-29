@@ -1,4 +1,5 @@
 package t.mma.hooks.items.shortvideo
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.net.Uri
@@ -7,7 +8,7 @@ import android.util.Xml
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.core.FeatureContext
 import t.mma.utils.HchatMediaDownloader
-import t.mma.utils.HLog
+import HLog
 import t.mma.utils.KavaReflector
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONObject

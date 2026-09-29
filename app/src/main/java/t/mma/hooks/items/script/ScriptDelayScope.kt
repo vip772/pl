@@ -1,4 +1,5 @@
 package t.mma.hooks.items.script
+import t.mma.utils.HLog
 
 import android.os.Handler
 import android.os.Looper
@@ -40,7 +41,7 @@ internal class ScriptDelayScope(
                 val now = SystemClock.elapsedRealtime()
                 if (delayDropLogAt == 0L || now - delayDropLogAt >= DELAY_DROP_LOG_COOLDOWN_MS) {
                     delayDropLogAt = now
-                    t.mma.utils.HLog.e(
+                    HLog.e(
                         "[Hchat:Script] 延迟任务队列已满: ${pluginName()}，累计丢弃 $droppedDelays 项"
                     )
                 }
@@ -58,7 +59,7 @@ internal class ScriptDelayScope(
                 }
             } catch (error: Throwable) {
                 task.cancelLocked()
-                t.mma.utils.HLog.e("[Hchat:Script] 提交延迟任务失败: ${error.message}", error)
+                HLog.e("[Hchat:Script] 提交延迟任务失败: ${error.message}", error)
             }
         }
     }
@@ -86,7 +87,7 @@ internal class ScriptDelayScope(
             runCatching {
                 callback.run()
             }.onFailure {
-                t.mma.utils.HLog.e("[Hchat:Script] 延迟任务失败: ${it.message}", it)
+                HLog.e("[Hchat:Script] 延迟任务失败: ${it.message}", it)
             }
         }
 

@@ -1,4 +1,5 @@
 package t.mma.hooks.items.floatingshortcut
+import t.mma.utils.HLog
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -8,7 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
 import android.widget.ImageView
-import t.mma.utils.HLog
+import HLog
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 import java.util.concurrent.LinkedBlockingQueue

@@ -1,4 +1,5 @@
 package t.mma.hooks.items.messagebubble
+import t.mma.utils.HLog
 
 import android.content.Context
 import android.graphics.Bitmap
@@ -13,7 +14,7 @@ import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream

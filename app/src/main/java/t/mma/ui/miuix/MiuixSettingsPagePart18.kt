@@ -1,4 +1,5 @@
 package t.mma.ui.miuix
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.app.DatePickerDialog
@@ -1815,7 +1816,7 @@ internal fun showAfterDialogDismiss(context: Context, action: () -> Unit) {
 }
 
 internal fun showScriptPluginManagerError(context: Context, error: Throwable) {
-    t.mma.utils.HLog.e("[Hchat:ScriptManager] ${error.message ?: "操作失败"}", error)
+    HLog.e("[Hchat:ScriptManager] ${error.message ?: "操作失败"}", error)
     Toast.makeText(context, error.message ?: "操作失败", Toast.LENGTH_LONG).show()
 }
 

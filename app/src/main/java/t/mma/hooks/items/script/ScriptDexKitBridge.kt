@@ -1,4 +1,5 @@
 package t.mma.hooks.items.script
+import t.mma.utils.HLog
 
 import de.robv.android.xposed.XposedBridge
 import t.mma.dexkit.DexBridgeHolder
@@ -36,7 +37,7 @@ class ScriptDexKitBridge internal constructor(
             }
             ArrayList(out)
         }.onFailure {
-            t.mma.utils.HLog.e("[Hchat:Script] DexKit查找类失败: ${it.message}", it)
+            HLog.e("[Hchat:Script] DexKit查找类失败: ${it.message}", it)
         }.getOrDefault(emptyList())
     }
 
@@ -63,7 +64,7 @@ class ScriptDexKitBridge internal constructor(
             }
             ArrayList(out)
         }.onFailure {
-            t.mma.utils.HLog.e("[Hchat:Script] DexKit查找成员失败: ${it.message}", it)
+            HLog.e("[Hchat:Script] DexKit查找成员失败: ${it.message}", it)
         }.getOrDefault(emptyList())
     }
 

@@ -1,4 +1,5 @@
 package t.mma.hooks.items.script
+import t.mma.utils.HLog
 
 import android.app.Activity
 import android.content.Context
@@ -88,7 +89,7 @@ object ScriptSendButtonHook {
             finder.resolveScriptSendHookApi()
             val method = finder.chatFooterSendClickMethod
             if (method == null) {
-                t.mma.utils.HLog.e("$TAG 发送按钮Hook失败: 未定位到ChatFooter发送入口")
+                HLog.e("$TAG 发送按钮Hook失败: 未定位到ChatFooter发送入口")
                 return false
             }
             if (!clickHookInstalled) {
@@ -130,7 +131,7 @@ object ScriptSendButtonHook {
                                 )
                             }
                                 .onFailure {
-                                    t.mma.utils.HLog.e("$TAG 发送文字装饰失败: ${it.message}", it)
+                                    HLog.e("$TAG 发送文字装饰失败: ${it.message}", it)
                                 }
                                 .getOrNull()
                                 ?.let { param.setObjectExtra(TEXT_DECORATION_EXTRA, it) }
@@ -150,7 +151,7 @@ object ScriptSendButtonHook {
                         if (decoration != null) {
                             runCatching { restoreRejectedDecoration(decoration) }
                                 .onFailure {
-                                    t.mma.utils.HLog.e("$TAG 恢复未发送文字失败: ${it.message}", it)
+                                    HLog.e("$TAG 恢复未发送文字失败: ${it.message}", it)
                                 }
                         }
                         val session = param.getObjectExtra(INPUT_SESSION_EXTRA) as? InputSendSession
@@ -167,7 +168,7 @@ object ScriptSendButtonHook {
             longPressTouchHookInstalled = installLongPressTouchHook(method.declaringClass)
             installed = clickHookInstalled && inputTrackingHookInstalled && longPressTouchHookInstalled
         }.onFailure {
-            t.mma.utils.HLog.e("$TAG 发送按钮Hook异常: ${it.message}", it)
+            HLog.e("$TAG 发送按钮Hook异常: ${it.message}", it)
             return false
         }
         return installed
@@ -176,7 +177,7 @@ object ScriptSendButtonHook {
     private fun installInputTrackingHook(classLoader: ClassLoader): Boolean {
         if (inputTrackingHookInstalled) return true
         val footerClass = KavaReflector.loadClass(CHAT_FOOTER, classLoader) ?: run {
-            t.mma.utils.HLog.e("$TAG 输入时长Hook失败: 未找到ChatFooter")
+            HLog.e("$TAG 输入时长Hook失败: 未找到ChatFooter")
             return false
         }
         val attachMethod = KavaReflector.declaredMethods(footerClass).singleOrNull { candidate ->
@@ -184,7 +185,7 @@ object ScriptSendButtonHook {
                 candidate.returnType == Void.TYPE &&
                 candidate.parameterTypes.isEmpty()
         } ?: run {
-            t.mma.utils.HLog.e("$TAG 输入时长Hook失败: 未找到ChatFooter挂载方法")
+            HLog.e("$TAG 输入时长Hook失败: 未找到ChatFooter挂载方法")
             return false
         }
         return runCatching {
@@ -195,7 +196,7 @@ object ScriptSendButtonHook {
             })
             true
         }.getOrElse {
-            t.mma.utils.HLog.e(
+            HLog.e(
                 "$TAG 输入时长Hook失败: ${attachMethod.toGenericString()} ${it.message}",
                 it
             )
@@ -211,7 +212,7 @@ object ScriptSendButtonHook {
                 candidate.parameterTypes.contentEquals(arrayOf(MotionEvent::class.java))
         }
         if (method == null) {
-            t.mma.utils.HLog.e("$TAG 长按发送按钮Hook失败: 未找到View.dispatchTouchEvent")
+            HLog.e("$TAG 长按发送按钮Hook失败: 未找到View.dispatchTouchEvent")
             return false
         }
         return runCatching {
@@ -221,7 +222,7 @@ object ScriptSendButtonHook {
                     runCatching {
                         handleLongPressTouch(param, sendClickListenerClass)
                     }.onFailure {
-                        t.mma.utils.HLog.e("$TAG 长按发送按钮触摸处理异常: ${it.message}", it)
+                        HLog.e("$TAG 长按发送按钮触摸处理异常: ${it.message}", it)
                     }
                 }
 
@@ -235,7 +236,7 @@ object ScriptSendButtonHook {
             })
             true
         }.getOrElse {
-            t.mma.utils.HLog.e(
+            HLog.e(
                 "$TAG 长按发送按钮Hook失败: ${method.toGenericString()} ${it.message}",
                 it
             )
@@ -392,7 +393,7 @@ object ScriptSendButtonHook {
             handled
         }.getOrElse {
             cancelLongPressState(view, state)
-            t.mma.utils.HLog.e("$TAG 长按发送按钮分发异常: ${it.message}", it)
+            HLog.e("$TAG 长按发送按钮分发异常: ${it.message}", it)
             return
         }
         if (!intercepted) {
@@ -403,7 +404,7 @@ object ScriptSendButtonHook {
         state.consumed = true
         runCatching { clearInputText(footer) }
             .onFailure {
-                t.mma.utils.HLog.e("$TAG 长按发送按钮清空输入框失败: ${it.message}", it)
+                HLog.e("$TAG 长按发送按钮清空输入框失败: ${it.message}", it)
             }
         view.cancelLongPress()
         dispatchSyntheticCancel(view, state)
@@ -423,7 +424,7 @@ object ScriptSendButtonHook {
         try {
             runCatching { view.dispatchTouchEvent(event) }
                 .onFailure {
-                    t.mma.utils.HLog.e("$TAG 发送按钮取消原触摸失败: ${it.message}", it)
+                    HLog.e("$TAG 发送按钮取消原触摸失败: ${it.message}", it)
                 }
         } finally {
             dispatchingSyntheticCancel.remove()
@@ -519,7 +520,7 @@ object ScriptSendButtonHook {
             try {
                 if (entry.handler.onClick(text)) return true
             } catch (throwable: Throwable) {
-                t.mma.utils.HLog.e("$TAG 发送按钮模块回调失败: ${entry.id} ${throwable.message}", throwable)
+                HLog.e("$TAG 发送按钮模块回调失败: ${entry.id} ${throwable.message}", throwable)
             }
         }
         return false

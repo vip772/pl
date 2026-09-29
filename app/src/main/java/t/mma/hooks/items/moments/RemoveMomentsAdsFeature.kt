@@ -1,4 +1,5 @@
 package t.mma.hooks.items.moments
+import t.mma.utils.HLog
 
 import android.content.Context
 import de.robv.android.xposed.XC_MethodHook
@@ -6,7 +7,7 @@ import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import t.mma.utils.KavaReflector
 import java.util.HashSet
 

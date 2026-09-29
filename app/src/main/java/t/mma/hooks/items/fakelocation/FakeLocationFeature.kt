@@ -1,4 +1,5 @@
 package t.mma.hooks.items.fakelocation
+import t.mma.utils.HLog
 
 import android.content.Context
 import de.robv.android.xposed.XC_MethodHook
@@ -9,7 +10,7 @@ import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
-import t.mma.utils.HLog
+import HLog
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher

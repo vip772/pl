@@ -1,9 +1,10 @@
 package t.mma.hooks.core
+import t.mma.utils.HLog
 
 import t.mma.event.Events
 import t.mma.hooks.items.settings.SettingsFeature
 import t.mma.preferences.TermsGate
-import t.mma.utils.HLog
+import HLog
 import java.util.Collections
 
 /**

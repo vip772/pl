@@ -1,4 +1,5 @@
 package t.mma.loader.utils;
+import t.mma.utils.HLog
 
 import android.content.Context;
 import android.os.Process;
@@ -163,12 +164,12 @@ public class NativeLibraryLoader {
                 }
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " " + soName + " 加载失败: " + e.getMessage(), e);
+            HLog.e(TAG + " " + soName + " 加载失败: " + e.getMessage(), e);
             try {
                 System.loadLibrary(libName);
                 return true;
             } catch (Throwable e2) {
-                t.mma.utils.HLog.e(TAG + " " + libName + " loadLibrary 也失败: " + e2.getMessage(), e2);
+                HLog.e(TAG + " " + libName + " loadLibrary 也失败: " + e2.getMessage(), e2);
                 if (optional) return false;
                 throw new RuntimeException("无法加载 " + soName, e2);
             }

@@ -1,4 +1,5 @@
 package t.mma.dexkit;
+import t.mma.utils.HLog
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -166,7 +167,7 @@ public class SettingsDexFinder {
                 break;
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " setKey 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " setKey 失败: " + e.getMessage(), e);
         }
     }
 
@@ -202,7 +203,7 @@ public class SettingsDexFinder {
                 }
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " setTitle 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " setTitle 失败: " + e.getMessage(), e);
         }
     }
 
@@ -227,7 +228,7 @@ public class SettingsDexFinder {
                 }
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " getKey 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " getKey 失败: " + e.getMessage(), e);
         }
     }
 
@@ -304,7 +305,7 @@ public class SettingsDexFinder {
                 } catch (Throwable ignored) {}
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " addPreference 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " addPreference 失败: " + e.getMessage(), e);
         }
     }
 
@@ -400,7 +401,7 @@ public class SettingsDexFinder {
                         + settingItemClassesProviderClass.getName());
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " SettingItemClassesProvider 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " SettingItemClassesProvider 失败: " + e.getMessage(), e);
         }
     }
 
@@ -449,7 +450,7 @@ public class SettingsDexFinder {
                 logDetail("BaseSettingItem: " + baseSettingItemClass.getName());
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " BaseSettingItem 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " BaseSettingItem 失败: " + e.getMessage(), e);
         }
     }
 
@@ -518,7 +519,7 @@ public class SettingsDexFinder {
                 break;
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " SettingLocation 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " SettingLocation 失败: " + e.getMessage(), e);
         }
     }
 
@@ -541,7 +542,7 @@ public class SettingsDexFinder {
                 break;
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " AccountInfo.returns1 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " AccountInfo.returns1 失败: " + e.getMessage(), e);
         }
     }
 
@@ -565,7 +566,7 @@ public class SettingsDexFinder {
                 break;
             }
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " AccountInfo.settingKey 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " AccountInfo.settingKey 失败: " + e.getMessage(), e);
         }
     }
 
@@ -629,7 +630,7 @@ public class SettingsDexFinder {
             }
             logDetail("PlusSubMenuHelper 未找到");
         } catch (Throwable e) {
-            t.mma.utils.HLog.e(TAG + " PlusSubMenuHelper 失败: " + e.getMessage(), e);
+            HLog.e(TAG + " PlusSubMenuHelper 失败: " + e.getMessage(), e);
         }
     }
 
