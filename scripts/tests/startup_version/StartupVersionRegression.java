@@ -1,8 +1,8 @@
 import android.content.Context;
 import android.content.pm.*;
 import com.tencent.mm.boot.BuildConfig;
-import h.Hchat.hooks.api.model.WeChatVersionInfo;
-import h.Hchat.hooks.api.runtime.WeChatVersionApi;
+import t.mma.hooks.api.model.WeChatVersionInfo;
+import t.mma.hooks.api.runtime.WeChatVersionApi;
 import java.io.File;
 import java.nio.file.*;
 

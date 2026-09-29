@@ -1,4 +1,4 @@
-package h.Hchat.hooks.items.floatingshortcut
+package t.mma.hooks.items.floatingshortcut
 import android.graphics.BitmapFactory
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable

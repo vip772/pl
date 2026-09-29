@@ -1,4 +1,4 @@
-package h.Hchat.hooks.items.hchatextra
+package t.mma.hooks.items.hchatextra
 
 import android.view.View
 import android.view.ViewTreeObserver

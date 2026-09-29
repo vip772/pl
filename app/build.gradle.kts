@@ -33,7 +33,7 @@ val hasReleaseSigning = releaseStoreFile.isFile &&
     !releaseKeyPassword.isNullOrBlank()
 
 android {
-    namespace = "h.Hchat"
+    namespace = "t.mma"
     compileSdk = 37
 
     if (modernXposed) {
@@ -47,7 +47,7 @@ android {
     val autoVersionName = System.getenv("HCAT_VERSION_NAME")?.takeIf { it.isNotBlank() } ?: "1.0.0"
 
     defaultConfig {
-        applicationId = "h.Hchat"
+        applicationId = "t.mma"
         minSdk = 27
         targetSdk = 37
         versionCode = autoVersionCode

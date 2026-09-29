@@ -6,7 +6,7 @@ import java.lang.reflect.Method;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
-import h.Hchat.modern.ModernXposedRuntime;
+import t.mma.modern.ModernXposedRuntime;
 
 public final class XposedBridge {
     private XposedBridge() {

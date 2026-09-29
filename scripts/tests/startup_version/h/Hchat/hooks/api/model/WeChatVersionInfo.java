@@ -1,4 +1,4 @@
-package h.Hchat.hooks.api.model;
+package t.mma.hooks.api.model;
 public class WeChatVersionInfo {
  public final String packageName, versionName, clientVersion, tinkerId, patchId, classLoaderHash, cacheKey;
  public final long versionCode, sourceLastModified;

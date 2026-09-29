@@ -1,4 +1,4 @@
-package h.Hchat.loader.utils;
+package t.mma.loader.utils;
 
 import java.util.ArrayList;
 import java.util.List;

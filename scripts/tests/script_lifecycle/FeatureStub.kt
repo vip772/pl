@@ -1,2 +1,2 @@
-package h.Hchat.hooks.core
+package t.mma.hooks.core
 class FeatureContext

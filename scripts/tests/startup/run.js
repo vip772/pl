@@ -10,10 +10,10 @@ function run(command, args) {
     if (result.error || result.status !== 0) throw result.error || new Error('Check failed: ' + result.status);
 }
 run(process.env.JAVAC || (fs.existsSync(termux + 'javac') ? termux + 'javac' : 'javac'), [
-    '-d', output, 'app/src/main/java/h/Hchat/loader/utils/NativeLoadCache.java',
+    '-d', output, 'app/src/main/java/t/mma/loader/utils/NativeLoadCache.java',
     'scripts/tests/startup/NativeLoadCacheRegression.java'
 ]);
 run(process.env.JAVA || (fs.existsSync(termux + 'java') ? termux + 'java' : 'java'), [
-    '-cp', output, 'h.Hchat.loader.utils.NativeLoadCacheRegression'
+    '-cp', output, 't.mma.loader.utils.NativeLoadCacheRegression'
 ]);
 console.log('Test artifacts: ' + output);

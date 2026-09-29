@@ -1,4 +1,4 @@
-package h.Hchat.hooks.api.core
+package t.mma.hooks.api.core
 
 class TestMessage(val id: Long, val kind: String = "text")
 class Change(val message: TestMessage?)

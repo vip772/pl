@@ -1,8 +1,8 @@
-package h.Hchat.hooks.items.script
+package t.mma.hooks.items.script
 
-import h.Hchat.hooks.api.core.WeChatApis
-import h.Hchat.hooks.core.FeatureContext
-import h.Hchat.utils.HLog
+import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.core.FeatureContext
+import t.mma.utils.HLog
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.ThreadPoolExecutor

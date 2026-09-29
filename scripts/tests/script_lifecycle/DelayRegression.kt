@@ -1,7 +1,7 @@
-package h.Hchat.hooks.items.script
+package t.mma.hooks.items.script
 
 import android.os.Handler
-import h.Hchat.utils.HLog
+import t.mma.utils.HLog
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger

@@ -1,6 +1,6 @@
-package h.Hchat.hooks.items.script
+package t.mma.hooks.items.script
 
-import h.Hchat.hooks.api.core.TestMessage
+import t.mma.hooks.api.core.TestMessage
 import java.util.concurrent.atomic.AtomicInteger
 class ScriptMessageBean(private val message: TestMessage) {
     init { constructed.incrementAndGet() }
