@@ -104,7 +104,7 @@ fun updateMeta(talker: String, days: Int, memberCount: Int, speakerCount: Int) {
     private var currentText = ""
     private fun screenshotLayout(source: String, paint: TextPaint, width: Int): StaticLayout {
         val styled = SpannableStringBuilder(source)
-        val lines = source.split("\\n")
+        val lines = source.split("\n")
         var offset = 0
         val red = Color.rgb(198, 40, 40)
         val numerals = "一二三四五六七八九十"
