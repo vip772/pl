@@ -5,7 +5,6 @@ import android.os.SystemClock
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.items.shortvideo.FinderMediaDownloadSupport
-import HLog
 import java.util.Locale
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap

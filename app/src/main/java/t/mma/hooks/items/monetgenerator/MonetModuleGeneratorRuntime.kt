@@ -17,7 +17,6 @@ import t.mma.hooks.items.monetgenerator.engine.MonetGenerationRequest
 import t.mma.hooks.items.monetgenerator.engine.MonetLogLevel
 import t.mma.hooks.items.monetgenerator.engine.MonetModuleGenerator
 import t.mma.hooks.items.monetgenerator.engine.MonetResourceDexEvidence
-import HLog
 import org.luckypray.dexkit.DexKitBridge
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean

@@ -6,7 +6,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import t.mma.preferences.HchatStorage
-import HLog
 import java.io.File
 import java.io.FileOutputStream
 import java.nio.file.Files

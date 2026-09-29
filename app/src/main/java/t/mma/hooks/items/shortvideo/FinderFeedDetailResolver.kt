@@ -7,7 +7,6 @@ import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
-import HLog
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher

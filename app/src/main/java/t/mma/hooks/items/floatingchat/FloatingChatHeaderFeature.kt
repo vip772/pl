@@ -21,7 +21,6 @@ import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
-import HLog
 import t.mma.utils.KavaReflector
 import java.lang.reflect.Member
 import java.lang.reflect.Method

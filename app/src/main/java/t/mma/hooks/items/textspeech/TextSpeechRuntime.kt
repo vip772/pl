@@ -24,7 +24,6 @@ import t.mma.hooks.api.media.WeChatVoiceApi
 import t.mma.hooks.api.message.WeChatMessageObserveApi
 import t.mma.hooks.api.model.WeChatMessage
 import t.mma.preferences.HchatStorage
-import HLog
 import t.mma.utils.KavaReflector
 import java.io.File
 import java.util.ArrayDeque

@@ -14,7 +14,6 @@ import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import t.mma.preferences.HchatStorage
-import HLog
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream

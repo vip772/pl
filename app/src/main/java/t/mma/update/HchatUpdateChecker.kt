@@ -11,7 +11,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import t.mma.preferences.HchatStorage
-import HLog
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader

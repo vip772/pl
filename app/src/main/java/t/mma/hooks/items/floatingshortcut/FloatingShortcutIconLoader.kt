@@ -9,7 +9,6 @@ import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
 import android.widget.ImageView
-import HLog
 import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 import java.util.concurrent.LinkedBlockingQueue

@@ -50,7 +50,6 @@ import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
 import t.mma.ui.miuix.EmbeddedComposeOwnerInstaller
 import t.mma.ui.miuix.EmbeddedComposeRuntime
-import HLog
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.FindMethod

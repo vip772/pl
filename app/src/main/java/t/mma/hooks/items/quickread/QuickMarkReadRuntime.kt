@@ -15,7 +15,6 @@ import t.mma.hooks.api.runtime.WeChatDatabaseApi
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.preferences.HchatStorage
-import HLog
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher

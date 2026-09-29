@@ -26,7 +26,6 @@ import t.mma.hooks.api.ui.WeChatChatPageApi
 import t.mma.hooks.api.ui.WeChatLifecycleApi
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
-import HLog
 import t.mma.utils.KavaReflector
 import java.util.Collections
 import java.util.WeakHashMap

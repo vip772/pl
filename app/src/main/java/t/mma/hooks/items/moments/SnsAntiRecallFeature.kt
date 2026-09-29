@@ -13,7 +13,6 @@ import t.mma.hooks.core.HookRegistry
 import t.mma.event.Events
 import t.mma.hooks.items.momentsfake.MomentsFakeInteractionNodeIdentity
 import t.mma.preferences.HchatStorage
-import HLog
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher

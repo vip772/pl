@@ -2,7 +2,6 @@ package t.mma.hooks.core
 import t.mma.utils.HLog
 
 import android.app.Activity
-import HLog
 import java.util.concurrent.ConcurrentHashMap
 
 internal data class ConversationMenuExtensionTarget(

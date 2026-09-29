@@ -12,7 +12,6 @@ import t.mma.hooks.items.messageblock.MessageBlockSettings
 import t.mma.hooks.items.quickread.QuickMarkReadRuntime
 import t.mma.ui.SettingsUI
 import t.mma.ui.miuix.VoiceForwardMiuixDialog
-import HLog
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 

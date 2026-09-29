@@ -12,7 +12,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import t.mma.R
-import HLog
 
 class WeChatKeepAliveService : Service() {
     private val handler = Handler(Looper.getMainLooper())

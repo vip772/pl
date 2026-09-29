@@ -12,7 +12,6 @@ import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.api.runtime.WeChatVersionApi
 import t.mma.preferences.HchatStorage
-import HLog
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import org.luckypray.dexkit.wrap.DexMethod

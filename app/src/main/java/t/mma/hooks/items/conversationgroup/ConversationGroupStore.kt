@@ -4,7 +4,6 @@ import t.mma.utils.HLog
 import android.content.Context
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.preferences.HchatStorage
-import HLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID

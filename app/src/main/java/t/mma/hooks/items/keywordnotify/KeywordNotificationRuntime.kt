@@ -32,7 +32,6 @@ import t.mma.hooks.items.customfriendavatar.CustomFriendAvatarSettings
 import t.mma.hooks.items.customfriendavatar.CustomFriendAvatarStore
 import t.mma.hooks.items.notification.NotificationNameResolver
 import t.mma.preferences.HchatStorage
-import HLog
 import java.io.File
 import java.net.URL
 import java.security.MessageDigest

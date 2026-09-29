@@ -36,7 +36,6 @@ import t.mma.hooks.api.ui.HchatAgentIconDrawable
 import t.mma.preferences.HchatStorage
 import t.mma.ui.SettingsUI
 import t.mma.ui.miuix.MiuixSettingsPage
-import HLog
 import java.lang.ref.WeakReference
 import kotlin.math.abs
 

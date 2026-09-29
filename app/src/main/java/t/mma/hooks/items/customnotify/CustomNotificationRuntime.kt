@@ -38,7 +38,6 @@ import t.mma.hooks.items.customfriendavatar.CustomFriendAvatarSettings
 import t.mma.hooks.items.customfriendavatar.CustomFriendAvatarStore
 import t.mma.hooks.items.notification.NotificationNameResolver
 import t.mma.hooks.items.quickread.QuickMarkReadRuntime
-import HLog
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher

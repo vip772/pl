@@ -8,7 +8,6 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
-import HLog
 import java.io.File
 import java.io.FileOutputStream
 import java.lang.ref.WeakReference

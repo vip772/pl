@@ -6,7 +6,6 @@ import android.content.SharedPreferences
 import android.system.Os
 import t.mma.hooks.items.script.agent.ScriptPluginAgentWorkspaceTools
 import t.mma.preferences.HchatStorage
-import HLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream

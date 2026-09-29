@@ -8,7 +8,6 @@ import android.util.Xml
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.core.FeatureContext
 import t.mma.utils.HchatMediaDownloader
-import HLog
 import t.mma.utils.KavaReflector
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONObject

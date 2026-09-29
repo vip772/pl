@@ -6,7 +6,6 @@ import android.content.Intent
 import android.os.PowerManager
 import t.mma.BuildConfig
 import t.mma.preferences.HchatStorage
-import HLog
 
 object WeChatKeepAliveRuntime {
     private const val TAG = "[Hchat:KeepAlive]"

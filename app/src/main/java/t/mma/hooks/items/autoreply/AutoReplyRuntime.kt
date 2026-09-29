@@ -14,7 +14,6 @@ import android.widget.Toast
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.message.WeChatMessageObserveApi
 import t.mma.hooks.items.script.ScriptPluginRuntime
-import HLog
 import me.yun.silk.AacCodec
 import me.yun.silk.SilkCodec
 import okhttp3.MediaType.Companion.toMediaType

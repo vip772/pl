@@ -7,7 +7,6 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.model.WeChatContact
 import t.mma.preferences.HchatStorage
 import t.mma.ui.miuix.VoiceForwardMiuixDialog
-import HLog
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 

@@ -10,7 +10,6 @@ import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.items.quickread.QuickMarkReadRuntime
 import t.mma.hooks.items.quickterminate.QuickTerminateRuntime
 import t.mma.ui.FeatureSettingsProvider
-import HLog
 
 /**
  * 微信内设置入口注入功能。

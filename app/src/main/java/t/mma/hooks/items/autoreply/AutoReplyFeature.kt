@@ -6,7 +6,6 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.items.script.ScriptNewFriendHook
-import HLog
 
 class AutoReplyFeature : BaseFeature() {
     override fun featureId(): String = ID

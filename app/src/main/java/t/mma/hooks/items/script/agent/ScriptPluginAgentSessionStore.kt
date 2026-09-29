@@ -5,7 +5,6 @@ import android.content.Context
 import android.net.Uri
 import android.system.Os
 import t.mma.hooks.items.script.ScriptPluginRuntime
-import HLog
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File

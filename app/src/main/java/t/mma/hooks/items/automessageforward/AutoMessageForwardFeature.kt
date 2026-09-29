@@ -5,7 +5,6 @@ import t.mma.event.Events
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
-import HLog
 
 class AutoMessageForwardFeature : BaseFeature() {
     private var runtime: AutoMessageForwardRuntime? = null

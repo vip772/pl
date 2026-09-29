@@ -13,7 +13,6 @@ import t.mma.BuildConfig
 import t.mma.loader.utils.NativeLibraryLoader
 import t.mma.preferences.HchatStorage
 import t.mma.ui.miuix.VoiceForwardMiuixDialog
-import HLog
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream

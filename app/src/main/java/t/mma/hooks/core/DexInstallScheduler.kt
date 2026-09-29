@@ -3,7 +3,6 @@ import t.mma.utils.HLog
 
 import android.os.Handler
 import android.os.Looper
-import HLog
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
