@@ -1,5 +1,5 @@
 package t.mma.hooks.api.core;
-import t.mma.utils.HLog
+import t.mma.utils.HLog;
 
 import t.mma.hooks.api.contact.*;
 import t.mma.hooks.api.conversation.*;

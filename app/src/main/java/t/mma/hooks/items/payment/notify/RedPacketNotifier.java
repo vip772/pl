@@ -1,5 +1,5 @@
 package t.mma.hooks.items.payment.notify;
-import t.mma.utils.HLog
+import t.mma.utils.HLog;
 
 import android.app.Notification;
 import android.app.NotificationChannel;

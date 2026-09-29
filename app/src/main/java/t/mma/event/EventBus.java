@@ -1,5 +1,5 @@
 package t.mma.event;
-import t.mma.utils.HLog
+import t.mma.utils.HLog;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;

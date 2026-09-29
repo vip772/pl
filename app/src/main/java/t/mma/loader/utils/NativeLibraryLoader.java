@@ -1,5 +1,5 @@
 package t.mma.loader.utils;
-import t.mma.utils.HLog
+import t.mma.utils.HLog;
 
 import android.content.Context;
 import android.os.Process;

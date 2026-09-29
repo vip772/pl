@@ -1,5 +1,5 @@
 package t.mma.dexkit;
-import t.mma.utils.HLog
+import t.mma.utils.HLog;
 
 import android.content.Context;
 import android.content.SharedPreferences;

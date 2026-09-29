@@ -1,5 +1,5 @@
 package t.mma.hooks.api.ui;
-import t.mma.utils.HLog
+import t.mma.utils.HLog;
 
 import android.app.Activity;
 import android.content.Context;
