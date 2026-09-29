@@ -151,7 +151,7 @@ private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (
         val records = sampledRows.mapNotNull { row -> normalizeRecord(talker, row["content"].toString(), row["isSend"].toString() == "1").takeIf { it.isNotBlank() } }
         sampleCount = records.size
         require(records.isNotEmpty()) { "所选时段暂无文本消息" }
-        val body = JSONObject().put("model", cfg.model).put("temperature", 0.55).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", buildPrompt(records)))).put("stream", false)
+        val body = JSONObject().put("model", cfg.model).put("temperature", 0.55).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", buildPrompt(records)))).put("stream", true)
         val conn = URL(join(cfg.address, cfg.path)).openConnection() as HttpURLConnection
         activeConnection = conn
         try {
@@ -159,9 +159,39 @@ private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (
             conn.setRequestProperty("Authorization", "Bearer ${cfg.key}"); conn.setRequestProperty("Content-Type", "application/json; charset=utf-8"); conn.setRequestProperty("Accept", "application/json")
             conn.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
             if (conn.responseCode !in 200..299) error("HTTP ${conn.responseCode}: ${conn.errorStream?.bufferedReader()?.readText()}")
-            val response = BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { it.readText() }
+            val reader = BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8))
+            val result = StringBuilder()
+            val fallback = StringBuilder()
+            var sawStreamEvent = false
+            reader.useLines { lines ->
+                lines.forEach { rawLine ->
+                    check(token == requestToken.get()) { "生成已取消" }
+                    val line = rawLine.trim()
+                    if (line.isBlank()) return@forEach
+                    if (!line.startsWith("data:")) {
+                        fallback.append(rawLine)
+                        return@forEach
+                    }
+                    val payload = line.removePrefix("data:").trim()
+                    if (payload == "[DONE]") return@forEach
+                    val chunk = runCatching {
+                        val json = JSONObject(payload)
+                        json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("delta")?.optString("content").orEmpty()
+                    }.getOrDefault("")
+                    if (chunk.isNotEmpty()) {
+                        sawStreamEvent = true
+                        result.append(chunk)
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            if (token == requestToken.get()) onUpdate(result.toString())
+                        }
+                    }
+                }
+            }
             check(token == requestToken.get()) { "生成已取消" }
-            return JSONObject(response).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty().ifBlank { "AI 返回内容为空" }
+            if (sawStreamEvent) return result.toString().ifBlank { "AI 返回内容为空" }
+            return runCatching {
+                JSONObject(fallback.toString()).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
+            }.getOrDefault("").ifBlank { "AI 返回内容为空" }
         } finally {
             if (activeConnection === conn) activeConnection = null
             conn.disconnect()

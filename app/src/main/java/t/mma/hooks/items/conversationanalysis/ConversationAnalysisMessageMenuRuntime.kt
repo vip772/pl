@@ -3,7 +3,8 @@ package t.mma.hooks.items.conversationanalysis
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
+import android.graphics.RectF
+
 import android.graphics.drawable.Drawable
 import android.view.MenuItem
 import android.view.View
@@ -209,23 +210,27 @@ private class AnalysisMenuDrawable(private val density: Float) : Drawable() {
         strokeWidth = 2.2f * density
         strokeCap = Paint.Cap.ROUND
         strokeJoin = Paint.Join.ROUND
-        color = Color.WHITE
+        color = Color.BLACK
     }
 
     override fun draw(canvas: Canvas) {
         val cx = bounds.exactCenterX()
         val cy = bounds.exactCenterY()
         val unit = density
-        canvas.drawRoundRect(cx - 13 * unit, cy - 13 * unit, cx + 13 * unit, cy + 13 * unit, 4 * unit, 4 * unit, paint)
-        canvas.drawLine(cx - 8 * unit, cy + 7 * unit, cx - 8 * unit, cy - 1 * unit, paint)
-        canvas.drawLine(cx, cy + 7 * unit, cx, cy - 6 * unit, paint)
-        canvas.drawLine(cx + 8 * unit, cy + 7 * unit, cx + 8 * unit, cy - 10 * unit, paint)
-        val path = Path().apply {
-            moveTo(cx - 8 * unit, cy - 1 * unit)
-            lineTo(cx, cy - 6 * unit)
-            lineTo(cx + 8 * unit, cy - 10 * unit)
-        }
-        canvas.drawPath(path, paint)
+        val halfWidth = 13f * unit
+        val halfHeight = 16f * unit
+        val radius = 5f * unit
+        canvas.drawRoundRect(
+            RectF(cx - halfWidth, cy - halfHeight, cx + halfWidth, cy + halfHeight),
+            radius,
+            radius,
+            paint
+        )
+        paint.style = Paint.Style.FILL
+        canvas.drawRoundRect(RectF(cx - 8f * unit, cy - 8f * unit, cx + 8f * unit, cy - 5f * unit), 1.5f * unit, 1.5f * unit, paint)
+        canvas.drawRoundRect(RectF(cx - 8f * unit, cy - 1.5f * unit, cx + 10f * unit, cy + 1.5f * unit), 1.5f * unit, 1.5f * unit, paint)
+        canvas.drawRoundRect(RectF(cx - 8f * unit, cy + 5f * unit, cx + 4f * unit, cy + 8f * unit), 1.5f * unit, 1.5f * unit, paint)
+        paint.style = Paint.Style.STROKE
     }
 
     override fun setAlpha(alpha: Int) { paint.alpha = alpha }
