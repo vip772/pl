@@ -1,5 +1,6 @@
 package t.mma.hooks.api.media
 
+import de.robv.android.xposed.XposedBridge
 import t.mma.dexkit.DexFinder
 import t.mma.utils.KavaReflector
 import java.lang.reflect.Method
@@ -41,7 +42,8 @@ object WeChatInternalServices {
             if (!KavaReflector.isStatic(getter)) return null
             val value = KavaReflector.invoke(getter, null, serviceClass)
             if (value != null && owner.isInstance(value)) value else null
-        } catch (_: Throwable) {
+        } catch (t: Throwable) {
+            XposedBridge.log("[Hchat:LocalMessage][DIAG] service getter failed class=${serviceClass.name} owner=${owner.name} type=${t.javaClass.name} message=${t.message}\n${android.util.Log.getStackTraceString(t)}")
             null
         }
     }
