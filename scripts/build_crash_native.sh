@@ -41,7 +41,7 @@ build_abi() {
     exit 1
   fi
   "$readelf_bin" -Ws "$output_dir/libhchat_crash.so" | grep -q \
-    'Java_h_Hchat_crash_NativeCrashBridge_nativeInstall'
+    'Java_t_mma_crash_NativeCrashBridge_nativeInstall'
 }
 
 build_abi arm64-v8a aarch64-linux-android27

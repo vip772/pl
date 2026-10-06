@@ -711,7 +711,7 @@ static int open_report_file(void) {
 }
 
 JNIEXPORT jboolean JNICALL
-Java_h_Hchat_crash_NativeCrashBridge_nativeInstall(JNIEnv *env, jclass clazz, jstring report_path) {
+Java_t_mma_crash_NativeCrashBridge_nativeInstall(JNIEnv *env, jclass clazz, jstring report_path) {
     (void) clazz;
     if (env == 0 || report_path == 0) return JNI_FALSE;
     const char *path = (*env)->GetStringUTFChars(env, report_path, 0);

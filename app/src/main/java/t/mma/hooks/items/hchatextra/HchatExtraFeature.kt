@@ -3116,31 +3116,10 @@ private class HchatExtraHooker(
 
 
     private fun wrapCardDetailsAnchor(anchor: BottomDetailsAnchor): BottomDetailsAnchor {
-        val content = anchor.layoutView
-        if (content is LinearLayout && content.tag == "hchat_card_details_column") {
-            val card = content.getChildAt(0) ?: return anchor
-            return BottomDetailsAnchor(content, card, card)
-        }
-        (content.parent as? LinearLayout)?.takeIf { it.tag == "hchat_card_details_column" }?.let {
-            return BottomDetailsAnchor(it, content, content)
-        }
-        val parent = content.parent as? ViewGroup ?: return anchor
-        val index = parent.indexOfChild(content)
-        if (index < 0) return anchor
-        val outerParams = content.layoutParams ?: return anchor
-        val column = LinearLayout(content.context).apply {
-            orientation = LinearLayout.VERTICAL
-            tag = "hchat_card_details_column"
-            clipChildren = false
-        }
-        // 原卡片保持其 ID、背景和 holder 引用；外部参数交给纵向容器。
-        val width = outerParams.width
-        val height = outerParams.height.takeIf { it >= 0 } ?: ViewGroup.LayoutParams.WRAP_CONTENT
-        outerParams.height = ViewGroup.LayoutParams.WRAP_CONTENT
-        parent.removeViewAt(index)
-        column.addView(content, LinearLayout.LayoutParams(width, height))
-        parent.addView(column, index, outerParams)
-        return BottomDetailsAnchor(column, content, content)
+        // Never reparent a host-owned card view. WeChat's bind code retains the
+        // original parent contract and may cast its LayoutParams on recycle.
+        // The label is inserted next to the card by addBottomDetailsView().
+        return anchor
     }
 
 
