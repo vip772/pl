@@ -2,6 +2,8 @@ package t.mma.hooks.items.antirecall
 import t.mma.utils.HLog
 
 import android.content.ContentValues
+import android.os.Handler
+import android.os.Looper
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import t.mma.dexkit.DexMethodCache
@@ -29,6 +31,8 @@ class AntiRecallFeature : BaseFeature() {
     private val messageCache = ConcurrentHashMap<String, WeChatMessage>()
     private val selfRecallMsgIds = Collections.newSetFromMap(ConcurrentHashMap<Long, Boolean>())
     private val rawMessageRows = ConcurrentHashMap<Long, Map<String, Any>>()
+    private val noticeHandler = Handler(Looper.getMainLooper())
+    private val pendingNoticeKeys = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
     private var methodCachePrefs: android.content.SharedPreferences? = null
     @Volatile private var revokeEntryInstalled = false
     @Volatile private var messageStorageHookInstalled = false
@@ -537,34 +541,44 @@ class AntiRecallFeature : BaseFeature() {
         svrId: Long,
         recalledInfo: WeChatRecalledMessage?,
         recallTime: Long,
-        selfRecall: Boolean
+        selfRecall: Boolean,
+        attempt: Int = 0
     ) {
         if (talker.isBlank() || svrId <= 0L) {
             HLog.e("$TAG 插入提示失败: talker/newmsgid为空 talker=$talker newmsgid=$svrId")
             return
         }
+        val key = "$talker:$svrId:${if (selfRecall) 1 else 0}"
+        if (attempt == 0 && !pendingNoticeKeys.add(key)) return
         val localMessages = WeChatApis.localMessages()
-        if (localMessages == null) {
-            HLog.e("$TAG 插入提示失败: LocalMessage API为空")
-            return
-        }
-        localMessages.ensureReady()
         val targetCreateTime = resolveRecalledCreateTime(svrId, recalledInfo)
+            .takeIf { it > 0L }
+            ?: normalizeMillis(recallTime).takeIf { it > 0L }
+            ?: System.currentTimeMillis()
         val notice = if (selfRecall) {
             AntiRecallSettings.SELF_NOTICE_TEXT
         } else {
             noticeText(context, talker, recalledInfo, targetCreateTime, recallTime)
         }
-        if (targetCreateTime <= 0L) {
-            HLog.e(
-                "$TAG 插入提示失败: 未定位原消息时间 talker=$talker id=$svrId " +
-                    "origin=${recalledInfo?.originSvrId ?: 0L} new=${recalledInfo?.newMsgId ?: 0L}"
-            )
+        val result = runCatching {
+            localMessages?.ensureReady()
+            localMessages?.insertSystemMessageAt(talker, notice, targetCreateTime + 1L) ?: 0L
+        }.getOrDefault(0L)
+        if (result > 0L) {
+            pendingNoticeKeys.remove(key)
             return
         }
-        val result = localMessages.insertSystemMessageAt(talker, notice, targetCreateTime + 1L)
-        if (result <= 0L) {
-            HLog.e("$TAG 插入提示失败: talker=$talker newmsgid=$svrId")
+        if (attempt < NOTICE_RETRY_COUNT) {
+            noticeHandler.postDelayed(
+                { insertLocalNotice(context, talker, svrId, recalledInfo, recallTime, selfRecall, attempt + 1) },
+                NOTICE_RETRY_DELAYS_MS[attempt]
+            )
+        } else {
+            pendingNoticeKeys.remove(key)
+            HLog.e(
+                "$TAG 插入提示失败: talker=$talker newmsgid=$svrId " +
+                    "localApi=${localMessages != null} attempts=${attempt + 1}"
+            )
         }
     }
 
@@ -1140,6 +1154,8 @@ class AntiRecallFeature : BaseFeature() {
         private const val RECALLED_MESSAGE_TYPE = 268445456
         private const val SELF_RECALLED_MESSAGE_TYPE = 268445458
         private const val MEDIA_RECALLED_MESSAGE_TYPE = 285222674
+        private const val NOTICE_RETRY_COUNT = 3
+        private val NOTICE_RETRY_DELAYS_MS = longArrayOf(250L, 750L, 1500L)
         private val NEVER_RESTORE_COLUMNS = setOf("rowid")
     }
 
