@@ -119,7 +119,7 @@ class WeChatLocalMessageApi(
             pendingCreateTime.set(TimedInsert(talker, createTime))
         }
         return try {
-            KavaReflector.invoke(method, owner, talker, content, "")
+            KavaReflector.invokeOrThrow(method, owner, talker, content, "")
             1L
         } finally {
             if (createTime != null) pendingCreateTime.remove()
