@@ -34,10 +34,10 @@ class WeChatLocalMessageApi(
 
     fun ensureReady() {
         val finder = dexFinder ?: return
-        if (!finder.hasLocalMessageApi()) {
+        if (!finder.hasLocalMessageApi() || finder.localMessageCreateTimeMethod == null) {
             finder.resolveLocalMessageApi()
         }
-        if (finder.localMessageCreateTimeMethod != null) installCreateTimeHook()
+        installCreateTimeHook()
     }
 
     fun installCreateTimeHook(): Boolean {
@@ -86,20 +86,21 @@ class WeChatLocalMessageApi(
             log("插入系统消息失败: 本地消息API未就绪")
             return 0L
         }
-        val canSetCreateTime = useWechatCreateTime || installCreateTimeHook()
+        if (!useWechatCreateTime && !installCreateTimeHook()) {
+            log("插入系统消息失败: createTime hook 未就绪")
+            return 0L
+        }
         return runCatching {
-            if (finder.localSystemMessageMethod != null) {
-                insertViaWechatSystemMessageMethod(
-                    finder,
-                    talker.orEmpty(),
-                    content.orEmpty(),
-                    if (!useWechatCreateTime && canSetCreateTime) normalizeCreateTimeMillis(createTime) else null
-                )?.let { return@runCatching it }
-            }
+            insertViaWechatSystemMessageMethod(
+                finder,
+                talker.orEmpty(),
+                content.orEmpty(),
+                if (useWechatCreateTime) null else normalizeCreateTimeMillis(createTime)
+            )?.let { return@runCatching it }
             val msg = newMessage(finder, talker.orEmpty())
                 ?: throw IllegalStateException("消息对象创建失败")
-            fillSystemMessage(msg, talker.orEmpty(), content.orEmpty(), createTime, useWechatCreateTime && canSetCreateTime)
-            val result = KavaReflector.invokeOrThrow(finder.localMessageInsertMethod, null, msg)
+            fillSystemMessage(msg, talker.orEmpty(), content.orEmpty(), createTime, useWechatCreateTime)
+            val result = KavaReflector.invoke(finder.localMessageInsertMethod, null, msg)
             (result as? Number)?.toLong() ?: 0L
         }.onFailure {
             log("插入系统消息失败: ${it.message}")
