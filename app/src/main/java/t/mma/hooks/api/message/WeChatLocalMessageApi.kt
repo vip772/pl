@@ -33,42 +33,24 @@ class WeChatLocalMessageApi(
     }
 
     fun ensureReady() {
-        val finder = dexFinder
-        if (finder == null) {
-            diag("ensureReady: dexFinder=null")
-            return
-        }
-        diag("ensureReady.before available=${finder.hasLocalMessageApi()} createHook=$createTimeHookInstalled ${apiState(finder)}")
+        val finder = dexFinder ?: return
         if (!finder.hasLocalMessageApi() || finder.localMessageCreateTimeMethod == null) {
-            diag("ensureReady: resolveLocalMessageApi start")
             finder.resolveLocalMessageApi()
-            diag("ensureReady: resolveLocalMessageApi end ${apiState(finder)}")
         }
-        val installed = installCreateTimeHook()
-        diag("ensureReady.end installed=$installed createHook=$createTimeHookInstalled ${apiState(finder)}")
+        installCreateTimeHook()
     }
 
     fun installCreateTimeHook(): Boolean {
-        if (createTimeHookInstalled) {
-            diag("createTimeHook: already installed")
-            return true
-        }
-        val finder = dexFinder
-        if (finder == null) {
-            diag("createTimeHook: dexFinder=null")
-            return false
-        }
+        if (createTimeHookInstalled) return true
+        val finder = dexFinder ?: return false
         if (finder.localMessageCreateTimeMethod == null) {
-            diag("createTimeHook: target=null, resolve start ${apiState(finder)}")
             finder.resolveLocalMessageApi()
-            diag("createTimeHook: resolve end ${apiState(finder)}")
         }
         val method = finder.localMessageCreateTimeMethod
         if (method == null) {
-            diag("createTimeHook: target=null, return false")
+            log("创建时间方法未定位: ${apiState(finder)}")
             return false
         }
-        diag("createTimeHook: target=${describe(method)}")
         synchronized(this) {
             if (createTimeHookInstalled) return true
             try {
@@ -81,10 +63,13 @@ class WeChatLocalMessageApi(
                         param.result = pending.createTime
                     }
                 })
-                diag("createTimeHook: hook returned ${unhook != null}")
+                if (unhook == null) {
+                    log("创建时间Hook未返回有效句柄: ${describe(method)}")
+                    return false
+                }
                 createTimeHookInstalled = true
             } catch (t: Throwable) {
-                diagThrowable("createTimeHook: hook failed", t)
+                logThrowable("创建时间Hook失败", t)
                 throw t
             }
         }
@@ -111,35 +96,30 @@ class WeChatLocalMessageApi(
         }
         val finder = dexFinder
         if (finder == null || !finder.hasLocalMessageApi()) {
-            diag("insert: api unavailable finder=${finder != null} ${finder?.let { apiState(it) } ?: ""}")
-            log("插入系统消息失败: 本地消息API未就绪")
+            log("插入系统消息失败: 本地消息API未就绪 ${finder?.let { apiState(it) } ?: "finder=null"}")
             return 0L
         }
-        diag("insert.start useWechatCreateTime=$useWechatCreateTime ${apiState(finder)}")
         if (!useWechatCreateTime && !installCreateTimeHook()) {
-            diag("insert: createTime hook unavailable ${apiState(finder)}")
-            log("插入系统消息失败: createTime hook 未就绪")
+            log("插入系统消息失败: createTime hook 未就绪 ${apiState(finder)}")
             return 0L
         }
         return runCatching {
-            diag("insert: system method invoke start method=${finder.localSystemMessageMethod?.let(::describe) ?: "null"}")
             insertViaWechatSystemMessageMethod(
                 finder,
                 talker.orEmpty(),
                 content.orEmpty(),
                 if (useWechatCreateTime) null else normalizeCreateTimeMillis(createTime)
             )?.let {
-                diag("insert: system method invoke success result=$it")
                 return@runCatching it
             }
-            diag("insert: system method unavailable, fallback object insert")
+            log("系统消息入口不可用，尝试对象插入兜底")
             val msg = newMessage(finder, talker.orEmpty())
                 ?: throw IllegalStateException("消息对象创建失败")
             fillSystemMessage(msg, talker.orEmpty(), content.orEmpty(), createTime, useWechatCreateTime)
             val result = KavaReflector.invoke(finder.localMessageInsertMethod, null, msg)
             (result as? Number)?.toLong() ?: 0L
         }.onFailure {
-            diagThrowable("insert: failed", it)
+            logThrowable("插入系统消息失败详情", it)
             log("插入系统消息失败: ${it.message}")
         }.getOrDefault(0L)
     }
@@ -152,13 +132,11 @@ class WeChatLocalMessageApi(
     ): Long? {
         val method = finder.localSystemMessageMethod
         if (method == null) {
-            diag("systemInvoke: method=null")
+            log("系统消息入口未定位")
             return null
         }
-        diag("systemInvoke: method=${describe(method)}")
         val owner = newSystemMessageOwner(finder, method)
             ?: throw IllegalStateException("系统消息API实例创建失败")
-        diag("systemInvoke: owner=${owner.javaClass.name}")
         if (createTime != null) {
             pendingCreateTime.set(TimedInsert(talker, createTime))
         }
@@ -172,21 +150,9 @@ class WeChatLocalMessageApi(
 
     private fun newSystemMessageOwner(finder: DexFinder, method: Method): Any? {
         val ownerClass = method.declaringClass ?: return null
-        diag("owner.resolve class=${ownerClass.name} serviceGetter=${finder.serviceGetterMethod?.let(::describe) ?: "null"}")
-        WeChatInternalServices.getService(finder, ownerClass)?.let {
-            diag("owner.resolve source=service type=${it.javaClass.name}")
-            return it
-        }
-        diag("owner.resolve source=service result=null")
-        KavaReflector.staticInstance(ownerClass)?.let {
-            diag("owner.resolve source=staticInstance type=${it.javaClass.name}")
-            return it
-        }
-        staticOwnerInstance(ownerClass)?.let {
-            diag("owner.resolve source=staticField type=${it.javaClass.name}")
-            return it
-        }
-        diag("owner.resolve static sources=null")
+        WeChatInternalServices.getService(finder, ownerClass)?.let { return it }
+        KavaReflector.staticInstance(ownerClass)?.let { return it }
+        staticOwnerInstance(ownerClass)?.let { return it }
 
         val errors = ArrayList<String>()
         KavaReflector.newInstanceByArgs(ownerClass, emptyArray())?.let { return it }
@@ -341,13 +307,9 @@ class WeChatLocalMessageApi(
         return KavaReflector.writeField(field, target, value)
     }
 
-    private fun diag(message: String) {
-        log("[DIAG] $message")
-    }
-
-    private fun diagThrowable(prefix: String, throwable: Throwable) {
-        diag("$prefix type=${throwable.javaClass.name} message=${throwable.message}")
-        XposedBridge.log("$TAG [DIAG] $prefix\n${android.util.Log.getStackTraceString(throwable)}")
+    private fun logThrowable(prefix: String, throwable: Throwable) {
+        log("$prefix type=${throwable.javaClass.name} message=${throwable.message}")
+        XposedBridge.log("$TAG $prefix\n${android.util.Log.getStackTraceString(throwable)}")
     }
 
     private fun describe(method: Method): String {

@@ -43,7 +43,7 @@ object WeChatInternalServices {
             val value = KavaReflector.invoke(getter, null, serviceClass)
             if (value != null && owner.isInstance(value)) value else null
         } catch (t: Throwable) {
-            XposedBridge.log("[Hchat:LocalMessage][DIAG] service getter failed class=${serviceClass.name} owner=${owner.name} type=${t.javaClass.name} message=${t.message}\n${android.util.Log.getStackTraceString(t)}")
+            XposedBridge.log("[Hchat:LocalMessage] service getter failed class=${serviceClass.name} owner=${owner.name} type=${t.javaClass.name} message=${t.message}\n${android.util.Log.getStackTraceString(t)}")
             null
         }
     }
