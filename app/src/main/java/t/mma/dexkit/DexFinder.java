@@ -2901,6 +2901,9 @@ public class DexFinder {
                 if (localMessageCreateTimeMethod == null && localSystemMessageMethod != null) {
                     localMessageCreateTimeMethod = findLocalMessageCreateTimeMethod(localSystemMessageMethod.getDeclaringClass());
                 }
+                if (localMessageCreateTimeMethod == null) {
+                    localMessageCreateTimeMethod = findGlobalLocalMessageCreateTimeMethod();
+                }
             }
             if (localSystemMessageMethod != null && localMessageCreateTimeMethod != null) {
                 return count;
@@ -5140,6 +5143,58 @@ public class DexFinder {
             }
         }
         return fallback;
+    }
+
+    private Method findGlobalLocalMessageCreateTimeMethod() {
+        List<Method> candidates = new ArrayList<>();
+        List<Method> preferred = new ArrayList<>();
+        try {
+            FindMethod find = new FindMethod();
+            MethodMatcher matcher = new MethodMatcher();
+            matcher.returnType(long.class);
+            matcher.paramTypes(String.class, long.class);
+            find.matcher(matcher);
+            for (MethodData data : dexKit.findMethod(find)) {
+                try {
+                    Method method = data.getMethodInstance(classLoader);
+                    if (!isLocalMessageCreateTimeMethod(method)) continue;
+                    Method accessible = KavaReflector.accessible(method);
+                    if ("m".equals(method.getName())) {
+                        if (!preferred.contains(accessible)) preferred.add(accessible);
+                    } else if (!candidates.contains(accessible)) {
+                        candidates.add(accessible);
+                    }
+                } catch (Throwable ignored) {}
+            }
+        } catch (Throwable e) {
+            HLog.e(TAG + " 本地消息createTime全局定位失败: " + e.getMessage(), e);
+            return null;
+        }
+        if (preferred.size() == 1) {
+            logDetail("本地消息createTime全局定位: preferred=" + methodName(preferred.get(0)));
+            return preferred.get(0);
+        }
+        if (preferred.size() > 1) {
+            logCreateTimeCandidates("preferred", preferred);
+            return null;
+        }
+        if (candidates.size() == 1) {
+            logDetail("本地消息createTime全局定位: unique=" + methodName(candidates.get(0)));
+            return candidates.get(0);
+        }
+        logCreateTimeCandidates("all", candidates);
+        return null;
+    }
+
+    private void logCreateTimeCandidates(String kind, List<Method> candidates) {
+        StringBuilder detail = new StringBuilder();
+        int max = Math.min(candidates.size(), 12);
+        for (int i = 0; i < max; i++) {
+            if (detail.length() > 0) detail.append(" | ");
+            detail.append(methodName(candidates.get(i)));
+        }
+        HLog.e(TAG + " 本地消息createTime全局定位不唯一: kind=" + kind
+                + " candidates=" + candidates.size() + " methods=" + detail);
     }
 
     private boolean isLocalMessageCreateTimeMethod(Method method) {
