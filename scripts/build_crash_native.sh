@@ -5,11 +5,21 @@ project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source_dir="$project_dir/app/src/main/cpp"
 output_root="$project_dir/app/src/main/jniLibs"
 build_root="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/hchat-crash-native"
-clang_bin=${CLANG:-clang}
-ld_bin=${LD_LLD:-ld.lld}
-strip_bin=${LLVM_STRIP:-llvm-strip}
-readelf_bin=${LLVM_READELF:-llvm-readelf}
-include_dir=${PREFIX:-/data/data/com.termux/files/usr}/include
+ndk_root=${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}
+llvm_bin=""
+if [ -n "$ndk_root" ]; then
+  llvm_bin="$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/bin"
+  ndk_include_dir="$ndk_root/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include"
+fi
+clang_bin=${CLANG:-${llvm_bin:+$llvm_bin/clang}}
+ld_bin=${LD_LLD:-${llvm_bin:+$llvm_bin/ld.lld}}
+strip_bin=${LLVM_STRIP:-${llvm_bin:+$llvm_bin/llvm-strip}}
+readelf_bin=${LLVM_READELF:-${llvm_bin:+$llvm_bin/llvm-readelf}}
+include_dir=${JNI_INCLUDE_DIR:-${ndk_include_dir:-${PREFIX:-/data/data/com.termux/files/usr}/include}}
+clang_bin=${clang_bin:-clang}
+ld_bin=${ld_bin:-ld.lld}
+strip_bin=${strip_bin:-llvm-strip}
+readelf_bin=${readelf_bin:-llvm-readelf}
 
 rm -rf -- "$build_root"
 mkdir -p "$build_root"

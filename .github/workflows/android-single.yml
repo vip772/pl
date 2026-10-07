@@ -36,11 +36,33 @@ jobs:
           cache-cleanup: always
           cache-read-only: false
           validate-wrappers: false
-
-      - name: 配置 Android SDK
+      - name: 配置 Android SDK 和 NDK
         uses: android-actions/setup-android@v3
         with:
-          packages: platform-tools
+          packages: |
+            platform-tools
+            ndk;26.3.11579264
+
+      - name: 设置 NDK 环境变量
+        run: echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/26.3.11579264" >> "$GITHUB_ENV"
+
+      - name: 编译并校验 Native 崩溃捕获库
+        run: |
+          set -e
+          chmod +x scripts/build_crash_native.sh
+          scripts/build_crash_native.sh
+          readelf_bin="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf"
+          test -x "$readelf_bin"
+          for abi in arm64-v8a armeabi-v7a; do
+            so="app/src/main/jniLibs/${abi}/libhchat_crash.so"
+            echo "校验 ${so}"
+            "$readelf_bin" -Ws "$so" | grep -q 'JNI_OnLoad'
+            if "$readelf_bin" -Ws "$so" | grep -q 'Java_t_mma_crash_NativeCrashBridge_nativeInstall'; then
+              echo "${so} 仍包含旧式 JNI 导出符号"
+              exit 1
+            fi
+          done
+
 
       - name: 准备单频道构建配置
         env:
