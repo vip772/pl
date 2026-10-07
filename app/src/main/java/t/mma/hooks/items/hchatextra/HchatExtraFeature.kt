@@ -1198,7 +1198,9 @@ private class HchatExtraHooker(
             )
         val bottomAnchor = if (avatarAnchor == null) {
             val candidate = noticeContentAnchor(root, nativeTimeLabel, details.type)
-                ?: nativeTimeLabel?.let { messageContentAnchor(holder, it) }
+                ?: nativeTimeLabel?.let {
+                    messageContentAnchor(holder, it) ?: timeLabelDetailsAnchor(it)
+                }
             if (cardMessage) {
                 // The reference module owns the entire row branch. A card's timeTV and
                 // clickArea can belong to a transient inner container or be absent.
@@ -3134,6 +3136,14 @@ private class HchatExtraHooker(
         return BottomDetailsAnchor(row, cardBranch, cardBranch)
     }
 
+
+    private fun timeLabelDetailsAnchor(label: TextView): BottomDetailsAnchor? {
+        val parent = label.parent as? ViewGroup ?: return null
+        if (parent !is RelativeLayout &&
+            !(parent is LinearLayout && parent.orientation == LinearLayout.VERTICAL)) return null
+        if (label.visibility == View.GONE || !isViewWithinRoot(label, parent)) return null
+        return BottomDetailsAnchor(parent, label, label)
+    }
 
     private fun messageContentAnchor(holder: Any, label: TextView): BottomDetailsAnchor? {
         val labelParent = label.parent as? ViewGroup ?: return null
