@@ -786,18 +786,18 @@ public final class WeChatMessageApi {
         if (sourceArgs != null) {
             Constructor<?> objectCtor = dexFinder.sendTextMsgCtorObject;
             if (objectCtor != null) {
-                return KavaReflector.newInstance(objectCtor, talker, content, messageType, sendFlag, sourceArgs);
+                return newSendTextRequest(objectCtor, talker, content, messageType, sendFlag, sourceArgs);
             }
         }
 
         Constructor<?> longCtor = dexFinder.sendTextMsgCtorLong;
         if (longCtor != null) {
-            return KavaReflector.newInstance(longCtor, talker, content, messageType, sendFlag, 0L);
+            return newSendTextRequest(longCtor, talker, content, messageType, sendFlag, 0L);
         }
 
         Constructor<?> objectCtor = dexFinder.sendTextMsgCtorObject;
         if (objectCtor != null) {
-            return KavaReflector.newInstance(objectCtor, talker, content, messageType, sendFlag, sourceArgs);
+            return newSendTextRequest(objectCtor, talker, content, messageType, sendFlag, sourceArgs);
         }
 
         return RedPacketReflector.newInstanceByArgs(
@@ -810,6 +810,20 @@ public final class WeChatMessageApi {
                         sourceArgs != null ? sourceArgs : 0L
                 }
         );
+    }
+
+    private Object newSendTextRequest(Constructor<?> constructor,
+                                     String talker,
+                                     String content,
+                                     int messageType,
+                                     int sendFlag,
+                                     Object sourceArgs) throws Throwable {
+        if (constructor.getParameterTypes().length == 6) {
+            return KavaReflector.newInstance(constructor,
+                    talker, content, messageType, sendFlag, sourceArgs, "");
+        }
+        return KavaReflector.newInstance(constructor,
+                talker, content, messageType, sendFlag, sourceArgs);
     }
 
     private Object getPatExtensionInstance() {

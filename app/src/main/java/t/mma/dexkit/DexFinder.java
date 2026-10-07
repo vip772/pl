@@ -675,8 +675,16 @@ public class DexFinder {
             for (Class<?> cl : candidates) {
                 Constructor<?> longCtor = findCtorByExactTypes(
                         cl, String.class, String.class, int.class, int.class, long.class);
+                if (longCtor == null) {
+                    longCtor = findCtorByExactTypes(
+                            cl, String.class, String.class, int.class, int.class, long.class, String.class);
+                }
                 Constructor<?> objectCtor = findCtorByExactTypes(
                         cl, String.class, String.class, int.class, int.class, Object.class);
+                if (objectCtor == null) {
+                    objectCtor = findCtorByExactTypes(
+                            cl, String.class, String.class, int.class, int.class, Object.class, String.class);
+                }
                 if (longCtor != null || objectCtor != null) {
                     sendTextMsgClass = cl;
                     sendTextMsgCtorLong = longCtor;
@@ -1244,8 +1252,9 @@ public class DexFinder {
             if (sendFileMethod != null) {
                 collectSendXmlCandidatesFromClass(candidates, sendFileMethod.getDeclaringClass());
             }
-            if (candidates.size() == 1) {
-                sendXmlAppMsgMethod = candidates.get(0);
+            Method selected = selectShortestSendXmlMethod(candidates);
+            if (selected != null) {
+                sendXmlAppMsgMethod = selected;
                 resolveAppMsgParseMethod(sendXmlAppMsgMethod.getParameterTypes()[0]);
             } else if (candidates.size() > 1) {
                 HLog.e(TAG + " XML发送方法定位不唯一: candidates=" + candidates.size()
@@ -3577,8 +3586,16 @@ public class DexFinder {
             wishWxHbCtor = findCtorByArgCount(wishWxHbClass, 4);
             sendTextMsgCtorLong = findCtorByExactTypes(
                     sendTextMsgClass, String.class, String.class, int.class, int.class, long.class);
+            if (sendTextMsgCtorLong == null) {
+                sendTextMsgCtorLong = findCtorByExactTypes(
+                        sendTextMsgClass, String.class, String.class, int.class, int.class, long.class, String.class);
+            }
             sendTextMsgCtorObject = findCtorByExactTypes(
                     sendTextMsgClass, String.class, String.class, int.class, int.class, Object.class);
+            if (sendTextMsgCtorObject == null) {
+                sendTextMsgCtorObject = findCtorByExactTypes(
+                        sendTextMsgClass, String.class, String.class, int.class, int.class, Object.class, String.class);
+            }
             if (localMessageClass == null && localMessageInsertMethod != null
                     && localMessageInsertMethod.getParameterTypes().length == 1) {
                 localMessageClass = localMessageInsertMethod.getParameterTypes()[0];
@@ -4058,6 +4075,24 @@ public class DexFinder {
             Method accessible = KavaReflector.accessible(method);
             if (!out.contains(accessible)) out.add(accessible);
         }
+    }
+
+    private Method selectShortestSendXmlMethod(List<Method> methods) {
+        if (methods == null || methods.isEmpty()) return null;
+        Method selected = null;
+        int shortest = Integer.MAX_VALUE;
+        boolean ambiguous = false;
+        for (Method method : methods) {
+            int count = method.getParameterTypes().length;
+            if (count < shortest) {
+                selected = method;
+                shortest = count;
+                ambiguous = false;
+            } else if (count == shortest) {
+                ambiguous = true;
+            }
+        }
+        return ambiguous ? null : selected;
     }
 
     private String joinMethodNames(List<Method> methods, int maxCount) {
