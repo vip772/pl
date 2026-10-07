@@ -40,8 +40,12 @@ build_abi() {
     printf '生成库包含本机 RPATH/RUNPATH: %s\n' "$output_dir/libhchat_crash.so" >&2
     exit 1
   fi
-  "$readelf_bin" -Ws "$output_dir/libhchat_crash.so" | grep -q \
-    'Java_t_mma_crash_NativeCrashBridge_nativeInstall'
+  "$readelf_bin" -Ws "$output_dir/libhchat_crash.so" | grep -q 'JNI_OnLoad'
+  if "$readelf_bin" -Ws "$output_dir/libhchat_crash.so" | grep -q \
+     'Java_t_mma_crash_NativeCrashBridge_nativeInstall'; then
+    printf '不应依赖导出 JNI 命名符号: %s\n' "$output_dir/libhchat_crash.so" >&2
+    exit 1
+  fi
 }
 
 build_abi arm64-v8a aarch64-linux-android27

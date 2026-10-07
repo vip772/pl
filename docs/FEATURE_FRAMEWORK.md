@@ -189,7 +189,7 @@ sh ./gradlew :app:assembleRelease --no-daemon --no-watch-fs -x lintVitalAnalyzeR
 - `me.yun.silk.SilkCodec`、`me.yun.silk.AacCodec` 放在 `app/src/main/java/me/yun/silk/`
 - Native 库只维护 ARM 64/32 两套：`arm64-v8a` 和 `armeabi-v7a`。`libsilk_codec.so`、`libhchat_crash.so` 必须同时放在 `app/src/main/jniLibs/arm64-v8a/` 与 `app/src/main/jniLibs/armeabi-v7a/`。
 - `libsilk_codec.so` 使用上游 1.0.6 的 16KB ELF LOAD 段对齐产物，两套 ABI 的段对齐均为 `0x4000`；16KB 兼容由链接器页大小参数保证，不再对普通音频缓冲区强制执行 16KB 堆内存对齐。
-- `libhchat_crash.so` 由 `scripts/build_crash_native.sh` 使用 Termux Clang/LLD 生成；脚本会同时生成两套 ABI、去除调试符号，并校验 ELF 架构、`libc.so` 依赖和 JNI 导出。日常 Gradle/GitHub 构建直接打包已提交的 `.so`，不要求额外安装 NDK。
+- `libhchat_crash.so` 由 `scripts/build_crash_native.sh` 使用 Termux Clang/LLD 生成；脚本会同时生成两套 ABI、去除调试符号，并校验 ELF 架构、`libc.so` 依赖和 `JNI_OnLoad` 显式注册。日常 Gradle/GitHub 构建直接打包已提交的 `.so`，不要求额外安装 NDK。
 - 当前本地接管版本：`1.0.6`（上游提交 `c09fc1f534c7435c7b4c11a84a4632c6d177e1b9`）
 
 ## 微信 APK 横向验证

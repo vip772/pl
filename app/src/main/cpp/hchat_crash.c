@@ -710,8 +710,33 @@ static int open_report_file(void) {
     return g_report_fd >= 0;
 }
 
-JNIEXPORT jboolean JNICALL
-Java_t_mma_crash_NativeCrashBridge_nativeInstall(JNIEnv *env, jclass clazz, jstring report_path) {
+static jboolean native_install(JNIEnv *env, jclass clazz, jstring report_path);
+
+static const JNINativeMethod k_native_methods[] = {
+    {"nativeInstall", "(Ljava/lang/String;)Z", (void *) native_install}
+};
+
+JNIEXPORT jint JNICALL
+JNI_OnLoad(JavaVM *vm, void *reserved) {
+    (void) reserved;
+    if (vm == 0) return JNI_ERR;
+    JNIEnv *env = 0;
+    if ((*vm)->GetEnv(vm, (void **) &env, JNI_VERSION_1_6) != JNI_OK || env == 0) {
+        return JNI_ERR;
+    }
+    jclass bridge = (*env)->FindClass(env, "t/mma/crash/NativeCrashBridge");
+    if (bridge == 0) return JNI_ERR;
+    if ((*env)->RegisterNatives(
+            env,
+            bridge,
+            k_native_methods,
+            sizeof(k_native_methods) / sizeof(k_native_methods[0])) != JNI_OK) {
+        return JNI_ERR;
+    }
+    return JNI_VERSION_1_6;
+}
+
+static jboolean native_install(JNIEnv *env, jclass clazz, jstring report_path) {
     (void) clazz;
     if (env == 0 || report_path == 0) return JNI_FALSE;
     const char *path = (*env)->GetStringUTFChars(env, report_path, 0);
