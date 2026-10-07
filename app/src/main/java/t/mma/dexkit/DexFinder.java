@@ -2894,8 +2894,16 @@ public class DexFinder {
         int count = 0;
         resolveLocalSystemMessageMethod();
         try {
-            if (localMessageInsertMethod != null && localMessageCreateTimeMethod == null) {
-                localMessageCreateTimeMethod = findLocalMessageCreateTimeMethod(localMessageInsertMethod.getDeclaringClass());
+            if (localMessageCreateTimeMethod == null) {
+                if (localMessageInsertMethod != null) {
+                    localMessageCreateTimeMethod = findLocalMessageCreateTimeMethod(localMessageInsertMethod.getDeclaringClass());
+                }
+                if (localMessageCreateTimeMethod == null && localSystemMessageMethod != null) {
+                    localMessageCreateTimeMethod = findLocalMessageCreateTimeMethod(localSystemMessageMethod.getDeclaringClass());
+                }
+            }
+            if (localSystemMessageMethod != null && localMessageCreateTimeMethod != null) {
+                return count;
             }
             if (localMessageInsertMethod != null && localMessageCreateTimeMethod != null) {
                 return count;
