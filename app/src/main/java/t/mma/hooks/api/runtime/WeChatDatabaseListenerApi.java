@@ -81,6 +81,7 @@ public final class WeChatDatabaseListenerApi {
     private final Set<Method> hookedMethods = ConcurrentHashMap.newKeySet();
     private final Set<Method> hookedWrapperMutationMethods = ConcurrentHashMap.newKeySet();
     private final Set<Method> hookedWrapperInsertMethods = ConcurrentHashMap.newKeySet();
+    private final Set<Method> hookedStandardInsertMethods = ConcurrentHashMap.newKeySet();
     // One logical operation can traverse wrapper, WCDB and Android SQLite hooks.
     private final ThreadLocal<Integer> mutationDepth = ThreadLocal.withInitial(() -> 0);
     private final ThreadLocal<Integer> queryDepth = ThreadLocal.withInitial(() -> 0);
@@ -120,9 +121,10 @@ public final class WeChatDatabaseListenerApi {
 
     public boolean isOperational() {
         Class<?> wrapperClass = dexFinder != null ? dexFinder.sqliteDbWrapperClass : null;
-        return wrapperClass != null
+        boolean wrapperReady = wrapperClass != null
                 && wrapperClass == hookedWrapperClass
                 && !hookedWrapperInsertMethods.isEmpty();
+        return wrapperReady || !hookedStandardInsertMethods.isEmpty();
     }
 
     public Subscription subscribe(Listener listener) {
@@ -173,6 +175,7 @@ public final class WeChatDatabaseListenerApi {
                 + " added=" + count + " total=" + hookedMethodCount
                 + " wrapperMutations=" + hookedWrapperMutationMethods.size()
                 + " wrapperInserts=" + hookedWrapperInsertMethods.size()
+                + " standardInserts=" + hookedStandardInsertMethods.size()
                 + " operational=" + installed);
     }
 
@@ -201,7 +204,10 @@ public final class WeChatDatabaseListenerApi {
             return DatabaseChange.DELETE;
         }
         if (!allowObfuscatedWrapperMethod) return null;
-        if ((returnType == long.class || returnType == int.class) && isWrapperInsertSignature(params)) {
+        String lowerName = name.toLowerCase(java.util.Locale.US);
+        if ((returnType == long.class || returnType == int.class)
+                && (lowerName.contains("insert") || lowerName.contains("replace"))
+                && hasStringArg(params) && hasNonPrimitiveObjectArg(params)) {
             return DatabaseChange.INSERT;
         }
         if (returnType == int.class && isWrapperUpdateSignature(params)) {
@@ -210,7 +216,26 @@ public final class WeChatDatabaseListenerApi {
         if (returnType == int.class && isWrapperDeleteSignature(params)) {
             return DatabaseChange.DELETE;
         }
+        if ((returnType == long.class || returnType == int.class) && isWrapperInsertSignature(params)) {
+            return DatabaseChange.INSERT;
+        }
         return null;
+    }
+
+    private boolean hasStringArg(Class<?>[] params) {
+        if (params == null) return false;
+        for (Class<?> param : params) if (param == String.class) return true;
+        return false;
+    }
+
+    private boolean hasNonPrimitiveObjectArg(Class<?>[] params) {
+        if (params == null) return false;
+        for (Class<?> param : params) {
+            if (!param.isPrimitive() && param != String.class
+                    && param != String[].class && param != Object[].class
+                    && param != Class.class) return true;
+        }
+        return false;
     }
 
     private boolean isWrapperInsertSignature(Class<?>[] params) {
@@ -261,12 +286,7 @@ public final class WeChatDatabaseListenerApi {
             boolean potentialMutation = allowObfuscatedWrapperMethod && isPotentialWrapperMutationMethod(method);
             if (operation == null && !query && !potentialMutation) continue;
             if (hookedMethods.contains(method)) {
-                if (allowObfuscatedWrapperMethod && (operation != null || potentialMutation)) {
-                    hookedWrapperMutationMethods.add(method);
-                    if (DatabaseChange.INSERT.equals(operation) || potentialMutation) {
-                        hookedWrapperInsertMethods.add(method);
-                    }
-                }
+                recordHookedMutation(method, operation, allowObfuscatedWrapperMethod);
                 continue;
             }
             try {
@@ -285,24 +305,38 @@ public final class WeChatDatabaseListenerApi {
                     protected void afterHookedMethod(MethodHookParam param) {
                         if (query) {
                             leaveQuery();
-                        } else if (leaveMutation()) {
-                            dispatchIfSuccessful(operation, method, param.args, param.getResult());
+                        } else {
+                            boolean outermostMutation = leaveMutation();
+                            if (outermostMutation || (!allowObfuscatedWrapperMethod
+                                    && DatabaseChange.INSERT.equals(operation))) {
+                                dispatchIfSuccessful(operation, method, param.args, param.getResult());
+                            }
                         }
                     }
                 });
                 hookedMethods.add(method);
-                if (allowObfuscatedWrapperMethod && (operation != null || potentialMutation)) {
-                    hookedWrapperMutationMethods.add(method);
-                    if (DatabaseChange.INSERT.equals(operation) || potentialMutation) {
-                        hookedWrapperInsertMethods.add(method);
-                    }
-                }
+                recordHookedMutation(method, operation, allowObfuscatedWrapperMethod);
                 count++;
             } catch (Throwable error) {
                 log("数据库方法Hook失败: " + method + " " + error.getMessage());
             }
         }
         return count;
+    }
+
+    private void recordHookedMutation(Method method, String operation, boolean wrapperMethod) {
+        if (!DatabaseChange.INSERT.equals(operation)
+                && !DatabaseChange.UPDATE.equals(operation)
+                && !DatabaseChange.DELETE.equals(operation)
+                && !(wrapperMethod && isPotentialWrapperMutationMethod(method))) {
+            return;
+        }
+        if (wrapperMethod) {
+            hookedWrapperMutationMethods.add(method);
+            if (DatabaseChange.INSERT.equals(operation)) hookedWrapperInsertMethods.add(method);
+        } else if (DatabaseChange.INSERT.equals(operation)) {
+            hookedStandardInsertMethods.add(method);
+        }
     }
 
     private boolean isRawQueryMethod(Method method) {
