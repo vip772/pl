@@ -6013,10 +6013,10 @@ public class DexFinder {
         for (int i = 0; i < max; i++) {
             Class<?> candidate = candidates.get(i);
             result.append(" | ").append(candidate.getName()).append(" ctors=");
-            Constructor<?>[] constructors = KavaReflector.declaredConstructors(candidate);
-            for (int j = 0; j < constructors.length; j++) {
+            List<Constructor<?>> constructors = KavaReflector.declaredConstructors(candidate);
+            for (int j = 0; j < constructors.size(); j++) {
                 if (j > 0) result.append(";");
-                result.append(constructorSignature(constructors[j]));
+                result.append(constructorSignature(constructors.get(j)));
             }
         }
         return result.toString();
