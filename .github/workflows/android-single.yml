@@ -36,12 +36,13 @@ jobs:
           cache-cleanup: always
           cache-read-only: false
           validate-wrappers: false
-      - name: 配置 Android SDK 和 NDK
+      - name: 配置 Android SDK
         uses: android-actions/setup-android@v3
         with:
-          packages: |
-            platform-tools
-            ndk;26.3.11579264
+          packages: platform-tools
+
+      - name: 安装 Android NDK
+        run: sdkmanager "ndk;26.3.11579264"
 
       - name: 设置 NDK 环境变量
         run: echo "ANDROID_NDK_HOME=${ANDROID_SDK_ROOT}/ndk/26.3.11579264" >> "$GITHUB_ENV"
