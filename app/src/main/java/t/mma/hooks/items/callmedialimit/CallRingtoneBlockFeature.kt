@@ -225,7 +225,16 @@ private class CallRingtoneBlockHooker(
         }
         if (methods.isEmpty()) {
             DexMethodCache.clear(methodCache, runtimeKey, CACHE_MULTI_TALK_DIRECTION_METHODS)
-            logger("未定位微信群通话铃声入口，等待兼容定位", null)
+            logger(
+                "未定位微信群通话铃声入口: routeCandidates=${routeData.size} " +
+                    "directionCandidates=${routeData.mapNotNull { data ->
+                        runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+                    }.filter(::isMultiTalkRouteMethod).sumOf { route ->
+                        KavaReflector.declaredMethods(route.declaringClass)
+                            .count(::isMultiTalkDirectionMethod)
+                    }}",
+                null
+            )
         } else {
             DexMethodCache.saveList(
                 methodCache,
@@ -333,7 +342,6 @@ private class CallRingtoneBlockHooker(
             types[0] == java.lang.Boolean.TYPE &&
             types[1] == java.lang.Integer.TYPE &&
             method.returnType == Void.TYPE &&
-            !KavaReflector.isStatic(method) &&
             !KavaReflector.isAbstract(method)
     }
 
@@ -342,7 +350,6 @@ private class CallRingtoneBlockHooker(
         return types.size == 1 &&
             types[0] == java.lang.Boolean.TYPE &&
             method.returnType == Void.TYPE &&
-            !KavaReflector.isStatic(method) &&
             !KavaReflector.isAbstract(method)
     }
 
@@ -400,7 +407,7 @@ private class CallRingtoneBlockHooker(
     private companion object {
         const val CACHE_PREFS = "Hchat_call_ringtone_block_method_cache"
         const val CACHE_DIRECTION_METHODS = "direction_methods_v1"
-        const val CACHE_MULTI_TALK_DIRECTION_METHODS = "multi_talk_direction_methods_v1"
+        const val CACHE_MULTI_TALK_DIRECTION_METHODS = "multi_talk_direction_methods_v2"
         const val CACHE_CORE_START_METHODS = "core_start_methods_v1"
         const val CACHE_CORE_ACK_METHODS = "core_ack_methods_v1"
         const val CACHE_CORE_SCAN_RUNTIME = "core_scan_runtime_v1"
