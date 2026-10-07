@@ -687,8 +687,11 @@ public class DexFinder {
 
             logDetail("文本发送类: "
                     + (sendTextMsgClass != null ? sendTextMsgClass.getName() : "null")
-                    + " longCtor=" + (sendTextMsgCtorLong != null)
-                    + " objectCtor=" + (sendTextMsgCtorObject != null));
+                    + " longCtor=" + constructorSignature(sendTextMsgCtorLong)
+                    + " objectCtor=" + constructorSignature(sendTextMsgCtorObject));
+            if (sendTextMsgClass == null) {
+                HLog.e(TAG + " 文本发送类候选为空: " + describeTextCandidates(candidates));
+            }
         } catch (Throwable e) {
             HLog.e(TAG + " resolveSendText 失败: " + e.getMessage(), e);
         }
@@ -1222,19 +1225,35 @@ public class DexFinder {
                 return;
             }
 
+            List<Method> candidates = new ArrayList<>();
+            List<Method> rawCandidates = new ArrayList<>();
             List<MethodData> methods = dexKit.findMethod(
                     mkMethodUsingStrings("summerbig sendAppMsg attachFilePath"));
             for (MethodData methodData : methods) {
+                collectMethodForDiagnostics(rawCandidates, methodData, true);
+                collectSendXmlCandidate(candidates, methodData);
+                for (MethodData invokeData : methodData.getInvokes()) {
+                    collectMethodForDiagnostics(rawCandidates, invokeData, false);
+                    collectSendXmlCandidate(candidates, invokeData);
+                }
                 try {
-                    Method method = methodData.getMethodInstance(classLoader);
-                    if (!isSendXmlAppMsgMethod(method)) continue;
-                    KavaReflector.accessible(method);
-                    sendXmlAppMsgMethod = method;
-                    resolveAppMsgParseMethod(method.getParameterTypes()[0]);
-                    break;
+                    Class<?> owner = KavaReflector.loadClass(methodData.getClassName(), classLoader);
+                    collectSendXmlCandidatesFromClass(candidates, owner);
                 } catch (Throwable ignored) {}
             }
-
+            if (sendFileMethod != null) {
+                collectSendXmlCandidatesFromClass(candidates, sendFileMethod.getDeclaringClass());
+            }
+            if (candidates.size() == 1) {
+                sendXmlAppMsgMethod = candidates.get(0);
+                resolveAppMsgParseMethod(sendXmlAppMsgMethod.getParameterTypes()[0]);
+            } else if (candidates.size() > 1) {
+                HLog.e(TAG + " XML发送方法定位不唯一: candidates=" + candidates.size()
+                        + " methods=" + joinMethodNames(candidates, 12));
+            } else {
+                HLog.e(TAG + " XML发送方法未匹配: anchors=" + methods.size()
+                        + " raw=" + joinMethodNames(rawCandidates, 12));
+            }
             logDetail("XML发送方法: " + methodName(sendXmlAppMsgMethod)
                     + " parse=" + methodName(appMsgParseMethod));
         } catch (Throwable e) {
@@ -4010,26 +4029,74 @@ public class DexFinder {
                 && params[5] == String.class;
     }
 
+    private void collectMethodForDiagnostics(List<Method> out, MethodData data, boolean includeAnyReturnType) {
+        if (out == null || data == null) return;
+        try {
+            Method method = data.getMethodInstance(classLoader);
+            if (!includeAnyReturnType
+                    && !"android.util.Pair".equals(method.getReturnType().getName())) {
+                return;
+            }
+            if (!out.contains(method)) out.add(method);
+        } catch (Throwable ignored) {}
+    }
+
+    private void collectSendXmlCandidate(List<Method> out, MethodData data) {
+        if (out == null || data == null) return;
+        try {
+            Method method = data.getMethodInstance(classLoader);
+            if (!isSendXmlAppMsgMethod(method)) return;
+            Method accessible = KavaReflector.accessible(method);
+            if (!out.contains(accessible)) out.add(accessible);
+        } catch (Throwable ignored) {}
+    }
+
+    private void collectSendXmlCandidatesFromClass(List<Method> out, Class<?> owner) {
+        if (out == null || owner == null) return;
+        for (Method method : KavaReflector.declaredMethods(owner)) {
+            if (!isSendXmlAppMsgMethod(method)) continue;
+            Method accessible = KavaReflector.accessible(method);
+            if (!out.contains(accessible)) out.add(accessible);
+        }
+    }
+
+    private String joinMethodNames(List<Method> methods, int maxCount) {
+        StringBuilder result = new StringBuilder();
+        int max = Math.min(methods.size(), maxCount);
+        for (int i = 0; i < max; i++) {
+            if (result.length() > 0) result.append(" | ");
+            result.append(methodName(methods.get(i)));
+        }
+        return result.toString();
+    }
+
     private boolean isSendXmlAppMsgMethod(Method method) {
         if (method == null || method.getReturnType() == void.class) return false;
         if (!"android.util.Pair".equals(method.getReturnType().getName())) return false;
         if (!KavaReflector.isStatic(method)) return false;
         Class<?>[] params = method.getParameterTypes();
-        if (params.length != 10 && params.length != 12) return false;
-        if (params[0].isPrimitive()) return false;
-        return params[1] == String.class
-                && params[2] == String.class
-                && params[3] == String.class
-                && params[4] == String.class
-                && params[5] == byte[].class
-                && params[6] == String.class
-                && params[7] == String.class
-                && params[8] == String.class
-                && ((params.length == 10 && (params[9] == long.class || params[9] == Long.class))
-                || (params.length == 12
-                && !params[9].isPrimitive()
-                && (params[10] == boolean.class || params[10] == Boolean.class)
-                && params[11] == String.class));
+        if (params.length < 10 || params[0].isPrimitive()) return false;
+        if (params[1] != String.class
+                || params[2] != String.class
+                || params[3] != String.class
+                || params[4] != String.class
+                || params[5] != byte[].class
+                || params[6] != String.class
+                || params[7] != String.class
+                || params[8] != String.class) {
+            return false;
+        }
+        for (int i = 9; i < params.length; i++) {
+            Class<?> type = params[i];
+            if (type == long.class || type == Long.class
+                    || type == boolean.class || type == Boolean.class
+                    || type == String.class
+                    || "com.tencent.mm.plugin.msg.MsgIdTalker".equals(type.getName())) {
+                continue;
+            }
+            return false;
+        }
+        return true;
     }
 
     private boolean isAppMsgParseMethod(Method method, Class<?> appMsgClass) {
@@ -5928,7 +5995,40 @@ public class DexFinder {
 
     private String methodName(Method method) {
         if (method == null) return "null";
-        return method.getDeclaringClass().getName() + "#" + method.getName();
+        return method.getDeclaringClass().getName() + "#" + method.getName()
+                + "(" + joinTypeNames(method.getParameterTypes()) + "):"
+                + method.getReturnType().getName();
+    }
+
+    private String constructorSignature(Constructor<?> constructor) {
+        if (constructor == null) return "null";
+        return constructor.getDeclaringClass().getName()
+                + "(" + joinTypeNames(constructor.getParameterTypes()) + ")";
+    }
+
+    private String describeTextCandidates(List<Class<?>> candidates) {
+        if (candidates == null || candidates.isEmpty()) return "candidates=0";
+        StringBuilder result = new StringBuilder("candidates=").append(candidates.size());
+        int max = Math.min(candidates.size(), 12);
+        for (int i = 0; i < max; i++) {
+            Class<?> candidate = candidates.get(i);
+            result.append(" | ").append(candidate.getName()).append(" ctors=");
+            Constructor<?>[] constructors = KavaReflector.declaredConstructors(candidate);
+            for (int j = 0; j < constructors.length; j++) {
+                if (j > 0) result.append(";");
+                result.append(constructorSignature(constructors[j]));
+            }
+        }
+        return result.toString();
+    }
+
+    private String joinTypeNames(Class<?>[] types) {
+        StringBuilder result = new StringBuilder();
+        for (int i = 0; i < types.length; i++) {
+            if (i > 0) result.append(",");
+            result.append(types[i].getName());
+        }
+        return result.toString();
     }
 
     private String className(Class<?> clazz) {

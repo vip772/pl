@@ -885,9 +885,13 @@ public final class WeChatMessageApi {
 
             String msgSource = extractMsgSource(xml);
             Object[] args = buildSendAppMsgArgs(sendMethod, appMessage, talker, xml, msgSource);
-            if (args.length == 12 && args[9] == null) {
-                log("发送XML失败: MsgIdTalker参数创建失败");
-                return false;
+            Class<?>[] parameterTypes = sendMethod.getParameterTypes();
+            for (int i = 0; i < parameterTypes.length; i++) {
+                if ("com.tencent.mm.plugin.msg.MsgIdTalker".equals(parameterTypes[i].getName())
+                        && args[i] == null) {
+                    log("发送XML失败: MsgIdTalker参数创建失败 index=" + i);
+                    return false;
+                }
             }
             Object result = KavaReflector.invoke(sendMethod, null, args);
             boolean success = isSuccessfulPair(result);
@@ -953,12 +957,19 @@ public final class WeChatMessageApi {
         args[7] = "";
         args[8] = msgSource != null ? msgSource : "";
 
-        if (params.length == 10) {
-            args[9] = 0L;
-        } else if (params.length == 12) {
-            args[9] = newMsgIdTalker(params[9], talker);
-            args[10] = false;
-            args[11] = "";
+        for (int i = 9; i < params.length; i++) {
+            Class<?> type = params[i];
+            if (type == long.class || type == Long.class) {
+                args[i] = 0L;
+            } else if (type == boolean.class || type == Boolean.class) {
+                args[i] = false;
+            } else if (type == String.class) {
+                args[i] = "";
+            } else if ("com.tencent.mm.plugin.msg.MsgIdTalker".equals(type.getName())) {
+                args[i] = newMsgIdTalker(type, talker);
+            } else {
+                throw new IllegalArgumentException("不支持的AppMsgLogic参数: index=" + i + " type=" + type.getName());
+            }
         }
         return args;
     }
