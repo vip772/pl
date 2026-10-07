@@ -4,7 +4,7 @@ set -eu
 project_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source_dir="$project_dir/app/src/main/cpp"
 output_root="$project_dir/app/src/main/jniLibs"
-build_root="${TMPDIR:-/data/data/com.termux/files/usr/tmp}/hchat-crash-native"
+build_root="${TMPDIR:-${RUNNER_TEMP:-/tmp}}/hchat-crash-native"
 ndk_root=${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}
 llvm_bin=""
 if [ -n "$ndk_root" ]; then
