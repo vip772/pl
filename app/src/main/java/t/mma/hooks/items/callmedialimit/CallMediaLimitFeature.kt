@@ -231,10 +231,8 @@ internal class CallMediaLimitHooker(
     }
 
     private fun clearVoipUsageResult(event: Any?, resultField: Field) {
-        val result = KavaReflector.readField(resultField, event) ?: run {
-            logVoipResultFailure("result", "微信通话状态事件结果为空")
-            return
-        }
+        // 普通通话记录没有设备占用结果时无需改写，也不应把它记录为异常。
+        val result = KavaReflector.readField(resultField, event) ?: return
         val booleanFields = voipResultBooleanFields.computeIfAbsent(result.javaClass) { resultClass ->
             instanceFields(resultClass).filter { field ->
                 !KavaReflector.isStatic(field) &&
