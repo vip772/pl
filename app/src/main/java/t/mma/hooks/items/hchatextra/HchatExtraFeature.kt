@@ -1202,11 +1202,9 @@ private class HchatExtraHooker(
                     messageContentAnchor(holder, it) ?: timeLabelDetailsAnchor(it)
                 }
             if (cardMessage) {
-                // The reference module owns the entire row branch. A card's timeTV and
-                // clickArea can belong to a transient inner container or be absent.
-                val branch = candidate?.let { safeBottomAnchor(root, it.layoutView) }
-                    ?: rowBottomAnchor(root)
-                branch?.let(::wrapCardDetailsAnchor)
+                // A verified timeTV parent is already a valid insertion container. Do not
+                // discard it by requiring timeTV to be a direct child of the row root.
+                candidate ?: rowBottomAnchor(root)
             } else candidate
         } else null
         val avatarContent = avatarAnchor
