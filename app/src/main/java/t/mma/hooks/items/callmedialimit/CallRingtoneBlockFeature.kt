@@ -178,20 +178,17 @@ private class CallRingtoneBlockHooker(
                     matcher(MethodMatcher().apply { usingEqStrings(*MULTI_TALK_ROUTE_ANCHORS) })
                 }
             )
-            if (primary.isNotEmpty()) {
-                primary
-            } else {
-                // 8.0.78 可能将两个日志字符串拆到不同方法，逐个锚点查询后再按签名过滤。
-                MULTI_TALK_ROUTE_FALLBACK_ANCHORS
-                    .flatMap { anchor ->
-                        bridge.findMethod(
-                            FindMethod().apply {
-                                matcher(MethodMatcher().apply { usingEqStrings(anchor) })
-                            }
-                        )
-                    }
-                    .distinctBy { data -> data.toString() }
-            }
+            // 8.0.78 可能把日志字符串拆到不同方法。即使主锚点命中，
+            // 也保留分散锚点结果，避免主方法的 invokes 元数据不完整时提前丢失入口。
+            val fallback = MULTI_TALK_ROUTE_FALLBACK_ANCHORS
+                .flatMap { anchor ->
+                    bridge.findMethod(
+                        FindMethod().apply {
+                            matcher(MethodMatcher().apply { usingEqStrings(anchor) })
+                        }
+                    )
+                }
+            (primary + fallback).distinctBy { data -> data.toString() }
         }.getOrElse {
             logger("定位微信群通话铃声路由失败", it)
             emptyList()
@@ -220,13 +217,12 @@ private class CallRingtoneBlockHooker(
                 KavaReflector.declaredMethods(route.declaringClass)
                     .filter(::isMultiTalkDirectionMethod)
             }.distinctBy { it.toGenericString() }
-            if (fallbackMethods.size <= 4) {
+            if (fallbackMethods.size <= MAX_MULTI_TALK_FALLBACK_METHODS) {
                 methods = fallbackMethods
             } else {
                 logger("微信群通话路由候选过多，跳过不确定 Hook: ${fallbackMethods.size}", null)
             }
         }
-
         if (methods.isEmpty()) {
             DexMethodCache.clear(methodCache, runtimeKey, CACHE_MULTI_TALK_DIRECTION_METHODS)
             logger("未定位微信群通话铃声入口，等待兼容定位", null)
@@ -410,6 +406,7 @@ private class CallRingtoneBlockHooker(
         const val CACHE_CORE_SCAN_RUNTIME = "core_scan_runtime_v1"
         const val OUTGOING_ARGUMENT_INDEX = 2
         const val MULTI_TALK_OUTGOING_ARGUMENT_INDEX = 0
+        const val MAX_MULTI_TALK_FALLBACK_METHODS = 8
         val DIRECTION_ANCHOR_GROUPS = listOf(
             arrayOf(
                 "MicroMsg.VoIP.VoIPAudioManager",
