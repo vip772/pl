@@ -239,6 +239,7 @@ import t.mma.hooks.items.conversationgroup.ConversationGroupPickerSupport
 import t.mma.hooks.items.conversationgroup.ConversationGroupRuntime
 import t.mma.hooks.items.conversationgroup.ConversationGroupStore
 import t.mma.hooks.items.custombottombar.CustomBottomBarFeature
+import t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings
 import t.mma.hooks.items.custombottombar.FloatingBottomBarSettings
 import t.mma.hooks.items.customnotify.CustomNotificationFeature
 import t.mma.hooks.items.customnotify.CustomNotificationRule
@@ -1559,6 +1560,7 @@ internal fun practicalFeatureGroups(
                 RoundAvatarFeature.ID,
                 CustomFriendAvatarFeature.ID,
                 CustomBottomBarFeature.ID,
+                DynamicBadgeSettings.ID,
                 FloatingBottomBarSettings.FEATURE_ID,
                 FloatingChatHeaderFeature.ID,
                 FloatingChatFooterFeature.ID

@@ -22,6 +22,7 @@ import t.mma.hooks.items.securemessage.AntiSecureMessageFeature
 import t.mma.hooks.items.securemessage.SendSecureMessageFeature
 import t.mma.hooks.items.transparentavatar.UploadTransparentAvatarFeature
 import t.mma.hooks.items.custombottombar.CustomBottomBarFeature
+import t.mma.hooks.items.dynamicbadge.DynamicBadgeFeature
 import t.mma.hooks.items.customfriendavatar.CustomFriendAvatarFeature
 import t.mma.hooks.items.customnotify.CustomNotificationFeature
 import t.mma.hooks.items.editmsg.EditMessageFeature
@@ -123,6 +124,7 @@ object FeatureRegistry {
             .register(FloatingChatHeaderFeature())
             .register(FloatingChatFooterFeature())
             .register(CustomBottomBarFeature())
+            .register(DynamicBadgeFeature())
 
             .register(RoundAvatarFeature())
             .register(CustomFriendAvatarFeature())

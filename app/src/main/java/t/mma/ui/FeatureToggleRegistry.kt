@@ -28,6 +28,7 @@ object FeatureToggleRegistry {
         "background_beauty" to Toggle("Hchat_background_beauty_config", "enable"),
         "call_media_limit" to Toggle("Hchat_call_media_limit_config", "call_media_limit_enable"),
         "custom_bottom_bar" to Toggle("Hchat_native_bottom_bar_config", "enable"),
+        "dynamic_badge" to Toggle("Hchat_dynamic_badge_config", "dynamic_badge_enable"),
         "call_ringtone_block" to Toggle("Hchat_call_media_limit_config", "call_media_limit_enable"),
         "custom_friend_avatar" to Toggle("Hchat_custom_friend_avatar_config", "enable"),
         "custom_notification" to Toggle("Hchat_custom_notification", "custom_notification_enable"),

@@ -245,6 +245,7 @@ import t.mma.hooks.items.conversationgroup.ConversationGroupPickerSupport
 import t.mma.hooks.items.conversationgroup.ConversationGroupRuntime
 import t.mma.hooks.items.conversationgroup.ConversationGroupStore
 import t.mma.hooks.items.custombottombar.CustomBottomBarFeature
+import t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings
 import t.mma.hooks.items.custombottombar.FloatingBottomBarSettings
 import t.mma.hooks.items.customnotify.CustomNotificationFeature
 import t.mma.hooks.items.customnotify.CustomNotificationRule
@@ -1149,6 +1150,7 @@ internal fun FeatureSettingsPage(
             onBack = onBack
         )
         QuickMarkReadFeature.ID -> QuickMarkReadMiuixPage(context, provider, onBack)
+        DynamicBadgeSettings.ID -> DynamicBadgeMiuixPage(context, provider, onBack)
         AutoReplyFeature.ID -> AutoReplyMiuixPage(context, provider, onBack)
         AutoMessageForwardFeature.ID -> AutoMessageForwardMiuixPage(context, provider, onBack)
         ConversationGroupFeature.ID -> ConversationGroupMiuixPage(context, provider, onBack)
