@@ -14,6 +14,7 @@ import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
+import android.widget.ImageView
 import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import org.luckypray.dexkit.query.FindMethod
@@ -73,6 +74,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     @Volatile private var installedMethods = emptySet<Method>()
     private val boundRows = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
     private val pendingRowBindings = Collections.synchronizedMap(WeakHashMap<View, View.OnAttachStateChangeListener>())
+    private val diagnosedRows = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
     @Volatile private var modernHolderInstalled = false
     @Volatile private var modernBindInstalled = false
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
@@ -95,9 +97,9 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         if (destroyed || param.hasThrowable()) return
                         val row = param.result as? View ?: return
                         if (Looper.myLooper() == Looper.getMainLooper()) {
-                            removeOverlaysIn(row)
+                            diagnoseRowOnce(row, "legacy")
                             scheduleBindRow(row)
-                        } else row.post { removeOverlaysIn(row); scheduleBindRow(row) }
+                        } else row.post { diagnoseRowOnce(row, "legacy"); removeOverlaysIn(row); scheduleBindRow(row) }
                     }
                 }
                 val hookedMethods = newMethods.filter { method ->
@@ -122,6 +124,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         mainHandler.removeCallbacksAndMessages(null)
         synchronized(modernRows) { modernRows.clear() }
         synchronized(boundRows) { boundRows.clear() }
+        synchronized(diagnosedRows) { diagnosedRows.clear() }
         synchronized(pendingRowBindings) {
             pendingRowBindings.forEach { (row, listener) -> row.removeOnAttachStateChangeListener(listener) }
             pendingRowBindings.clear()
@@ -190,7 +193,10 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         if (destroyed || param.hasThrowable()) return
                         val holderObject = param.args?.getOrNull(1) ?: return
                         val row = modernRows[holderObject] ?: return
-                        if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
+                        if (Looper.myLooper() == Looper.getMainLooper()) {
+                            diagnoseRowOnce(row, "modern")
+                            scheduleBindRow(row)
+                        } else row.post { diagnoseRowOnce(row, "modern"); scheduleBindRow(row) }
                     }
                 })
                 true
@@ -271,7 +277,23 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
     }
 
+    private fun diagnoseRowOnce(row: View, source: String) {
+        if (synchronized(diagnosedRows) { diagnosedRows.put(row, true) != null }) return
+        val views = ArrayList<View>()
+        collectViews(row, views)
+        val details = views.take(80).joinToString(" || ") { view ->
+            val location = IntArray(2)
+            runCatching { view.getLocationOnScreen(location) }
+            val text = (view as? TextView)?.text?.toString()?.replace("|", "\\|").orEmpty()
+            val image = (view as? ImageView)?.drawable?.javaClass?.name.orEmpty()
+            "${view.javaClass.name}@${view.id},${view.width}x${view.height},v=${view.visibility},t=$text,b=${view.background?.javaClass?.name.orEmpty()},d=$image,x=${location[0]},y=${location[1]}"
+        }
+        t.mma.utils.HLog.i("[Hchat:动态角标诊断] source=$source row=${row.javaClass.name} attached=${row.isAttachedToWindow} shown=${row.isShown} childCount=${views.size} $details")
+    }
+
     private fun bindRow(row: View) {
+        diagnoseRowOnce(row, "attached")
+        if (DIAGNOSTIC_ONLY) return
         if (!isEnabled()) {
             removeOverlaysIn(row)
             return
@@ -406,6 +428,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         const val CONVERSATION_OWNER = "com.tencent.mm.ui.conversation."
         const val MODERN_STORAGE_PREFIX = "com.tencent.mm.storage."
         const val FRAME_INTERVAL_MS = 16L
+        const val DIAGNOSTIC_ONLY = true
         val LEGACY_BIND_ANCHORS = listOf("MicroMsg.ConversationWithCacheAdapter", "MicroMsg.ConversationAdapter")
         val MODERN_BIND_ANCHORS = listOf("[getView] position=", "handleShowTipCnt")
         val NUMBER_PATTERN = Regex("[0-9]+\\+?\\s*")
