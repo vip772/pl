@@ -55,7 +55,9 @@ internal fun DynamicBadgeMiuixPage(
         )
     }
     var numberSpeed by remember { mutableStateOf(sp.getInt(DynamicBadgeSettings.KEY_NUMBER_SPEED, DynamicBadgeSettings.DEFAULT_NUMBER_SPEED)) }
-    var dotSpeed by remember { mutableStateOf(sp.getInt(DynamicBadgeSettings.KEY_DOT_SPEED, DynamicBadgeSettings.DEFAULT_DOT_SPEED)) }
+var dotSpeed by remember { mutableStateOf(sp.getInt(DynamicBadgeSettings.KEY_DOT_SPEED, DynamicBadgeSettings.DEFAULT_DOT_SPEED)) }
+    var numberStrokeWidth by remember { mutableStateOf(sp.getInt(DynamicBadgeSettings.KEY_NUMBER_STROKE_WIDTH, DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH)) }
+    var dotStrokeWidth by remember { mutableStateOf(sp.getInt(DynamicBadgeSettings.KEY_DOT_STROKE_WIDTH, DynamicBadgeSettings.DEFAULT_DOT_STROKE_WIDTH)) }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
@@ -69,6 +71,8 @@ internal fun DynamicBadgeMiuixPage(
                 .putBoolean(DynamicBadgeSettings.KEY_DOT_ENABLE, dotEnabled)
                 .putInt(DynamicBadgeSettings.KEY_NUMBER_SPEED, numberSpeed)
                 .putInt(DynamicBadgeSettings.KEY_DOT_SPEED, dotSpeed)
+                .putInt(DynamicBadgeSettings.KEY_NUMBER_STROKE_WIDTH, numberStrokeWidth)
+                .putInt(DynamicBadgeSettings.KEY_DOT_STROKE_WIDTH, dotStrokeWidth)
                 .putString(DynamicBadgeSettings.KEY_NUMBER_COLOR, numberColor)
                 .putString(DynamicBadgeSettings.KEY_DOT_COLOR, dotColor)
                 .remove(DynamicBadgeSettings.KEY_NUMBER_START)
@@ -97,6 +101,7 @@ internal fun DynamicBadgeMiuixPage(
                         ) { numberColor = it.take(19) }
                     }
                     item { speedControl("描边旋转周期", numberSpeed) { numberSpeed = it } }
+                    item { strokeWidthControl("数字角标描边宽度", numberStrokeWidth) { numberStrokeWidth = it } }
                 }
                 item { SwitchRow(dotEnabled, "圆点角标", "保持原位置和尺寸，以渐变透明度周期闪烁", onCheckedChange = { dotEnabled = it }) }
                 if (dotEnabled) {
@@ -109,11 +114,26 @@ internal fun DynamicBadgeMiuixPage(
                         ) { dotColor = it.take(19) }
                     }
                     item { speedControl("闪烁周期", dotSpeed) { dotSpeed = it } }
+                    item { strokeWidthControl("圆点角标描边宽度", dotStrokeWidth) { dotStrokeWidth = it } }
                 }
             }
         }
     }
 }
+@Composable
+private fun strokeWidthControl(title: String, value: Int, onValue: (Int) -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        SmallTitle(text = "$title ${value}dp")
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onValue(it.toInt().coerceIn(DynamicBadgeSettings.MIN_STROKE_WIDTH, DynamicBadgeSettings.MAX_STROKE_WIDTH)) },
+            modifier = Modifier.fillMaxWidth(),
+            valueRange = DynamicBadgeSettings.MIN_STROKE_WIDTH.toFloat()..DynamicBadgeSettings.MAX_STROKE_WIDTH.toFloat(),
+            steps = DynamicBadgeSettings.MAX_STROKE_WIDTH - DynamicBadgeSettings.MIN_STROKE_WIDTH - 1
+        )
+    }
+}
+
 @Composable
 private fun speedControl(title: String, value: Int, onValue: (Int) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {

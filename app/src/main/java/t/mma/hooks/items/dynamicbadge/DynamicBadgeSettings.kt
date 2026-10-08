@@ -14,6 +14,8 @@ object DynamicBadgeSettings {
     const val KEY_DOT_START = "dynamic_badge_dot_start"
     const val KEY_DOT_END = "dynamic_badge_dot_end"
     const val KEY_DOT_SPEED = "dynamic_badge_dot_speed"
+    const val KEY_NUMBER_STROKE_WIDTH = "dynamic_badge_number_stroke_width"
+    const val KEY_DOT_STROKE_WIDTH = "dynamic_badge_dot_stroke_width"
     const val DEFAULT_ENABLE = false
     const val DEFAULT_NUMBER_ENABLE = true
     const val DEFAULT_DOT_ENABLE = true
@@ -21,6 +23,10 @@ object DynamicBadgeSettings {
     const val DEFAULT_DOT_COLOR = "#FF3B30,#FF8A00"
     const val DEFAULT_NUMBER_SPEED = 2400
     const val DEFAULT_DOT_SPEED = 900
+    const val DEFAULT_NUMBER_STROKE_WIDTH = 3
+    const val DEFAULT_DOT_STROKE_WIDTH = 3
+    const val MIN_STROKE_WIDTH = 1
+    const val MAX_STROKE_WIDTH = 12
     const val MIN_SPEED = 300
     const val MAX_SPEED = 5000
 }

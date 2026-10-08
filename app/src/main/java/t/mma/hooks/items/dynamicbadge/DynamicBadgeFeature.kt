@@ -193,17 +193,21 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             modernBindInstalled = runCatching {
                 HookRegistry.get().hook(targetBind, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        val holderObject = param.args?.getOrNull(1) ?: return
-                        modernRows[holderObject]?.let { row ->
-                            removeOverlaysIn(row)
-                            boundRows.remove(row)
+                        val holderObjects = param.args?.drop(1)?.take(2).orEmpty()
+                        holderObjects.forEach { holderObject ->
+                            modernRows[holderObject]?.let { row ->
+                                removeOverlaysIn(row)
+                                boundRows.remove(row)
+                            }
                         }
                     }
                     override fun afterHookedMethod(param: MethodHookParam) {
                         if (destroyed || param.hasThrowable()) return
-                        val holderObject = param.args?.getOrNull(1) ?: return
-                        trace("bindHit holder=${holderObject.javaClass.name} rowKnown=${modernRows.containsKey(holderObject)}", traceBindCount)
-                        val row = modernRows[holderObject] ?: return
+                        val holderObjects = param.args?.drop(1)?.take(2).orEmpty()
+                        val row = holderObjects.asSequence().mapNotNull { holderObject ->
+                            trace("bindHit holder=${holderObject.javaClass.name} rowKnown=${modernRows.containsKey(holderObject)}", traceBindCount)
+                            modernRows[holderObject]
+                        }.firstOrNull() ?: return
                         if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
                     }
                 })
@@ -230,6 +234,10 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     }
 
     private fun locateConversationBindMethods(allowDexSearch: Boolean): Set<Method> {
+        val exact = runCatching {
+            loader.loadClass(EXACT_CONVERSATION_ADAPTER).declaredMethods.filter(::isLegacyConversationBind).toSet()
+        }.getOrDefault(emptySet())
+        if (exact.isNotEmpty()) return exact
         val runtimeKey = DexMethodCache.runtimeKey(host, loader)
         val cached = DexMethodCache.loadList(methodPrefs, runtimeKey, loader, CACHE_BIND)
             .filter(::isLegacyConversationBind)
@@ -314,8 +322,18 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
         val candidates = ArrayList<View>()
         collectViews(row, candidates)
-        val badges = candidates.filter(::isBadge)
+val badges = candidates.filter(::isBadge)
         trace("badgeScan row=${row.javaClass.name}@${System.identityHashCode(row)} candidates=${candidates.size} badges=${badges.joinToString { "${it.javaClass.simpleName}@${it.id}=${it.width}x${it.height}" }} numberEnabled=${prefs.getBoolean(DynamicBadgeSettings.KEY_NUMBER_ENABLE, true)} dotEnabled=${prefs.getBoolean(DynamicBadgeSettings.KEY_DOT_ENABLE, true)}", traceBadgeCount)
+        if (badges.isEmpty() && row.isShown) {
+            row.postOnAnimation {
+                if (!destroyed && row.isAttachedToWindow && row.isShown) {
+                    val retry = ArrayList<View>()
+                    collectViews(row, retry)
+                    if (retry.any(::isBadge)) bindRow(row)
+                }
+            }
+        }
+        val active
         val active = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
         active.addAll(badges)
         boundRows[row] = true
@@ -450,6 +468,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         const val CACHE_MODERN_BIND = "modern_conversation_bind_v1"
         const val CACHE_MODERN_HOLDER = "modern_conversation_holder_v1"
         const val CONVERSATION_OWNER = "com.tencent.mm.ui.conversation."
+        const val EXACT_CONVERSATION_ADAPTER = "com.tencent.mm.ui.conversation.o2"
         const val MODERN_STORAGE_PREFIX = "com.tencent.mm.storage."
         const val FRAME_INTERVAL_MS = 16L
         const val TRACE_LIMIT = 40
@@ -468,11 +487,12 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     }
 
     private inner class BadgeOverlay(
-        private val hostView: View,
+        private val rowView: View,
         private val source: View,
         private val preferences: SharedPreferences,
         initialKind: BadgeKind
     ) : View.OnAttachStateChangeListener, View.OnLayoutChangeListener {
+        private val hostView: View = (rowView.parent as? View) ?: rowView
         private val drawable = AnimatedBadgeDrawable(hostView, source, preferences, initialKind)
         private val preDrawListener = ViewTreeObserver.OnPreDrawListener {
             updateVisibility()
@@ -568,11 +588,16 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             val duration = prefs.getInt(if (number) DynamicBadgeSettings.KEY_NUMBER_SPEED else DynamicBadgeSettings.KEY_DOT_SPEED, if (number) DynamicBadgeSettings.DEFAULT_NUMBER_SPEED else DynamicBadgeSettings.DEFAULT_DOT_SPEED).coerceIn(DynamicBadgeSettings.MIN_SPEED, DynamicBadgeSettings.MAX_SPEED)
             val phase = ((SystemClock.uptimeMillis() % duration).toFloat() / duration) * 360f
             val density = source.resources.displayMetrics.density
-            val inset = if (number) 1.5f * density else 0f
-            rect.set(bounds.left + inset, bounds.top + inset, bounds.right - inset, bounds.bottom - inset)
+            val strokeDp = prefs.getInt(
+                if (number) DynamicBadgeSettings.KEY_NUMBER_STROKE_WIDTH else DynamicBadgeSettings.KEY_DOT_STROKE_WIDTH,
+                if (number) DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH else DynamicBadgeSettings.DEFAULT_DOT_STROKE_WIDTH
+            ).coerceIn(DynamicBadgeSettings.MIN_STROKE_WIDTH, DynamicBadgeSettings.MAX_STROKE_WIDTH)
+            val stroke = strokeDp * density
+            val gap = 2f * density
+            rect.set(bounds.left - gap - stroke / 2f, bounds.top - gap - stroke / 2f, bounds.right + gap + stroke / 2f, bounds.bottom + gap + stroke / 2f)
             if (number) {
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 1.5f * density
+                paint.strokeWidth = stroke
                 paint.shader = SweepGradient(rect.centerX(), rect.centerY(), intArrayOf(start, end, start), floatArrayOf(0f, 0.5f, 1f)).apply {
                     setLocalMatrix(android.graphics.Matrix().apply { postRotate(phase, rect.centerX(), rect.centerY()) })
                 }
@@ -581,7 +606,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                 val pulse = (0.35f + 0.65f * (0.5f + 0.5f * kotlin.math.cos(phase * Math.PI / 180.0))).toFloat()
                 val dotRect = RectF(rect.left - density, rect.top - density, rect.right + density, rect.bottom + density)
                 paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 2f * density
+                paint.strokeWidth = stroke
                 paint.alpha = (pulse * 255).toInt()
                 paint.shader = android.graphics.LinearGradient(dotRect.left, dotRect.top, dotRect.right, dotRect.bottom, start, end, android.graphics.Shader.TileMode.CLAMP)
                 canvas.drawOval(dotRect, paint)
