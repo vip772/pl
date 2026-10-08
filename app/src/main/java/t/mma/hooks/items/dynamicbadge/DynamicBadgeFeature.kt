@@ -31,6 +31,7 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.util.Collections
 import java.util.WeakHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 class DynamicBadgeFeature : BaseFeature() {
     private var runtime: DynamicBadgeRuntime? = null
@@ -75,6 +76,13 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     private val boundRows = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
     private val pendingRowBindings = Collections.synchronizedMap(WeakHashMap<View, View.OnAttachStateChangeListener>())
     private val diagnosedRows = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
+    private val traceInstallCount = AtomicInteger(0)
+    private val traceHolderCount = AtomicInteger(0)
+    private val traceBindCount = AtomicInteger(0)
+    private val traceRowCount = AtomicInteger(0)
+    private val traceBadgeCount = AtomicInteger(0)
+    private val traceOverlayCount = AtomicInteger(0)
+    private val traceDrawCount = AtomicInteger(0)
     @Volatile private var modernHolderInstalled = false
     @Volatile private var modernBindInstalled = false
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
@@ -88,6 +96,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     @Synchronized
     fun install(allowDexSearch: Boolean): Boolean {
         if (destroyed) return false
+        trace("install allowDexSearch=$allowDexSearch enabled=${isEnabled()} legacyMethods=${installedMethods.size} modernHolder=$modernHolderInstalled modernBind=$modernBindInstalled", traceInstallCount)
         val methods = locateConversationBindMethods(allowDexSearch)
         val legacyInstalled = if (methods.isEmpty()) false else {
             val newMethods = methods - installedMethods
@@ -111,6 +120,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
         val modernInstalled = installModernConversationHooks(allowDexSearch)
         val installed = legacyInstalled || modernInstalled
+        trace("installResult legacy=$legacyInstalled modern=$modernInstalled methods=${methods.size} enabled=${isEnabled()}", traceInstallCount)
         if (!installed && allowDexSearch) {
             t.mma.utils.HLog.e("[Hchat:动态角标] 会话绑定 Hook 未安装，动态角标未生效")
         }
@@ -173,6 +183,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         val holderObject = param.args?.getOrNull(0) ?: return
                         val row = param.args?.getOrNull(1) as? View ?: return
                         modernRows[holderObject] = row
+                        trace("holderHit holder=${holderObject.javaClass.name} row=${row.javaClass.name}@${System.identityHashCode(row)} attached=${row.isAttachedToWindow} size=${row.width}x${row.height}", traceHolderCount)
                     }
                 })
                 true
@@ -191,6 +202,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         if (destroyed || param.hasThrowable()) return
                         val holderObject = param.args?.getOrNull(1) ?: return
+                        trace("bindHit holder=${holderObject.javaClass.name} rowKnown=${modernRows.containsKey(holderObject)}", traceBindCount)
                         val row = modernRows[holderObject] ?: return
                         if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
                     }
@@ -294,6 +306,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     }
 
     private fun bindRow(row: View) {
+        trace("bindRow row=${row.javaClass.name}@${System.identityHashCode(row)} attached=${row.isAttachedToWindow} shown=${row.isShown} size=${row.width}x${row.height} enabled=${isEnabled()}", traceRowCount)
         if (DIAGNOSTIC_ONLY) return
         if (!isEnabled()) {
             removeOverlaysIn(row)
@@ -302,6 +315,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         val candidates = ArrayList<View>()
         collectViews(row, candidates)
         val badges = candidates.filter(::isBadge)
+        trace("badgeScan row=${row.javaClass.name}@${System.identityHashCode(row)} candidates=${candidates.size} badges=${badges.joinToString { "${it.javaClass.simpleName}@${it.id}=${it.width}x${it.height}" }} numberEnabled=${prefs.getBoolean(DynamicBadgeSettings.KEY_NUMBER_ENABLE, true)} dotEnabled=${prefs.getBoolean(DynamicBadgeSettings.KEY_DOT_ENABLE, true)}", traceBadgeCount)
         val active = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
         active.addAll(badges)
         boundRows[row] = true
@@ -324,6 +338,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                 return@forEach
             }
             val overlay = synchronized(overlays) { overlays[badge] } ?: BadgeOverlay(row, badge, prefs, kind).also {
+                trace("overlayCreate badge=${badge.javaClass.name}@${badge.id} kind=$kind row=${row.javaClass.name}@${System.identityHashCode(row)} bounds=${badge.left},${badge.top},${badge.right},${badge.bottom}", traceOverlayCount)
                 synchronized(overlays) { overlays[badge] = it }
                 synchronized(badgeSources) { badgeSources[badge] = row }
             }
@@ -391,6 +406,12 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
 
     private enum class BadgeKind { NUMBER, DOT }
 
+    private fun trace(message: String, counter: AtomicInteger) {
+        if (counter.incrementAndGet() <= TRACE_LIMIT) {
+            t.mma.utils.HLog.i("[Hchat:动态角标定位] $message")
+        }
+    }
+
     private fun parseGradient(value: String?, number: Boolean): Pair<Int, Int> {
         fun parseColor(part: String): Int? {
             val normalized = part.trim().removePrefix("#")
@@ -431,6 +452,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         const val CONVERSATION_OWNER = "com.tencent.mm.ui.conversation."
         const val MODERN_STORAGE_PREFIX = "com.tencent.mm.storage."
         const val FRAME_INTERVAL_MS = 16L
+        const val TRACE_LIMIT = 40
         const val DIAGNOSTIC_ONLY = false
         const val NUMBER_BADGE_ID = 2131389131
         const val DOT_BADGE_ID = 2131363591
@@ -528,6 +550,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             unscheduleSelf(frame)
         }
         override fun draw(canvas: Canvas) {
+            trace("draw running=$running source=${source.javaClass.simpleName}@${source.id} shown=${source.isShown} bounds=${bounds.left},${bounds.top},${bounds.right},${bounds.bottom} host=${hostView.javaClass.simpleName}@${System.identityHashCode(hostView)}", traceDrawCount)
             if (running && hostView.isAttachedToWindow && hostView.isShown && source.isShown) {
                 scheduleSelf(frame, SystemClock.uptimeMillis() + FRAME_INTERVAL_MS)
             }
