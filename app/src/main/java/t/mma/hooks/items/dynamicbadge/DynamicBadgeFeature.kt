@@ -310,7 +310,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
         stale.forEach(::removeOverlay)
         badges.forEach { badge ->
-            val kind = if (badge is TextView && NUMBER_PATTERN.matches(badge.text?.toString()?.trim().orEmpty())) {
+            val kind = if (badge.id == NUMBER_BADGE_ID || (badge is TextView && NUMBER_PATTERN.matches(badge.text?.toString()?.trim().orEmpty()))) {
                 BadgeKind.NUMBER
             } else {
                 BadgeKind.DOT
@@ -337,6 +337,8 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
 
     private fun isBadge(view: View): Boolean {
         if (view.visibility != View.VISIBLE || view.width <= 0 || view.height <= 0) return false
+        if (view.id == NUMBER_BADGE_ID) return true
+        if (view.id == DOT_BADGE_ID) return true
         val textView = view as? TextView
         val text = textView?.text?.toString()?.trim().orEmpty()
         val number = textView != null && NUMBER_PATTERN.matches(text) &&
@@ -430,6 +432,8 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         const val MODERN_STORAGE_PREFIX = "com.tencent.mm.storage."
         const val FRAME_INTERVAL_MS = 16L
         const val DIAGNOSTIC_ONLY = false
+        const val NUMBER_BADGE_ID = 2131389131
+        const val DOT_BADGE_ID = 2131363591
         val LEGACY_BIND_ANCHORS = listOf("MicroMsg.ConversationWithCacheAdapter", "MicroMsg.ConversationAdapter")
         val MODERN_BIND_ANCHORS = listOf("[getView] position=", "handleShowTipCnt")
         val NUMBER_PATTERN = Regex("[0-9]+\\+?\\s*")
