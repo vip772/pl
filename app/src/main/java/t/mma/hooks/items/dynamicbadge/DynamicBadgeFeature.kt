@@ -72,6 +72,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     @Volatile private var destroyed = false
     @Volatile private var installedMethods = emptySet<Method>()
     private val boundRows = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
+    private val pendingRowBindings = Collections.synchronizedMap(WeakHashMap<View, View.OnAttachStateChangeListener>())
     @Volatile private var modernHolderInstalled = false
     @Volatile private var modernBindInstalled = false
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
@@ -95,21 +96,24 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         val row = param.result as? View ?: return
                         if (Looper.myLooper() == Looper.getMainLooper()) {
                             removeOverlaysIn(row)
-                            bindRow(row)
-                        } else row.post { removeOverlaysIn(row); bindRow(row) }
+                            scheduleBindRow(row)
+                        } else row.post { removeOverlaysIn(row); scheduleBindRow(row) }
                     }
                 }
-                var hooked = 0
-                newMethods.forEach { method ->
-                    runCatching { HookRegistry.get().hook(method, callback); hooked++ }
-                        .onFailure { HLogBridge.error("安装旧版会话行角标动画 Hook 失败", method, it) }
+                val hookedMethods = newMethods.filter { method ->
+                    runCatching { HookRegistry.get().hook(method, callback); true }
+                        .getOrElse { HLogBridge.error("安装旧版会话行角标动画 Hook 失败", method, it); false }
                 }
-                if (hooked > 0) installedMethods = installedMethods + newMethods
+                if (hookedMethods.isNotEmpty()) installedMethods = installedMethods + hookedMethods
             }
             installedMethods.isNotEmpty()
         }
         val modernInstalled = installModernConversationHooks(allowDexSearch)
-        return legacyInstalled || modernInstalled
+        val installed = legacyInstalled || modernInstalled
+        if (!installed && allowDexSearch) {
+            t.mma.utils.HLog.e("[Hchat:动态角标] 会话绑定 Hook 未安装，动态角标未生效")
+        }
+        return installed
     }
 
     fun destroy() {
@@ -118,6 +122,10 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         mainHandler.removeCallbacksAndMessages(null)
         synchronized(modernRows) { modernRows.clear() }
         synchronized(boundRows) { boundRows.clear() }
+        synchronized(pendingRowBindings) {
+            pendingRowBindings.forEach { (row, listener) -> row.removeOnAttachStateChangeListener(listener) }
+            pendingRowBindings.clear()
+        }
         synchronized(badgeSources) { badgeSources.clear() }
         val current = synchronized(overlays) { overlays.values.toList().also { overlays.clear() } }
         current.forEach(BadgeOverlay::detach)
@@ -182,7 +190,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         if (destroyed || param.hasThrowable()) return
                         val holderObject = param.args?.getOrNull(1) ?: return
                         val row = modernRows[holderObject] ?: return
-                        if (Looper.myLooper() == Looper.getMainLooper()) bindRow(row) else row.post { bindRow(row) }
+                        if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
                     }
                 })
                 true
@@ -239,6 +247,30 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             method.declaringClass.name.startsWith(CONVERSATION_OWNER) &&
             !Modifier.isStatic(method.modifiers) && !Modifier.isAbstract(method.modifiers)
     }
+    private fun scheduleBindRow(row: View) {
+        if (!isEnabled()) {
+            removeOverlaysIn(row)
+            return
+        }
+        if (row.isAttachedToWindow && row.isShown) {
+            row.postOnAnimation { bindRow(row) }
+            return
+        }
+        synchronized(pendingRowBindings) {
+            if (pendingRowBindings.containsKey(row)) return
+            val listener = object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) {
+                    view.removeOnAttachStateChangeListener(this)
+                    synchronized(pendingRowBindings) { pendingRowBindings.remove(view) }
+                    view.postOnAnimation { if (!destroyed) bindRow(view) }
+                }
+                override fun onViewDetachedFromWindow(view: View) = Unit
+            }
+            pendingRowBindings[row] = listener
+            row.addOnAttachStateChangeListener(listener)
+        }
+    }
+
     private fun bindRow(row: View) {
         if (!isEnabled()) {
             removeOverlaysIn(row)
@@ -249,11 +281,11 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         val badges = candidates.filter(::isBadge)
         val active = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
         active.addAll(badges)
+        boundRows[row] = true
         val stale = synchronized(overlays) {
             overlays.keys.filter { badge -> badgeSources[badge] === row && badge !in active }
         }
         stale.forEach(::removeOverlay)
-        boundRows[row] = true
         badges.forEach { badge ->
             val kind = if (badge is TextView && NUMBER_PATTERN.matches(badge.text?.toString()?.trim().orEmpty())) {
                 BadgeKind.NUMBER
@@ -281,7 +313,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     )
 
     private fun isBadge(view: View): Boolean {
-        if (!view.isShown || view.visibility != View.VISIBLE || view.width <= 0 || view.height <= 0) return false
+        if (view.visibility != View.VISIBLE || view.width <= 0 || view.height <= 0) return false
         val textView = view as? TextView
         val text = textView?.text?.toString()?.trim().orEmpty()
         val number = textView != null && NUMBER_PATTERN.matches(text) &&
@@ -324,8 +356,8 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             return
         }
         val rows = synchronized(boundRows) { boundRows.keys.toList() }
-        rows.filter { it.isAttachedToWindow && it.isShown }.forEach { row ->
-            if (Looper.myLooper() == Looper.getMainLooper()) bindRow(row) else row.post { bindRow(row) }
+        rows.forEach { row ->
+            if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
         }
     }
 
@@ -333,6 +365,40 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     private fun isLight(color: Int) = Color.red(color) > 180 && Color.green(color) > 180 && Color.blue(color) > 180
 
     private enum class BadgeKind { NUMBER, DOT }
+
+    private fun parseGradient(value: String?, number: Boolean): Pair<Int, Int> {
+        fun parseColor(part: String): Int? {
+            val normalized = part.trim().removePrefix("#")
+            if (normalized.length != 6 && normalized.length != 8) return null
+            val parsed = normalized.toLongOrNull(16)?.toInt() ?: return null
+            return if (normalized.length == 6) (0xFF000000L or parsed.toLong()).toInt() else parsed
+        }
+        val legacyStartKey = if (number) DynamicBadgeSettings.KEY_NUMBER_START else DynamicBadgeSettings.KEY_DOT_START
+        val legacyEndKey = if (number) DynamicBadgeSettings.KEY_NUMBER_END else DynamicBadgeSettings.KEY_DOT_END
+        val legacyStart = prefs.getInt(legacyStartKey, Int.MIN_VALUE)
+        val legacyEnd = prefs.getInt(legacyEndKey, Int.MIN_VALUE)
+        val colorKey = if (number) DynamicBadgeSettings.KEY_NUMBER_COLOR else DynamicBadgeSettings.KEY_DOT_COLOR
+        var effectiveValue = value
+        if (value.isNullOrBlank() && (legacyStart != Int.MIN_VALUE || legacyEnd != Int.MIN_VALUE)) {
+            effectiveValue = "#%06X,#%06X".format(
+                (legacyStart.takeUnless { it == Int.MIN_VALUE } ?: legacyEnd) and 0xFFFFFF,
+                (legacyEnd.takeUnless { it == Int.MIN_VALUE } ?: legacyStart) and 0xFFFFFF
+            )
+            prefs.edit().putString(colorKey, effectiveValue)
+                .remove(legacyStartKey).remove(legacyEndKey).apply()
+        }
+        val parts = effectiveValue.orEmpty().split(',').mapNotNull(::parseColor)
+        return when (parts.size) {
+            0 -> {
+                val defaults = (if (number) DynamicBadgeSettings.DEFAULT_NUMBER_COLOR else DynamicBadgeSettings.DEFAULT_DOT_COLOR)
+                    .split(',').mapNotNull(::parseColor)
+                defaults[0] to defaults[1]
+            }
+            1 -> parts[0] to parts[0]
+            else -> parts[0] to parts[1]
+        }
+    }
+
     private companion object {
         const val CACHE_BIND = "conversation_get_view_v2"
         const val CACHE_MODERN_BIND = "modern_conversation_bind_v1"
@@ -439,8 +505,15 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             }
             if (!source.isShown || source.visibility != View.VISIBLE || bounds.isEmpty) return
             val number = badgeKind == BadgeKind.NUMBER
-            val start = prefs.getInt(if (number) DynamicBadgeSettings.KEY_NUMBER_START else DynamicBadgeSettings.KEY_DOT_START, if (number) DynamicBadgeSettings.DEFAULT_NUMBER_START else DynamicBadgeSettings.DEFAULT_DOT_START)
-            val end = prefs.getInt(if (number) DynamicBadgeSettings.KEY_NUMBER_END else DynamicBadgeSettings.KEY_DOT_END, if (number) DynamicBadgeSettings.DEFAULT_NUMBER_END else DynamicBadgeSettings.DEFAULT_DOT_END)
+            val colors = parseGradient(
+                prefs.getString(
+                    if (number) DynamicBadgeSettings.KEY_NUMBER_COLOR else DynamicBadgeSettings.KEY_DOT_COLOR,
+                    if (number) DynamicBadgeSettings.DEFAULT_NUMBER_COLOR else DynamicBadgeSettings.DEFAULT_DOT_COLOR
+                ),
+                number
+            )
+            val start = colors.first
+            val end = colors.second
             val duration = prefs.getInt(if (number) DynamicBadgeSettings.KEY_NUMBER_SPEED else DynamicBadgeSettings.KEY_DOT_SPEED, if (number) DynamicBadgeSettings.DEFAULT_NUMBER_SPEED else DynamicBadgeSettings.DEFAULT_DOT_SPEED).coerceIn(DynamicBadgeSettings.MIN_SPEED, DynamicBadgeSettings.MAX_SPEED)
             val phase = ((SystemClock.uptimeMillis() % duration).toFloat() / duration) * 360f
             val density = source.resources.displayMetrics.density

@@ -6,6 +6,7 @@ import t.mma.ui.SimpleFeatureSettingsProvider
 class DynamicBadgeSettingsProvider : SimpleFeatureSettingsProvider(
     DynamicBadgeSettings.ID,
     "动态角标",
-    "为会话列表数字角标和红点添加动态渐变效果",
-    FeatureSettingsProvider.CATEGORY_PRACTICAL
+    "为聊天列表联系人和群组的未读角标添加动态渐变效果",
+    FeatureSettingsProvider.CATEGORY_PRACTICAL,
+    true
 )
