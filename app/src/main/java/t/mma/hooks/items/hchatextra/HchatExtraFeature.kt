@@ -1211,7 +1211,9 @@ private class HchatExtraHooker(
             ?.takeIf { it.hidden }
             ?.let { avatarDetailsContentView(holder, it.parent) }
         val parent: ViewGroup = avatarAnchor?.parent ?: bottomAnchor?.parent ?: return false
-        if (parent !is RelativeLayout && parent !is LinearLayout) return false
+        if (parent !is RelativeLayout && parent !is LinearLayout &&
+            parent !is android.widget.FrameLayout) return false
+
         val label = preferredLabel?.takeIf { it.tag == TAG_MESSAGE_DETAILS_VIEW }
             ?: findDirectMessageDetailsLabel(parent)
             ?: TextView(nativeTimeLabel?.context ?: root.context).also {
@@ -1823,6 +1825,29 @@ private class HchatExtraHooker(
             }
         }
         when (parent) {
+            is android.widget.FrameLayout -> {
+                val frameParams = android.widget.FrameLayout.LayoutParams(params).apply {
+                    gravity = Gravity.TOP or if (details.isSelf) Gravity.END else Gravity.START
+                    topMargin = content.bottom + dp(label.context, 2f)
+                    if (details.isSelf) {
+                        marginEnd = parent.width - content.right
+                        rightMargin = marginEnd
+                    } else {
+                        marginStart = content.left
+                        leftMargin = marginStart
+                    }
+                }
+                if (!alreadyAttached) {
+                    parent.addView(label, frameParams)
+                } else if (label.layoutParams !is android.widget.FrameLayout.LayoutParams) {
+                    label.layoutParams = frameParams
+                } else if (label.layoutParams != frameParams) {
+                    label.layoutParams = frameParams
+                }
+                if (label.visibility != View.VISIBLE) label.visibility = View.VISIBLE
+                messageDetailsPositionListeners.cancel(label)
+                refreshMessageDetailsColorsAfterAttach(label, newlyAttached = !alreadyAttached)
+            }
             is LinearLayout -> {
                 val linearParams = LinearLayout.LayoutParams(params)
                 linearParams.gravity = if (details.isSelf) Gravity.END else Gravity.START
@@ -3137,7 +3162,7 @@ private class HchatExtraHooker(
 
     private fun timeLabelDetailsAnchor(label: TextView): BottomDetailsAnchor? {
         val parent = label.parent as? ViewGroup ?: return null
-        if (parent !is RelativeLayout &&
+        if (parent !is RelativeLayout && parent !is android.widget.FrameLayout &&
             !(parent is LinearLayout && parent.orientation == LinearLayout.VERTICAL)) return null
         if (label.visibility == View.GONE || !isViewWithinRoot(label, parent)) return null
         return BottomDetailsAnchor(parent, label, label)
