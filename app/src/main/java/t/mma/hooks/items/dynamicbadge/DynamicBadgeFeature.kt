@@ -324,14 +324,17 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         collectViews(row, candidates)
         val badges = candidates.filter(::isBadge)
         trace("badgeScan row=${row.javaClass.name}@${System.identityHashCode(row)} candidates=${candidates.size} badges=${badges.joinToString { "${it.javaClass.simpleName}@${it.id}=${it.width}x${it.height}" }} numberEnabled=${prefs.getBoolean(DynamicBadgeSettings.KEY_NUMBER_ENABLE, true)} dotEnabled=${prefs.getBoolean(DynamicBadgeSettings.KEY_DOT_ENABLE, true)}", traceBadgeCount)
-        if (badges.isEmpty() && row.isShown) {
-            row.postOnAnimation {
-                if (!destroyed && row.isAttachedToWindow && row.isShown) {
-                    val retry = ArrayList<View>()
-                    collectViews(row, retry)
-                    if (retry.any(::isBadge)) bindRow(row)
+        if (badges.isEmpty()) {
+            if (row.isShown) {
+                row.postOnAnimation {
+                    if (!destroyed && row.isAttachedToWindow && row.isShown) {
+                        val retry = ArrayList<View>()
+                        collectViews(row, retry)
+                        if (retry.any(::isBadge)) bindRow(row)
+                    }
                 }
             }
+            return
         }
         val active = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
         active.addAll(badges)
@@ -494,6 +497,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         private val hostView: View = (rowView.parent as? View) ?: rowView
         private val drawable = AnimatedBadgeDrawable(hostView, source, preferences, initialKind)
         private val preDrawListener = ViewTreeObserver.OnPreDrawListener {
+            updateBounds()
             updateVisibility()
             true
         }
