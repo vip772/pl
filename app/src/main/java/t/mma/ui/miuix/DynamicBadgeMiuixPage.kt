@@ -1,20 +1,27 @@
 package t.mma.ui.miuix
 
 import android.content.Context
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings
@@ -23,6 +30,8 @@ import t.mma.ui.FeatureSettingsProvider
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.Slider
 import top.yukonga.miuix.kmp.basic.SmallTitle
+import top.yukonga.miuix.kmp.basic.Text
+import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun DynamicBadgeMiuixPage(
@@ -87,14 +96,43 @@ internal fun DynamicBadgeMiuixPage(
 @Composable
 private fun colorInput(title: String, value: String, onValue: (String) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-        androidx.compose.material3.Text(title, fontSize = 14.sp)
-        androidx.compose.material3.OutlinedTextField(
-            value = value,
-            onValueChange = { next -> onValue(next.filter { it.isDigit() || it in "abcdefABCDEF" }.take(8)) },
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            singleLine = true,
-            prefix = { androidx.compose.material3.Text("#") },
-            supportingText = { androidx.compose.material3.Text("输入 6 位 RGB 或 8 位 ARGB 十六进制色值") }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            Text(title, color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp)
+            Text(
+                text = "#",
+                modifier = Modifier.padding(start = 10.dp),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary
+            )
+            BasicTextField(
+                value = value,
+                onValueChange = { input ->
+                    onValue(input.filter { it.isDigit() || it in "abcdefABCDEF" }.take(8))
+                },
+                singleLine = true,
+                textStyle = TextStyle(color = MiuixTheme.colorScheme.onSurface, fontSize = 14.sp),
+                cursorBrush = SolidColor(MiuixTheme.colorScheme.primary),
+                modifier = Modifier.weight(1f)
+                    .padding(start = 6.dp)
+                    .background(MiuixTheme.colorScheme.secondaryVariant, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 10.dp, vertical = 10.dp),
+                decorationBox = { innerTextField ->
+                    Box {
+                        if (value.isEmpty()) {
+                            Text("RRGGBB 或 AARRGGBB", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        }
+                        innerTextField()
+                    }
+                }
+            )
+        }
+        Text(
+            text = "支持 6 位 RGB 或 8 位 ARGB 十六进制色值",
+            modifier = Modifier.padding(top = 5.dp),
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = 12.sp
         )
     }
 }
