@@ -1,6 +1,7 @@
 package t.mma.ui.miuix
 
 import android.content.Context
+import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -74,7 +75,8 @@ internal fun DynamicBadgeMiuixPage(
                 .remove(DynamicBadgeSettings.KEY_NUMBER_END)
                 .remove(DynamicBadgeSettings.KEY_DOT_START)
                 .remove(DynamicBadgeSettings.KEY_DOT_END)
-            editor.apply()
+            editor.commit()
+            Toast.makeText(context, "动态角标设置已保存", Toast.LENGTH_SHORT).show()
         }, "返回", onBack) }
     ) { padding ->
         LazyColumn(

@@ -278,6 +278,11 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     }
 
     private fun diagnoseRowOnce(row: View, source: String) {
+        if (!row.isAttachedToWindow) return
+        if (row.width <= 0 || row.height <= 0) {
+            row.postOnAnimation { if (!destroyed) diagnoseRowOnce(row, source) }
+            return
+        }
         if (synchronized(diagnosedRows) { diagnosedRows.put(row, true) != null }) return
         val views = ArrayList<View>()
         collectViews(row, views)
