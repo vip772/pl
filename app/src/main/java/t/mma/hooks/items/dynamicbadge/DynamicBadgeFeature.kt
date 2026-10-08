@@ -97,9 +97,8 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         if (destroyed || param.hasThrowable()) return
                         val row = param.result as? View ?: return
                         if (Looper.myLooper() == Looper.getMainLooper()) {
-                            diagnoseRowOnce(row, "legacy")
                             scheduleBindRow(row)
-                        } else row.post { diagnoseRowOnce(row, "legacy"); removeOverlaysIn(row); scheduleBindRow(row) }
+                        } else row.post { removeOverlaysIn(row); scheduleBindRow(row) }
                     }
                 }
                 val hookedMethods = newMethods.filter { method ->
@@ -193,10 +192,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         if (destroyed || param.hasThrowable()) return
                         val holderObject = param.args?.getOrNull(1) ?: return
                         val row = modernRows[holderObject] ?: return
-                        if (Looper.myLooper() == Looper.getMainLooper()) {
-                            diagnoseRowOnce(row, "modern")
-                            scheduleBindRow(row)
-                        } else row.post { diagnoseRowOnce(row, "modern"); scheduleBindRow(row) }
+                        if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
                     }
                 })
                 true
@@ -277,6 +273,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
     }
 
+    /* diagnostic helper removed after confirming ConversationFolderItemView */
     private fun diagnoseRowOnce(row: View, source: String) {
         if (!row.isAttachedToWindow) return
         if (row.width <= 0 || row.height <= 0) {
@@ -297,7 +294,6 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     }
 
     private fun bindRow(row: View) {
-        diagnoseRowOnce(row, "attached")
         if (DIAGNOSTIC_ONLY) return
         if (!isEnabled()) {
             removeOverlaysIn(row)
@@ -433,7 +429,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         const val CONVERSATION_OWNER = "com.tencent.mm.ui.conversation."
         const val MODERN_STORAGE_PREFIX = "com.tencent.mm.storage."
         const val FRAME_INTERVAL_MS = 16L
-        const val DIAGNOSTIC_ONLY = true
+        const val DIAGNOSTIC_ONLY = false
         val LEGACY_BIND_ANCHORS = listOf("MicroMsg.ConversationWithCacheAdapter", "MicroMsg.ConversationAdapter")
         val MODERN_BIND_ANCHORS = listOf("[getView] position=", "handleShowTipCnt")
         val NUMBER_PATTERN = Regex("[0-9]+\\+?\\s*")
