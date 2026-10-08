@@ -322,7 +322,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
         val candidates = ArrayList<View>()
         collectViews(row, candidates)
-val badges = candidates.filter(::isBadge)
+        val badges = candidates.filter(::isBadge)
         trace("badgeScan row=${row.javaClass.name}@${System.identityHashCode(row)} candidates=${candidates.size} badges=${badges.joinToString { "${it.javaClass.simpleName}@${it.id}=${it.width}x${it.height}" }} numberEnabled=${prefs.getBoolean(DynamicBadgeSettings.KEY_NUMBER_ENABLE, true)} dotEnabled=${prefs.getBoolean(DynamicBadgeSettings.KEY_DOT_ENABLE, true)}", traceBadgeCount)
         if (badges.isEmpty() && row.isShown) {
             row.postOnAnimation {
@@ -333,7 +333,6 @@ val badges = candidates.filter(::isBadge)
                 }
             }
         }
-        val active
         val active = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
         active.addAll(badges)
         boundRows[row] = true
