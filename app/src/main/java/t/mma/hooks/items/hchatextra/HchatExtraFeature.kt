@@ -1200,10 +1200,9 @@ private class HchatExtraHooker(
             )
         val bottomAnchor = if (avatarAnchor == null) {
             if (cardMessage) {
-                // A card's timeTV belongs to the header branch on some holders. Resolve
-                // the measured card body independently so details cannot land between
-                // the nickname/header and the card itself.
-                cardBottomAnchor(root, holder, nativeTimeLabel)
+                // The native time/header and card may share one outer branch. Anchor below
+                // that complete measured branch so details cannot split the message body.
+                cardBottomAnchor(root, holder)
             } else {
                 noticeContentAnchor(root, nativeTimeLabel, details.type)
                     ?: nativeTimeLabel?.let {
@@ -3140,19 +3139,19 @@ private class HchatExtraHooker(
     }
 
 
-    private fun cardBottomAnchor(root: View, holder: Any, nativeTimeLabel: TextView?): BottomDetailsAnchor? {
+    private fun cardBottomAnchor(root: View, holder: Any): BottomDetailsAnchor? {
         val row = root as? ViewGroup ?: return null
         if (row !is RelativeLayout && row !is android.widget.FrameLayout &&
             !(row is LinearLayout && row.orientation == LinearLayout.VERTICAL)
         ) return null
         val excludedBranches = buildSet<View> {
-            nativeTimeLabel?.let { directChildOf(row, it) }?.let(::add)
             findHolderAvatarView(holder)?.let { directChildOf(row, it) }?.let(::add)
             findChattingAvatarView(root)?.let { directChildOf(row, it) }?.let(::add)
         }
         val candidates = buildList<View> {
-            holderMainContentView(holder, row)?.let(::add)
-            messageContentView(holder, row, nativeTimeLabel)?.let(::add)
+            // The native time/header and card may share one outer branch. Keep that
+            // complete branch and choose by measured visual bottom instead of excluding
+            // it merely because it contains timeTV.
             for (index in 0 until row.childCount) add(row.getChildAt(index))
         }
         val branch = candidates.asSequence()
