@@ -196,7 +196,6 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         val holderObjects = param.args?.drop(1)?.take(2).orEmpty()
                         holderObjects.forEach { holderObject ->
                             modernRows[holderObject]?.let { row ->
-                                removeOverlaysIn(row)
                                 boundRows.remove(row)
                             }
                         }
