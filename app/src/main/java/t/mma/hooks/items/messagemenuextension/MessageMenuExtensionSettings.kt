@@ -15,7 +15,7 @@ object MessageMenuExtensionSettings {
 class MessageMenuExtensionSettingsProvider : SimpleFeatureSettingsProvider(
     MessageMenuExtensionSettings.ID,
     "消息菜单扩展",
-    "目标每排6个、最多5排；当前为实机定位诊断版",
+    "每排6个、最多5排，新增菜单项自动换行",
     FeatureSettingsProvider.CATEGORY_ENHANCE,
     true
 )

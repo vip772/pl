@@ -1980,3 +1980,6 @@ NativeLibraryLoader 只记录同一模块 ClassLoader 下已经成功加载的�
 ## 消息菜单扩展诊断入口
 
 消息菜单扩展在增强与新功能展示同一个 Provider。当前只有默认关闭的总开关，开启采集定向诊断，6×5 尚未实现。规格与测试步骤见 [消息菜单扩展](features/MESSAGE_MENU_EXTENSION.md)。
+
+
+消息菜单扩展现已接入8.0.78/3180原生View捕获与6×5重排，替代签名诊断，尚待构建和实机验证；适用范围、回退条件及测试见 features/MESSAGE_MENU_EXTENSION.md。

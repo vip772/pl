@@ -33,7 +33,7 @@ internal fun MessageMenuExtensionMiuixPage(context: Context, provider: FeatureSe
             BottomActionBar("保存设置", {
                 val saved = prefs.edit().putBoolean(MessageMenuExtensionSettings.KEY_ENABLE, enabled).commit()
                 if (saved) {
-                    HLog.i("[Hchat:消息菜单扩展诊断] stage=settingsSave enabled=$enabled mode=diagnostic requested=6x5")
+                    HLog.i("[Hchat:消息菜单扩展诊断] stage=settingsSave enabled=$enabled mode=grid requested=6x5")
                 } else {
                     HLog.e("[Hchat:消息菜单扩展诊断] stage=settingsSave failed")
                 }
@@ -47,7 +47,7 @@ internal fun MessageMenuExtensionMiuixPage(context: Context, provider: FeatureSe
             contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item {
-                SwitchRow(enabled, "消息菜单扩展", "目标：每排6个、最多5排，新增项目自动换行。当前为轻量诊断版，暂不改变原生3排×5个布局。保存开关后需完全重启微信，关闭后重启不安装菜单Hook。", onCheckedChange = { enabled = it })
+                SwitchRow(enabled, "消息菜单扩展", "开启后每排6个、最多5排；关闭使用原生每排5个、最多3排。新增项目自动换行，最多显示30项。保存开关后需完全重启微信。", onCheckedChange = { enabled = it })
             }
         }
     }
