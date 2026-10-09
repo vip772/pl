@@ -75,15 +75,19 @@ private class MessageMenuExtensionRuntime(private val context: FeatureContext) {
             val show = KavaReflector.findDeclaredMethod(owner, "p", Integer.TYPE, Integer.TYPE)
                 ?: return missing("eu5.s0.p(int,int)")
             if (Modifier.isAbstract(show.modifiers) || Modifier.isStatic(show.modifiers)) return missing("instanceShow")
-            val listener = KavaReflector.loadClass("eu5.l0", loader) ?: return missing("eu5.l0")
-            val constructor = KavaReflector.findConstructor(listener, owner, Integer.TYPE)
-                ?: return missing("eu5.l0(eu5.s0,int)")
-            // eu5.l0 is a listener, not an item View. Count only; no field scans or item maps.
-            unhooks += HookRegistry.get().hook(constructor, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    if (active && !param.hasThrowable()) currentSession.get()?.let { it.listenerCount++ }
-                }
-            })
+            // l0 is only the click listener; do not hook every menu item. Record its
+            // verified signature together with s0's helper signatures for the next stage.
+            val listener = KavaReflector.loadClass("eu5.l0", loader)
+            val constructor = listener?.let { KavaReflector.findConstructor(it, owner, Integer.TYPE) }
+            val methods = KavaReflector.declaredMethods(owner)
+                .filterNot { Modifier.isStatic(it.modifiers) }
+                .take(80)
+                .joinToString(" || ") { it.toGenericString() }
+            val fields = KavaReflector.declaredFields(owner)
+                .filterNot { Modifier.isStatic(it.modifiers) }
+                .take(80)
+                .joinToString(" || ") { "${it.name}:${it.type.name}" }
+            HLog.i("$TAG stage=signatures version=$version s0Methods=$methods s0Fields=$fields l0Constructor=${constructor?.toGenericString() ?: "missing"}")
             unhooks += HookRegistry.get().hook(show, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (!active || !prefs.getBoolean(MessageMenuExtensionSettings.KEY_ENABLE, false)) return
