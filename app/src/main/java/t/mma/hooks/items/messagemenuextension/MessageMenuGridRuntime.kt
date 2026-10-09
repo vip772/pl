@@ -170,11 +170,13 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
         if (items.isEmpty()) return
         val allViews = items.map { frame.views[it] ?: error("Capture incomplete: visible=${items.size} captured=${frame.views.size}") }
         check(allViews.toSet().size == allViews.size) { "Duplicate item Views" }
-        val rows = ROW_IDS.map { content.findViewById<View>(it) as? LinearLayout ?: error("Missing native row ${Integer.toHexString(it)}") }
-        val parent = rows.first().parent as? LinearLayout ?: error("Unsupported row parent")
-        check(parent.orientation == LinearLayout.VERTICAL && rows.all { it.parent === parent && it.orientation == LinearLayout.HORIZONTAL })
+        val nativeRows = ROW_IDS.map { content.findViewById<View>(it) as? LinearLayout ?: error("Missing native row ${Integer.toHexString(it)}") }
+        val parent = nativeRows.first().parent as? LinearLayout ?: error("Unsupported row parent")
+        check(parent.orientation == LinearLayout.VERTICAL && nativeRows.all { it.parent === parent && it.orientation == LinearLayout.HORIZONTAL })
+        // Resource order is not necessarily visual order; native separators may sit between rows.
+        val rows = nativeRows.sortedBy { parent.indexOfChild(it) }
         val indices = rows.map { parent.indexOfChild(it) }
-        check(indices.zipWithNext().all { (a, b) -> b == a + 1 }) { "Non-contiguous native rows" }
+        check(indices.all { it >= 0 } && indices.distinct().size == rows.size) { "Invalid native row indices" }
         check(allViews.all { it.parent == null || it.parent in rows }) { "Unexpected item parent" }
         val selected = allViews.take(30)
         val count = (selected.size + 5) / 6
@@ -225,7 +227,7 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
             window.height = ViewGroup.LayoutParams.WRAP_CONTENT
             frame.changed = true
             content.requestLayout()
-            HLog.i("$TAG stage=reflow visible=${items.size} captured=${frame.views.size} displayed=${selected.size} rows=$count columns=6 overflow=${(items.size - 30).coerceAtLeast(0)}")
+            HLog.i("$TAG stage=reflow visible=${items.size} captured=${frame.views.size} displayed=${selected.size} rows=$count columns=6 nativeRowIndices=${indices.joinToString(",")} overflow=${(items.size - 30).coerceAtLeast(0)}")
         } catch (error: Throwable) {
             restore(); frame.undo = null; throw error
         }
