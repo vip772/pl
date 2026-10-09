@@ -273,7 +273,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             removeOverlaysIn(row)
             return
         }
-        if (row.isAttachedToWindow && row.isShown) {
+        if (row.isAttachedToWindow) {
             row.postOnAnimation { bindRow(row) }
             return
         }
@@ -321,7 +321,9 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
         val candidates = ArrayList<View>()
         collectViews(row, candidates)
-        val badges = candidates.filter(::isBadge)
+        // Manage both verified controls even when binding temporarily hides them.
+        val knownBadges = candidates.filter { it.id == NUMBER_BADGE_ID || it.id == DOT_BADGE_ID }
+        val badges = if (knownBadges.isNotEmpty()) knownBadges else candidates.filter(::isBadge)
         trace("badgeScan row=${row.javaClass.name}@${System.identityHashCode(row)} candidates=${candidates.size} badges=${badges.joinToString { "${it.javaClass.simpleName}@${it.id}=${it.width}x${it.height}" }} numberEnabled=${prefs.getBoolean(DynamicBadgeSettings.KEY_NUMBER_ENABLE, true)} dotEnabled=${prefs.getBoolean(DynamicBadgeSettings.KEY_DOT_ENABLE, true)}", traceBadgeCount)
         if (badges.isEmpty()) {
             if (row.isShown) {
@@ -515,6 +517,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             updateBounds()
             hostView.overlay.add(drawable)
             hostView.addOnAttachStateChangeListener(this)
+            source.addOnAttachStateChangeListener(this)
             source.addOnLayoutChangeListener(this)
             hostView.viewTreeObserver.addOnPreDrawListener(preDrawListener)
             drawable.start()
@@ -531,10 +534,15 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             drawable.stop()
             hostView.overlay.remove(drawable)
             hostView.removeOnAttachStateChangeListener(this)
+            source.removeOnAttachStateChangeListener(this)
             source.removeOnLayoutChangeListener(this)
             if (hostView.viewTreeObserver.isAlive) hostView.viewTreeObserver.removeOnPreDrawListener(preDrawListener)
         }
-        override fun onViewAttachedToWindow(view: View) = updateVisibility()
+        override fun onViewAttachedToWindow(view: View) {
+            updateBounds()
+            updateVisibility()
+            hostView.postInvalidateOnAnimation()
+        }
         override fun onViewDetachedFromWindow(view: View) = drawable.stop()
         override fun onLayoutChange(v: View, left: Int, top: Int, right: Int, bottom: Int, oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
             updateBounds()
@@ -558,24 +566,44 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     ) : Drawable() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val rect = RectF()
-        private var frame = Runnable { invalidateSelf() }
+        private val frame = object : Runnable {
+            override fun run() {
+                if (!running) return
+                if (!hostView.isAttachedToWindow || !source.isAttachedToWindow || !source.isShown) {
+                    stop()
+                    return
+                }
+                invalidateSelf()
+                hostView.postInvalidateOnAnimation()
+                hostView.postOnAnimation(this)
+            }
+        }
         @Volatile private var running = false
         @Volatile private var badgeKind = kind
+        private var lastStateLog = 0L
+        private fun stateLog(state: String) {
+            val now = SystemClock.uptimeMillis()
+            if (now - lastStateLog < 2000L) return
+            lastStateLog = now
+            t.mma.utils.HLog.i("[Hchat:动态角标状态] state=$state source=${source.id}@${System.identityHashCode(source)} attached=${source.isAttachedToWindow} shown=${source.isShown} host=${hostView.javaClass.simpleName}")
+        }
         fun setKind(value: BadgeKind) { badgeKind = value; invalidateSelf() }
         fun start() {
             if (running || !source.isAttachedToWindow || !source.isShown) return
             running = true
-            scheduleSelf(frame, SystemClock.uptimeMillis() + FRAME_INTERVAL_MS)
+            stateLog("start")
+            invalidateSelf()
+            hostView.postInvalidateOnAnimation()
+            hostView.postOnAnimation(frame)
         }
         fun stop() {
+            if (!running) return
             running = false
-            unscheduleSelf(frame)
+            stateLog("stop")
+            hostView.removeCallbacks(frame)
         }
         override fun draw(canvas: Canvas) {
             trace("draw running=$running source=${source.javaClass.simpleName}@${source.id} shown=${source.isShown} bounds=${bounds.left},${bounds.top},${bounds.right},${bounds.bottom} host=${hostView.javaClass.simpleName}@${System.identityHashCode(hostView)}", traceDrawCount)
-            if (running && hostView.isAttachedToWindow && hostView.isShown && source.isShown) {
-                scheduleSelf(frame, SystemClock.uptimeMillis() + FRAME_INTERVAL_MS)
-            }
             if (!source.isShown || source.visibility != View.VISIBLE || bounds.isEmpty) return
             val number = badgeKind == BadgeKind.NUMBER
             val colors = parseGradient(
