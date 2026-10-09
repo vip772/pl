@@ -1091,8 +1091,9 @@ private class HchatExtraHooker(
         val label = findHolderTextView(viewTag, "timeTV", holderTimeFieldCache)
         val inserted = insertMessageDetailsLabel(root, label, viewTag, details, nativeMessage = nativeMessage)
         if (!inserted) {
+            // Never expose a stale or partially inserted label while waiting for layout.
+            removeTaggedMessageDetailsViews(root)
             if (attempt >= MESSAGE_DETAILS_MAX_RETRY) {
-                removeTaggedMessageDetailsViews(root)
                 logMessageDetailsFailure("layout", viewTag, root)
             }
             scheduleMessageDetailsRetry(root, bindObject, args, attempt, viewTag, nativeMessage)
@@ -1202,9 +1203,11 @@ private class HchatExtraHooker(
                     messageContentAnchor(holder, it) ?: timeLabelDetailsAnchor(it)
                 }
             if (cardMessage) {
-                // A verified timeTV parent is already a valid insertion container. Do not
-                // discard it by requiring timeTV to be a direct child of the row root.
-                candidate ?: rowBottomAnchor(root)
+                // Card time/click views may live in transient inner layouts. Promote the
+                // candidate to the complete row branch before placing details below it.
+                val branch = candidate?.let { safeBottomAnchor(root, it.layoutView) }
+                    ?: rowBottomAnchor(root)
+                branch?.let(::wrapCardDetailsAnchor)
             } else candidate
         } else null
         val avatarContent = avatarAnchor
@@ -1264,6 +1267,10 @@ private class HchatExtraHooker(
             } else {
                 observeMessageDetailsAttachment(root, label)
             }
+        } else {
+            // A failed layout attempt must not leave a temporary label in an inner card
+            // container while the pre-draw retry is pending.
+            removeMessageDetailsLabel(label)
         }
         return inserted
     }
