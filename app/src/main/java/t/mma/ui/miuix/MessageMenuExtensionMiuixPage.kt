@@ -47,7 +47,7 @@ internal fun MessageMenuExtensionMiuixPage(context: Context, provider: FeatureSe
             contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item {
-                SwitchRow(enabled, "消息菜单扩展", "目标：每排6个、最多5排，新增项目自动换行。当前为诊断版：开启只记录菜单结构，暂不改变原生3排×5个布局。", onCheckedChange = { enabled = it })
+                SwitchRow(enabled, "消息菜单扩展", "目标：每排6个、最多5排，新增项目自动换行。当前为轻量诊断版，暂不改变原生3排×5个布局。保存开关后需完全重启微信，关闭后重启不安装菜单Hook。", onCheckedChange = { enabled = it })
             }
         }
     }

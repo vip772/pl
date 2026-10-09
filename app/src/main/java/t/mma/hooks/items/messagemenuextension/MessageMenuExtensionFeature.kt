@@ -22,6 +22,11 @@ class MessageMenuExtensionFeature : BaseFeature() {
         registerSettingsProvider(MessageMenuExtensionSettingsProvider())
     }
     override fun onFeatureInstall(context: FeatureContext) {
+        if (!MessageMenuExtensionSettings.preferences(context.hostContext())
+                .getBoolean(MessageMenuExtensionSettings.KEY_ENABLE, false)) {
+            HLog.i("[Hchat:消息菜单扩展诊断] stage=installSkipped reason=disabled runtimeCreated=false hooks=0")
+            return
+        }
         runtime = MessageMenuExtensionRuntime(context)
         scheduleInstall()
         subscribe(Events.DexReady::class.java) { scheduleInstall() }
@@ -53,6 +58,11 @@ private class MessageMenuExtensionRuntime(private val context: FeatureContext) {
     fun install(): Boolean {
         if (installed) return true
         if (!active) return false
+        // The switch is an installation gate. Disabled means no reflective lookup or WeChat hook.
+        if (!prefs.getBoolean(MessageMenuExtensionSettings.KEY_ENABLE, false)) {
+            HLog.i("$TAG stage=installSkipped reason=disabled")
+            return true
+        }
         try {
             val host = context.hostContext()
             val info = host.packageManager.getPackageInfo(host.packageName, 0)
