@@ -208,6 +208,7 @@ private class HchatExtraHooker(
     private val nativeMessageClassCache = ConcurrentHashMap<Class<*>, Boolean>()
     private val messageNestedFieldCache = ConcurrentHashMap<Class<*>, List<Field>>()
     private val messageDetailsFailureKeys = ConcurrentHashMap.newKeySet<String>()
+    private val messageDetailsCardAnchorKeys = ConcurrentHashMap.newKeySet<String>()
     private val messageDetailsLabels = Collections.newSetFromMap(WeakHashMap<TextView, Boolean>())
     private val messageDetailsBindings = WeakHashMap<TextView, MessageDetailsBinding>()
     private val avatarDetailsSpacings = WeakHashMap<RelativeLayout, AvatarDetailsSpacing>()
@@ -1198,17 +1199,17 @@ private class HchatExtraHooker(
                 MessageTypeLabels.subtype(details.type, details.content, details.body) != null
             )
         val bottomAnchor = if (avatarAnchor == null) {
-            val candidate = noticeContentAnchor(root, nativeTimeLabel, details.type)
-                ?: nativeTimeLabel?.let {
-                    messageContentAnchor(holder, it) ?: timeLabelDetailsAnchor(it)
-                }
             if (cardMessage) {
-                // Card time/click views may live in transient inner layouts. Promote the
-                // candidate to the complete row branch before placing details below it.
-                val branch = candidate?.let { safeBottomAnchor(root, it.layoutView) }
-                    ?: rowBottomAnchor(root)
-                branch?.let(::wrapCardDetailsAnchor)
-            } else candidate
+                // A card's timeTV belongs to the header branch on some holders. Resolve
+                // the measured card body independently so details cannot land between
+                // the nickname/header and the card itself.
+                cardBottomAnchor(root, holder, nativeTimeLabel)
+            } else {
+                noticeContentAnchor(root, nativeTimeLabel, details.type)
+                    ?: nativeTimeLabel?.let {
+                        messageContentAnchor(holder, it) ?: timeLabelDetailsAnchor(it)
+                    }
+            }
         } else null
         val avatarContent = avatarAnchor
             ?.takeIf { it.hidden }
@@ -3139,39 +3140,49 @@ private class HchatExtraHooker(
     }
 
 
-    private fun rowBottomAnchor(root: View): BottomDetailsAnchor? {
-        val group = root as? ViewGroup ?: return null
-        if (group !is RelativeLayout && group !is android.widget.FrameLayout &&
-            !(group is LinearLayout && group.orientation == LinearLayout.VERTICAL)) return null
-        val children = (0 until group.childCount).map(group::getChildAt)
-            .filter { it.visibility != View.GONE && it.tag != TAG_MESSAGE_DETAILS_VIEW }
-        // Multiple native children are indistinguishable before measurement. Retry on
-        // pre-draw instead of wrapping the timestamp/checkbox from a zero-sized row.
-        if (children.size > 1 && children.none { it.bottom > 0 }) return null
-        val bottom = children.maxByOrNull {
-            it.bottom + ((it.layoutParams as? ViewGroup.MarginLayoutParams)?.bottomMargin ?: 0)
-        } ?: return null
-        return BottomDetailsAnchor(group, bottom, bottom)
-    }
-
-
-    private fun wrapCardDetailsAnchor(anchor: BottomDetailsAnchor): BottomDetailsAnchor {
-        // Never reparent a host-owned card view. WeChat's bind code retains the
-        // original parent contract and may cast its LayoutParams on recycle.
-        // The label is inserted next to the card by addBottomDetailsView().
-        return anchor
-    }
-
-
-    private fun safeBottomAnchor(root: View, content: View): BottomDetailsAnchor? {
+    private fun cardBottomAnchor(root: View, holder: Any, nativeTimeLabel: TextView?): BottomDetailsAnchor? {
         val row = root as? ViewGroup ?: return null
-        // 标签只能是完整内容分支的兄弟，绝不退回价格/店铺所在的内部布局。
         if (row !is RelativeLayout && row !is android.widget.FrameLayout &&
-            !(row is LinearLayout && row.orientation == LinearLayout.VERTICAL)) return null
-        if (content === row || !isViewWithinRoot(content, row)) return null
-        val cardBranch = directChildOf(row, content) ?: return null
-        if (cardBranch.tag == TAG_MESSAGE_DETAILS_VIEW) return null
-        return BottomDetailsAnchor(row, cardBranch, cardBranch)
+            !(row is LinearLayout && row.orientation == LinearLayout.VERTICAL)
+        ) return null
+        val excludedBranches = buildSet<View> {
+            nativeTimeLabel?.let { directChildOf(row, it) }?.let(::add)
+            findHolderAvatarView(holder)?.let { directChildOf(row, it) }?.let(::add)
+            findChattingAvatarView(root)?.let { directChildOf(row, it) }?.let(::add)
+        }
+        val candidates = buildList<View> {
+            holderMainContentView(holder, row)?.let(::add)
+            messageContentView(holder, row, nativeTimeLabel)?.let(::add)
+            for (index in 0 until row.childCount) add(row.getChildAt(index))
+        }
+        val branch = candidates.asSequence()
+            .mapNotNull { directChildOf(row, it) }
+            .filter { it !in excludedBranches && it.tag != TAG_MESSAGE_DETAILS_VIEW }
+            .filter { isMeasuredCardBranch(it, row) }
+            .distinct()
+            .maxWithOrNull(
+                compareBy<View> { it.bottom }
+                    .thenBy { viewScoreForBottomDetails(it) }
+            )
+        val key = holder.javaClass.name
+        if (branch != null && messageDetailsCardAnchorKeys.add(key)) {
+            logger(
+                "消息卡片锚点 holder=$key root=${row.javaClass.name} " +
+                    "anchor=${branch?.javaClass?.name ?: "none"} size=${branch?.width ?: 0}x${branch?.height ?: 0} " +
+                    "top=${branch?.top ?: -1} bottom=${branch?.bottom ?: -1}",
+                null
+            )
+        }
+        return branch?.let { BottomDetailsAnchor(row, it, it) }
+    }
+    private fun isMeasuredCardBranch(view: View, row: ViewGroup): Boolean {
+        if (view.parent !== row || view.visibility != View.VISIBLE || row.width <= 0) return false
+        val width = view.width.takeIf { it > 0 } ?: view.measuredWidth
+        val height = view.height.takeIf { it > 0 } ?: view.measuredHeight
+        if (width <= dp(view.context, 72f) || height <= dp(view.context, 40f) || view.bottom <= 0) {
+            return false
+        }
+        return true
     }
 
 
