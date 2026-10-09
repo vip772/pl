@@ -496,6 +496,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         private val hostView: View = (rowView.parent as? View) ?: rowView
         private val drawable = AnimatedBadgeDrawable(hostView, source, preferences, initialKind)
         private val preDrawListener = ViewTreeObserver.OnPreDrawListener {
+            updateBounds()
             updateVisibility()
             true
         }
