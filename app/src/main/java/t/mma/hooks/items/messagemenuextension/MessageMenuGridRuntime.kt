@@ -203,16 +203,37 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
         }
         frame.undo = restore
         try {
-            val available = content.resources.displayMetrics.widthPixels - (24 * content.resources.displayMetrics.density).toInt()
-            val existingWidth = rows.first().measuredWidth.takeIf { it > 0 } ?: available
-            val rowWidth = minOf(existingWidth, available).coerceAtLeast(6)
+            val density = content.resources.displayMetrics.density
+            val visibleFrame = Rect().also { content.getWindowVisibleDisplayFrame(it) }
+            val screenWidth = visibleFrame.width().takeIf { it > 0 }
+                ?: content.resources.displayMetrics.widthPixels
+            val available = (screenWidth - (24 * density).toInt()).coerceAtLeast(6)
+            val existingWidth = rows.first().measuredWidth.takeIf { it > 0 }
+                ?: rows.first().layoutParams.width.takeIf { it > 0 }
+                ?: available
+            val horizontalPadding = rows.first().paddingLeft + rows.first().paddingRight
+            val nativeContentWidth = (existingWidth - horizontalPadding).coerceAtLeast(5)
+            val rowWidth = minOf(
+                available,
+                nativeContentWidth * 6 / 5 + horizontalPadding
+            ).coerceAtLeast(6)
+            val itemWidth = ((rowWidth - horizontalPadding) / 6).coerceAtLeast(1)
             val rowHeight = rows.first().measuredHeight.takeIf { it > 0 }
                 ?: allViews.maxOf { it.measuredHeight }.takeIf { it > 0 }
                 ?: rows.first().layoutParams.height
             check(rowHeight > 0) { "Unmeasured native row" }
             rows.forEach { it.removeAllViews() }
             while (rows.size + extra.size < count) {
-                val row = LinearLayout(content.context).apply { orientation = LinearLayout.HORIZONTAL; gravity = rows.first().gravity }
+                val row = LinearLayout(content.context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = rows.first().gravity
+                    setPadding(
+                        rows.first().paddingLeft,
+                        rows.first().paddingTop,
+                        rows.first().paddingRight,
+                        rows.first().paddingBottom
+                    )
+                }
                 parent.addView(row, indices.last() + 1 + extra.size, LinearLayout.LayoutParams(rowWidth, rowHeight))
                 extra.add(row)
             }
@@ -220,14 +241,15 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
                 row.visibility = if (index < count) View.VISIBLE else View.GONE
                 row.layoutParams = LinearLayout.LayoutParams(rowWidth, rowHeight)
                 selected.drop(index * 6).take(6).forEach { view ->
-                    row.addView(view, LinearLayout.LayoutParams(rowWidth / 6, rowHeight))
+                    row.addView(view, LinearLayout.LayoutParams(itemWidth, rowHeight))
                 }
             }
             check(KavaReflector.writeField(flag, frame.owner, false)) { "Cannot override popup height flag" }
             window.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            window.width = ViewGroup.LayoutParams.WRAP_CONTENT
             frame.changed = true
             content.requestLayout()
-            HLog.i("$TAG stage=reflow visible=${items.size} captured=${frame.views.size} displayed=${selected.size} rows=$count columns=6 nativeRowIndices=${indices.joinToString(",")} overflow=${(items.size - 30).coerceAtLeast(0)}")
+            HLog.i("$TAG stage=reflow visible=${items.size} captured=${frame.views.size} displayed=${selected.size} rows=$count columns=6 rowWidth=$rowWidth itemWidth=$itemWidth nativeRowIndices=${indices.joinToString(",")} overflow=${(items.size - 30).coerceAtLeast(0)}")
         } catch (error: Throwable) {
             restore(); frame.undo = null; throw error
         }
