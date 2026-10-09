@@ -30,7 +30,6 @@ import t.mma.utils.KavaReflector
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.util.Collections
-import java.util.IdentityHashMap
 import java.util.WeakHashMap
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -69,8 +68,8 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     private val prefs = HchatStorage.preferences(host, DynamicBadgeSettings.PREFS_NAME)
     private val methodPrefs = DexMethodCache.prefs(host, "Hchat_dynamic_badge_method_cache")
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val overlays = Collections.synchronizedMap(IdentityHashMap<View, BadgeOverlay>())
-    private val badgeSources = Collections.synchronizedMap(IdentityHashMap<View, View>())
+    private val overlays = Collections.synchronizedMap(WeakHashMap<View, BadgeOverlay>())
+    private val badgeSources = Collections.synchronizedMap(WeakHashMap<View, View>())
     private val modernRows = Collections.synchronizedMap(WeakHashMap<Any, View>())
     @Volatile private var destroyed = false
     @Volatile private var installedMethods = emptySet<Method>()
@@ -497,8 +496,6 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         private val hostView: View = (rowView.parent as? View) ?: rowView
         private val drawable = AnimatedBadgeDrawable(hostView, source, preferences, initialKind)
         private val preDrawListener = ViewTreeObserver.OnPreDrawListener {
-            ensureAttached()
-            updateBounds()
             updateVisibility()
             true
         }
@@ -523,12 +520,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
         fun update(kind: BadgeKind) {
             drawable.setKind(kind)
-            ensureAttached()
-            updateBounds()
             updateVisibility()
-        }
-        private fun ensureAttached() {
-            hostView.overlay.add(drawable)
         }
         private fun updateVisibility() {
             if (hostView.isAttachedToWindow && hostView.isShown && source.isShown && source.visibility == View.VISIBLE) drawable.start()
