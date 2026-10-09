@@ -1833,6 +1833,14 @@ private class HchatExtraHooker(
         }
         when (parent) {
             is android.widget.FrameLayout -> {
+                // Card branches can finish binding before their first layout. Treat zero
+                // geometry as pending; otherwise topMargin becomes 2dp and the details
+                // label is incorrectly accepted at the top of the message row.
+                if (content.parent !== parent || parent.width <= 0 ||
+                    content.width <= 0 || content.bottom <= 0
+                ) {
+                    return false
+                }
                 val frameParams = android.widget.FrameLayout.LayoutParams(params).apply {
                     gravity = Gravity.TOP or if (details.isSelf) Gravity.END else Gravity.START
                     topMargin = content.bottom + dp(label.context, 2f)
