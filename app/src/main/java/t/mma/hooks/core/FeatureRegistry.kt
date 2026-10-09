@@ -42,6 +42,7 @@ import t.mma.hooks.items.grouplabel.QuickGroupChatLabelFeature
 import t.mma.hooks.items.grouprename.GroupRenameMonitorFeature
 import t.mma.hooks.items.hideavatar.HideChatAvatarFeature
 import t.mma.hooks.items.hidemenu.HideChatMenuFeature
+import t.mma.hooks.items.messagemenuextension.MessageMenuExtensionFeature
 import t.mma.hooks.items.hotupdate.DisableHotUpdateFeature
 import t.mma.hooks.items.hometextcolor.HomeTextColorFeature
 import t.mma.hooks.items.inputhint.InputHintFeature
@@ -139,6 +140,7 @@ object FeatureRegistry {
             .register(DisableHotUpdateFeature())
             .register(ProfileIdFeature())
             .register(HideChatMenuFeature())
+            .register(MessageMenuExtensionFeature())
             .register(QuickContactEditFeature())
             .register(QuickGroupChatLabelFeature())
             .register(QuickMomentsFeature())

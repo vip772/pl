@@ -1057,6 +1057,7 @@ internal object HchatConfigBackup {
         MessageTextColorSettings.PREFS_NAME,
         HideChatAvatarSettings.PREFS_NAME,
         HideChatMenuSettings.PREFS_NAME,
+        t.mma.hooks.items.messagemenuextension.MessageMenuExtensionSettings.PREFS_NAME,
         QuickContactEditSettings.PREFS_NAME,
         RoundAvatarSettings.PREFS_NAME,
         CustomFriendAvatarSettings.PREFS_NAME,
@@ -2398,6 +2399,7 @@ internal fun featureSubSearchTerms(featureId: String): List<String> {
         QuickContactEditFeature.ID -> listOf("快捷设置备注和标签", "好友备注", "好友标签", "新建标签", "会话长按菜单", "朋友圈头像")
         QuickMomentsFeature.ID -> listOf("快捷查看朋友圈", "朋友圈", "会话长按菜单", "个人朋友圈", "聊天分组", "自己", "企业微信联系人")
         QuickTerminateFeature.ID -> listOf("快捷终止", "结束微信", "终止微信", "加号菜单", "关闭微信")
+        t.mma.hooks.items.messagemenuextension.MessageMenuExtensionSettings.ID -> listOf("消息菜单扩展", "长按消息", "菜单图标", "6个", "5排", "诊断")
         HideChatMenuFeature.ID -> listOf("隐藏聊天菜单", "长按菜单", "隐藏菜单项", "提醒", "搜一搜", "收藏")
         WeChatKeepAliveFeature.ID -> listOf("微信保活", "常驻通知", "WakeLock", "Root保活", "保活服务")
         WeChatTabletFeature.ID -> listOf("平板模式", "Pad模式", "设备登录", "多设备登录", "登录为平板")

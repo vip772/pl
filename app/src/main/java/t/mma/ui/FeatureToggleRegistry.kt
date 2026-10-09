@@ -42,6 +42,7 @@ object FeatureToggleRegistry {
         "quick_group_chat_label" to Toggle("Hchat_quick_group_chat_label_config", "enable"),
         "group_leave_monitor" to Toggle("Hchat_group_leave_monitor_config", "group_leave_monitor_enable"),
         "group_nickname_color" to Toggle("Hchat_group_nickname_color_config", "enable"),
+        "message_menu_extension" to Toggle("Hchat_message_menu_extension_config", "message_menu_extension_enable"),
         "hide_chat_menu" to Toggle("Hchat_hide_chat_menu_config", "hide_chat_menu_enable"),
         "home_text_color" to Toggle("Hchat_home_text_color_config", "home_text_color_enable"),
         "disable_hot_update" to Toggle("Hchat_disable_hot_update_config", "disable_hot_update_enable"),

@@ -1107,6 +1107,7 @@ internal fun FeatureSettingsPage(
         QuickMomentsFeature.ID -> QuickMomentsMiuixPage(context, provider, onBack)
         QuickTerminateFeature.ID -> QuickTerminateMiuixPage(context, provider, onBack)
         HideChatMenuFeature.ID -> HideChatMenuMiuixPage(context, provider, onBack)
+        t.mma.hooks.items.messagemenuextension.MessageMenuExtensionSettings.ID -> MessageMenuExtensionMiuixPage(context, provider, onBack)
         MessageAffixFeature.ID -> MessageAffixMiuixPage(context, provider, onBack)
         TypingReportBlockFeature.ID -> TypingReportBlockMiuixPage(context, provider, onBack)
         PatBlockFeature.ID -> PatBlockMiuixPage(context, provider, onBack)
