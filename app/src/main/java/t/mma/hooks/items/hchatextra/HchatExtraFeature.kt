@@ -3195,9 +3195,27 @@ private class HchatExtraHooker(
             findChattingAvatarView(root)?.let { directChildOf(row, it) }?.let(::add)
         }
         val holderCard = holderCardContainer(holder, row)
-        val holderBranch = holderCard?.let { directChildOf(row, it) }
+        val holderDirectBranch = holderCard?.let { directChildOf(row, it) }
+        val holderBranch = holderDirectBranch
             ?.takeUnless { it in excludedBranches || it.tag == TAG_MESSAGE_DETAILS_VIEW }
             ?.takeIf { isMeasuredCardBranch(it, row) }
+        if (holderCard != null && messageDetailsCardAnchorKeys.add("trace:${holder.javaClass.name}")) {
+            logger(
+                "消息卡片锚点诊断 holder=${holder.javaClass.name} " +
+                    "field=${holderCard.javaClass.name}@${System.identityHashCode(holderCard)} " +
+                    "fieldAttached=${isViewWithinRoot(holderCard, row)} " +
+                    "fieldSize=${holderCard.width}x${holderCard.height} " +
+                    "fieldParent=${holderCard.parent?.javaClass?.name ?: "none"} " +
+                    "direct=${holderDirectBranch?.javaClass?.name ?: "none"} " +
+                    "directSize=${holderDirectBranch?.width ?: 0}x${holderDirectBranch?.height ?: 0} " +
+                    "directBounds=${holderDirectBranch?.left ?: -1},${holderDirectBranch?.top ?: -1}," +
+                    "${holderDirectBranch?.right ?: -1},${holderDirectBranch?.bottom ?: -1} " +
+                    "directParent=${holderDirectBranch?.parent?.javaClass?.name ?: "none"} " +
+                    "rowSize=${row.width}x${row.height} rowChildren=${row.childCount} " +
+                    "valid=${holderDirectBranch?.let { isMeasuredCardBranch(it, row) } ?: false}",
+                null
+            )
+        }
         val knownCardHolder = when (holder.javaClass.name) {
             "kn5.d9", "com.tencent.mm.ui.chatting.viewitems.kb",
             "com.tencent.mm.ui.chatting.viewitems.id",
