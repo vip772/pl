@@ -109,8 +109,13 @@ internal class DynamicRecallRuntime(private val context: Context) {
         private val rect = RectF()
         private val visible = Rect()
         private var running = false
-        private var startColor = Color.RED
-        private var endColor = Color.YELLOW
+        private val outline = Path()
+        private val segment = Path()
+        private val measure = PathMeasure()
+        private val gradientMatrix = Matrix()
+        private var gradient: SweepGradient? = null
+        private var perimeter = 0f
+        private var dashCount = 1
         private var period = DynamicBadgeSettings.DEFAULT_NUMBER_SPEED
         private val frame = object : Runnable {
             override fun run() {
@@ -130,13 +135,17 @@ internal class DynamicRecallRuntime(private val context: Context) {
                 .coerceIn(DynamicBadgeSettings.MIN_STROKE_WIDTH, DynamicBadgeSettings.MAX_STROKE_WIDTH) * density
             val inset = paint.strokeWidth / 2f
             rect.set(inset, inset, view.width - inset, view.height - inset)
-            val colors = prefs.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
-                DynamicBadgeSettings.DEFAULT_NUMBER_COLOR).orEmpty().split(',').mapNotNull {
-                runCatching { Color.parseColor(it.trim()) }.getOrNull()
-            }
-            val start = colors.firstOrNull() ?: Color.rgb(255, 77, 103)
-            val end = colors.getOrNull(1) ?: start
-            startColor = start; endColor = end
+            val colors = DynamicRecallGradient.parts(prefs.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
+                DynamicRecallGradient.DEFAULT).orEmpty()).map { Color.parseColor(it) }
+            gradient = SweepGradient(rect.centerX(), rect.centerY(),
+                intArrayOf(colors[0], colors[1], colors[2], colors[0]), floatArrayOf(0f, 1f / 3f, 2f / 3f, 1f))
+            outline.reset()
+            val radius = minOf(12f * density, rect.height() / 2f)
+            if (rect.width() > 0 && rect.height() > 0) outline.addRoundRect(rect, radius, radius, Path.Direction.CW)
+            measure.setPath(outline, true)
+            perimeter = measure.length
+            dashCount = (perimeter / maxOf(24f * density, paint.strokeWidth * 5f)).toInt().coerceAtLeast(1)
+            paint.strokeCap = Paint.Cap.ROUND
             period = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_SPEED, DynamicBadgeSettings.DEFAULT_NUMBER_SPEED)
                 .coerceIn(DynamicBadgeSettings.MIN_SPEED, DynamicBadgeSettings.MAX_SPEED)
             if (!running) { running = true; view.postOnAnimation(frame) }
@@ -145,10 +154,25 @@ internal class DynamicRecallRuntime(private val context: Context) {
         fun stop() { running = false; view.removeCallbacks(frame) }
         override fun draw(canvas: Canvas) {
             if (!running || !enabled() || !view.isShown || rect.width() <= 0 || rect.height() <= 0) return
-            val phase = SystemClock.uptimeMillis() % period * 360f / period
-            val radius = minOf(12f * view.resources.displayMetrics.density, rect.height() / 2f)
-            t.mma.hooks.items.dynamicbadge.RotatingGradientStroke.draw(
-                canvas, paint, rect, radius, startColor, endColor, phase)
+            if (perimeter <= 0f) return
+            val progress = (SystemClock.uptimeMillis() % period).toFloat() / period
+            gradientMatrix.setRotate(progress * 360f, rect.centerX(), rect.centerY())
+            gradient?.setLocalMatrix(gradientMatrix)
+            paint.shader = gradient
+            // Evenly spaced segments advance clockwise around the complete closed path.
+            // Split seam-crossing segments so no dash disappears at the closing corner.
+            val spacing = perimeter / dashCount
+            val length = spacing * .58f
+            val offset = progress * perimeter
+            segment.reset()
+            repeat(dashCount) { index ->
+                val start = (index * spacing + offset) % perimeter
+                val end = start + length
+                measure.getSegment(start, minOf(end, perimeter), segment, true)
+                if (end > perimeter) measure.getSegment(0f, end - perimeter, segment, true)
+            }
+            canvas.drawPath(segment, paint)
+            paint.shader = null
         }
         override fun setAlpha(alpha: Int) { paint.alpha = alpha }
         override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }

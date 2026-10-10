@@ -571,12 +571,17 @@ internal fun ColorSpecChip(
 }
 
 @Composable
-internal fun ColorPreviewDot(value: String, size: Dp = 34.dp) {
+internal fun ColorPreviewDot(value: String, size: Dp = 34.dp, threeColorGradient: Boolean = false) {
     val colorParts = colorSpecParts(value)
     val startColor = composeColorFromHex(colorParts.first) ?: MiuixTheme.colorScheme.secondaryVariant
     val endColor = composeColorFromHex(colorParts.second)
     val shape = RoundedCornerShape(size / 2)
-    val colorBackground = if (endColor != null && endColor != startColor) {
+    val colorBackground = if (threeColorGradient) {
+        val colors = t.mma.hooks.items.antirecall.DynamicRecallGradient.parts(value).map {
+            composeColorFromHex(it) ?: startColor
+        }
+        Modifier.background(Brush.horizontalGradient(colors))
+    } else if (endColor != null && endColor != startColor) {
         Modifier.background(Brush.horizontalGradient(listOf(startColor, endColor)))
     } else {
         Modifier.background(startColor)

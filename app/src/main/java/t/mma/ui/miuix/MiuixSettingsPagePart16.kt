@@ -1442,7 +1442,7 @@ internal fun AntiRecallMiuixPage(
     }
     var dynamicRecall by remember { mutableStateOf(sp.getBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, false)) }
     var dynamicColor by remember { mutableStateOf(sp.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
-        t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings.DEFAULT_NUMBER_COLOR).orEmpty()) }
+        t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty()) }
     var dynamicSpeed by remember { mutableStateOf(sp.getInt(AntiRecallSettings.KEY_DYNAMIC_SPEED,
         t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings.DEFAULT_NUMBER_SPEED)) }
     var dynamicStroke by remember { mutableStateOf(sp.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
@@ -1553,9 +1553,10 @@ internal fun AntiRecallMiuixPage(
             }
             if (dynamicRecall) {
                 item {
-                    ColorPickerRow("渐变颜色", "消息描边旋转渐变色", dynamicColor,
-                        onReset = { dynamicColor = t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings.DEFAULT_NUMBER_COLOR }
-                    ) { dynamicColor = it.take(19) }
+                    ColorPickerRow("渐变颜色", "断点描边三色渐变", dynamicColor,
+                        threeColorGradient = true,
+                        onReset = { dynamicColor = t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT }
+                    ) { dynamicColor = it.take(29) }
                 }
                 item { speedControl("描边旋转周期", dynamicSpeed) { dynamicSpeed = it } }
                 item { strokeWidthControl("描边宽度", dynamicStroke) { dynamicStroke = it } }

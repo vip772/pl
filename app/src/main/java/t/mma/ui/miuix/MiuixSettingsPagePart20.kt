@@ -2095,6 +2095,7 @@ public fun ColorPickerRow(
     value: String,
     allowGradient: Boolean = true,
     onReset: (() -> Unit)? = null,
+    threeColorGradient: Boolean = false,
     onValueChange: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -2104,8 +2105,10 @@ public fun ColorPickerRow(
     } else {
         MemberTitleStore.cleanColor(value) to ""
     }
+    val triple = if (threeColorGradient) t.mma.hooks.items.antirecall.DynamicRecallGradient.parts(value) else emptyList()
+    var editStop by remember { mutableStateOf(0) }
     var editEnd by remember { mutableStateOf(colorParts.second.isNotEmpty()) }
-    val selectedColor = if (allowGradient && editEnd) colorParts.second.ifEmpty { colorParts.first } else colorParts.first
+    val selectedColor = if (threeColorGradient) triple[editStop] else if (allowGradient && editEnd) colorParts.second.ifEmpty { colorParts.first } else colorParts.first
     Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth().clickable { expanded = !expanded },
@@ -2125,7 +2128,9 @@ public fun ColorPickerRow(
                     ClickHintTag()
                 }
                 Text(
-                    text = if (allowGradient) {
+                    text = if (threeColorGradient) {
+                        "$summary，支持 #起始色,#中间色,#结束色"
+                    } else if (allowGradient) {
                         "$summary，支持 #RRGGBB / #AARRGGBB / #A,#B 渐变"
                     } else {
                         "$summary，支持 #RRGGBB / #AARRGGBB"
@@ -2134,7 +2139,7 @@ public fun ColorPickerRow(
                     fontSize = 12.sp
                 )
             }
-            ColorPreviewDot(if (allowGradient) value else colorParts.first)
+            ColorPreviewDot(if (allowGradient) value else colorParts.first, threeColorGradient = threeColorGradient)
         }
         Row(
             modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
@@ -2143,7 +2148,7 @@ public fun ColorPickerRow(
         ) {
             BasicTextField(
                 value = value,
-                onValueChange = { onValueChange(it.take(if (allowGradient) 19 else 9)) },
+                onValueChange = { onValueChange(it.take(if (threeColorGradient) 29 else if (allowGradient) 19 else 9)) },
                 textStyle = TextStyle(
                     color = MiuixTheme.colorScheme.onSurface,
                     fontSize = 14.sp
@@ -2174,26 +2179,37 @@ public fun ColorPickerRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ColorSpecChip(
-                        label = "起始色",
-                        value = colorParts.first,
-                        selected = !editEnd,
-                        onClick = { editEnd = false },
-                        modifier = Modifier.weight(1f)
-                    )
-                    ColorSpecChip(
-                        label = "结束色",
-                        value = colorParts.second,
-                        selected = editEnd,
-                        onClick = { editEnd = true },
-                        modifier = Modifier.weight(1f)
-                    )
+                    if (threeColorGradient) {
+                        listOf("起始色", "中间色", "结束色").forEachIndexed { index, label ->
+                            ColorSpecChip(label = label, value = triple[index], selected = editStop == index,
+                                onClick = { editStop = index }, modifier = Modifier.weight(1f))
+                        }
+                    } else {
+                        ColorSpecChip(
+                            label = "起始色",
+                            value = colorParts.first,
+                            selected = !editEnd,
+                            onClick = { editEnd = false },
+                            modifier = Modifier.weight(1f)
+                        )
+                        ColorSpecChip(
+                            label = "结束色",
+                            value = colorParts.second,
+                            selected = editEnd,
+                            onClick = { editEnd = true },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
             }
             PsColorPicker(
                 value = selectedColor,
                 onValueChange = { picked ->
-                    val next = if (allowGradient) {
+                    val next = if (threeColorGradient) {
+                        val stops = t.mma.hooks.items.antirecall.DynamicRecallGradient.parts(currentValue).toMutableList()
+                        stops[editStop] = picked
+                        stops.joinToString(",")
+                    } else if (allowGradient) {
                         val latestParts = colorSpecParts(currentValue)
                         if (editEnd) {
                             composeColorSpec(latestParts.first.ifEmpty { picked }, picked)
@@ -2208,7 +2224,9 @@ public fun ColorPickerRow(
                 modifier = Modifier.padding(top = if (allowGradient) 12.dp else 8.dp)
             )
             Text(
-                text = if (allowGradient) {
+                text = if (threeColorGradient) {
+                    "先选起始色、中间色或结束色，再用色盘取色"
+                } else if (allowGradient) {
                     "先选起始色或结束色，再用色盘取色；清空输入框可恢复默认/跟随昵称"
                 } else {
                     "可直接输入颜色值，也可以用色盘取色；清空输入框可恢复默认色"
