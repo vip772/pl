@@ -22,9 +22,13 @@ function run(args) {
 run(['-Xmx256m', '-cp', jars.map(name => path.join(lib, name)).join(path.delimiter),
     'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-no-stdlib', '-no-reflect',
     '-classpath', path.join(lib, stdlib), '-d', jar,
-    'app/src/main/java/h/Hchat/hooks/items/hchatextra/MessageDetailsLayoutObserver.kt',
+    'app/src/main/java/t/mma/hooks/items/hchatextra/MessageDetailsLayoutObserver.kt',
+    'app/src/main/java/t/mma/hooks/items/hchatextra/MessageDetailsCardHierarchy.kt',
+    'app/src/main/java/t/mma/hooks/api/model/WeChatMessageTypes.kt',
+    'scripts/tests/message_details_layout/CardHierarchyRegression.kt',
     'scripts/tests/message_details_layout/AndroidStub.kt',
     'scripts/tests/message_details_layout/TextViewStub.kt',
     'scripts/tests/message_details_layout/LayoutRegression.kt']);
-run(['-cp', jar + path.delimiter + path.join(lib, stdlib), 'h.Hchat.hooks.items.hchatextra.LayoutRegressionKt']);
+run(['-cp', jar + path.delimiter + path.join(lib, stdlib), 't.mma.hooks.items.hchatextra.LayoutRegressionKt']);
+run(['-cp', jar + path.delimiter + path.join(lib, stdlib), 't.mma.hooks.items.hchatextra.CardHierarchyRegressionKt']);
 console.log('Test artifacts: ' + output);

@@ -572,7 +572,7 @@ private class HchatExtraHooker(
                         if (stack?.isEmpty() == true) messageDetailsBindStates.remove()
                         if (outer != null || !messageDetailsConfig.enabled || param.hasThrowable()) return
                         runCatching {
-                            bindBottomMessageDetails(param.thisObject, param.args, 0, state.holder, state.message)
+                            bindBottomMessageDetails(param.thisObject, param.args, 0, state.holder, state.message, state.root)
                         }.onFailure { logger("消息显示时间绑定失败", it) }
                     }
                 })
@@ -1070,12 +1070,15 @@ private class HchatExtraHooker(
         args: Array<Any?>?,
         attempt: Int,
         capturedHolder: Any? = null,
-        capturedMessage: Any? = null
+        capturedMessage: Any? = null,
+        capturedRoot: View? = null
     ): Boolean {
         val holder = capturedHolder ?: messageBindHolder(args) ?: return false
-        val holderRoot = findRootView(holder) ?: return false
+        // Native BaseViewHolder can resolve to an inner music/card container.
+        // Preserve the adapter row throughout delayed retries.
+        val holderRoot = capturedRoot ?: findRootView(holder) ?: return false
         if (isScrollingContainer(holderRoot)) return false
-        val root = messageRowRoot(holderRoot)
+        val root = capturedRoot ?: messageRowRoot(holderRoot)
         messageDetailsRetryListeners.cancel(root)
         val nativeMessage = capturedMessage ?: resolveMessageFromBindArgs(args)
             ?: resolveMessageFromAdapter(bindObject, messageBindPosition(args))
@@ -1084,13 +1087,13 @@ private class HchatExtraHooker(
                 removeTaggedMessageDetailsViews(root)
                 logMessageDetailsFailure("message", holder, root)
             }
-            scheduleMessageDetailsRetry(root, bindObject, args, attempt, capturedHolder)
+            scheduleMessageDetailsRetry(root, bindObject, args, attempt, holder)
             return false
         }
         val messageType = messageType(nativeMessage)
         val details = messageDetails(nativeMessage, knownType = messageType)
-        val viewTag = holderRoot.tag?.takeIf { isMessageDetailsHolder(it, root) }
-            ?: capturedHolder?.takeIf { isMessageDetailsHolder(it, root) }
+        val viewTag = capturedHolder?.takeIf { isMessageDetailsHolder(it, root) }
+            ?: holderRoot.tag?.takeIf { isMessageDetailsHolder(it, root) }
             ?: holder
         val label = findHolderTextView(viewTag, "timeTV", holderTimeFieldCache)
         val inserted = insertMessageDetailsLabel(root, label, viewTag, details, nativeMessage = nativeMessage)
@@ -1108,9 +1111,11 @@ private class HchatExtraHooker(
             removeTaggedMessageDetailsViews(root)
             if (cardMessage) {
                 val retryArgs = args?.copyOf()
+                val token = messageDetailsBindToken(root)
                 messageDetailsPendingLayout.observe(root) {
+                    if (!isCurrentMessageDetailsBind(root, token)) return@observe true
                     bindBottomMessageDetails(
-                        bindObject, retryArgs, MESSAGE_DETAILS_MAX_RETRY, viewTag, nativeMessage
+                        bindObject, retryArgs, MESSAGE_DETAILS_MAX_RETRY, viewTag, nativeMessage, root
                     )
                 }
             } else {
@@ -1161,7 +1166,7 @@ private class HchatExtraHooker(
         val bindArgs = args?.copyOf()
         messageDetailsRetryListeners.schedule(root, root) {
             if (isCurrentMessageDetailsBind(root, token)) {
-                bindBottomMessageDetails(bindObject, bindArgs, nextAttempt, holder, nativeMessage)
+                bindBottomMessageDetails(bindObject, bindArgs, nextAttempt, holder, nativeMessage, root)
             }
         }
     }
@@ -1223,7 +1228,7 @@ private class HchatExtraHooker(
             if (cardMessage) {
                 // The native time/header and card may share one outer branch. Anchor below
                 // that complete measured branch so details cannot split the message body.
-                cardBottomAnchor(root, holder)
+                cardBottomAnchor(root, holder, details.type)
             } else {
                 noticeContentAnchor(root, nativeTimeLabel, details.type)
                     ?: nativeTimeLabel?.let {
@@ -2450,7 +2455,10 @@ private class HchatExtraHooker(
         val needsAtUsers = includeContent || tokens.any {
             it == "atUserList" || it == "rawAtUserList" || it == "mentionedUsers"
         }
-        val needsContent = includeContent || needsAtUsers || "type" in tokens || "appType" in tokens
+        val type = knownType ?: messageType(message)
+        // App XML determines reference/card layout even with a time-only template.
+        val needsContent = includeContent || needsAtUsers || "type" in tokens || "appType" in tokens ||
+            WeChatMessageTypes.isApp(type)
         val content = if (needsContent) {
             readMessageString(message, "getContent", "field_content", "content")
         } else {
@@ -2480,7 +2488,7 @@ private class HchatExtraHooker(
             0L
         }
         return MessageDetails(
-            type = knownType ?: messageType(message),
+            type = type,
             id = messageId,
             serverId = serverId,
             talker = talker,
@@ -3093,13 +3101,7 @@ private class HchatExtraHooker(
         holder.javaClass.name == "kn5.c3"
 
     private fun isCardMessage(type: Int, appSubtype: Int?): Boolean {
-        val normalized = WeChatMessageTypes.normalize(type)
-        if (normalized != WeChatMessageTypes.APP && type != 44 && type != 82 && appSubtype == null) {
-            return false
-        }
-        // These appmsg subtypes are rendered as ordinary text/media/reference rows;
-        // they must keep the native timeTV/content anchor rather than card anchoring.
-        return appSubtype !in setOf(1, 2, 8, 19, 24, 57, 87)
+        return MessageDetailsCardHierarchy.isCardMessage(type, appSubtype)
     }
     private fun noticeContentAnchor(root: View, timeLabel: TextView?, type: Int): BottomDetailsAnchor? {
         if (!isCenteredNotice(type)) return null
@@ -3206,7 +3208,7 @@ private class HchatExtraHooker(
         val card = KavaReflector.readField(field, holder) as? android.widget.FrameLayout ?: return null
         return card.takeIf { isViewWithinRoot(it, row) }
     }
-    private fun cardBottomAnchor(root: View, holder: Any): BottomDetailsAnchor? {
+    private fun cardBottomAnchor(root: View, holder: Any, type: Int): BottomDetailsAnchor? {
         val row = root as? ViewGroup ?: return null
         if (row !is RelativeLayout && row !is android.widget.FrameLayout &&
             !(row is LinearLayout && row.orientation == LinearLayout.VERTICAL)
@@ -3216,9 +3218,13 @@ private class HchatExtraHooker(
             findChattingAvatarView(root)?.let { directChildOf(row, it) }?.let(::add)
         }
         val holderCard = holderCardContainer(holder, row)
-        val holderDirectBranch = holderCard?.let { directChildOf(row, it) }
+            ?: if (WeChatMessageTypes.isLocation(type)) {
+                holderMainContentView(holder, row) ?: messageContentView(holder, row)
+            } else null
+        val holderDirectBranch = holderCard?.let { MessageDetailsCardHierarchy.contentBranch(row, it) }
+        // Verified content can share its outer branch with the avatar.
         val holderBranch = holderDirectBranch
-            ?.takeUnless { it in excludedBranches || it.tag == TAG_MESSAGE_DETAILS_VIEW }
+            ?.takeUnless { it.tag == TAG_MESSAGE_DETAILS_VIEW }
             ?.takeIf { isMeasuredCardBranch(it, row) }
         if (holderCard != null && messageDetailsCardAnchorKeys.add("trace:${holder.javaClass.name}")) {
             logger(
@@ -3246,7 +3252,7 @@ private class HchatExtraHooker(
         }
         // A verified card holder must never fall back to a guessed X2C/TextView branch.
         // Wait for its FrameLayout field to attach and let the existing retry handle it.
-        val branch = if (knownCardHolder) holderBranch else run {
+        val branch = holderBranch ?: if (knownCardHolder) null else run {
             val candidates = buildList<View> {
                 for (index in 0 until row.childCount) add(row.getChildAt(index))
             }
