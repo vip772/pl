@@ -402,7 +402,7 @@ public class WeChatNetworkDispatcher {
         dispatcherInstance = instance;
         dispatcherMethod = method;
         dispatcherArgCount = method.getParameterTypes().length;
-        observeQueueCompletion(instance.getClass());
+        // 网络完成回调只用于诊断，不参与发包；启动阶段不安装观察 Hook，避免影响微信原生链路。
         log(reason + ": " + instance.getClass().getName() + "#" + method.getName());
     }
 
