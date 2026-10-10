@@ -3139,6 +3139,19 @@ private class HchatExtraHooker(
     }
 
 
+    private fun holderCardContainer(holder: Any, row: ViewGroup): View? {
+        val holderName = holder.javaClass.name
+        val fieldName = when {
+            holderName == "kn5.d9" -> "b"
+            holderName == "com.tencent.mm.ui.chatting.viewitems.kb" -> "f"
+            else -> return null
+        }
+        val field = fieldsRecursive(holder.javaClass).firstOrNull {
+            it.name == fieldName && android.widget.FrameLayout::class.java.isAssignableFrom(it.type)
+        } ?: return null
+        val card = KavaReflector.readField(field, holder) as? android.widget.FrameLayout ?: return null
+        return card.takeIf { isViewWithinRoot(it, row) }
+    }
     private fun cardBottomAnchor(root: View, holder: Any): BottomDetailsAnchor? {
         val row = root as? ViewGroup ?: return null
         if (row !is RelativeLayout && row !is android.widget.FrameLayout &&
@@ -3148,25 +3161,31 @@ private class HchatExtraHooker(
             findHolderAvatarView(holder)?.let { directChildOf(row, it) }?.let(::add)
             findChattingAvatarView(root)?.let { directChildOf(row, it) }?.let(::add)
         }
-        val candidates = buildList<View> {
-            // The native time/header and card may share one outer branch. Keep that
-            // complete branch and choose by measured visual bottom instead of excluding
-            // it merely because it contains timeTV.
-            for (index in 0 until row.childCount) add(row.getChildAt(index))
-        }
-        val branch = candidates.asSequence()
-            .mapNotNull { directChildOf(row, it) }
-            .filter { it !in excludedBranches && it.tag != TAG_MESSAGE_DETAILS_VIEW }
-            .filter { isMeasuredCardBranch(it, row) }
-            .distinct()
-            .maxWithOrNull(
-                compareBy<View> { it.bottom }
-                    .thenBy { viewScoreForBottomDetails(it) }
-            )
+        val holderCard = holderCardContainer(holder, row)
+        val holderBranch = holderCard?.let { directChildOf(row, it) }
+            ?.takeUnless { it in excludedBranches || it.tag == TAG_MESSAGE_DETAILS_VIEW }
+            ?.takeIf { isMeasuredCardBranch(it, row) }
+        val branch = holderBranch ?: run {
+                val candidates = buildList<View> {
+                    // The native time/header and card may share one outer branch. Keep
+                    // that complete branch for holders without a verified card field.
+                    for (index in 0 until row.childCount) add(row.getChildAt(index))
+                }
+                candidates.asSequence()
+                    .mapNotNull { directChildOf(row, it) }
+                    .filter { it !in excludedBranches && it.tag != TAG_MESSAGE_DETAILS_VIEW }
+                    .filter { isMeasuredCardBranch(it, row) }
+                    .distinct()
+                    .maxWithOrNull(
+                        compareBy<View> { it.bottom }
+                            .thenBy { viewScoreForBottomDetails(it) }
+                    )
+            }
         val key = holder.javaClass.name
         if (branch != null && messageDetailsCardAnchorKeys.add(key)) {
             logger(
                 "消息卡片锚点 holder=$key root=${row.javaClass.name} " +
+                    "source=${if (holderBranch != null) "holderField" else "rowFallback"} " +
                     "anchor=${branch?.javaClass?.name ?: "none"} size=${branch?.width ?: 0}x${branch?.height ?: 0} " +
                     "top=${branch?.top ?: -1} bottom=${branch?.bottom ?: -1}",
                 null
