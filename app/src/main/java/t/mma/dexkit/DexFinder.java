@@ -81,7 +81,6 @@ public class DexFinder {
     public Class<?> protobufOnGYNetEndClass;
     public Class<?> protobufNetSceneBaseClass;
     public Method protobufStaticDispatchMethod;
-    public List<Method> protobufSceneEndMethods = new ArrayList<>();
     // 祝福语
     public Class<?> wishWxHbClass;
     public Constructor<?> wishWxHbCtor;
@@ -3475,7 +3474,6 @@ public class DexFinder {
             protobufOnGYNetEndClass = loadClass("protobufOnGYNetEndClass");
             protobufNetSceneBaseClass = loadClass("protobufNetSceneBaseClass");
             protobufStaticDispatchMethod = loadMethod("protobufStaticDispatchMethod");
-            protobufSceneEndMethods = loadMethodList("protobufSceneEndMethods");
             wishWxHbClass = loadClass("wishWxHbClass");
             sendTextMsgClass = loadClass("sendTextMsgClass");
             serviceGetterMethod = loadMethod("serviceGetterMethod");
@@ -4786,7 +4784,7 @@ public class DexFinder {
             putClass(editor, "protobufOnGYNetEndClass", protobufOnGYNetEndClass);
             putClass(editor, "protobufNetSceneBaseClass", protobufNetSceneBaseClass);
             putMethod(editor, "protobufStaticDispatchMethod", protobufStaticDispatchMethod);
-            putMethodList(editor, "protobufSceneEndMethods", protobufSceneEndMethods);
+            editor.remove("protobufSceneEndMethods");
             putClass(editor, "wishWxHbClass", wishWxHbClass);
             putClass(editor, "sendTextMsgClass", sendTextMsgClass);
             putMethod(editor, "serviceGetterMethod", serviceGetterMethod);
@@ -5470,9 +5468,6 @@ public class DexFinder {
             if (protobufOnGYNetEndClass == null) protobufOnGYNetEndClass = findOnGYNetEndClass();
             if (protobufReqRespClass == null) protobufReqRespClass = findReqRespClassFromConfigBuilder();
             resolveProtobufDispatchApi();
-            if (protobufSceneEndMethods == null || protobufSceneEndMethods.isEmpty()) {
-                protobufSceneEndMethods = findProtobufSceneEndMethods();
-            }
             logDetail("Protobuf包API: raw=" + className(protobufRawReqClass)
                     + " sendMsg=" + className(protobufNewSendMsgReqClass)
                     + " oplog=" + className(protobufOplogReqClass)
@@ -5482,8 +5477,7 @@ public class DexFinder {
                     + " cb=" + className(protobufCallbackClass)
                     + " gy=" + className(protobufOnGYNetEndClass)
                     + " scene=" + className(protobufNetSceneBaseClass)
-                    + " dispatch=" + methodName(protobufStaticDispatchMethod)
-                    + " sceneEnd=" + (protobufSceneEndMethods == null ? 0 : protobufSceneEndMethods.size()));
+                    + " dispatch=" + methodName(protobufStaticDispatchMethod));
         } catch (Throwable e) {
             HLog.e(TAG + " resolveProtobufPacketApi 失败: " + e.getMessage(), e);
         }
@@ -5858,43 +5852,6 @@ public class DexFinder {
                 && params[1] == int.class
                 && params[2] == int.class
                 && params[3] == String.class;
-    }
-
-    private List<Method> findProtobufSceneEndMethods() {
-        List<Method> result = new ArrayList<>();
-        if (protobufNetSceneBaseClass == null) return result;
-        try {
-            FindMethod fm = new FindMethod();
-            MethodMatcher mm = new MethodMatcher();
-            mm.name("onSceneEnd");
-            mm.paramCount(4);
-            fm.matcher(mm);
-            for (MethodData md : dexKit.findMethod(fm)) {
-                try {
-                    Method method = md.getMethodInstance(classLoader);
-                    if (isProtobufSceneEndMethod(method) && !result.contains(method)) {
-                        result.add(KavaReflector.accessible(method));
-                    }
-                } catch (Throwable ignored) {}
-            }
-        } catch (Throwable ignored) {}
-        return result;
-    }
-
-    private boolean isProtobufSceneEndMethod(Method method) {
-        if (method == null || !"onSceneEnd".equals(method.getName())) return false;
-        Class<?> owner = method.getDeclaringClass();
-        Class<?>[] params = method.getParameterTypes();
-        return owner != null
-                && !owner.isInterface()
-                && method.getReturnType() == void.class
-                && params != null
-                && params.length == 4
-                && params[0] == int.class
-                && params[1] == int.class
-                && params[2] == String.class
-                && protobufNetSceneBaseClass != null
-                && protobufNetSceneBaseClass.isAssignableFrom(params[3]);
     }
 
     private void resolveProtobufDispatchApi() {

@@ -3,9 +3,6 @@ import t.mma.utils.HLog;
 
 import org.json.JSONObject;
 
-import java.util.Collections;
-import java.util.Map;
-import java.util.WeakHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 
@@ -14,8 +11,6 @@ public final class ProtobufPacketRuntime {
     public static final String DIRECTION_RESPONSE = "response";
 
     private static volatile ProtobufPacketHook hook;
-    private static final Map<Object, Boolean> GENERIC_SCENES =
-            Collections.synchronizedMap(new WeakHashMap<>());
     private static final CopyOnWriteArrayList<Listener> LISTENERS = new CopyOnWriteArrayList<>();
 
     private ProtobufPacketRuntime() {}
@@ -35,14 +30,6 @@ public final class ProtobufPacketRuntime {
             return false;
         }
         return current.send(uri, cgiId, funcId, routeId, json, callback);
-    }
-
-    static void markGenericScene(Object scene) {
-        if (scene != null) GENERIC_SCENES.put(scene, Boolean.TRUE);
-    }
-
-    static boolean isGenericScene(Object scene) {
-        return scene != null && GENERIC_SCENES.containsKey(scene);
     }
 
     public static boolean registerListener(Listener listener) {

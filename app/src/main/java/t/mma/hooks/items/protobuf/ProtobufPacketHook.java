@@ -10,6 +10,11 @@ import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.lang.reflect.InvocationTargetException;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.RejectedExecutionException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -44,7 +49,13 @@ public class ProtobufPacketHook {
     private final ConcurrentHashMap<String, PacketSnapshot> snapshots = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> recentLogs = new ConcurrentHashMap<>();
     private volatile boolean installed;
-    private volatile boolean sceneEndHooked;
+    private static final int MAX_CAPTURE_BYTES = 1024 * 1024;
+    private final ThreadPoolExecutor captureExecutor = new ThreadPoolExecutor(
+            1, 1, 30L, TimeUnit.SECONDS, new ArrayBlockingQueue<>(64), runnable -> {
+                Thread thread = new Thread(runnable, "Hchat-PacketCapture");
+                thread.setDaemon(true);
+                return thread;
+            }, new ThreadPoolExecutor.AbortPolicy());
 
     public ProtobufPacketHook(ClassLoader classLoader,
                               DexFinder dexFinder,
@@ -80,7 +91,6 @@ public class ProtobufPacketHook {
                     hooked++;
                 }
             }
-            hookSceneEndCallbacks();
             installed = hooked > 0;
             if (hooked <= 0) error("Hook失败: 未找到dispatch");
             return installed;
@@ -273,7 +283,9 @@ public class ProtobufPacketHook {
                     broadcastPacket(ProtobufPacketRuntime.DIRECTION_REQUEST, uri, cgiId, snapshot.bytes);
                 }
                 if (logEnabled && !blocked) {
-                    log("快照保存: type=" + cgiId + " uri=" + uri + " req=" + snapshot.reqPbObj.getClass().getName());
+                    String snapshotLog = "快照保存: type=" + cgiId + " uri=" + uri
+                            + " req=" + snapshot.reqPbObj.getClass().getName();
+                    enqueueCapture(() -> log(snapshotLog));
                 }
                 if (logEnabled && !blocked && captureRequestEnabled()
                         && shouldLog("req|" + snapshot.key(), snapshot.bytes)) {
@@ -295,9 +307,20 @@ public class ProtobufPacketHook {
                                 if ("toString".equals(method.getName())) return callback.toString();
                                 if ("equals".equals(method.getName())) return callback == (args != null && args.length > 0 ? args[0] : null);
                                 if ("onGYNetEnd".equals(method.getName())) {
-                                    captureResponse(finalUri, finalCgiId, finalReqResp, args);
+                                    // Copy before native mutation; observation must not skip completion.
+                                    try {
+                                        captureResponse(finalUri, finalCgiId, finalReqResp, args);
+                                    } catch (Throwable captureError) {
+                                        t.mma.utils.HLog.e(TAG + " 响应复制失败", captureError);
+                                    }
                                 }
-                                return KavaReflector.invoke(method, callback, args == null ? new Object[0] : args);
+                                try {
+                                    return KavaReflector.invokeOrThrow(method, callback,
+                                            args == null ? new Object[0] : args);
+                                } catch (InvocationTargetException invocationError) {
+                                    throw invocationError.getCause() != null
+                                            ? invocationError.getCause() : invocationError;
+                                }
                             });
                     param.args[2] = proxy;
             }
@@ -306,100 +329,12 @@ public class ProtobufPacketHook {
         }
     }
 
-    private void hookSceneEndCallbacks() {
-        if (sceneEndHooked || dexFinder == null || dexFinder.protobufNetSceneBaseClass == null) return;
-        try {
-            int hooked = 0;
-            Set<String> hookedDesc = new HashSet<>();
-            if (dexFinder.protobufSceneEndMethods != null) {
-                for (Method method : dexFinder.protobufSceneEndMethods) {
-                    hooked += hookSceneEndMethod(method, hookedDesc);
-                }
-            }
-            List<Class<?>> candidates = new ArrayList<>();
-            collectSceneEndClasses(candidates, dexFinder.protobufOnGYNetEndClass);
-            if (dexFinder.packetBaseClasses != null) {
-                for (Class<?> base : dexFinder.packetBaseClasses) collectSceneEndClasses(candidates, base);
-            }
-            for (Class<?> clazz : candidates) {
-                for (Method method : KavaReflector.declaredMethods(clazz)) {
-                    hooked += hookSceneEndMethod(method, hookedDesc);
-                }
-            }
-            sceneEndHooked = hooked > 0;
-            if (hooked <= 0) error("Hook通用发包回调隔离失败: 未找到onSceneEnd");
-        } catch (Throwable e) {
-            error("Hook通用发包回调隔离失败: " + e.getMessage());
-        }
-    }
-
-    private int hookSceneEndMethod(Method method, Set<String> hookedDesc) {
-        if (!isSceneEndMethod(method)) return 0;
-        String desc = method.getDeclaringClass().getName() + "#" + method.toString();
-        if (!hookedDesc.add(desc)) return 0;
-        HookRegistry.get().hook(method, new XC_MethodHook() {
-            @Override
-            protected void beforeHookedMethod(MethodHookParam param) {
-                if (param.args == null || param.args.length < 4) return;
-                Object scene = param.args[3];
-                if (!ProtobufPacketRuntime.isGenericScene(scene)) return;
-                param.setResult(null);
-            }
-        });
-        return 1;
-    }
-
-    private void collectSceneEndClasses(List<Class<?>> out, Class<?> seed) {
-        if (seed == null) return;
-        if (seed.isInterface()) {
-            collectInterfaceImplementors(out, seed);
-            return;
-        }
-        addSceneEndClass(out, seed);
-        Class<?> cur = seed.getSuperclass();
-        while (cur != null && cur != Object.class) {
-            addSceneEndClass(out, cur);
-            cur = cur.getSuperclass();
-        }
-    }
-
-    private void collectInterfaceImplementors(List<Class<?>> out, Class<?> iface) {
-        if (iface == null || dexFinder == null) return;
-        List<Class<?>> bases = new ArrayList<>();
-        if (dexFinder.packetBaseClasses != null) bases.addAll(dexFinder.packetBaseClasses);
-        if (dexFinder.netQueueCandidateClasses != null) bases.addAll(dexFinder.netQueueCandidateClasses);
-        for (Class<?> candidate : bases) {
-            if (candidate == null) continue;
-            if (iface.isAssignableFrom(candidate)) addSceneEndClass(out, candidate);
-            for (Class<?> nested : candidate.getDeclaredClasses()) {
-                if (iface.isAssignableFrom(nested)) addSceneEndClass(out, nested);
-            }
-        }
-    }
-
-    private void addSceneEndClass(List<Class<?>> out, Class<?> clazz) {
-        if (clazz != null && !clazz.isInterface() && !out.contains(clazz)) out.add(clazz);
-    }
-
-    private boolean isSceneEndMethod(Method method) {
-        if (method == null || !"onSceneEnd".equals(method.getName())) return false;
-        Class<?>[] params = method.getParameterTypes();
-        return params != null
-                && params.length == 4
-                && params[0] == int.class
-                && params[1] == int.class
-                && params[2] == String.class
-                && dexFinder != null
-                && dexFinder.protobufNetSceneBaseClass != null
-                && dexFinder.protobufNetSceneBaseClass.isAssignableFrom(params[3]);
-    }
-
     private PacketSnapshot captureRequest(Object scene, Object reqResp, String uri, int cgiId) {
         try {
             Object wrapper = call(reqResp, "getReqObj");
             Object pb = findPbObject(wrapper);
             byte[] bytes = toBytes(pb);
-            if (pb == null || bytes == null) return null;
+            if (pb == null || bytes == null || bytes.length > MAX_CAPTURE_BYTES) return null;
             return new PacketSnapshot(uri, cgiId, scene, pb, bytes);
         } catch (Throwable ignored) {
             return null;
@@ -415,7 +350,7 @@ public class ProtobufPacketHook {
             if (args != null && args.length > 4) respSource = args[4];
             if (respSource == null) respSource = reqResp;
             byte[] bytes = extractResponseBytes(respSource);
-            if (bytes != null) {
+            if (bytes != null && bytes.length <= MAX_CAPTURE_BYTES) {
                 if (listenerEnabled) {
                     broadcastPacket(ProtobufPacketRuntime.DIRECTION_RESPONSE, uri, cgiId, bytes);
                 }
@@ -527,6 +462,21 @@ public class ProtobufPacketHook {
     }
 
     private void logPacket(String direction, String uri, int cgiId, byte[] bytes) {
+        if (bytes == null || bytes.length > MAX_CAPTURE_BYTES) return;
+        byte[] copy = bytes.clone();
+        enqueueCapture(() -> writePacketLog(direction, uri, cgiId, copy));
+    }
+    private void enqueueCapture(Runnable task) {
+        try {
+            captureExecutor.execute(() -> {
+                try { task.run(); }
+                catch (Throwable error) { t.mma.utils.HLog.e(TAG + " 后台抓包处理失败", error); }
+            });
+        } catch (RejectedExecutionException ignored) {
+            // Drop observation on overload; never block or run on the network caller.
+        }
+    }
+    private void writePacketLog(String direction, String uri, int cgiId, byte[] bytes) {
         String json = packetJson(bytes);
         XposedBridge.log(TAG + " " + direction
                 + "\nUri: " + uri
@@ -541,13 +491,10 @@ public class ProtobufPacketHook {
     private void broadcastPacket(String direction, String uri, int cgiId, byte[] bytes) {
         if (!ProtobufPacketRuntime.hasListeners()) return;
         long timestamp = System.currentTimeMillis();
-        ProtobufPacketRuntime.broadcast(new ProtobufPacketRuntime.Packet(
-                direction,
-                uri,
-                cgiId,
-                bytes,
-                timestamp
-        ));
+        if (bytes == null || bytes.length > MAX_CAPTURE_BYTES) return;
+        ProtobufPacketRuntime.Packet packet = new ProtobufPacketRuntime.Packet(
+                direction, uri, cgiId, bytes, timestamp);
+        enqueueCapture(() -> ProtobufPacketRuntime.broadcast(packet));
     }
 
     private String packetJson(byte[] bytes) {

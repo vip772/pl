@@ -88,7 +88,6 @@ final class ProtobufGenericSender {
             notify(callback, false, "通用发包失败: Dispatch异常 " + e.getClass().getSimpleName() + ": " + e.getMessage());
             return true;
         }
-        if (scene != null) ProtobufPacketRuntime.markGenericScene(scene);
         XposedBridge.log(TAG + " 发包Dispatch: type=" + cgiId
                 + " reqResp=" + reqResp.getClass().getName()
                 + " req=" + requestDesc

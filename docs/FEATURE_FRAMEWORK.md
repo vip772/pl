@@ -1988,3 +1988,13 @@ NativeLibraryLoader 只记录同一模块 ClassLoader 下已经成功加载的�
 
 
 消息菜单扩展现已接入8.0.78/3180原生View捕获与6×5重排，替代签名诊断，尚待构建和实机验证；适用范围、回退条件及测试见 features/MESSAGE_MENU_EXTENSION.md。
+
+## 微信偶发网络停滞排查与修复（2026-10-10）
+
+源码确认 ProtobufPacketHook 的通用发包回调隔离按全局 `(int,int,String,NetSceneBase)` 签名定位 onSceneEnd，并对被标记为通用 Scene 的回调直接 setResult(null)。该范围包括微信网络队列自身，且安装不受抓包日志开关限制。定向核对本地已解包微信 8.0.78 classes11 的 `com.tencent.mm.modelbase.r1.onSceneEnd`：入口设置 setHasCallbackToQueue(true)，从运行 Vector g 移除已完成 Scene，随后调用 w(int) 及 b(int,int,String,Scene) 继续处理。因此主动通用发包进入该路径后，模块会跳过队列清理与后续处理，可能造成请求槽位被占用及后续请求停滞。没有本轮故障现场线程栈，不能认定用户所有“无网络”事件均来自此路径。
+
+修复删除全局 onSceneEnd Hook、通用 Scene 标记、对应 DexKit 全局定位和缓存读取，保存缓存时移除旧 protobufSceneEndMethods 条目。微信原生网络生命周期及业务回调由宿主自行处理，不再作未经业务范围确认的全局隔离。模块使用的通用发包应由调用方提供正确 CGI/URI/参数；本轮未重建宿主业务回调。
+
+抓包 JSON 解析、Xposed 内容日志、文件写入及数据包监听通知改到单线程有界后台队列（64 个待处理任务）；超过 1 MiB 的包跳过观察，过载直接丢弃观察任务，不等待网络线程、不采用 CallerRunsPolicy。网络线程仍负责读取原生响应并复制字节，后台不访问可被宿主修改的响应对象。抓包响应代理在复制失败时继续调用原始回调，通过 invokeOrThrow 保留宿主返回值与异常原因，避免静默吞掉宿主异常。此限制只作用于观察，不阻止微信请求或响应。
+
+源码检查未发现 Wi-Fi 开关、系统代理或 ConnectivityManager 网络状态改写。该检查不等同于证明其它功能和脚本绝无阻塞风险。已完成改动静态审查、旧拦截引用清理与 diff 检查；按用户约定未执行本地编译、Gradle 或 APK 构建。微信内部证据限本地 8.0.78，未完成其它约定版本横向核验。需 GitHub 构建后重启微信，再验证普通收发消息、抓包开启时连续收发、主动通用发包后普通请求持续可用及后台重连。
