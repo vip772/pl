@@ -3208,6 +3208,8 @@ private class HchatExtraHooker(
     private fun holderCardContainer(holder: Any, row: ViewGroup): View? {
         val holderName = holder.javaClass.name
         val knownField = when (holderName) {
+            // 8.0.78 b4.a assigns clickArea to bkg, the red-packet card FrameLayout.
+            "com.tencent.mm.ui.chatting.viewitems.b4" -> "clickArea"
             "com.tencent.mm.ui.chatting.viewitems.bf" -> "c"
             "com.tencent.mm.ui.chatting.viewitems.w1" -> "q"
             else -> null
@@ -3279,7 +3281,8 @@ private class HchatExtraHooker(
             "kn5.d9", "com.tencent.mm.ui.chatting.viewitems.kb",
             "com.tencent.mm.ui.chatting.viewitems.id",
             "com.tencent.mm.ui.chatting.viewitems.bf",
-            "com.tencent.mm.ui.chatting.viewitems.w1" -> true
+            "com.tencent.mm.ui.chatting.viewitems.w1",
+            "com.tencent.mm.ui.chatting.viewitems.b4" -> true
             else -> false
         }
         // A verified card holder must never fall back to a guessed X2C/TextView branch.
@@ -3306,6 +3309,7 @@ private class HchatExtraHooker(
                 "com.tencent.mm.ui.chatting.viewitems.id" -> "e"
                 "com.tencent.mm.ui.chatting.viewitems.bf" -> "c"
                 "com.tencent.mm.ui.chatting.viewitems.w1" -> "q"
+                "com.tencent.mm.ui.chatting.viewitems.b4" -> "clickArea"
                 else -> "unknown"
             }
             logger(

@@ -83,3 +83,11 @@
 直接 Kotlin 编译生产辅助类及布局观察器（未运行 Gradle）：7 项布局观察器回归、5 项卡片层级/分类回归、14 项预绘制/附着回归通过；消息类型分类另有 59 项断言通过。
 
 用户在修复提交 `d20602a` 推送后确认：“构建成功，实机验证通过。”本轮消息底部时间缺失问题已由用户完成构建与实机验收；该反馈未提供逐消息类型测试清单或新增版本信息，不扩大为其它微信版本均已验证的结论。
+
+## 红包卡片时间偏移（2026-10-10 18:47 日志）
+
+用户反馈发送红包的时间显示在卡片顶部，而转账正常。日志 `Hchat-runtime-20261010-184725.log` 于 18:30:18.333 明确记录 `holder=com.tencent.mm.ui.chatting.viewitems.b4 source=rowFallback anchor=com.tencent.mm.view.x2c.X2CTextView size=995x190 top=0 bottom=190`，说明未知 Holder 的行分支兜底误选顶部文字。
+
+定向核对已解包微信 8.0.78 的 classes13 `b4.smali`：`b4.a` 将资源 `0x7f0a0f6d` 赋给继承的 `clickArea`；public.xml 确认为 `bkg`；`wu.xml`、`wg.xml` 中 `bkg` 为承载卡片内容的 FrameLayout。`getMainContainerView()` 返回字段 n（资源 `0x7f0a0f74`），不作为本次红包完整卡片定位依据。
+
+现将 b4 的 clickArea 纳入已确认卡片字段，沿现有父链提升到完整消息行直接分支；字段尚未附着或测量时等待既有布局重试，禁止回退到 X2CTextView。转账及其它 Holder 的字段映射与锚点选择规则未修改。按用户约定未执行本地编译或构建，仅静态审查和 diff 检查；红包显示效果待 GitHub 构建后实机验证，本轮未完成其它微信版本横向验证。
