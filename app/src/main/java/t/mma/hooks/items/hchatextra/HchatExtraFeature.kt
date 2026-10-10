@@ -215,6 +215,7 @@ private class HchatExtraHooker(
     private val messageDetailsAttachCallbacks = MessageDetailsAttachQueue()
     private val messageDetailsLayoutCallbacks = MessageDetailsLayoutObserver()
     private val messageDetailsRetryListeners = MessageDetailsPreDrawQueue()
+    private val messageDetailsPendingLayout = MessageDetailsPendingLayoutObserver()
     private val messageDetailsPositionListeners = MessageDetailsPreDrawQueue()
     private val messageDetailsColorListeners = MessageDetailsPreDrawQueue()
     private val messageDetailsBindStates = ThreadLocal<ArrayDeque<MessageDetailsBindState>>()
@@ -382,6 +383,7 @@ private class HchatExtraHooker(
         messageDetailsAttachCallbacks.clear()
         messageDetailsLayoutCallbacks.clear()
         messageDetailsRetryListeners.clear()
+        messageDetailsPendingLayout.clear()
         messageDetailsPositionListeners.clear()
         messageDetailsColorListeners.clear()
         synchronized(messageDetailsBindTokens) { messageDetailsBindTokens.clear() }
@@ -599,6 +601,7 @@ private class HchatExtraHooker(
         messageDetailsLayoutCallbacks.cancel(root)
         synchronized(messageDetailsBindTokens) { messageDetailsBindTokens[root] = Any() }
         messageDetailsRetryListeners.cancel(root)
+        messageDetailsPendingLayout.cancel(root)
         removeTaggedMessageDetailsViews(root)
         return state
     }
@@ -1091,13 +1094,31 @@ private class HchatExtraHooker(
             ?: holder
         val label = findHolderTextView(viewTag, "timeTV", holderTimeFieldCache)
         val inserted = insertMessageDetailsLabel(root, label, viewTag, details, nativeMessage = nativeMessage)
-        if (!inserted) {
-            // Never expose a stale or partially inserted label while waiting for layout.
+        val cardMessage = !isCenteredNotice(details.type) &&
+            !isKnownNonCardHolder(viewTag) &&
+            isCardMessage(
+                details.type,
+                MessageTypeLabels.subtype(details.type, details.content, details.body)
+            )
+        if (inserted) {
+            if (cardMessage) messageDetailsPendingLayout.cancel(root)
+        } else {
+            // Card holders can be bound while the row and their native content are still 0x0.
+            // Keep listening for the actual global layout instead of exhausting pre-draw retries.
             removeTaggedMessageDetailsViews(root)
-            if (attempt >= MESSAGE_DETAILS_MAX_RETRY) {
-                logMessageDetailsFailure("layout", viewTag, root)
+            if (cardMessage) {
+                val retryArgs = args?.copyOf()
+                messageDetailsPendingLayout.observe(root) {
+                    bindBottomMessageDetails(
+                        bindObject, retryArgs, MESSAGE_DETAILS_MAX_RETRY, viewTag, nativeMessage
+                    )
+                }
+            } else {
+                if (attempt >= MESSAGE_DETAILS_MAX_RETRY) {
+                    logMessageDetailsFailure("layout", viewTag, root)
+                }
+                scheduleMessageDetailsRetry(root, bindObject, args, attempt, viewTag, nativeMessage)
             }
-            scheduleMessageDetailsRetry(root, bindObject, args, attempt, viewTag, nativeMessage)
         }
         label?.setOnClickListener(null)
         if (label != null) label.isClickable = false
