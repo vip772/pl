@@ -3152,15 +3152,27 @@ private class HchatExtraHooker(
 
     private fun holderCardContainer(holder: Any, row: ViewGroup): View? {
         val holderName = holder.javaClass.name
+        val knownField = when (holderName) {
+            "com.tencent.mm.ui.chatting.viewitems.bf" -> "c"
+            "com.tencent.mm.ui.chatting.viewitems.w1" -> "q"
+            else -> null
+        }
+        if (knownField != null) {
+            val content = fieldsRecursive(holder.javaClass).firstOrNull {
+                it.name == knownField && View::class.java.isAssignableFrom(it.type)
+            }?.let { KavaReflector.readField(it, holder) as? View }
+                ?: return null
+            return content.takeIf { isViewWithinRoot(it, row) }
+        }
         if (holderName == "com.tencent.mm.ui.chatting.viewitems.id") {
-            // id.e is the inner gbh footer in vf/x0. Its ancestor at the message-row
-            // level is the complete content branch (header plus card), which is the
-            // only valid place to append message details.
+            // id.e is the inner gbh footer in vf/x0. The caller promotes this
+            // inner view to the message-row direct content branch before insertion,
+            // so details are appended after the complete header-plus-card body.
             val innerCard = fieldsRecursive(holder.javaClass).firstOrNull {
                 it.name == "e" && View::class.java.isAssignableFrom(it.type)
             }?.let { KavaReflector.readField(it, holder) as? View }
                 ?: return null
-            return directChildOf(row, innerCard)?.takeIf { isViewWithinRoot(it, row) }
+            return innerCard.takeIf { isViewWithinRoot(it, row) }
         }
         val fieldName = when {
             holderName == "kn5.d9" -> "b"
@@ -3188,7 +3200,9 @@ private class HchatExtraHooker(
             ?.takeIf { isMeasuredCardBranch(it, row) }
         val knownCardHolder = when (holder.javaClass.name) {
             "kn5.d9", "com.tencent.mm.ui.chatting.viewitems.kb",
-            "com.tencent.mm.ui.chatting.viewitems.id" -> true
+            "com.tencent.mm.ui.chatting.viewitems.id",
+            "com.tencent.mm.ui.chatting.viewitems.bf",
+            "com.tencent.mm.ui.chatting.viewitems.w1" -> true
             else -> false
         }
         // A verified card holder must never fall back to a guessed X2C/TextView branch.
@@ -3213,6 +3227,8 @@ private class HchatExtraHooker(
                 "kn5.d9" -> "b"
                 "com.tencent.mm.ui.chatting.viewitems.kb" -> "f"
                 "com.tencent.mm.ui.chatting.viewitems.id" -> "e"
+                "com.tencent.mm.ui.chatting.viewitems.bf" -> "c"
+                "com.tencent.mm.ui.chatting.viewitems.w1" -> "q"
                 else -> "unknown"
             }
             logger(
