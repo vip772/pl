@@ -166,6 +166,8 @@ class AntiRecallFeature : BaseFeature() {
         if (selfRecall && !keepSelfRecallEnabled(context)) {
             return false
         }
+        runCatching { DynamicRecallStore.mark(context.hostContext(), recalledInfo?.message) }
+            .onFailure { logError("动态撤回标记保存失败", it) }
         if (selfRecall) markSelfRecallMessage(recalledInfo)
         if (selfRecall) {
             if (showNoticeEnabled(context)) {

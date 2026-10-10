@@ -186,6 +186,7 @@ private class HchatExtraHooker(
         UNAVAILABLE
     }
 
+    private val dynamicRecall = t.mma.hooks.items.antirecall.DynamicRecallRuntime(context.hostContext())
     private val prefs = HchatStorage.preferences(context.hostContext(), HchatExtraSettings.PREFS_NAME)
     private val hideAvatarPrefs = HchatStorage.preferences(
         context.hostContext(),
@@ -367,6 +368,7 @@ private class HchatExtraHooker(
     }
 
     fun destroy() {
+        dynamicRecall.destroy()
         forwardedRecordTypes.destroy()
         prefs.unregisterOnSharedPreferenceChangeListener(messageDetailsPrefsListener)
         hideAvatarPrefs.unregisterOnSharedPreferenceChangeListener(hideAvatarPrefsListener)
@@ -570,9 +572,13 @@ private class HchatExtraHooker(
                         val outer = stack?.lastOrNull { state.root != null && it.root === state.root }
                         if (outer != null && state.message != null) outer.message = state.message
                         if (stack?.isEmpty() == true) messageDetailsBindStates.remove()
-                        if (outer != null || !messageDetailsConfig.enabled || param.hasThrowable()) return
+                        if (outer != null || param.hasThrowable()) return
                         runCatching {
-                            bindBottomMessageDetails(param.thisObject, param.args, 0, state.holder, state.message, state.root)
+                            runCatching { bindDynamicRecall(param.thisObject, param.args, state) }
+                                .onFailure { logger("动态撤回消息绑定失败", it) }
+                            if (messageDetailsConfig.enabled) {
+                                bindBottomMessageDetails(param.thisObject, param.args, 0, state.holder, state.message, state.root)
+                            }
                         }.onFailure { logger("消息显示时间绑定失败", it) }
                     }
                 })
@@ -587,6 +593,31 @@ private class HchatExtraHooker(
         return complete
     }
 
+    private fun bindDynamicRecall(bindObject: Any?, args: Array<Any?>?, state: MessageDetailsBindState) {
+        val adapterHolder = messageBindHolder(args) ?: return
+        val itemView = findRootView(adapterHolder) ?: return
+        val root = state.root ?: messageRowRoot(itemView)
+        val holder = state.holder ?: itemView.tag?.takeIf { isMessageDetailsHolder(it, root) } ?: return
+        val message = state.message ?: resolveMessageFromBindArgs(args)
+            ?: resolveMessageFromAdapter(bindObject, messageBindPosition(args)) ?: return
+        val type = messageType(message)
+        if (isCenteredNotice(type)) return
+        val talker = readMessageString(message, "getTalker", "field_talker", "talker")
+        val id = messageId(message)
+        val serverId = parseLong(readMessageValue(message, "getMsgSvrId", "field_msgSvrId", "msgSvrId")) ?: 0L
+        dynamicRecall.bind(root, talker, id, serverId) {
+            val parent = root as? ViewGroup
+            if (parent == null) null else {
+                holderCardContainer(holder, parent)
+                    ?.takeIf { it.visibility == View.VISIBLE && it.width > 0 && it.height > 0 }
+                    ?: holderMainContentView(holder, parent)
+                        ?.takeIf { hasMessageSizedBounds(it, parent) }
+                    ?: messageContentView(holder, parent)
+                        ?.takeIf { hasMessageSizedBounds(it, parent) }
+            }
+        }
+    }
+
     private fun captureMessageDetailsBindState(args: Array<Any?>?): MessageDetailsBindState {
         val adapterHolder = messageBindHolder(args) ?: return MessageDetailsBindState(null)
         val holderRoot = findRootView(adapterHolder) ?: return MessageDetailsBindState(null)
@@ -597,6 +628,7 @@ private class HchatExtraHooker(
         // A full/payload adapter bind invokes the item hook synchronously. Clean each row
         // once and mount from its outermost hook after all native mutations finish.
         if (messageDetailsBindStates.get()?.any { it.root === root } == true) return state
+        dynamicRecall.clear(root)
         messageDetailsAttachCallbacks.cancel(root)
         messageDetailsLayoutCallbacks.cancel(root)
         synchronized(messageDetailsBindTokens) { messageDetailsBindTokens[root] = Any() }

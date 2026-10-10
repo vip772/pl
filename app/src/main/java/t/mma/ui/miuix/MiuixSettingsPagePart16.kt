@@ -1440,6 +1440,13 @@ internal fun AntiRecallMiuixPage(
             ) ?: AntiRecallSettings.DEFAULT_NOTICE_TIME_FORMAT
         )
     }
+    var dynamicRecall by remember { mutableStateOf(sp.getBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, false)) }
+    var dynamicColor by remember { mutableStateOf(sp.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
+        t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings.DEFAULT_NUMBER_COLOR).orEmpty()) }
+    var dynamicSpeed by remember { mutableStateOf(sp.getInt(AntiRecallSettings.KEY_DYNAMIC_SPEED,
+        t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings.DEFAULT_NUMBER_SPEED)) }
+    var dynamicStroke by remember { mutableStateOf(sp.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
+        t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH)) }
     val usesTimeVariable = noticeText.contains(AntiRecallSettings.VAR_SEND_TIME) ||
         noticeText.contains(AntiRecallSettings.VAR_RECALL_TIME)
     val listState = rememberLazyListState()
@@ -1463,6 +1470,10 @@ internal fun AntiRecallMiuixPage(
                         return@save
                     }
                     sp.edit()
+                        .putBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, dynamicRecall)
+                        .putString(AntiRecallSettings.KEY_DYNAMIC_COLOR, dynamicColor)
+                        .putInt(AntiRecallSettings.KEY_DYNAMIC_SPEED, dynamicSpeed)
+                        .putInt(AntiRecallSettings.KEY_DYNAMIC_STROKE, dynamicStroke)
                         .putString(
                             AntiRecallSettings.KEY_NOTICE_TEXT,
                             noticeText.ifBlank { AntiRecallSettings.DEFAULT_NOTICE_TEXT }
@@ -1534,6 +1545,20 @@ internal fun AntiRecallMiuixPage(
                         ) { noticeTimeFormat = it }
                     }
                 }
+            }
+            item { SmallTitle(text = "动态撤回") }
+            item {
+                SwitchRow(dynamicRecall, "动态撤回", "为防撤回保留的原消息显示旋转渐变描边，保存后生效",
+                    onCheckedChange = { dynamicRecall = it })
+            }
+            if (dynamicRecall) {
+                item {
+                    ColorPickerRow("渐变颜色", "消息描边旋转渐变色", dynamicColor,
+                        onReset = { dynamicColor = t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings.DEFAULT_NUMBER_COLOR }
+                    ) { dynamicColor = it.take(19) }
+                }
+                item { speedControl("描边旋转周期", dynamicSpeed) { dynamicSpeed = it } }
+                item { strokeWidthControl("描边宽度", dynamicStroke) { dynamicStroke = it } }
             }
         }
     }

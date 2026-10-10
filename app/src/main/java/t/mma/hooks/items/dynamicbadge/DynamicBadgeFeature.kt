@@ -6,7 +6,6 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
-import android.graphics.SweepGradient
 import android.graphics.drawable.Drawable
 import android.os.Handler
 import android.os.Looper
@@ -628,10 +627,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             if (number) {
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = stroke
-                paint.shader = SweepGradient(rect.centerX(), rect.centerY(), intArrayOf(start, end, start), floatArrayOf(0f, 0.5f, 1f)).apply {
-                    setLocalMatrix(android.graphics.Matrix().apply { postRotate(phase, rect.centerX(), rect.centerY()) })
-                }
-                canvas.drawRoundRect(rect, rect.height() / 2f, rect.height() / 2f, paint)
+                RotatingGradientStroke.draw(canvas, paint, rect, rect.height() / 2f, start, end, phase)
             } else {
                 val pulse = (0.35f + 0.65f * (0.5f + 0.5f * kotlin.math.cos(phase * Math.PI / 180.0))).toFloat()
                 val dotRect = RectF(rect.left - density, rect.top - density, rect.right + density, rect.bottom + density)

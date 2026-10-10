@@ -2252,7 +2252,7 @@ internal fun matchedFeatureSubTerms(query: String, provider: FeatureSettingsProv
 internal fun featureSubSearchTerms(featureId: String): List<String> {
     return when (featureId) {
         AntiRecallFeature.ID -> listOf(
-            "私聊防撤回", "群聊防撤回", "公众号防撤回", "撤回提示", "自定义撤回提示", "发送时间", "撤回时间", "时间格式", "语音防撤回", "图片防撤回", "视频防撤回"
+            "动态撤回", "渐变颜色", "描边旋转周期", "描边宽度", "私聊防撤回", "群聊防撤回", "公众号防撤回", "撤回提示", "自定义撤回提示", "发送时间", "撤回时间", "时间格式", "语音防撤回", "图片防撤回", "视频防撤回"
         )
         MultiRecallFeature.ID -> listOf("多选撤回", "批量撤回", "多选消息", "分享菜单", "撤回自己消息")
         MessageForwardFeature.ID -> listOf("转发", "转发[H]", "朋友圈", "好友", "分享", "群发助手", "好友标签", "朋友圈转发", "个人主页朋友圈")

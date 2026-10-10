@@ -121,7 +121,7 @@ var dotSpeed by remember { mutableStateOf(sp.getInt(DynamicBadgeSettings.KEY_DOT
     }
 }
 @Composable
-private fun strokeWidthControl(title: String, value: Int, onValue: (Int) -> Unit) {
+internal fun strokeWidthControl(title: String, value: Int, onValue: (Int) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         SmallTitle(text = "$title ${value}dp")
         Slider(
@@ -135,7 +135,7 @@ private fun strokeWidthControl(title: String, value: Int, onValue: (Int) -> Unit
 }
 
 @Composable
-private fun speedControl(title: String, value: Int, onValue: (Int) -> Unit) {
+internal fun speedControl(title: String, value: Int, onValue: (Int) -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
         SmallTitle(text = "$title ${value}ms")
         Slider(
