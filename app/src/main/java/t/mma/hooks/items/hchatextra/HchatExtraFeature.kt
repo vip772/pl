@@ -1072,7 +1072,7 @@ private class HchatExtraHooker(
         capturedHolder: Any? = null,
         capturedMessage: Any? = null
     ): Boolean {
-        val holder = messageBindHolder(args) ?: return false
+        val holder = capturedHolder ?: messageBindHolder(args) ?: return false
         val holderRoot = findRootView(holder) ?: return false
         if (isScrollingContainer(holderRoot)) return false
         val root = messageRowRoot(holderRoot)
