@@ -38,6 +38,8 @@
 
 第六次复测进一步确认 `kn5.c3` 是文件消息 Holder：目标 APK 中它持有 `ChattingNewFileMvvmView`、文件名 TextView 和 LinearLayout，不是卡片容器。旧版本还允许已确认卡片 Holder 在字段未命中时回退 `rowFallback`，因此 `kn5.d9` 再次选中 `X2CTextView`。当前修订将 `kn5.c3` 永久排除卡片路径；`kn5.d9` 与 `viewitems.kb` 一旦进入卡片路径，只允许使用经 DEX 确认的 FrameLayout 字段，字段未附着或未测量时直接等待现有重试，禁止任何 X2C/TextView 行分支回退。新增一次性 `消息卡片锚点字段未就绪` 日志，用于区分字段为空、未挂载和测量未完成。
 
+本次针对新日志中的 `com.tencent.mm.ui.chatting.viewitems.id`：定向读取 8.0.78 的 `id.smali` 和布局 `vf.xml`/`x0.xml` 确认，`id.e` 是内部 `gbh` 底部区域，不是完整卡片。实现通过 `id.e` 沿父链提升到消息行直接内容分支，并将 `id` 纳入禁止 `rowFallback` 的已确认卡片 Holder 集合，避免再次选中 `X2CTextView`。
+
 ## 验证边界
 续接时已运行生产布局观察器 7 项及预绘制/附着队列 14 项回归，全部通过。布局观察器回归覆盖标签异步移除、滚动复用旧回调取消、稳定几何不循环、observer 迁移、深层标签状态变化及 detach/clear 清理。编译和这些模型测试不等同于微信真机 UI 通过。本轮宿主绑定链针对设备微信 8.0.76（3140）核验，未完成 8.0.49/58/66/68/72/74/77 横向验证。上述 8.0.78 回归修复已取得截图和运行日志证据，但仍需 GitHub 构建后的同类卡片实机复测。
 
