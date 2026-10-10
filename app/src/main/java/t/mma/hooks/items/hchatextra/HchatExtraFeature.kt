@@ -1195,7 +1195,9 @@ private class HchatExtraHooker(
             restoreAvatarDetailsSpacingsAround(root)
         }
         val appSubtype = MessageTypeLabels.subtype(details.type, details.content, details.body)
-        val cardMessage = !centeredNotice && isCardMessage(details.type, appSubtype)
+        val cardMessage = !centeredNotice &&
+            !isKnownNonCardHolder(holder) &&
+            isCardMessage(details.type, appSubtype)
         val bottomAnchor = if (avatarAnchor == null) {
             if (cardMessage) {
                 // The native time/header and card may share one outer branch. Anchor below
@@ -3066,6 +3068,9 @@ private class HchatExtraHooker(
         64, 570425393, 603979825, 285222674, 889192497, 922746929 -> true
         else -> false
     }
+    private fun isKnownNonCardHolder(holder: Any): Boolean =
+        holder.javaClass.name == "kn5.c3"
+
     private fun isCardMessage(type: Int, appSubtype: Int?): Boolean {
         val normalized = WeChatMessageTypes.normalize(type)
         if (normalized != WeChatMessageTypes.APP && type != 44 && type != 82 && appSubtype == null) {
@@ -3171,23 +3176,35 @@ private class HchatExtraHooker(
         val holderBranch = holderCard?.let { directChildOf(row, it) }
             ?.takeUnless { it in excludedBranches || it.tag == TAG_MESSAGE_DETAILS_VIEW }
             ?.takeIf { isMeasuredCardBranch(it, row) }
-        val branch = holderBranch ?: run {
-                val candidates = buildList<View> {
-                    // The native time/header and card may share one outer branch. Keep
-                    // that complete branch for holders without a verified card field.
-                    for (index in 0 until row.childCount) add(row.getChildAt(index))
-                }
-                candidates.asSequence()
-                    .mapNotNull { directChildOf(row, it) }
-                    .filter { it !in excludedBranches && it.tag != TAG_MESSAGE_DETAILS_VIEW }
-                    .filter { isMeasuredCardBranch(it, row) }
-                    .distinct()
-                    .maxWithOrNull(
-                        compareBy<View> { it.bottom }
-                            .thenBy { viewScoreForBottomDetails(it) }
-                    )
+        val knownCardHolder = when (holder.javaClass.name) {
+            "kn5.d9", "com.tencent.mm.ui.chatting.viewitems.kb" -> true
+            else -> false
+        }
+        // A verified card holder must never fall back to a guessed X2C/TextView branch.
+        // Wait for its FrameLayout field to attach and let the existing retry handle it.
+        val branch = if (knownCardHolder) holderBranch else run {
+            val candidates = buildList<View> {
+                for (index in 0 until row.childCount) add(row.getChildAt(index))
             }
+            candidates.asSequence()
+                .mapNotNull { directChildOf(row, it) }
+                .filter { it !in excludedBranches && it.tag != TAG_MESSAGE_DETAILS_VIEW }
+                .filter { isMeasuredCardBranch(it, row) }
+                .distinct()
+                .maxWithOrNull(
+                    compareBy<View> { it.bottom }
+                        .thenBy { viewScoreForBottomDetails(it) }
+                )
+        }
         val key = holder.javaClass.name
+        if (knownCardHolder && holderBranch == null && messageDetailsCardAnchorKeys.add("missing:$key")) {
+            val fieldLabel = if (key == "kn5.d9") "b" else "f"
+            logger(
+                "消息卡片锚点字段未就绪 holder=$key field=$fieldLabel " +
+                    "fieldView=${holderCard?.javaClass?.name ?: "none"} row=${row.javaClass.name}",
+                null
+            )
+        }
         if (branch != null && messageDetailsCardAnchorKeys.add(key)) {
             logger(
                 "消息卡片锚点 holder=$key root=${row.javaClass.name} " +
