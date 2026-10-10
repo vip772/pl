@@ -33,6 +33,8 @@ internal class MessageDetailsPendingLayoutObserver {
         private var observer: ViewTreeObserver? = null
         private var active = true
         private var posted = false
+        private var polling = false
+        private val poll = Runnable { onPoll() }
 
         fun attach(view: View) {
             if (!active) return
@@ -42,23 +44,42 @@ internal class MessageDetailsPendingLayoutObserver {
                 current.addOnGlobalLayoutListener(this)
                 observer = current
             }
+            schedulePoll()
         }
-
         override fun onViewAttachedToWindow(view: View) = attach(view)
-
         override fun onViewDetachedFromWindow(view: View) {
             removeObserver()
+            stopPoll()
             posted = false
         }
+        override fun onGlobalLayout() = scheduleAction()
 
-        override fun onGlobalLayout() {
+        private fun scheduleAction() {
             if (!active || entries[root] !== this || !root.isAttachedToWindow || posted) return
             posted = true
             root.post {
                 posted = false
                 if (!active || entries[root] !== this || !root.isAttachedToWindow) return@post
-                if (action()) cancel(root)
+                if (action()) cancel(root) else schedulePoll()
             }
+        }
+
+        private fun schedulePoll() {
+            if (!active || entries[root] !== this || !root.isAttachedToWindow || polling) return
+            polling = true
+            root.postDelayed(poll, 32L)
+        }
+
+        private fun onPoll() {
+            polling = false
+            if (!active || entries[root] !== this || !root.isAttachedToWindow) return
+            scheduleAction()
+            if (entries[root] === this) schedulePoll()
+        }
+
+        private fun stopPoll() {
+            if (polling) root.removeCallbacks(poll)
+            polling = false
         }
 
         private fun removeObserver() {
@@ -70,6 +91,7 @@ internal class MessageDetailsPendingLayoutObserver {
 
         fun dispose() {
             active = false
+            stopPoll()
             removeObserver()
             root.removeOnAttachStateChangeListener(this)
             action = { true }
