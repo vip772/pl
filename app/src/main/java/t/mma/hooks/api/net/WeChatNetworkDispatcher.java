@@ -15,6 +15,12 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.lang.reflect.Modifier;
+import java.lang.reflect.InvocationTargetException;
+import java.util.Map;
+import java.util.WeakHashMap;
+import android.os.SystemClock;
+import t.mma.utils.HLog;
 
 import de.robv.android.xposed.XC_MethodHook;
 
@@ -28,11 +34,15 @@ public class WeChatNetworkDispatcher {
     }
 
     private final Logger logger;
-    private Object dispatcherInstance;
-    private Method dispatcherMethod;
+    private volatile Object dispatcherInstance;
+    private volatile Method dispatcherMethod;
     private int dispatcherArgCount = 1;
     private List<Class<?>> queueCandidateClasses = Collections.emptyList();
     private final Set<Method> hookedQueueMethods = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Set<Method> observedCompletionMethods = Collections.newSetFromMap(new ConcurrentHashMap<>());
+    private final Map<Object, Long> moduleRequests = Collections.synchronizedMap(new WeakHashMap<>());
+    private final Map<String, Long> failureLogTimes = new ConcurrentHashMap<>();
+
 
     public WeChatNetworkDispatcher(Logger logger) {
         this.logger = logger;
@@ -97,31 +107,80 @@ public class WeChatNetworkDispatcher {
 
         if (dispatcherInstance != null && dispatcherMethod != null) {
             try {
+                moduleRequests.put(realRequest, SystemClock.elapsedRealtime());
                 Object result;
                 if (dispatcherArgCount == 2) {
-                    result = KavaReflector.invoke(dispatcherMethod, dispatcherInstance, realRequest, 0);
+                    result = KavaReflector.invokeOrThrow(dispatcherMethod, dispatcherInstance, realRequest, 0);
                 } else {
-                    result = KavaReflector.invoke(dispatcherMethod, dispatcherInstance, realRequest);
+                    result = KavaReflector.invokeOrThrow(dispatcherMethod, dispatcherInstance, realRequest);
                 }
-                return normalizeSendResult(result);
+                boolean accepted = normalizeSendResult(result);
+                if (!accepted) moduleRequests.remove(realRequest);
+                HLog.i("[Hchat:NetworkTrace] moduleSubmit scene=" + realRequest.getClass().getName()
+                        + " accepted=" + accepted + " queue=" + dispatcherMethod.toGenericString());
+                return accepted;
+            } catch (InvocationTargetException invokeErr) {
+                // Original code may already have submitted work before throwing. Never resubmit.
+                moduleRequests.remove(realRequest);
+                HLog.e("[Hchat:NetworkTrace] 模块请求原生入队异常 scene="
+                        + realRequest.getClass().getName(),
+                        invokeErr.getCause() != null ? invokeErr.getCause() : invokeErr);
+                return false;
             } catch (Throwable invokeErr) {
-                try {
-                    if (dispatcherArgCount == 2) {
-                        Object result = KavaReflector.invokeMethod(dispatcherInstance, dispatcherMethod.getName(), realRequest, 0);
-                        return normalizeSendResult(result);
-                    } else {
-                        Object result = KavaReflector.invokeMethod(dispatcherInstance, dispatcherMethod.getName(), realRequest);
-                        return normalizeSendResult(result);
-                    }
-                } catch (Throwable e) {
-                    log("sendNetworkRequest 异常: " + e.getMessage());
-                }
+                moduleRequests.remove(realRequest);
+                HLog.e("[Hchat:NetworkTrace] 模块请求反射入队失败 scene=" + realRequest.getClass().getName(), invokeErr);
+                return false;
             }
         } else {
             log("sendNetworkRequest 失败: dispatcher=" + (dispatcherInstance != null)
                     + " method=" + (dispatcherMethod != null));
         }
         return false;
+    }
+
+    /** Read-only: never intercept native completion or inspect message/response contents. */
+    private void observeQueueCompletion(Class<?> queueClass) {
+        for (Method method : KavaReflector.declaredMethods(queueClass)) {
+            Class<?>[] types = method.getParameterTypes();
+            if (!"onSceneEnd".equals(method.getName()) || method.getReturnType() != void.class
+                    || Modifier.isAbstract(method.getModifiers()) || Modifier.isStatic(method.getModifiers())
+                    || types.length != 4 || types[0] != int.class || types[1] != int.class
+                    || types[2] != String.class || !isNetworkRequestType(types[3])
+                    || !observedCompletionMethods.add(method)) continue;
+            try {
+                HookRegistry.get().hook(method, new XC_MethodHook() {
+                    @Override protected void afterHookedMethod(MethodHookParam param) {
+                        // Candidate classes include business listeners. Only the exact cached queue applies.
+                        if (param.thisObject != dispatcherInstance || param.args == null || param.args.length != 4) return;
+                        try {
+                            int errType = ((Number) param.args[0]).intValue();
+                            int errCode = ((Number) param.args[1]).intValue();
+                            Object scene = param.args[3];
+                            Long submitted = scene != null ? moduleRequests.remove(scene) : null;
+                            if (errType == 0 && errCode == 0 && !param.hasThrowable()) return;
+                            long now = SystemClock.elapsedRealtime();
+                            String key = errType + ":" + errCode;
+                            Long last = failureLogTimes.put(key, now);
+                            if (last != null && now - last < 2000L && submitted == null) return;
+                            if (failureLogTimes.size() > 64) failureLogTimes.clear();
+                            Object type = scene != null ? KavaReflector.invokeMethod(scene, "getType") : null;
+                            HLog.w("[Hchat:NetworkTrace] queueFailure errType=" + errType + " errCode=" + errCode
+                                    + " cgi=" + type + " scene=" + (scene != null ? scene.getClass().getName() : "null")
+                                    + " moduleSubmitted=" + (submitted != null)
+                                    + " elapsedMs=" + (submitted != null ? now - submitted : -1)
+                                    + " thread=" + Thread.currentThread().getName());
+                            if (param.hasThrowable()) HLog.e("[Hchat:NetworkTrace] 网络队列原始完成回调异常", param.getThrowable());
+                        } catch (Throwable error) {
+                            HLog.e("[Hchat:NetworkTrace] 只读网络诊断失败", error);
+                        }
+                    }
+                });
+                HLog.i("[Hchat:NetworkTrace] completionObserver=" + method.toGenericString());
+            } catch (Throwable error) {
+                observedCompletionMethods.remove(method);
+                HLog.e("[Hchat:NetworkTrace] 网络完成诊断安装失败: " + method.toGenericString(), error);
+            }
+        }
     }
 
     private boolean normalizeSendResult(Object result) {
@@ -343,6 +402,7 @@ public class WeChatNetworkDispatcher {
         dispatcherInstance = instance;
         dispatcherMethod = method;
         dispatcherArgCount = method.getParameterTypes().length;
+        observeQueueCompletion(instance.getClass());
         log(reason + ": " + instance.getClass().getName() + "#" + method.getName());
     }
 
