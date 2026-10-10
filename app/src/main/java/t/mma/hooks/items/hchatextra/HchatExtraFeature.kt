@@ -3356,14 +3356,13 @@ private class HchatExtraHooker(
     }
 
     private fun directChildOf(parent: ViewGroup, view: View): View? {
-        if (view.parent === parent) return view
+        if (view === parent) return null
         var current: View = view
-        var depth = 0
-        while (depth < 8) {
+        val visited = HashSet<View>()
+        while (visited.add(current)) {
             val next = current.parent as? View ?: return null
-            if (next.parent === parent) return next
+            if (next === parent) return current
             current = next
-            depth++
         }
         return null
     }
