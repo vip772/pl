@@ -105,11 +105,12 @@ object DexInstallScheduler {
         if (state.installed.get()) return
         val installer = state.installer ?: return
         if (!state.running.compareAndSet(false, true)) return
-        HLog.d("$TAG 开始安装: ${state.label} key=$key attempt=${state.retryIndex.get() + 1}")
+        HLog.d("$TAG 安装入队: ${state.label} key=$key attempt=${state.retryIndex.get() + 1}")
         executor.execute {
             var ok = false
             try {
                 ok = synchronized(dexKitExecutionLock) {
+                    HLog.i("$TAG 开始执行: ${state.label} key=$key attempt=${state.retryIndex.get() + 1} thread=${Thread.currentThread().name}")
                     installer()
                 }
             } catch (e: Throwable) {
