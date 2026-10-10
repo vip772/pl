@@ -1194,10 +1194,8 @@ private class HchatExtraHooker(
         if (avatarAnchor == null) {
             restoreAvatarDetailsSpacingsAround(root)
         }
-        val cardMessage = !centeredNotice && (
-            WeChatMessageTypes.normalize(details.type).let { it == WeChatMessageTypes.APP || it == 44 || it == 82 } ||
-                MessageTypeLabels.subtype(details.type, details.content, details.body) != null
-            )
+        val appSubtype = MessageTypeLabels.subtype(details.type, details.content, details.body)
+        val cardMessage = !centeredNotice && isCardMessage(details.type, appSubtype)
         val bottomAnchor = if (avatarAnchor == null) {
             if (cardMessage) {
                 // The native time/header and card may share one outer branch. Anchor below
@@ -3068,7 +3066,15 @@ private class HchatExtraHooker(
         64, 570425393, 603979825, 285222674, 889192497, 922746929 -> true
         else -> false
     }
-
+    private fun isCardMessage(type: Int, appSubtype: Int?): Boolean {
+        val normalized = WeChatMessageTypes.normalize(type)
+        if (normalized != WeChatMessageTypes.APP && type != 44 && type != 82 && appSubtype == null) {
+            return false
+        }
+        // These appmsg subtypes are rendered as ordinary text/media/reference rows;
+        // they must keep the native timeTV/content anchor rather than card anchoring.
+        return appSubtype !in setOf(1, 2, 8, 19, 24, 57, 87)
+    }
     private fun noticeContentAnchor(root: View, timeLabel: TextView?, type: Int): BottomDetailsAnchor? {
         if (!isCenteredNotice(type)) return null
         val name = if (type == 889192497 || type == 922746929) "kpw" else "bkl"

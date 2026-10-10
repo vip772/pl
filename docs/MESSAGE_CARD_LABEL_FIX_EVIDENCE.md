@@ -34,6 +34,8 @@
 
 第四次复测日志给出决定性证据：`kn5.d9` 和 `viewitems.kb` 的锚点均为 `com.tencent.mm.view.x2c.X2CTextView`，尺寸约 `1004x190/1011x190`，不是完整卡片容器。目标微信 APK 的定向 DEX 读取确认 `kn5.d9.b` 与 `viewitems.kb.f` 才是各自的 FrameLayout 卡片字段；其中 `kb.getMainContainerView()` 返回的字段 b 是 MMNeat7extView，不能作为卡片容器。当前修订针对这两个已确认 Holder 直接读取 b/f FrameLayout，再提升到 jh 的直接消息分支；只有其它未确认 Holder 才使用行分支兜底。日志增加 `source=holderField`/`source=rowFallback`，用于确认是否命中真实字段。
 
+第五次复测发现引用信息消失：日志中的 `kb`、`kn5.c3` 均以 `reason=layout` 失败，且卡片锚点随后走 `source=rowFallback`。根因是此前用 `MessageTypeLabels.subtype(...) != null` 把所有带 App 子类型的消息都归入卡片路径；但该表明确把子类型 `57` 定义为“引用回复”，并把 `1/2/8/19/24/87` 定义为普通文字、图片、表情、聊天记录、收藏或文字行。现已增加严格 `isCardMessage` 分类，仅真正卡片类型进入卡片锚点，引用回复及上述非卡片子类型继续使用原生 timeTV/content 定位。
+
 ## 验证边界
 续接时已运行生产布局观察器 7 项及预绘制/附着队列 14 项回归，全部通过。布局观察器回归覆盖标签异步移除、滚动复用旧回调取消、稳定几何不循环、observer 迁移、深层标签状态变化及 detach/clear 清理。编译和这些模型测试不等同于微信真机 UI 通过。本轮宿主绑定链针对设备微信 8.0.76（3140）核验，未完成 8.0.49/58/66/68/72/74/77 横向验证。上述 8.0.78 回归修复已取得截图和运行日志证据，但仍需 GitHub 构建后的同类卡片实机复测。
 
