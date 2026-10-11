@@ -1,5 +1,7 @@
 package t.mma.hooks.items.dynamicbadge
 
+import android.app.Activity
+import t.mma.hooks.api.core.WeChatApis
 import android.content.Context
 import android.content.SharedPreferences
 import android.graphics.Canvas
@@ -84,6 +86,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     private val traceDrawCount = AtomicInteger(0)
     @Volatile private var modernHolderInstalled = false
     @Volatile private var modernBindInstalled = false
+    private var resumeHookInstalled = false
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         mainHandler.post { refreshAll() }
     }
@@ -123,9 +126,60 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         if (!installed && allowDexSearch) {
             t.mma.utils.HLog.e("[Hchat:动态角标] 会话绑定 Hook 未安装，动态角标未生效")
         }
+        if (installed) {
+            installVisibleRowRecovery()
+            mainHandler.post { recoverVisibleRows() }
+        }
         return installed
     }
-
+    private fun installVisibleRowRecovery() {
+        if (resumeHookInstalled) return
+        val resume = Activity::class.java.getDeclaredMethod("onResume")
+        HookRegistry.get().hook(resume, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                val activity = param.thisObject as? Activity ?: return
+                if (destroyed || !activity.javaClass.name.startsWith("com.tencent.mm.")) return
+                activity.window?.decorView?.post { recoverVisibleRows(activity) }
+            }
+        })
+        resumeHookInstalled = true
+    }
+    private fun recoverVisibleRows(activity: Activity? = WeChatApis.currentActivity()?.currentActivity() as? Activity) {
+        if (destroyed || !isEnabled()) return
+        val decor = activity?.window?.decorView ?: return
+        fun visit(view: View) {
+            val group = view as? ViewGroup ?: return
+            // Only scan visible children of native conversation lists, never arbitrary badges.
+            if (view.javaClass.name == "com.tencent.mm.ui.conversation.ConversationListView") {
+                for (i in 0 until group.childCount) scheduleBindRow(group.getChildAt(i))
+                return
+            }
+            for (i in 0 until group.childCount) visit(group.getChildAt(i))
+        }
+        visit(decor)
+    }
+    private fun holderRow(holder: Any?): View? {
+        holder ?: return null
+        modernRows[holder]?.let { return it }
+        var clazz: Class<*>? = holder.javaClass
+        val candidates = linkedSetOf<View>()
+        while (clazz != null && clazz != Any::class.java) {
+            KavaReflector.declaredFields(clazz).filter { View::class.java.isAssignableFrom(it.type) }
+                .mapNotNull { KavaReflector.readField(it, holder) as? View }.forEach { view ->
+                    var node = view
+                    repeat(16) {
+                        val parent = node.parent as? View ?: return@repeat
+                        if (parent.javaClass.name == "com.tencent.mm.ui.conversation.ConversationListView") {
+                            candidates.add(node)
+                            return@forEach
+                        }
+                        node = parent
+                    }
+                }
+            clazz = clazz.superclass
+        }
+        return candidates.singleOrNull()?.also { modernRows[holder] = it }
+    }
     fun destroy() {
         destroyed = true
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
@@ -182,6 +236,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         val holderObject = param.args?.getOrNull(0) ?: return
                         val row = param.args?.getOrNull(1) as? View ?: return
                         modernRows[holderObject] = row
+                        scheduleBindRow(row)
                         trace("holderHit holder=${holderObject.javaClass.name} row=${row.javaClass.name}@${System.identityHashCode(row)} attached=${row.isAttachedToWindow} size=${row.width}x${row.height}", traceHolderCount)
                     }
                 })
@@ -204,7 +259,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         val holderObjects = param.args?.drop(1)?.take(2).orEmpty()
                         val row = holderObjects.asSequence().mapNotNull { holderObject ->
                             trace("bindHit holder=${holderObject.javaClass.name} rowKnown=${modernRows.containsKey(holderObject)}", traceBindCount)
-                            modernRows[holderObject]
+                            holderRow(holderObject)
                         }.firstOrNull() ?: return
                         if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
                     }
@@ -313,7 +368,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
 
     private fun bindRow(row: View) {
         trace("bindRow row=${row.javaClass.name}@${System.identityHashCode(row)} attached=${row.isAttachedToWindow} shown=${row.isShown} size=${row.width}x${row.height} enabled=${isEnabled()}", traceRowCount)
-        if (DIAGNOSTIC_ONLY) return
+        if (destroyed || !row.isAttachedToWindow || DIAGNOSTIC_ONLY) return
         if (!isEnabled()) {
             removeOverlaysIn(row)
             return
@@ -362,7 +417,13 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                 synchronized(overlays) { overlays[badge] = it }
                 synchronized(badgeSources) { badgeSources[badge] = row }
             }
-            overlay.update(kind)
+            if (!overlay.isCurrentHost(row)) {
+                removeOverlay(badge)
+                val replacement = BadgeOverlay(row, badge, prefs, kind)
+                overlays[badge] = replacement
+                badgeSources[badge] = row
+                replacement.update(kind)
+            } else overlay.update(kind)
         }
     }
 
@@ -496,10 +557,11 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     ) : View.OnAttachStateChangeListener, View.OnLayoutChangeListener {
         private val hostView: View = (rowView.parent as? View) ?: rowView
         private val drawable = AnimatedBadgeDrawable(hostView, source, preferences, initialKind)
-        private val preDrawListener = ViewTreeObserver.OnPreDrawListener {
+        private var disposed = false
+        fun isCurrentHost(row: View): Boolean = rowView === row && hostView === ((row.parent as? View) ?: row)
+        private val windowObserver = BadgeWindowObserver(hostView) {
             updateBounds()
             updateVisibility()
-            true
         }
         init {
             drawable.callback = object : Drawable.Callback {
@@ -518,31 +580,37 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             hostView.addOnAttachStateChangeListener(this)
             source.addOnAttachStateChangeListener(this)
             source.addOnLayoutChangeListener(this)
-            hostView.viewTreeObserver.addOnPreDrawListener(preDrawListener)
+            windowObserver.attach()
             drawable.start()
         }
         fun update(kind: BadgeKind) {
+            windowObserver.attach()
             drawable.setKind(kind)
             updateVisibility()
         }
         private fun updateVisibility() {
-            if (hostView.isAttachedToWindow && hostView.isShown && source.isShown && source.visibility == View.VISIBLE) drawable.start()
+            if (!disposed && rowView.isAttachedToWindow && source.isAttachedToWindow && hostView.isAttachedToWindow && hostView.isShown && source.isShown && source.visibility == View.VISIBLE) drawable.start()
             else drawable.stop()
         }
         fun detach() {
+            disposed = true
+            windowObserver.dispose()
             drawable.stop()
             hostView.overlay.remove(drawable)
             hostView.removeOnAttachStateChangeListener(this)
             source.removeOnAttachStateChangeListener(this)
             source.removeOnLayoutChangeListener(this)
-            if (hostView.viewTreeObserver.isAlive) hostView.viewTreeObserver.removeOnPreDrawListener(preDrawListener)
         }
         override fun onViewAttachedToWindow(view: View) {
+            windowObserver.attach()
             updateBounds()
             updateVisibility()
             hostView.postInvalidateOnAnimation()
         }
-        override fun onViewDetachedFromWindow(view: View) = drawable.stop()
+        override fun onViewDetachedFromWindow(view: View) {
+            drawable.stop()
+            if (view === hostView) windowObserver.detach()
+        }
         override fun onLayoutChange(v: View, left: Int, top: Int, right: Int, bottom: Int, oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
             updateBounds()
         }

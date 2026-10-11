@@ -229,6 +229,9 @@ class AntiRecallFeature : BaseFeature() {
                         if (!isWechatRecallType(type)) return
                         val outgoing = selfRecallMsgIds.contains(msgId) || messageObjectIsSend(msg)
                         if (!outgoing) return
+                        runCatching {
+                            DynamicRecallStore.mark(context.hostContext(), WeChatApis.messageStore()?.getMessageById(msgId))
+                        }.onFailure { logError("动态撤回存储拦截标记保存失败", it) }
                         markSelfRecallMsgId(msgId)
                         param.setResult(blockedReturnValue(method))
                     }
@@ -432,7 +435,7 @@ class AntiRecallFeature : BaseFeature() {
             HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (!isAntiRecallEnabled(context) || !keepSelfRecallEnabled(context)) return
-                    if (!fixSelfRecallUpdateValues(param.args)) return
+                    if (!fixSelfRecallUpdateValues(context, param.args)) return
                 }
             })
             count++
@@ -446,7 +449,7 @@ class AntiRecallFeature : BaseFeature() {
         return method.parameterTypes.any { ContentValues::class.java.isAssignableFrom(it) }
     }
 
-    private fun fixSelfRecallUpdateValues(args: Array<Any?>?): Boolean {
+    private fun fixSelfRecallUpdateValues(context: FeatureContext, args: Array<Any?>?): Boolean {
         if (args == null) return false
         val table = tableArg(args)
         if (!isMessageTable(table)) return false
@@ -462,6 +465,10 @@ class AntiRecallFeature : BaseFeature() {
         val original = WeChatApis.messageStore()?.getMessageById(msgId)
         val self = selfRecallMsgIds.contains(msgId) || original?.isSend() == true
         if (self) {
+            // This hook is installed synchronously, before deferred Dex revoke hooks.
+            // Preserve the visual record on the very first successful self-recall protection.
+            runCatching { DynamicRecallStore.mark(context.hostContext(), original) }
+                .onFailure { logError("动态撤回底层标记保存失败", it) }
             markSelfRecallMsgId(msgId)
             restoreRawRow(values, rawRow)
             values.put("type", original?.type?.takeIf { it > 0 && !isWechatRecallType(it) } ?: 1)
