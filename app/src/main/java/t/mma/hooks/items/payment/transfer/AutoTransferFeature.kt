@@ -80,6 +80,16 @@ class AutoTransferFeature : BaseFeature() {
             return
         }
 
+        // 微信重启/登录时可能重新分发历史待收款消息。不要把历史消息当成新转账再次提交，
+        // 否则会触发一次无效的 remittance 请求并由微信弹出 (1,-7) 连接失败提示。
+        var messageTime = message.getCreateTime()
+        if (messageTime in 1L until 100_000_000_000L) messageTime *= 1000L
+        val now = System.currentTimeMillis()
+        if (messageTime > 0L && now - messageTime > TRANSFER_FRESHNESS_MS) {
+            log("忽略历史待收款消息: ageMs=${now - messageTime} talker=${message.talker}")
+            return
+        }
+
         val selfWxId = WeChatApis.contact().account()?.selfWxId().orEmpty()
         if (info.receiverUsername.isNotBlank() && selfWxId.isNotBlank() && info.receiverUsername != selfWxId) {
             return
@@ -290,5 +300,6 @@ class AutoTransferFeature : BaseFeature() {
     companion object {
         const val ID = "auto_transfer"
         private const val HANDLED_TRANSFER_TTL_MS = 60 * 60 * 1000L
+        private const val TRANSFER_FRESHNESS_MS = 2 * 60 * 1000L
     }
 }
