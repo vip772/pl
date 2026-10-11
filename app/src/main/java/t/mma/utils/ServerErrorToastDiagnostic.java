@@ -9,6 +9,8 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -27,6 +29,10 @@ public final class ServerErrorToastDiagnostic {
     private static final List<XC_MethodHook.Unhook> hooks = new ArrayList<>();
     private static final List<String> pending = new ArrayList<>();
     private static final Set<Object> recordedToasts = Collections.newSetFromMap(new WeakHashMap<>());
+    private static final AtomicInteger sceneEvents = new AtomicInteger();
+    private static final AtomicInteger sceneSequence = new AtomicInteger();
+    private static final ThreadLocal<ArrayDeque<String>> sceneContext = new ThreadLocal<>();
+    private static boolean sceneHookInstalled;
     private static volatile long started;
     private static volatile boolean ready;
     private static volatile boolean installed;
@@ -37,7 +43,7 @@ public final class ServerErrorToastDiagnostic {
         if (installed) return;
         installed = true;
         started = SystemClock.elapsedRealtime();
-        emit(TAG + " armed revision=toast-stack-v1 module=" + BuildConfig.VERSION_NAME
+        emit(TAG + " armed revision=scene-correlation-v2 module=" + BuildConfig.VERSION_NAME
                 + " code=" + BuildConfig.VERSION_CODE + " process=" + process
                 + " pid=" + android.os.Process.myPid() + " windowMs=" + WINDOW_MS);
         try {
@@ -106,8 +112,71 @@ public final class ServerErrorToastDiagnostic {
         for (String entry : pending) HLog.w(entry);
         pending.clear();
         emit(TAG + " applicationReady elapsedMs=" + (SystemClock.elapsedRealtime() - started));
+        installSceneCorrelation(application.getClassLoader());
         new Handler(Looper.getMainLooper()).postDelayed(ServerErrorToastDiagnostic::stop,
                 Math.max(0L, WINDOW_MS - (SystemClock.elapsedRealtime() - started)));
+    }
+
+    /** This exact callback was verified against the host APK and the captured toast stack.
+     * No broad callback scan, request-body dump, or mutation of network results. */
+    private static synchronized void installSceneCorrelation(ClassLoader loader) {
+        if (sceneHookInstalled) return;
+        try {
+            Class<?> callback = Class.forName("com.tencent.mm.ui.conversation.x5", false, loader);
+            Class<?> scene = Class.forName("com.tencent.mm.modelbase.m1", false, loader);
+            Method target = callback.getDeclaredMethod("onSceneEnd", int.class, int.class, String.class, scene);
+            hooks.add(XposedBridge.hookMethod(target, new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!active() || param.args == null || param.args.length != 4) return;
+                    try {
+                        Object request = param.args[3];
+                        String type = sceneType(request);
+                        int errType = ((Number) param.args[0]).intValue();
+                        int errCode = ((Number) param.args[1]).intValue();
+                        String entry = "sequence=" + sceneSequence.incrementAndGet()
+                                + " callback=" + target.getDeclaringClass().getName()
+                                + " errType=" + errType + " errCode=" + errCode
+                                + " sceneType=" + type
+                                + " sceneClass=" + (request == null ? "null" : request.getClass().getName())
+                                + " sceneIdentity=" + (request == null ? 0 : System.identityHashCode(request))
+                                + " errMsgLength=" + (param.args[2] instanceof String ? ((String) param.args[2]).length() : 0)
+                                + " thread=" + Thread.currentThread().getName()
+                                + " elapsedMs=" + (SystemClock.elapsedRealtime() - started);
+                        ArrayDeque<String> stack = sceneContext.get();
+                        if (stack == null) { stack = new ArrayDeque<>(); sceneContext.set(stack); }
+                        stack.addLast(entry);
+                        // Mark this invocation: nested callbacks can finish after the window expires.
+                        param.setObjectExtra("hchat.scene.diagnostic", Boolean.TRUE);
+                        if ((errType != 0 || errCode != 0 || "138".equals(type) || "139".equals(type))
+                                && sceneEvents.incrementAndGet() <= 20) emit(TAG + " sceneEnd " + entry);
+                    } catch (Throwable error) {
+                        emit(TAG + " sceneCaptureFailure=" + error.getClass().getName());
+                    }
+                }
+                @Override protected void afterHookedMethod(MethodHookParam param) {
+                    if (param.getObjectExtra("hchat.scene.diagnostic") != Boolean.TRUE) return;
+                    ArrayDeque<String> stack = sceneContext.get();
+                    if (stack != null) {
+                        stack.pollLast();
+                        if (stack.isEmpty()) sceneContext.remove();
+                    }
+                }
+            }));
+            sceneHookInstalled = true;
+            emit(TAG + " sceneHook=installed callback=" + target.toGenericString());
+        } catch (Throwable error) {
+            // Explicitly report incompatible host versions instead of pretending correlation exists.
+            emit(TAG + " sceneHook=unavailable error=" + error.getClass().getName());
+        }
+    }
+
+    private static String sceneType(Object request) {
+        if (request == null) return "null";
+        try {
+            Method method = request.getClass().getMethod("getType");
+            method.setAccessible(true);
+            return String.valueOf(method.invoke(request));
+        } catch (Throwable error) { return "unavailable:" + error.getClass().getSimpleName(); }
     }
 
     private static boolean active() {
@@ -143,6 +212,9 @@ public final class ServerErrorToastDiagnostic {
                 .append(" source=").append(source).append(" elapsedMs=")
                 .append(SystemClock.elapsedRealtime() - started).append(" thread=")
                 .append(Thread.currentThread().getName()).append("\n");
+        ArrayDeque<String> context = sceneContext.get();
+        out.append("  correlatedScene=").append(context == null || context.isEmpty()
+                ? "none (not inside verified callback)" : context.peekLast()).append('\n');
         StackTraceElement[] stack = new Throwable().getStackTrace();
         for (int i = 0; i < Math.min(stack.length, 80); i++) out.append("  at ").append(stack[i]).append('\n');
         emit(out.toString());
@@ -161,6 +233,7 @@ public final class ServerErrorToastDiagnostic {
             try { hook.unhook(); } catch (Throwable ignored) { }
         }
         hooks.clear();
-        emit(TAG + " finished matches=" + matches.get());
+        emit(TAG + " finished matches=" + matches.get() + " sceneEvents=" + sceneEvents.get()
+                + " sceneHookInstalled=" + sceneHookInstalled);
     }
 }

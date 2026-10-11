@@ -1481,6 +1481,7 @@ object ConversationGroupRuntime {
                     "SELECT parentRef FROM rconversation WHERE username=? LIMIT 1", arrayOf(talker)
                 ).firstOrNull()
                 val parent = row?.get("parentRef")
+                diagnoseUnresolvedParent(database, prefs, account, talker, parent, plan)
                 HLog.e("$TAG 缺少可信原始父级，保留当前会话归属: talker=$talker " +
                     "reason=${if (row == null) "conversation_missing" else "restore_backup_missing"} " +
                     "currentParent=$parent；禁止猜测恢复，请核对原始归属备份")
@@ -1500,6 +1501,48 @@ object ConversationGroupRuntime {
         return successful
     }
 
+    // One snapshot per unresolved account/talker per process, called before backup rewrites.
+    // Only metadata needed for recovery; never dump contacts, messages or other accounts' records.
+    private fun diagnoseUnresolvedParent(
+        database: t.mma.hooks.api.runtime.WeChatDatabaseApi,
+        prefs: SharedPreferences,
+        account: String,
+        talker: String,
+        currentParent: Any?,
+        plan: ConversationGroupParentPolicy.Plan
+    ) {
+        runCatching {
+            fun snapshot(key: String): String {
+                val raw = prefs.getString(key, "{}").orEmpty().ifBlank { "{}" }
+                val root = JSONObject(raw)
+                val own = root.optJSONObject(account)
+                val value = own?.opt(talker)
+                val status = when {
+                    own == null -> "account_absent"
+                    !own.has(talker) -> "talker_absent"
+                    value !is String -> "invalid_value"
+                    ConversationGroupParentPolicy.isModuleParent(value) -> "module_parent_invalid_backup"
+                    value.isEmpty() -> "trusted_root"
+                    else -> "trusted_native_parent"
+                }
+                return "bytes=${raw.toByteArray(Charsets.UTF_8).size},accounts=${root.length()}," +
+                    "ownRecords=${own?.length() ?: 0},status=$status,parent=${if (value is String) value.take(160) else "n/a"}"
+            }
+            val parent = currentParent as? String
+            val virtualRowExists = if (parent.isNullOrBlank()) false else database.query(
+                "SELECT username FROM rconversation WHERE username=? LIMIT 1", arrayOf(parent)
+            ).isNotEmpty()
+            HLog.w("[Hchat:ConversationGroupDiagnostic] revision=parent-snapshot-v1 " +
+                "accountToken=${account.hashCode().toUInt().toString(16)} talker=$talker " +
+                "currentParent=$parent parentRowExists=$virtualRowExists " +
+                "planUpdates=${plan.updates.size} planUnresolved=${plan.unresolved.size} " +
+                "mergedHasOriginal=${plan.originalParents.containsKey(talker)} " +
+                "primary={${snapshot(KEY_ORIGINAL_PARENT_REFS)}} " +
+                "backup={${snapshot(KEY_ORIGINAL_PARENT_REFS_BACKUP)}}")
+        }.onFailure {
+            HLog.w("[Hchat:ConversationGroupDiagnostic] snapshotFailure=${it.javaClass.name}")
+        }
+    }
     private fun syncDatabase(context: Context) {
         val account = ConversationGroupStore.accountKey()
         if (account.isBlank()) return
