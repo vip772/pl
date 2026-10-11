@@ -83,15 +83,10 @@ class DisableHotUpdateFeature : BaseFeature() {
         fun installEarly(context: Context?, classLoader: ClassLoader?) {
             if (context == null || classLoader == null) return
             if (!isEnabled(context)) return
-            val key = loaderKey(classLoader)
-            synchronized(this) {
-                if (earlyInstalledLoaders.contains(key)) return
-                val installedFlags = hookTinkerFlags(classLoader)
-                val installedLoader = hookTinkerLoader(classLoader)
-                if (installedFlags || installedLoader) {
-                    earlyInstalledLoaders.add(key)
-                }
-            }
+            // Do not replace TinkerApplication/TinkerLoader return values during the
+            // earliest process startup. That path runs before WeChat's network state
+            // is ready and can surface a false server error (1,-7). The later,
+            // response-specific hooks still block applying an actual hot update.
         }
 
         private fun hookTinkerFlags(classLoader: ClassLoader): Boolean {
