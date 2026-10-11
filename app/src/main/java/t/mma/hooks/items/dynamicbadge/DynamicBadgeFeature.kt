@@ -87,6 +87,8 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     @Volatile private var modernHolderInstalled = false
     @Volatile private var modernBindInstalled = false
     private var resumeHookInstalled = false
+    private val recoveryHosts = WeakHashMap<View, BadgeListRecovery>()
+    private val queuedRows = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
         mainHandler.post { refreshAll() }
     }
@@ -129,6 +131,10 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         if (installed) {
             installVisibleRowRecovery()
             mainHandler.post { recoverVisibleRows() }
+            // The Activity API or its window can itself be unavailable at hook install.
+            listOf(100L, 300L, 1000L, 3000L).forEach { delay ->
+                mainHandler.postDelayed({ recoverVisibleRows() }, delay)
+            }
         }
         return installed
     }
@@ -147,11 +153,31 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     private fun recoverVisibleRows(activity: Activity? = WeChatApis.currentActivity()?.currentActivity() as? Activity) {
         if (destroyed || !isEnabled()) return
         val decor = activity?.window?.decorView ?: return
+        recoveryHosts.keys.filter { it !== decor && !it.isAttachedToWindow }.toList().forEach {
+            recoveryHosts.remove(it)?.dispose()
+        }
+        if (recoveryHosts[decor] == null) {
+            recoveryHosts[decor] = BadgeListRecovery(decor) { repairVisibleRows(decor) }
+        }
+        repairVisibleRows(decor)
+    }
+    private fun repairVisibleRows(decor: View) {
+        if (destroyed || !isEnabled()) return
+        fun repairRow(row: View) {
+            val views = ArrayList<View>()
+            collectViews(row, views)
+            val badges = views.filter { it.id == NUMBER_BADGE_ID || it.id == DOT_BADGE_ID }
+            val missing = badges.any { badge ->
+                val key = if (badge.id == NUMBER_BADGE_ID) DynamicBadgeSettings.KEY_NUMBER_ENABLE else DynamicBadgeSettings.KEY_DOT_ENABLE
+                prefs.getBoolean(key, true) && overlays[badge]?.isCurrentHost(row) != true
+            }
+            if (missing || (badges.isEmpty() && boundRows[row] != true)) scheduleBindRow(row)
+        }
         fun visit(view: View) {
             val group = view as? ViewGroup ?: return
             // Only scan visible children of native conversation lists, never arbitrary badges.
             if (view.javaClass.name == "com.tencent.mm.ui.conversation.ConversationListView") {
-                for (i in 0 until group.childCount) scheduleBindRow(group.getChildAt(i))
+                for (i in 0 until group.childCount) repairRow(group.getChildAt(i))
                 return
             }
             for (i in 0 until group.childCount) visit(group.getChildAt(i))
@@ -184,6 +210,9 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         destroyed = true
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         mainHandler.removeCallbacksAndMessages(null)
+        recoveryHosts.values.toList().forEach { it.dispose() }
+        recoveryHosts.clear()
+        queuedRows.clear()
         synchronized(modernRows) { modernRows.clear() }
         synchronized(boundRows) { boundRows.clear() }
         synchronized(diagnosedRows) { diagnosedRows.clear() }
@@ -258,8 +287,10 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         if (destroyed || param.hasThrowable()) return
                         val holderObjects = param.args?.drop(1)?.take(2).orEmpty()
                         val row = holderObjects.asSequence().mapNotNull { holderObject ->
-                            trace("bindHit holder=${holderObject.javaClass.name} rowKnown=${modernRows.containsKey(holderObject)}", traceBindCount)
-                            holderRow(holderObject)
+                            val cached = modernRows.containsKey(holderObject)
+                            val recovered = holderRow(holderObject)
+                            trace("bindHit holder=${holderObject.javaClass.name} cached=$cached rowResolved=${recovered != null}", traceBindCount)
+                            recovered
                         }.firstOrNull() ?: return
                         if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
                     }
@@ -323,12 +354,17 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             !Modifier.isStatic(method.modifiers) && !Modifier.isAbstract(method.modifiers)
     }
     private fun scheduleBindRow(row: View) {
+        if (destroyed) return
         if (!isEnabled()) {
             removeOverlaysIn(row)
             return
         }
         if (row.isAttachedToWindow) {
-            row.postOnAnimation { bindRow(row) }
+            if (!queuedRows.add(row)) return
+            row.postOnAnimation {
+                queuedRows.remove(row)
+                bindRow(row)
+            }
             return
         }
         synchronized(pendingRowBindings) {
@@ -337,7 +373,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                 override fun onViewAttachedToWindow(view: View) {
                     view.removeOnAttachStateChangeListener(this)
                     synchronized(pendingRowBindings) { pendingRowBindings.remove(view) }
-                    view.postOnAnimation { if (!destroyed) bindRow(view) }
+                    scheduleBindRow(view)
                 }
                 override fun onViewDetachedFromWindow(view: View) = Unit
             }
@@ -471,11 +507,13 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     }
 
     private fun refreshAll() {
+        if (destroyed) return
         if (!isEnabled()) {
             val current = synchronized(overlays) { overlays.keys.toList() }
             current.forEach(::removeOverlay)
             return
         }
+        recoverVisibleRows()
         val rows = synchronized(boundRows) { boundRows.keys.toList() }
         rows.forEach { row ->
             if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
@@ -535,6 +573,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         const val MODERN_STORAGE_PREFIX = "com.tencent.mm.storage."
         const val FRAME_INTERVAL_MS = 16L
         const val TRACE_LIMIT = 40
+        const val DEBUG_ANIMATION_STATE = false
         const val DIAGNOSTIC_ONLY = false
         const val NUMBER_BADGE_ID = 2131389131
         const val DOT_BADGE_ID = 2131363591
@@ -649,6 +688,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         @Volatile private var badgeKind = kind
         private var lastStateLog = 0L
         private fun stateLog(state: String) {
+            if (!DEBUG_ANIMATION_STATE) return
             val now = SystemClock.uptimeMillis()
             if (now - lastStateLog < 2000L) return
             lastStateLog = now

@@ -12,9 +12,26 @@ stubs={
 class View {
  var isAttachedToWindow=true
  var viewTreeObserver=ViewTreeObserver()
+ interface OnAttachStateChangeListener { fun onViewAttachedToWindow(view:View); fun onViewDetachedFromWindow(view:View) }
+ val attaches=linkedSetOf<OnAttachStateChangeListener>()
+ val queued=mutableListOf<Runnable>();val delayed=mutableListOf<Runnable>()
+ fun addOnAttachStateChangeListener(l:OnAttachStateChangeListener){attaches.add(l)}
+ fun removeOnAttachStateChangeListener(l:OnAttachStateChangeListener){attaches.remove(l)}
+ fun postOnAnimation(r:Runnable){queued.add(r)}
+ fun postDelayed(r:Runnable,d:Long){delayed.add(r)}
+ fun removeCallbacks(r:Runnable){queued.removeAll{it===r};delayed.removeAll{it===r}}
+ fun tick(){val old=queued.toList();queued.clear();old.forEach{it.run()}}
+ fun delays(){val old=delayed.toList();delayed.clear();old.forEach{it.run()}}
+ fun detach(){isAttachedToWindow=false;attaches.toList().forEach{it.onViewDetachedFromWindow(this)}}
+ fun attach(){isAttachedToWindow=true;attaches.toList().forEach{it.onViewAttachedToWindow(this)}}
 }
 class ViewTreeObserver {
  fun interface OnPreDrawListener { fun onPreDraw():Boolean }
+ fun interface OnGlobalLayoutListener { fun onGlobalLayout() }
+ val globals=linkedSetOf<OnGlobalLayoutListener>()
+ fun addOnGlobalLayoutListener(l:OnGlobalLayoutListener){globals.add(l)}
+ fun removeOnGlobalLayoutListener(l:OnGlobalLayoutListener){globals.remove(l)}
+ fun layout(){globals.toList().forEach{it.onGlobalLayout()}}
  var isAlive=true
  val listeners=linkedSetOf<OnPreDrawListener>()
  fun addOnPreDrawListener(l:OnPreDrawListener){listeners.add(l)}
@@ -59,6 +76,17 @@ fun main(){
  val snapshot=next.listeners.toList();registration.dispose();snapshot.forEach{it.onPreDraw()};check(calls==3 && next.listeners.isEmpty())
  registration.attach();check(next.listeners.isEmpty())
  println("PASS: dead observer migration, disposal and old dispatch snapshot do not leak/restart")
+ val list=View();var repairs=0;var available=false;var mounted=false
+ val recovery=BadgeListRecovery(list){repairs++;if(available)mounted=true}
+ list.tick();check(repairs==1 && !mounted)
+ available=true;repeat(10){list.viewTreeObserver.layout()};check(list.queued.size==1)
+ list.tick();check(mounted && repairs==2)
+ list.delays();check(list.queued.size==1);list.tick();check(list.delayed.isEmpty())
+ val saved=list.viewTreeObserver.globals.toList();list.detach();check(list.queued.isEmpty() && list.delayed.isEmpty())
+ list.viewTreeObserver=ViewTreeObserver();list.attach();check(list.delayed.size==4)
+ recovery.dispose();saved.forEach{it.onGlobalLayout()};list.tick()
+ check(list.queued.isEmpty() && list.delayed.isEmpty() && list.attaches.isEmpty() && list.viewTreeObserver.globals.isEmpty())
+ println("PASS: initially empty list is repaired on later layout; coalesced frame, finite retries, detach/dispose cleanup")
  val c=Context();WeChatApis.id="accountA"
  check(!Store.contains(c,"room",7,70));Store.mark(c,WeChatMessage("room",7,70))
  check(Store.contains(c,"room",7,0) && Store.contains(c,"room",0,70))
@@ -73,6 +101,6 @@ fun main(){
 with tempfile.TemporaryDirectory(prefix='pl-dynamic-lifecycle-') as d:
  p=Path(d)
  for name,text in stubs.items():(p/name).write_text(text)
- sources=[repo/'app/src/main/java/t/mma/hooks/items/dynamicbadge/BadgeWindowObserver.kt',repo/'app/src/main/java/t/mma/hooks/items/antirecall/DynamicRecallStore.kt',repo/'app/src/main/java/t/mma/hooks/items/antirecall/AntiRecallSettings.kt',*p.glob('*.kt')]
+ sources=[repo/'app/src/main/java/t/mma/hooks/items/dynamicbadge/BadgeWindowObserver.kt',repo/'app/src/main/java/t/mma/hooks/items/dynamicbadge/BadgeListRecovery.kt',repo/'app/src/main/java/t/mma/hooks/items/antirecall/DynamicRecallStore.kt',repo/'app/src/main/java/t/mma/hooks/items/antirecall/AntiRecallSettings.kt',*p.glob('*.kt')]
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(p/'test.jar'),*map(str,sources)],check=True)
  subprocess.run(['java','-cp',str(p/'test.jar')+':'+str(std),'t.mma.hooks.items.dynamicbadge.CheckKt'],check=True)
