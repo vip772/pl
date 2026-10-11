@@ -52,6 +52,10 @@ class MentionHighlightFeature : BaseFeature() {
 }
 
 private class MentionHighlightRuntime(private val context: FeatureContext) {
+    private inline fun debugLog(message: () -> String) {
+        if (DEBUG_RENDER_LOGS) HLog.d(message())
+    }
+    private val DEBUG_RENDER_LOGS = false
     private val gestures = WeakHashMap<View, Gesture>()
     private val renderedCache = LruCache<String, CharSequence>(96)
     // X2C may receive the same message again with a different CharSequence
@@ -148,7 +152,6 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             ) ?: MentionHighlightSettings.DEFAULT_COLOR
             val cacheKey = cacheKey(message, input, colorSpec)
             val messageCacheKey = messageCacheKey(message, colorSpec)
-            val result = buildMentionText(input, message, colorSpec)
             val inputCached = renderedCache.get(cacheKey)
             val messageCached = renderedByMessage.get(messageCacheKey)
             // X2C calls its final text entry again with a new/plain CharSequence
@@ -164,13 +167,17 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                 inputCached != null -> inputCached
                 else -> null
             }
+            if (input !is Spanned && cached != null) {
+                param.args?.set(0, cached)
+                return
+            }
+            val result = buildMentionText(input, message, colorSpec)
             val effective = if (result.appliedCount > 0) {
                 renderedCache.put(cacheKey, result.text)
                 renderedByMessage.put(messageCacheKey, result.text)
                 result.text
             } else cached
-            val parsedColors = MentionHighlightSettings.parseColors(colorSpec)
-            HLog.d(TAG + " setText前置 msgId=${message.msgId} enabled=true class=${view.javaClass.name} colorSpec=$colorSpec colors=${parsedColors.first},${parsedColors.second} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount} cacheHit=${cached != null} messageCache=${messageCached != null}")
+            debugLog { val parsedColors = MentionHighlightSettings.parseColors(colorSpec); TAG + " setText前置 msgId=${message.msgId} enabled=true class=${view.javaClass.name} colorSpec=$colorSpec colors=${parsedColors.first},${parsedColors.second} spanned=${input is Spanned} mentions=${result.mentionCount} applied=${result.appliedCount} cacheHit=${cached != null} messageCache=${messageCached != null}" }
             if (effective == null) return
             param.args?.set(0, effective)
         }
@@ -209,7 +216,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                         event.eventTime - gesture.time < ViewConfiguration.getLongPressTimeout() &&
                         hitMention(view, event.x, event.y) === gesture.span) {
                         gesture.span.onClick(view)
-                        HLog.d(TAG + " 艾特触摸命中")
+                        debugLog { TAG + " 艾特触摸命中" }
                     }
                     param.setResult(true)
                 }
@@ -298,15 +305,15 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         val native = resolveNativeMessage(item) ?: return BindState(null)
         val message = messageFromNative(native) ?: return BindState(null)
         gestures.remove(root)
-        HLog.d(TAG + " bind-before msgId=${message.msgId} talker=${message.talker} atUsers=${message.getEffectiveAtUserList().size}")
+        debugLog { TAG + " bind-before msgId=${message.msgId} talker=${message.talker} atUsers=${message.getEffectiveAtUserList().size}" }
         return BindState(message)
     }
 
     private fun cacheKey(message: WeChatMessage, text: CharSequence, spec: String): String =
-        message.msgId.toString() + "|" + spec + "|" + text.toString()
-
+        messageCacheKey(message, spec) + "|" + text.toString()
     private fun messageCacheKey(message: WeChatMessage, spec: String): String =
-        message.msgId.toString() + "|" + spec
+        message.msgId.toString() + "|" + spec + "|" + message.talker + "|" +
+            message.msgSource + "|" + message.reserved
 
     private fun buildMentionText(text: CharSequence, message: WeChatMessage, spec: String): BuildResult {
         // Keep the wire order intact. The text ranges and atuserlist are
@@ -345,8 +352,8 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         val orderedNativeRanges = if (nativeRanges.size == ids.size) {
             nativeRanges
         } else {
-            HLog.d(TAG + " 原生艾特范围未对齐: msgId=${message.msgId} " +
-                "ranges=${nativeRanges.size} atUsers=${ids.size} reason=name-fallback")
+            debugLog { TAG + " 原生艾特范围未对齐: msgId=${message.msgId} " +
+                "ranges=${nativeRanges.size} atUsers=${ids.size} reason=name-fallback" }
             emptyList()
         }
         var cursor = 0
@@ -363,7 +370,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                 val end = explicitRange.last + 1
                 found++
                 if (isAtAll(user)) {
-                    HLog.d(TAG + " 艾特跳过: msgId=${message.msgId} range=$at..$end user=$user reason=at-all")
+                    debugLog { TAG + " 艾特跳过: msgId=${message.msgId} range=$at..$end user=$user reason=at-all" }
                     cursor = end
                     rangeIndex++
                     continue
@@ -373,7 +380,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                     at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
                 applyForegroundColors(builder, raw, at, end, colors.first, colors.second)
                 applied++
-                HLog.d(TAG + " 艾特处理成功: msgId=${message.msgId} range=$at..$end user=$user source=native")
+                debugLog { TAG + " 艾特处理成功: msgId=${message.msgId} range=$at..$end user=$user source=native" }
                 cursor = end
                 rangeIndex++
                 continue
@@ -392,8 +399,8 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             val longest = matches.maxOfOrNull { it.second }
             val best = matches.filter { it.second == longest }.distinctBy { it.first }
             if (best.size != 1) {
-                HLog.d(TAG + " 艾特未处理: msgId=${message.msgId} offset=$at reason=" +
-                    if (best.isEmpty()) "name-not-resolved" else "ambiguous-name")
+                debugLog { TAG + " 艾特未处理: msgId=${message.msgId} offset=$at reason=" +
+                    if (best.isEmpty()) "name-not-resolved" else "ambiguous-name" }
                 cursor = at + 1
                 continue
             }
@@ -401,13 +408,13 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             val end = match.second
             found++
             if (isAtAll(match.first)) {
-                HLog.d(TAG + " 艾特跳过: msgId=${message.msgId} range=$at..$end user=${match.first} reason=at-all")
+                debugLog { TAG + " 艾特跳过: msgId=${message.msgId} range=$at..$end user=${match.first} reason=at-all" }
                 cursor = end
                 continue
             }
             val overlaps = builder.getSpans(at, end, ClickableSpan::class.java)
             if (overlaps.any { builder.getSpanStart(it) < at || builder.getSpanEnd(it) > end }) {
-                HLog.d(TAG + " 艾特未处理: msgId=${message.msgId} range=$at..$end user=${match.first} reason=span-overlap")
+                debugLog { TAG + " 艾特未处理: msgId=${message.msgId} range=$at..$end user=${match.first} reason=span-overlap" }
                 cursor = end
                 continue
             }
@@ -418,7 +425,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                 at, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             applyForegroundColors(builder, raw, at, end, colors.first, colors.second)
             applied++
-            HLog.d(TAG + " 艾特处理成功: msgId=${message.msgId} range=$at..$end user=${match.first} source=name")
+            debugLog { TAG + " 艾特处理成功: msgId=${message.msgId} range=$at..$end user=${match.first} source=name" }
             cursor = end
         }
         return BuildResult(if (applied > 0) builder else text, found, applied)
@@ -442,7 +449,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     }
 
     private fun openProfile(view: View, room: String, user: String) {
-        HLog.d(TAG + " 请求打开艾特成员资料页")
+        debugLog { TAG + " 请求打开艾特成员资料页" }
         val intent = Intent().setComponent(ComponentName(view.context.packageName, "com.tencent.mm.plugin.profile.ui.ContactInfoUI"))
             .putExtra("Contact_User", user)
             .putExtra("Contact_ChatRoomId", room)
@@ -537,7 +544,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             reserved, stored?.translatedContent.orEmpty(), stored?.flag ?: 0,
             msgSource, stored?.selfWxId.orEmpty()
         )
-        HLog.d(TAG + " message msgId=$msgId contentLen=${content.length} msgSourceLen=${msgSource.length} reservedLen=${reserved.length} atUsers=${merged.getAtUserList().size}")
+        debugLog { TAG + " message msgId=$msgId contentLen=${content.length} msgSourceLen=${msgSource.length} reservedLen=${reserved.length} atUsers=${merged.getAtUserList().size}" }
         return merged
     }
 

@@ -3,6 +3,7 @@ package t.mma.hooks.items.musicorder
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.os.SystemClock
+import t.mma.utils.HLog
 import me.yun.silk.AacCodec
 import me.yun.silk.SilkCodec
 import java.util.concurrent.atomic.AtomicBoolean
@@ -26,6 +27,7 @@ internal class QQMusicOrderRuntime(
     private val active = AtomicBoolean(true)
     private val installed = AtomicBoolean(false)
     private val commands = MusicCommandDeduplicator(SystemClock::elapsedRealtime)
+    private val voiceCache = MusicVoiceCache(File(hostContext.cacheDir, "$VOICE_CACHE_DIR/encoded"), System::currentTimeMillis)
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "HchatQQMusicOrder").apply { isDaemon = true }
     }
@@ -181,11 +183,21 @@ internal class QQMusicOrderRuntime(
         if ((!cacheDir.isDirectory && !cacheDir.mkdirs()) || !cacheDir.canWrite()) {
             return false
         }
+        val cachedSilk = voiceCache.file(track.mid + "|pcm24-v1")
+        val cachedDuration = voiceCache.duration(cachedSilk)
+        if (cachedDuration > 0) {
+            HLog.i("[Hchat:QQMusicTiming] voiceCache=hit")
+            return active.get() && voiceApi.send(talker, cachedSilk.absolutePath, cachedDuration)
+        }
+        voiceCache.trim()
+        val started = SystemClock.elapsedRealtime()
         val target = File(cacheDir, "qq_music_${System.currentTimeMillis()}_${System.nanoTime()}${audioSuffix(track.playUrl)}")
         val part = File(target.absolutePath + ".part")
-        val silk = File(target.absolutePath + ".silk")
+        val silk = cachedSilk
+        var keepSilk = false
         return try {
             if (!downloadAudio(track.playUrl, part, target) || !active.get()) return false
+            val downloaded = SystemClock.elapsedRealtime()
             val durationMillis = audioDurationMillis(target)
             if (durationMillis <= 0) return false
             // Despite its historic name, mp4ToSilk uses MediaExtractor/MediaCodec for
@@ -196,11 +208,18 @@ internal class QQMusicOrderRuntime(
                 logError("QQ点歌系统解码转 Silk 失败 code=$code", null)
                 return false
             }
-            active.get() && voiceApi.send(talker, silk.absolutePath, durationMillis)
+            val converted = SystemClock.elapsedRealtime()
+            keepSilk = runCatching { voiceCache.commit(silk, durationMillis) }.getOrDefault(false)
+            val sent = active.get() && voiceApi.send(talker, silk.absolutePath, durationMillis)
+            HLog.i("[Hchat:QQMusicTiming] voiceCache=miss downloadMs=${downloaded-started} convertMs=${converted-downloaded} submitMs=${SystemClock.elapsedRealtime()-converted}")
+            sent
         } finally {
             deleteFile(part)
             deleteFile(target)
-            deleteFile(silk)
+            if (!keepSilk) {
+                deleteFile(silk)
+                deleteFile(File(silk.path + ".duration"))
+            }
         }
     }
 
@@ -320,13 +339,13 @@ internal class QQMusicOrderRuntime(
             } ?: return@runCatching false
             if (oversized || !part.isFile || part.length() <= 0L) return@runCatching false
             if (target.exists() && !target.delete()) return@runCatching false
-            part.renameTo(target) && target.isFile && target.length() > 0L && isAudioFile(target)
+            // Duration/audio validation follows immediately before conversion; avoid opening
+            // MediaMetadataRetriever twice for the same downloaded song.
+            part.renameTo(target) && target.isFile && target.length() > 0L
         }.onFailure { logError("QQ点歌歌曲音频下载失败", it) }
             .getOrDefault(false)
             .also { connection?.disconnect() }
     }
-
-    private fun isAudioFile(file: File): Boolean = audioDurationMillis(file) > 0
 
     private fun audioDurationMillis(file: File): Int {
         val retriever = MediaMetadataRetriever()

@@ -209,7 +209,6 @@ private class HchatExtraHooker(
     private val nativeMessageClassCache = ConcurrentHashMap<Class<*>, Boolean>()
     private val messageNestedFieldCache = ConcurrentHashMap<Class<*>, List<Field>>()
     private val messageDetailsFailureKeys = ConcurrentHashMap.newKeySet<String>()
-    private val messageDetailsCardAnchorKeys = ConcurrentHashMap.newKeySet<String>()
     private val messageDetailsLabels = Collections.newSetFromMap(WeakHashMap<TextView, Boolean>())
     private val messageDetailsBindings = WeakHashMap<TextView, MessageDetailsBinding>()
     private val avatarDetailsSpacings = WeakHashMap<RelativeLayout, AvatarDetailsSpacing>()
@@ -3261,23 +3260,6 @@ private class HchatExtraHooker(
         val holderBranch = holderDirectBranch
             ?.takeUnless { it.tag == TAG_MESSAGE_DETAILS_VIEW }
             ?.takeIf { isMeasuredCardBranch(it, row) }
-        if (holderCard != null && messageDetailsCardAnchorKeys.add("trace:${holder.javaClass.name}")) {
-            logger(
-                "消息卡片锚点诊断 holder=${holder.javaClass.name} " +
-                    "field=${holderCard.javaClass.name}@${System.identityHashCode(holderCard)} " +
-                    "fieldAttached=${isViewWithinRoot(holderCard, row)} " +
-                    "fieldSize=${holderCard.width}x${holderCard.height} " +
-                    "fieldParent=${holderCard.parent?.javaClass?.name ?: "none"} " +
-                    "direct=${holderDirectBranch?.javaClass?.name ?: "none"} " +
-                    "directSize=${holderDirectBranch?.width ?: 0}x${holderDirectBranch?.height ?: 0} " +
-                    "directBounds=${holderDirectBranch?.left ?: -1},${holderDirectBranch?.top ?: -1}," +
-                    "${holderDirectBranch?.right ?: -1},${holderDirectBranch?.bottom ?: -1} " +
-                    "directParent=${holderDirectBranch?.parent?.javaClass?.name ?: "none"} " +
-                    "rowSize=${row.width}x${row.height} rowChildren=${row.childCount} " +
-                    "valid=${holderDirectBranch?.let { isMeasuredCardBranch(it, row) } ?: false}",
-                null
-            )
-        }
         val knownCardHolder = when (holder.javaClass.name) {
             "kn5.d9", "com.tencent.mm.ui.chatting.viewitems.kb",
             "com.tencent.mm.ui.chatting.viewitems.id",
@@ -3301,32 +3283,6 @@ private class HchatExtraHooker(
                     compareBy<View> { it.bottom }
                         .thenBy { viewScoreForBottomDetails(it) }
                 )
-        }
-        val key = holder.javaClass.name
-        if (knownCardHolder && holderBranch == null && messageDetailsCardAnchorKeys.add("missing:$key")) {
-            val fieldLabel = when (key) {
-                "kn5.d9" -> "b"
-                "com.tencent.mm.ui.chatting.viewitems.kb" -> "f"
-                "com.tencent.mm.ui.chatting.viewitems.id" -> "e"
-                "com.tencent.mm.ui.chatting.viewitems.bf" -> "c"
-                "com.tencent.mm.ui.chatting.viewitems.w1" -> "q"
-                "com.tencent.mm.ui.chatting.viewitems.b4" -> "clickArea"
-                else -> "unknown"
-            }
-            logger(
-                "消息卡片锚点字段未就绪 holder=$key field=$fieldLabel " +
-                    "fieldView=${holderCard?.javaClass?.name ?: "none"} row=${row.javaClass.name}",
-                null
-            )
-        }
-        if (branch != null && messageDetailsCardAnchorKeys.add(key)) {
-            logger(
-                "消息卡片锚点 holder=$key root=${row.javaClass.name} " +
-                    "source=${if (holderBranch != null) "holderField" else "rowFallback"} " +
-                    "anchor=${branch?.javaClass?.name ?: "none"} size=${branch?.width ?: 0}x${branch?.height ?: 0} " +
-                    "top=${branch?.top ?: -1} bottom=${branch?.bottom ?: -1}",
-                null
-            )
         }
         return branch?.let { BottomDetailsAnchor(row, it, it) }
     }

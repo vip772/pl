@@ -22,8 +22,8 @@ function run(args) {
 run(['-Xmx256m', '-cp', jars.map(name => path.join(lib, name)).join(path.delimiter),
     'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-no-stdlib', '-no-reflect',
     '-classpath', path.join(lib, stdlib), '-d', jar,
-    'app/src/main/java/h/Hchat/hooks/items/hchatextra/MessageDetailsPreDrawQueue.kt',
+    'app/src/main/java/t/mma/hooks/items/hchatextra/MessageDetailsPreDrawQueue.kt',
     'scripts/tests/message_details_predraw/AndroidStub.kt',
     'scripts/tests/message_details_predraw/PreDrawRegression.kt']);
-run(['-cp', jar + path.delimiter + path.join(lib, stdlib), 'h.Hchat.hooks.items.hchatextra.PreDrawRegressionKt']);
+run(['-cp', jar + path.delimiter + path.join(lib, stdlib), 't.mma.hooks.items.hchatextra.PreDrawRegressionKt']);
 console.log('Test artifacts: ' + output);

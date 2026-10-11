@@ -78,6 +78,9 @@ object WeChatApis {
  duration=d;path=p;sends++;return true}}
 }
 ''',
+'HLog.kt':'''package t.mma.utils
+object HLog {fun i(s:String) {}}
+''',
 'SendButton.kt':'''package t.mma.hooks.items.script
 object ScriptSendButtonHook {
  var handler:((String)->Boolean)?=null
@@ -96,14 +99,14 @@ class QQMusicOrderSettings(c:Context) {
  fun appId()="test";fun triggers()=listOf("点歌")
 }
 internal data class QQMusicTrack(val title:String="song",val singer:String="singer",val landingUrl:String="",
- val playUrl:String="",val lyric:String="",val coverUrl:String="")
+ val playUrl:String="",val lyric:String="",val coverUrl:String="",val mid:String="song")
 internal sealed class QQMusicSearchResult {
  data class Success(val track:QQMusicTrack):QQMusicSearchResult()
  object NotFound:QQMusicSearchResult();object Unavailable:QQMusicSearchResult()
 }
 internal class QQMusicClient {
  companion object {@Volatile var searches=0;var url=""}
- fun search(k:String):QQMusicSearchResult {searches++;return QQMusicSearchResult.Success(QQMusicTrack(playUrl=url))}
+ fun search(k:String):QQMusicSearchResult {searches++;return QQMusicSearchResult.Success(QQMusicTrack(playUrl=url,mid=k))}
 }
 ''',
 'Regression.kt':'''package t.mma.hooks.items.musicorder
@@ -118,6 +121,14 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
 import com.sun.net.httpserver.HttpServer
 fun main(args:Array<String>) {
+ var cacheTime=System.currentTimeMillis()
+ val cache=MusicVoiceCache(File(args[0],"bounded-cache")){cacheTime}
+ val cf=cache.file("one");cf.writeText("silk");cache.commit(cf,1000)
+ check(cache.duration(cf)==1000)
+ File(cf.path+".duration").writeText("invalid");check(cache.duration(cf)==0)
+ cache.commit(cf,1000);cacheTime+=25L*60*60*1000;check(cache.duration(cf)==0);cache.trim();check(!cf.exists())
+ repeat(12){val f=cache.file("item$it");f.writeText("silk");cache.commit(f,1000);cacheTime++}
+ check(File(args[0],"bounded-cache").listFiles()!!.count{it.extension=="silk"}<=8)
  var now=1000L;val d=MusicCommandDeduplicator({now},100L,4)
  check(d.claim("a",1,0,"点歌夜曲"));check(!d.claim("a",1,0,"different"))
  check(d.claim("a",2,0,"点歌夜曲"));check(d.claim("b",1,0,"点歌夜曲"))
@@ -144,11 +155,12 @@ fun main(args:Array<String>) {
  WeChatApis.changes.emit(Message(3,"点歌夜曲"));WeChatApis.changes.emit(Message(3,"点歌夜曲"))
  await{WeChatApis.voice.sends==1};Thread.sleep(100)
  check(AacCodec.calls==1 && WeChatApis.voice.duration==180000)
- check(File(root,"Hchat_qq_music_order_voice").listFiles()!!.isEmpty())
+ check(File(root,"Hchat_qq_music_order_voice").listFiles()!!.all{it.isDirectory})
  AacCodec.code=-1;val replies=WeChatApis.sender.replies
- WeChatApis.changes.emit(Message(4,"点歌夜曲"));await{WeChatApis.sender.replies>replies}
+ WeChatApis.changes.emit(Message(4,"点歌不同歌曲"));await{WeChatApis.sender.replies>replies}
  check(WeChatApis.voice.sends==1)
- check(File(root,"Hchat_qq_music_order_voice").listFiles()!!.isEmpty())
+ check(File(root,"Hchat_qq_music_order_voice").listFiles()!!.all{it.isDirectory})
+ AacCodec.code=0;WeChatApis.changes.emit(Message(6,"点歌夜曲"));await{WeChatApis.voice.sends==2};check(AacCodec.calls==2)
  val searches=QQMusicClient.searches;r.destroy();WeChatApis.changes.emit(Message(5,"点歌夜曲"))
  check(!ScriptSendButtonHook.handler!!("点歌夜曲"));Thread.sleep(100);check(QQMusicClient.searches==searches)
  }finally {server.stop(0);r.destroy()}
@@ -159,7 +171,7 @@ fun main(args:Array<String>) {
 with tempfile.TemporaryDirectory(prefix='hchat-music-test-') as temp:
  root=Path(temp)
  for n,s in stubs.items():(root/n).write_text(s)
- sources=[repo/'app/src/main/java/t/mma/hooks/items/musicorder'/n for n in ['QQMusicOrderRuntime.kt','MusicCommandDeduplicator.kt']]
+ sources=[repo/'app/src/main/java/t/mma/hooks/items/musicorder'/n for n in ['QQMusicOrderRuntime.kt','MusicCommandDeduplicator.kt','MusicVoiceCache.kt']]
  target=root/'test.jar'
  subprocess.run(['java','-Xmx256m','-cp',os.pathsep.join(map(str,compiler)),
   'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(stdlib),

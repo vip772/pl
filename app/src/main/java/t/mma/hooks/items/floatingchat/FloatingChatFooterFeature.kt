@@ -443,7 +443,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     }
                 } else {
                     footer.visibility = tracker.visibility
-                    HLog.e("[Hchat:$TAG] 首次定位失败，已恢复原始输入区可见性")
+                    HLog.d("[Hchat:$TAG] 首次定位失败，已恢复原始输入区可见性")
                 }
                 return true
             }
