@@ -107,7 +107,7 @@ public class WechatApiFeature implements Feature {
         WeChatSnsApi snsApi = new WeChatSnsApi(
                 context.hostContext(), context.dexFinder(), context.hostClassLoader(),
                 context.dexKitBridge(), networkApi, accountApi, contactApi, context, this::log);
-        networkApi.installNetworkHook(context.dexFinder());
+        // 网络队列 Hook 延后到 wechat_api:warmup，避免在微信启动网络状态未就绪时扫描并挂钩候选类。
         messageEventApi.installAddMsgHook();
         installApiHook("databaseChanges", databaseListenerApi::install);
         installApiHook("messageChanges", messageChangeApi::install);
