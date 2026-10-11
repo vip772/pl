@@ -86,7 +86,7 @@ class AutoTransferFeature : BaseFeature() {
         if (messageTime in 1L until 100_000_000_000L) messageTime *= 1000L
         val now = System.currentTimeMillis()
         if (messageTime > 0L && now - messageTime > TRANSFER_FRESHNESS_MS) {
-            log("忽略历史待收款消息: ageMs=${now - messageTime} talker=${message.talker}")
+            logInfo("忽略历史待收款消息: ageMs=${now - messageTime} talker=${message.talker}")
             return
         }
 
