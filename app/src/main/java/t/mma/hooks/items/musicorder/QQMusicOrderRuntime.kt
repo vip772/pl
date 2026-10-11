@@ -2,6 +2,10 @@ package t.mma.hooks.items.musicorder
 
 import android.content.Context
 import android.media.MediaMetadataRetriever
+import android.os.SystemClock
+import me.yun.silk.AacCodec
+import me.yun.silk.SilkCodec
+import java.util.concurrent.atomic.AtomicBoolean
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.message.WeChatMessageChangeApi
 import t.mma.hooks.items.script.ScriptSendButtonHook
@@ -19,11 +23,15 @@ internal class QQMusicOrderRuntime(
     private val hostContext = context.applicationContext ?: context
     private val settings = QQMusicOrderSettings(context)
     private val client = QQMusicClient()
+    private val active = AtomicBoolean(true)
+    private val installed = AtomicBoolean(false)
+    private val commands = MusicCommandDeduplicator(SystemClock::elapsedRealtime)
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "HchatQQMusicOrder").apply { isDaemon = true }
     }
 
     fun install(track: (Any) -> Unit) {
+        if (!active.get() || !installed.compareAndSet(false, true)) return
         WeChatApis.message().changes()?.let { changes ->
             runCatching { changes.install() }
                 .onFailure { logError("QQ点歌数据库监听安装失败", it) }
@@ -33,11 +41,13 @@ internal class QQMusicOrderRuntime(
     }
 
     fun destroy() {
+        active.set(false)
+        commands.clear()
         executor.shutdownNow()
     }
 
     private fun onSendButton(text: String): Boolean {
-        if (!settings.isEnabled()) return false
+        if (!active.get() || !settings.isEnabled()) return false
         val talker = WeChatApis.interaction().chatPage()?.currentTalker().orEmpty()
         if (talker.isBlank()) return false
         when (text.trim()) {
@@ -70,7 +80,7 @@ internal class QQMusicOrderRuntime(
     }
 
     private fun onMessageChanged(change: WeChatMessageChangeApi.MessageChange) {
-        if (!change.isInsert) return
+        if (!active.get() || !change.isInsert) return
         val message = change.message ?: return
         if (!settings.isEnabled() || !message.isText()) return
         if (message.isSystem()) return
@@ -86,16 +96,25 @@ internal class QQMusicOrderRuntime(
         } else {
             message.getSendTalker()
         }
+        if (!commands.claim(talker, message.msgId, createTime, message.content)) return
         submit(talker, message.msgId, sender, command)
     }
 
     private fun submit(talker: String, msgId: Long, sender: String, command: MusicCommand) {
-        executor.execute {
-            runCatching { process(talker, msgId, sender, command) }
-                .onFailure {
-                    logError("QQ点歌处理异常", it)
-                    sendReply(talker, msgId, "处理失败")
-                }
+        if (!active.get()) return
+        try {
+            executor.execute {
+                if (!active.get()) return@execute
+                runCatching { process(talker, msgId, sender, command) }
+                    .onFailure {
+                        if (active.get()) {
+                            logError("QQ点歌处理异常", it)
+                            sendReply(talker, msgId, "处理失败")
+                        }
+                    }
+            }
+        } catch (error: java.util.concurrent.RejectedExecutionException) {
+            if (active.get()) logError("QQ点歌任务提交失败", error)
         }
     }
 
@@ -111,6 +130,7 @@ internal class QQMusicOrderRuntime(
                 return
             }
         }
+        if (!active.get()) return
         val sendCard = settings.sendAsCard()
         val sendVoice = settings.sendAsVoice()
         if (!sendCard && !sendVoice) {
@@ -163,12 +183,24 @@ internal class QQMusicOrderRuntime(
         }
         val target = File(cacheDir, "qq_music_${System.currentTimeMillis()}_${System.nanoTime()}${audioSuffix(track.playUrl)}")
         val part = File(target.absolutePath + ".part")
+        val silk = File(target.absolutePath + ".silk")
         return try {
-            downloadAudio(track.playUrl, part, target) &&
-                voiceApi.send(talker, target.absolutePath)
+            if (!downloadAudio(track.playUrl, part, target) || !active.get()) return false
+            val durationMillis = audioDurationMillis(target)
+            if (durationMillis <= 0) return false
+            // Despite its historic name, mp4ToSilk uses MediaExtractor/MediaCodec for
+            // any supported audio track, then mono PCM -> Silk. Never autoToSilk:
+            // native compressed-audio decoding SIGSEGVs on the user's QQ music input.
+            val code = AacCodec.mp4ToSilk(target.absolutePath, silk.absolutePath, SilkCodec(), 24_000)
+            if (code != 0 || !silk.isFile || silk.length() <= 0L) {
+                logError("QQ点歌系统解码转 Silk 失败 code=$code", null)
+                return false
+            }
+            active.get() && voiceApi.send(talker, silk.absolutePath, durationMillis)
         } finally {
             deleteFile(part)
             deleteFile(target)
+            deleteFile(silk)
         }
     }
 
@@ -294,15 +326,17 @@ internal class QQMusicOrderRuntime(
             .also { connection?.disconnect() }
     }
 
-    private fun isAudioFile(file: File): Boolean {
+    private fun isAudioFile(file: File): Boolean = audioDurationMillis(file) > 0
+
+    private fun audioDurationMillis(file: File): Int {
         val retriever = MediaMetadataRetriever()
         return try {
             retriever.setDataSource(file.absolutePath)
-            retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                ?.toLongOrNull()
-                ?.let { it > 0L } == true
+            val duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                ?.toLongOrNull() ?: return 0
+            if (duration <= 0 || duration > Int.MAX_VALUE) 0 else duration.toInt()
         } catch (_: Throwable) {
-            false
+            0
         } finally {
             runCatching { retriever.release() }
         }
