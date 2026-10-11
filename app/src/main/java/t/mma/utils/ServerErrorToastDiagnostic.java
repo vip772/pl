@@ -29,6 +29,8 @@ public final class ServerErrorToastDiagnostic {
     private static final List<XC_MethodHook.Unhook> hooks = new ArrayList<>();
     private static final List<String> pending = new ArrayList<>();
     private static final Set<Object> recordedToasts = Collections.newSetFromMap(new WeakHashMap<>());
+    private static final java.util.Map<Object, String> networkOrigins = Collections.synchronizedMap(new WeakHashMap<>());
+    private static final AtomicInteger networkEvents = new AtomicInteger();
     private static final AtomicInteger sceneEvents = new AtomicInteger();
     private static final AtomicInteger sceneSequence = new AtomicInteger();
     private static final ThreadLocal<ArrayDeque<String>> sceneContext = new ThreadLocal<>();
@@ -43,7 +45,7 @@ public final class ServerErrorToastDiagnostic {
         if (installed) return;
         installed = true;
         started = SystemClock.elapsedRealtime();
-        emit(TAG + " armed revision=scene-correlation-v2 module=" + BuildConfig.VERSION_NAME
+        emit(TAG + " armed revision=sync-origin-v3 module=" + BuildConfig.VERSION_NAME
                 + " code=" + BuildConfig.VERSION_CODE + " process=" + process
                 + " pid=" + android.os.Process.myPid() + " windowMs=" + WINDOW_MS);
         try {
@@ -113,6 +115,7 @@ public final class ServerErrorToastDiagnostic {
         pending.clear();
         emit(TAG + " applicationReady elapsedMs=" + (SystemClock.elapsedRealtime() - started));
         installSceneCorrelation(application.getClassLoader());
+        installSyncOrigin(application.getClassLoader());
         new Handler(Looper.getMainLooper()).postDelayed(ServerErrorToastDiagnostic::stop,
                 Math.max(0L, WINDOW_MS - (SystemClock.elapsedRealtime() - started)));
     }
@@ -142,6 +145,8 @@ public final class ServerErrorToastDiagnostic {
                                 + " errMsgLength=" + (param.args[2] instanceof String ? ((String) param.args[2]).length() : 0)
                                 + " thread=" + Thread.currentThread().getName()
                                 + " elapsedMs=" + (SystemClock.elapsedRealtime() - started);
+                        String origin = request == null ? null : networkOrigins.get(request);
+                        entry += " networkOrigin={" + (origin == null ? "not_captured" : origin) + "}";
                         ArrayDeque<String> stack = sceneContext.get();
                         if (stack == null) { stack = new ArrayDeque<>(); sceneContext.set(stack); }
                         stack.addLast(entry);
@@ -168,6 +173,36 @@ public final class ServerErrorToastDiagnostic {
             // Explicitly report incompatible host versions instead of pretending correlation exists.
             emit(TAG + " sceneHook=unavailable error=" + error.getClass().getName());
         }
+    }
+
+    private static synchronized void installSyncOrigin(ClassLoader loader) {
+        try {
+            Class<?> sync = Class.forName("y51.b", false, loader);
+            Class<?> rr = Class.forName("com.tencent.mm.network.y0", false, loader);
+            Method method = sync.getDeclaredMethod("onGYNetEnd", int.class, int.class, int.class,
+                    String.class, rr, byte[].class);
+            hooks.add(XposedBridge.hookMethod(method, new XC_MethodHook() {
+                @Override protected void beforeHookedMethod(MethodHookParam param) {
+                    if (!active() || param.args == null || param.args.length != 6) return;
+                    try {
+                        if (networkEvents.incrementAndGet() > 20) return;
+                        Object response = param.args[4];
+                        String entry = "sceneIdentity=" + System.identityHashCode(param.thisObject)
+                                + " netId=" + param.args[0] + " errType=" + param.args[1]
+                                + " errCode=" + param.args[2] + " responseClass="
+                                + (response == null ? "null" : response.getClass().getName())
+                                + " responseType=" + sceneType(response)
+                                + " errMsgLength=" + (param.args[3] instanceof String ? ((String) param.args[3]).length() : 0)
+                                + " bufferLength=" + (param.args[5] instanceof byte[] ? ((byte[]) param.args[5]).length : 0)
+                                + " elapsedMs=" + (SystemClock.elapsedRealtime() - started)
+                                + " thread=" + Thread.currentThread().getName();
+                        networkOrigins.put(param.thisObject, entry);
+                        emit(TAG + " syncNetworkEnd " + entry);
+                    } catch (Throwable error) { emit(TAG + " syncCaptureFailure=" + error.getClass().getName()); }
+                }
+            }));
+            emit(TAG + " syncHook=installed callback=" + method.toGenericString());
+        } catch (Throwable error) { emit(TAG + " syncHook=unavailable error=" + error.getClass().getName()); }
     }
 
     private static String sceneType(Object request) {
@@ -233,6 +268,7 @@ public final class ServerErrorToastDiagnostic {
             try { hook.unhook(); } catch (Throwable ignored) { }
         }
         hooks.clear();
+        networkOrigins.clear();
         emit(TAG + " finished matches=" + matches.get() + " sceneEvents=" + sceneEvents.get()
                 + " sceneHookInstalled=" + sceneHookInstalled);
     }

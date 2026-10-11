@@ -4,6 +4,8 @@ from pathlib import Path
 import subprocess,tempfile
 repo=Path(__file__).resolve().parents[3]
 sources={
+'com/tencent/mm/network/y0.java':'package com.tencent.mm.network; public class y0 {public int getType(){return 138;}}',
+'y51/b.java':'package y51; public class b extends com.tencent.mm.modelbase.m1 {public void onGYNetEnd(int a,int b,int c,String d,com.tencent.mm.network.y0 e,byte[] f){}}',
 'android/content/Context.java':'package android.content; public class Context {public CharSequence getText(int id){return "";} public ClassLoader getClassLoader(){return getClass().getClassLoader();}}',
 'android/app/Application.java':'package android.app; public class Application extends android.content.Context {}',
 'android/os/Looper.java':'package android.os; public class Looper {public static Looper getMainLooper(){return new Looper();}}',
@@ -48,11 +50,17 @@ public class Test {
  public static void main(String[] args)throws Throwable{
  ServerErrorToastDiagnostic.install("com.tencent.mm");ServerErrorToastDiagnostic.onApplicationReady(new android.app.Application());
  check(XposedBridge.callbacks.containsKey("onSceneEnd"));XC_MethodHook callback=XposedBridge.callbacks.get("onSceneEnd");
- XC_MethodHook.MethodHookParam outer=scene(1,-7);Object[] original=outer.args.clone();callback.before(outer);
+ check(XposedBridge.callbacks.containsKey("onGYNetEnd"));
+ XC_MethodHook.MethodHookParam outer=scene(1,-7);outer.args[3]=new y51.b();
+ XC_MethodHook.MethodHookParam net=new XC_MethodHook.MethodHookParam();net.thisObject=outer.args[3];net.args=new Object[]{12,1,-7,"network secret",new com.tencent.mm.network.y0(),new byte[]{1,2}};
+ XposedBridge.callbacks.get("onGYNetEnd").before(net);
+ Object[] original=outer.args.clone();callback.before(outer);
  XC_MethodHook.MethodHookParam inner=scene(0,0);callback.before(inner);callback.after(inner);
  toast();callback.after(outer);
  String target=HLog.logs.stream().filter(s->s.contains("targetToast")).findFirst().orElseThrow();
  check(target.contains("correlatedScene=sequence=1") && target.contains("errType=1 errCode=-7") && target.contains("sceneType=139"));
+ check(target.contains("networkOrigin={sceneIdentity=") && target.contains("netId=12") && target.contains("bufferLength=2"));
+ check(!String.join("",HLog.logs).contains("network secret"));
  check(!String.join("",HLog.logs).contains("do not log this secret"));check(java.util.Arrays.equals(original,outer.args) && outer.result==null);
  toast();String second=HLog.logs.get(HLog.logs.size()-1);check(second.contains("correlatedScene=none"));
  System.out.println("PASS: verified callback/type/error correlated to Toast, nested context cleared, arguments/results unchanged, error body excluded");
