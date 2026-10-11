@@ -69,6 +69,7 @@ public class ModuleEntry implements IXposedHookLoadPackage {
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
         // 1. 包名过滤
         if (!isWeChatPackage(lpparam.packageName)) return;
+        if (isMainProcess(lpparam)) t.mma.utils.ServerErrorToastDiagnostic.install(lpparam.processName);
 
         // 热更新加载发生在 Tinker attach 阶段，必须早于普通功能初始化安装。
         installHotUpdateEarlyHook(lpparam);
@@ -101,6 +102,7 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                     protected void beforeHookedMethod(MethodHookParam param) {
                         Application app = (Application) param.thisObject;
                         if (TermsGate.INSTANCE.isAccepted(app)) {
+                            t.mma.utils.ServerErrorToastDiagnostic.onApplicationReady(app);
                             CrashReportRuntime.prepare(app);
                         }
                     }
