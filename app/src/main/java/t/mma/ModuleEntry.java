@@ -79,6 +79,17 @@ public class ModuleEntry implements IXposedHookLoadPackage {
 
         // 2. 子进程只安装明确需要的最小 Hook。
         if (!isMainProcess(lpparam)) {
+            if ("com.tencent.mm:push".equals(lpparam.processName)) {
+                XposedBridge.hookAllMethods(Application.class, "onCreate", new XC_MethodHook() {
+                    @Override
+                    protected void beforeHookedMethod(MethodHookParam param) {
+                        Application app = (Application) param.thisObject;
+                        if (TermsGate.INSTANCE.isAccepted(app)) {
+                            t.mma.utils.NetworkOriginDiagnostic.install(app.getClassLoader(), lpparam.processName);
+                        }
+                    }
+                });
+            }
             if (isAppBrandProcess(lpparam)) {
                 installAppBrandProcessHook(lpparam);
             }
