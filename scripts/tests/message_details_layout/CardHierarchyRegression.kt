@@ -19,6 +19,22 @@ fun main() {
     repeat(20) { val next = ViewGroup(); leaf.addView(next); leaf = next }
     check(MessageDetailsCardHierarchy.contentBranch(row, leaf) === shared)
     println("PASS deeply nested native content resolves to the original row")
+    // Template payments: the merchant/header is nested inside the full template body.
+    // Append against its row branch, not the header's own parent.
+    val paymentRow = ViewGroup()
+    val paymentBody = ViewGroup()
+    val merchantHeader = ViewGroup()
+    val amount = View()
+    val footer = View()
+    paymentRow.addView(paymentBody)
+    paymentBody.addView(merchantHeader)
+    paymentBody.addView(amount)
+    paymentBody.addView(footer)
+    check(MessageDetailsCardHierarchy.contentBranch(paymentRow, paymentBody) === paymentBody)
+    check(MessageDetailsCardHierarchy.contentBranch(paymentRow, merchantHeader) === paymentBody)
+    check(MessageDetailsCardHierarchy.isCardMessage(318767153, null))
+    check(MessageDetailsCardHierarchy.isCardMessage(318767153, 5))
+    println("PASS payment template keeps merchant, amount and footer in the complete row branch")
 
     check(MessageDetailsCardHierarchy.contentBranch(ViewGroup(), leaf) == null)
     check(MessageDetailsCardHierarchy.contentBranch(row, row) == null)

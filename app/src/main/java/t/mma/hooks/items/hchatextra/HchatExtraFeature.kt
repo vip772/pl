@@ -39,6 +39,7 @@ import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.items.hideavatar.HideChatAvatarSettings
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
+import t.mma.utils.HLog
 import org.json.JSONObject
 import org.luckypray.dexkit.query.FindClass
 import org.luckypray.dexkit.query.FindMethod
@@ -1263,7 +1264,8 @@ private class HchatExtraHooker(
         val appSubtype = MessageTypeLabels.subtype(details.type, details.content, details.body)
         val cardMessage = !centeredNotice &&
             !isKnownNonCardHolder(holder) &&
-            isCardMessage(details.type, appSubtype)
+            (isCardMessage(details.type, appSubtype) ||
+                holder.javaClass.name == "com.tencent.mm.ui.chatting.viewitems.cs")
         val bottomAnchor = if (avatarAnchor == null) {
             if (cardMessage) {
                 // The native time/header and card may share one outer branch. Anchor below
@@ -1329,6 +1331,15 @@ private class HchatExtraHooker(
         }
         if (inserted) {
             rememberMessageDetailsBinding(label, root, nativeTimeLabel, holder, nativeMessage, details)
+            if (holder.javaClass.name == "com.tencent.mm.ui.chatting.viewitems.cs" &&
+                messageDetailsFailureKeys.add("template_anchor|$position|${parent.javaClass.name}")) {
+                HLog.i("[Hchat:MessageDetailsLayout] templateAnchor revision=template-card-v1 " +
+                    "holder=${holder.javaClass.name} type=${details.type} position=$position " +
+                    "card=$cardMessage root=${root.javaClass.name} parent=${parent.javaClass.name} " +
+                    "anchor=${bottomAnchor?.layoutView?.javaClass?.name} " +
+                    "anchorBottom=${bottomAnchor?.layoutView?.bottom} labelIndex=${parent.indexOfChild(label)} " +
+                    "anchorIndex=${bottomAnchor?.layoutView?.let { parent.indexOfChild(it) }}")
+            }
             if (cardMessage && avatarAnchor == null) {
                 observeCardDetailsLayout(root, label)
             } else {
@@ -1805,6 +1816,8 @@ private class HchatExtraHooker(
         details: MessageDetails,
         avatarHidden: Boolean
     ): Boolean {
+        // In a horizontal header, index-after means beside the merchant, never below a card.
+        if (parent is LinearLayout && parent.orientation != LinearLayout.VERTICAL) return false
         if (label.maxLines != Int.MAX_VALUE) {
             label.setSingleLine(false)
             label.maxLines = Int.MAX_VALUE
@@ -3218,6 +3231,9 @@ private class HchatExtraHooker(
         val holderName = holder.javaClass.name
         val knownField = when (holderName) {
             // 8.0.78 b4.a assigns clickArea to bkg, the red-packet card FrameLayout.
+            // 8.0.78 ChattingItemDyeingTemplate uses cs.b (bkn), the complete
+            // vertical template body. Its header/avatar is not the message bottom.
+            "com.tencent.mm.ui.chatting.viewitems.cs" -> "b"
             "com.tencent.mm.ui.chatting.viewitems.b4" -> "clickArea"
             "com.tencent.mm.ui.chatting.viewitems.bf" -> "c"
             "com.tencent.mm.ui.chatting.viewitems.w1" -> "q"
@@ -3271,6 +3287,7 @@ private class HchatExtraHooker(
             ?.takeUnless { it.tag == TAG_MESSAGE_DETAILS_VIEW }
             ?.takeIf { isMeasuredCardBranch(it, row) }
         val knownCardHolder = when (holder.javaClass.name) {
+            "com.tencent.mm.ui.chatting.viewitems.cs",
             "kn5.d9", "com.tencent.mm.ui.chatting.viewitems.kb",
             "com.tencent.mm.ui.chatting.viewitems.id",
             "com.tencent.mm.ui.chatting.viewitems.bf",
