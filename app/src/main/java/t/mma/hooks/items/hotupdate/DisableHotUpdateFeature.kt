@@ -295,8 +295,10 @@ class DisableHotUpdateFeature : BaseFeature() {
         }
 
         private fun isUpgradeResponseHandler(method: Method): Boolean {
-            return (method.parameterTypes.size == 1 && method.parameterTypes[0] == java.io.File::class.java) ||
-                (method.name == "onGYNetEnd" && method.parameterTypes.size >= 5)
+            // onGYNetEnd is a shared WeChat network callback. Matching it here
+            // can intercept unrelated startup requests and trigger error (1,-7).
+            return method.parameterTypes.size == 1 &&
+                method.parameterTypes[0] == java.io.File::class.java
         }
 
         private fun isManualUpdaterMethod(method: Method): Boolean {
