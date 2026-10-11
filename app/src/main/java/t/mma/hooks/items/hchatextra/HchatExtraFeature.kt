@@ -1183,10 +1183,11 @@ private class HchatExtraHooker(
         }
         val cardMessage = !isCenteredNotice(details.type) &&
             !isKnownNonCardHolder(viewTag) &&
-            isCardMessage(
-                details.type,
-                MessageTypeLabels.subtype(details.type, details.content, details.body)
-            )
+            (MessageDetailsCardHierarchy.templateHolderClass(viewTag.javaClass) != null ||
+                isCardMessage(
+                    details.type,
+                    MessageTypeLabels.subtype(details.type, details.content, details.body)
+                ))
         if (inserted) {
             if (cardMessage) messageDetailsPendingLayout.cancel(root)
         } else {
@@ -1317,7 +1318,7 @@ private class HchatExtraHooker(
         val cardMessage = !centeredNotice &&
             !isKnownNonCardHolder(holder) &&
             (isCardMessage(details.type, appSubtype) ||
-                holder.javaClass.name == "com.tencent.mm.ui.chatting.viewitems.cs")
+                MessageDetailsCardHierarchy.templateHolderClass(holder.javaClass) != null)
         val bottomAnchor = if (avatarAnchor == null) {
             if (cardMessage) {
                 // The native time/header and card may share one outer branch. Anchor below
@@ -1389,9 +1390,9 @@ private class HchatExtraHooker(
         }
         if (inserted) {
             rememberMessageDetailsBinding(label, root, nativeTimeLabel, holder, nativeMessage, details)
-            if (holder.javaClass.name == "com.tencent.mm.ui.chatting.viewitems.cs" &&
+            if (MessageDetailsCardHierarchy.templateHolderClass(holder.javaClass) != null &&
                 messageDetailsFailureKeys.add("template_anchor|$position|${parent.javaClass.name}")) {
-                HLog.i("[Hchat:MessageDetailsLayout] templateAnchor revision=template-card-v1 " +
+                HLog.i("[Hchat:MessageDetailsLayout] templateAnchor revision=template-inheritance-v2 " +
                     "holder=${holder.javaClass.name} type=${details.type} position=$position " +
                     "card=$cardMessage root=${root.javaClass.name} parent=${parent.javaClass.name} " +
                     "anchor=${bottomAnchor?.layoutView?.javaClass?.name} " +
@@ -3287,12 +3288,18 @@ private class HchatExtraHooker(
 
 
     private fun holderCardContainer(holder: Any, row: ViewGroup): View? {
+        MessageDetailsCardHierarchy.templateHolderClass(holder.javaClass)?.let { declaringClass ->
+            val field = KavaReflector.declaredFields(declaringClass).firstOrNull {
+                it.name == "b" && LinearLayout::class.java.isAssignableFrom(it.type)
+            } ?: return null
+            val content = KavaReflector.readField(field, holder) as? LinearLayout ?: return null
+            return content.takeIf { isViewWithinRoot(it, row) }
+        }
         val holderName = holder.javaClass.name
         val knownField = when (holderName) {
             // 8.0.78 b4.a assigns clickArea to bkg, the red-packet card FrameLayout.
             // 8.0.78 ChattingItemDyeingTemplate uses cs.b (bkn), the complete
             // vertical template body. Its header/avatar is not the message bottom.
-            "com.tencent.mm.ui.chatting.viewitems.cs" -> "b"
             "com.tencent.mm.ui.chatting.viewitems.b4" -> "clickArea"
             "com.tencent.mm.ui.chatting.viewitems.bf" -> "c"
             "com.tencent.mm.ui.chatting.viewitems.w1" -> "q"
@@ -3332,6 +3339,8 @@ private class HchatExtraHooker(
             !(row is LinearLayout && row.orientation == LinearLayout.VERTICAL)
         ) return null
         val excludedBranches = buildSet<View> {
+            findHolderTextView(holder, "timeTV", holderTimeFieldCache)
+                ?.let { directChildOf(row, it) }?.let(::add)
             findHolderAvatarView(holder)?.let { directChildOf(row, it) }?.let(::add)
             findChattingAvatarView(root)?.let { directChildOf(row, it) }?.let(::add)
         }
@@ -3345,8 +3354,8 @@ private class HchatExtraHooker(
         val holderBranch = holderDirectBranch
             ?.takeUnless { it.tag == TAG_MESSAGE_DETAILS_VIEW }
             ?.takeIf { isMeasuredCardBranch(it, row) }
-        val knownCardHolder = when (holder.javaClass.name) {
-            "com.tencent.mm.ui.chatting.viewitems.cs",
+        val knownCardHolder = MessageDetailsCardHierarchy.templateHolderClass(holder.javaClass) != null ||
+            when (holder.javaClass.name) {
             "kn5.d9", "com.tencent.mm.ui.chatting.viewitems.kb",
             "com.tencent.mm.ui.chatting.viewitems.id",
             "com.tencent.mm.ui.chatting.viewitems.bf",

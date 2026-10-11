@@ -8,6 +8,16 @@ import java.util.IdentityHashMap
 
 /** Resolves native content without reparenting host views or excluding shared avatar branches. */
 internal object MessageDetailsCardHierarchy {
+    /** Match the verified declaring class, including service-notify subclasses (as extends cs).
+     * The caller reads cs's own field: a subclass's unrelated field named b must not shadow it. */
+    fun templateHolderClass(type: Class<*>): Class<*>? {
+        var current: Class<*>? = type
+        while (current != null && current != Any::class.java) {
+            if (current.name == "com.tencent.mm.ui.chatting.viewitems.cs") return current
+            current = current.superclass
+        }
+        return null
+    }
     fun contentBranch(row: ViewGroup, content: View): View? {
         if (content === row) return null
         var current = content

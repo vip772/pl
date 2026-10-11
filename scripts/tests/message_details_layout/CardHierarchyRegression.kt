@@ -4,6 +4,16 @@ import android.view.View
 import android.view.ViewGroup
 
 fun main() {
+    val template = com.tencent.mm.ui.chatting.viewitems.`as`()
+    val declaring = MessageDetailsCardHierarchy.templateHolderClass(template.javaClass)
+    check(declaring === com.tencent.mm.ui.chatting.viewitems.cs::class.java)
+    check(MessageDetailsCardHierarchy.templateHolderClass(declaring!!) === declaring)
+    check(MessageDetailsCardHierarchy.templateHolderClass(com.tencent.mm.ui.chatting.viewitems.unrelated::class.java) == null)
+    val body = ViewGroup()
+    (template as com.tencent.mm.ui.chatting.viewitems.cs).b = body
+    check(declaring.getDeclaredField("b").get(template) === body)
+    println("PASS actual as/cs inheritance resolves declaring body field from the verified superclass")
+
     val row = ViewGroup()
     val shared = ViewGroup()
     val avatar = View()
