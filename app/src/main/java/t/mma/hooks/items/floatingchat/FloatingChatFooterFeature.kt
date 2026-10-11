@@ -393,6 +393,7 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
 
     private fun trackFooter(footer: View) {
+        if (!isEnabled()) { restore(footer); return }
         val layout = findAncestorChatLayout(footer) ?: return
         val tracker = trackerForFooter(footer, layout)
         if (!isVisibleChatLayout(layout)) return
@@ -401,6 +402,7 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
 
     private fun requestFooterApply(footer: View) {
+        if (!isEnabled()) { restore(footer); return }
         val layout = findAncestorChatLayout(footer) ?: return
         if (!isVisibleChatLayout(layout)) return
         val tracker = trackerForFooter(footer, layout)
@@ -431,8 +433,15 @@ private class FooterRuntime(private val context: FeatureContext) {
                 if (observer.isAlive) observer.removeOnPreDrawListener(this)
                 if (tracker.preDraw === this) tracker.preDraw = null
                 if (!footer.isAttachedToWindow || !isVisibleChatLayout(tracker.layout)) return true
+                if (!isEnabled()) {
+                    footer.visibility = tracker.visibility
+                    restore(footer)
+                    return true
+                }
                 val applied = apply(footer)
                 if (applied) {
+                    tracker.attempts = 0
+                    tracker.failureReported = false
                     tracker.ready = true
                     footer.visibility = tracker.visibility
                 } else if (tracker.attempts++ < INITIAL_LAYOUT_RETRY_COUNT) {
@@ -442,8 +451,13 @@ private class FooterRuntime(private val context: FeatureContext) {
                         }
                     }
                 } else {
+                    // A failed apply may already have moved the native panel. Roll it back.
+                    restore(footer)
                     footer.visibility = tracker.visibility
-                    HLog.d("[Hchat:$TAG] 首次定位失败，已恢复原始输入区可见性")
+                    if (!tracker.failureReported) {
+                        tracker.failureReported = true
+                        HLog.w("[Hchat:$TAG] 初始布局未就绪，已恢复原始输入区和面板，等待后续布局变化")
+                    }
                 }
                 return true
             }
@@ -495,7 +509,6 @@ private class FooterRuntime(private val context: FeatureContext) {
             return false
         }
         val state = states[footer] ?: createState(footer, panel, marginParams) ?: return false
-        if (!state.reparented && !reparentPanel(state)) return false
         if (isPanelState(panelState)) applyCompactPanelHeight(footer, state.panel)
         val measuredInputHeight = visibleHeightExcludingPanel(state.panel)
         val stableInputHeight = measuredInputHeight.takeIf { it > 0 }
@@ -509,6 +522,8 @@ private class FooterRuntime(private val context: FeatureContext) {
             state.baseInputHeight.takeIf { it > 0 } ?: stableInputHeight
         }
 
+        // Do not mutate hierarchy until native input height is available.
+        if (!state.reparented && !reparentPanel(state)) return false
         val side = dp(SIDE_MARGIN_DP)
         val gap = dp(BOTTOM_GAP_DP)
         val targetTop = -(inputHeight + gap)
@@ -941,7 +956,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         var ready: Boolean = false,
         var preDraw: ViewTreeObserver.OnPreDrawListener? = null,
         var layoutListener: View.OnLayoutChangeListener? = null,
-        var attempts: Int = 0
+        var attempts: Int = 0,
+        var failureReported: Boolean = false
     )
 
     private data class FooterState(

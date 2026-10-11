@@ -34,6 +34,8 @@ class QuickMarkReadFeature : BaseFeature() {
 
     override fun onFeatureInstall(context: FeatureContext) {
         QuickMarkReadRuntime.install(context)
+        subscribe(t.mma.event.Events.DexReady::class.java) { QuickMarkReadRuntime.requestPreparation() }
+        subscribe(t.mma.event.Events.NetworkDispatcherReady::class.java) { QuickMarkReadRuntime.requestPreparation() }
         val controller = QuickMarkReadDragController(context.hostClassLoader(), ::logError)
         dragController = controller
         controller.install()

@@ -14,6 +14,9 @@ import t.mma.hooks.api.model.WeChatMessageTypes
 import t.mma.hooks.api.runtime.WeChatDatabaseApi
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
+import t.mma.hooks.core.HookRegistry
+import de.robv.android.xposed.XC_MethodHook
+import android.os.SystemClock
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
@@ -64,11 +67,22 @@ object QuickMarkReadRuntime {
     @Volatile private var featureContext: FeatureContext? = null
     @Volatile private var nativeMarkReadMethod: Method? = null
     @Volatile private var nativeMarkReadStorage: Any? = null
+    private val observedStorageMethods = java.util.concurrent.ConcurrentHashMap.newKeySet<Method>()
+    private val preparationFailures = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
+    private var lastPrepareRequest = 0L
 
     fun install(context: FeatureContext) {
         featureContext = context
         if (!installed.compareAndSet(false, true)) return
         prepareNativeMarkRead(context, allowDexSearch = false)
+        requestPreparation()
+    }
+    @Synchronized
+    fun requestPreparation() {
+        val context = featureContext ?: return
+        val now = SystemClock.elapsedRealtime()
+        if (lastPrepareRequest != 0L && now - lastPrepareRequest < 5_000L) return
+        lastPrepareRequest = now
         DexInstallScheduler.schedule(
             "${QuickMarkReadFeature.ID}:native_mark_read",
             "快捷已读原生已读入口",
@@ -343,23 +357,56 @@ object QuickMarkReadRuntime {
     private fun nativeMarkReadMethod(): Method? {
         nativeMarkReadMethod?.let { return it }
         val context = featureContext ?: return null
-        return locateNativeMarkReadMethod(context, allowDexSearch = false)
+        val method = locateNativeMarkReadMethod(context, allowDexSearch = false)
+        if (method == null) requestPreparation()
+        return method
     }
 
     private fun prepareNativeMarkRead(context: FeatureContext, allowDexSearch: Boolean): Boolean {
-        val method = locateNativeMarkReadMethod(context, allowDexSearch) ?: return false
-        val database = WeChatApis.database() ?: return false
-        return nativeMarkReadStorage(database, method) != null
+        val method = locateNativeMarkReadMethod(context, allowDexSearch)
+            ?: return preparationFailed("method_not_found")
+        observeNativeStorage(method)
+        val database = WeChatApis.database() ?: return preparationFailed("database_api_not_ready")
+        if (nativeMarkReadStorage(database, method) == null) {
+            return preparationFailed("native_storage_not_ready:${method.declaringClass.name}")
+        }
+        preparationFailures.clear()
+        return true
     }
 
+    private fun preparationFailed(reason: String): Boolean {
+        if (preparationFailures.add(reason)) HLog.w("$TAG 原生已读准备未完成 reason=$reason")
+        return false
+    }
+    private fun observeNativeStorage(method: Method) {
+        if (!observedStorageMethods.add(method)) return
+        try {
+            HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val storage = param.thisObject ?: return
+                    if (!method.declaringClass.isInstance(storage)) return
+                    if (nativeMarkReadStorage !== storage) {
+                        nativeMarkReadStorage = storage
+                        DexInstallScheduler.markInstalled("${QuickMarkReadFeature.ID}:native_mark_read")
+                        HLog.i("$TAG 原生已读存储已捕获 owner=${method.declaringClass.name}")
+                    }
+                }
+            })
+        } catch (error: Throwable) {
+            observedStorageMethods.remove(method)
+            HLog.e("$TAG 原生已读存储观察安装失败", error)
+        }
+    }
     private fun nativeMarkReadStorage(database: WeChatDatabaseApi, method: Method): Any? {
         nativeMarkReadStorage?.let { cached ->
             if (method.declaringClass.isInstance(cached)) return cached
             nativeMarkReadStorage = null
         }
-        return database.storageObjectForMethod(method)?.also {
+        val storage = database.storageObjectForMethod(method)?.also {
             nativeMarkReadStorage = it
         }
+        if (storage == null) requestPreparation()
+        return storage
     }
 
     private fun locateNativeMarkReadMethod(context: FeatureContext, allowDexSearch: Boolean): Method? {

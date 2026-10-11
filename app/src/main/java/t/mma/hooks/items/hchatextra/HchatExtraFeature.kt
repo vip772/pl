@@ -1152,8 +1152,17 @@ private class HchatExtraHooker(
             } else {
                 if (attempt >= MESSAGE_DETAILS_MAX_RETRY) {
                     logMessageDetailsFailure("layout", viewTag, root)
+                    val retryArgs = args?.copyOf()
+                    val token = messageDetailsBindToken(root)
+                    messageDetailsPendingLayout.observe(root) {
+                        if (!isCurrentMessageDetailsBind(root, token)) return@observe true
+                        bindBottomMessageDetails(
+                            bindObject, retryArgs, MESSAGE_DETAILS_MAX_RETRY, viewTag, nativeMessage, root
+                        )
+                    }
+                } else {
+                    scheduleMessageDetailsRetry(root, bindObject, args, attempt, viewTag, nativeMessage)
                 }
-                scheduleMessageDetailsRetry(root, bindObject, args, attempt, viewTag, nativeMessage)
             }
         }
         label?.setOnClickListener(null)
@@ -1262,6 +1271,7 @@ private class HchatExtraHooker(
                 cardBottomAnchor(root, holder, details.type)
             } else {
                 noticeContentAnchor(root, nativeTimeLabel, details.type)
+                    ?: (if (!centeredNotice) rowContentDetailsAnchor(root, holder, nativeTimeLabel) else null)
                     ?: nativeTimeLabel?.let {
                         messageContentAnchor(holder, it) ?: timeLabelDetailsAnchor(it)
                     }
@@ -3305,6 +3315,21 @@ private class HchatExtraHooker(
         return BottomDetailsAnchor(parent, label, label)
     }
 
+    // Native timeTV may live inside an unsupported X2C/ConstraintLayout container.
+    // Promote verified holder content to the adapter row rather than inserting there.
+    private fun rowContentDetailsAnchor(root: View, holder: Any, time: TextView?): BottomDetailsAnchor? {
+        val row = root as? ViewGroup ?: return null
+        if (row !is RelativeLayout && row !is android.widget.FrameLayout &&
+            !(row is LinearLayout && row.orientation == LinearLayout.VERTICAL)) return null
+        val content = holderCardContainer(holder, row)
+            ?: holderMainContentView(holder, row)
+            ?: messageContentView(holder, row, time)
+            ?: return null
+        val branch = directChildOf(row, content) ?: return null
+        if (branch.tag == TAG_MESSAGE_DETAILS_VIEW || branch.visibility != View.VISIBLE ||
+            branch.width <= 0 || branch.height <= 0) return null
+        return BottomDetailsAnchor(row, branch, content)
+    }
     private fun messageContentAnchor(holder: Any, label: TextView): BottomDetailsAnchor? {
         val labelParent = label.parent as? ViewGroup ?: return null
         if (labelParent !is RelativeLayout && labelParent !is LinearLayout) return null

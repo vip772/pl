@@ -9,7 +9,10 @@ internal class MessageDetailsPendingLayoutObserver {
     private val entries = WeakHashMap<View, Entry>()
 
     fun observe(root: View, action: () -> Boolean) {
-        cancel(root)
+        entries[root]?.let {
+            it.updateAction(action)
+            return
+        }
         val entry = Entry(root, action)
         entries[root] = entry
         root.addOnAttachStateChangeListener(entry)
@@ -34,8 +37,12 @@ internal class MessageDetailsPendingLayoutObserver {
         private var active = true
         private var posted = false
         private var polling = false
+        // Poll briefly for initial measurement; afterwards only real layout/attach
+        // events may retry. An unsupported holder must not spin every 32 ms forever.
+        private var pollsRemaining = 8
         private val poll = Runnable { onPoll() }
 
+        fun updateAction(next: () -> Boolean) { action = next }
         fun attach(view: View) {
             if (!active) return
             removeObserver()
@@ -65,7 +72,8 @@ internal class MessageDetailsPendingLayoutObserver {
         }
 
         private fun schedulePoll() {
-            if (!active || entries[root] !== this || !root.isAttachedToWindow || polling) return
+            if (!active || entries[root] !== this || !root.isAttachedToWindow || polling || pollsRemaining <= 0) return
+            pollsRemaining--
             polling = true
             root.postDelayed(poll, 32L)
         }

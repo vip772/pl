@@ -88,6 +88,7 @@ object ConversationGroupRuntime {
     private const val VIRTUAL_PREFIX = "wxid_hchat_group_"
     private const val PARENT_PREFIX = "hchat_conv_group:"
     private const val KEY_ORIGINAL_PARENT_REFS = "original_parent_refs"
+    private const val KEY_ORIGINAL_PARENT_REFS_BACKUP = "original_parent_refs_backup_v1"
     private const val MENU_ITEM_ID = 0x48434752
     private const val MENU_TITLE = "聊天分组"
     private const val PAGE_MENU_ITEM_ID = 0x4843474D
@@ -1476,7 +1477,13 @@ object ConversationGroupRuntime {
         check(account == ConversationGroupStore.accountKey()) { "账号已切换，停止分组写入" }
         plan.unresolved.forEach { talker ->
             if (parentRestoreFailures.add("$account|$talker")) {
-                HLog.e("$TAG 缺少可信原始父级，保留当前会话归属: talker=$talker")
+                val row = database.query(
+                    "SELECT parentRef FROM rconversation WHERE username=? LIMIT 1", arrayOf(talker)
+                ).firstOrNull()
+                val parent = row?.get("parentRef")
+                HLog.e("$TAG 缺少可信原始父级，保留当前会话归属: talker=$talker " +
+                    "reason=${if (row == null) "conversation_missing" else "restore_backup_missing"} " +
+                    "currentParent=$parent；禁止猜测恢复，请核对原始归属备份")
             }
         }
         // Recovery information must reach disk before any native parent mutation.
@@ -1961,8 +1968,16 @@ object ConversationGroupRuntime {
         account: String
     ): Map<String, String> {
         val root = JSONObject(prefs.getString(KEY_ORIGINAL_PARENT_REFS, "{}").orEmpty().ifBlank { "{}" })
-        if (!root.has(account)) return emptyMap()
-        val accountObject = root.getJSONObject(account)
+        val backup = JSONObject(prefs.getString(KEY_ORIGINAL_PARENT_REFS_BACKUP, "{}").orEmpty().ifBlank { "{}" })
+        val accountObject = backup.optJSONObject(account) ?: JSONObject()
+        // Both copies are scoped to the same account. Never infer root/empty parent.
+        root.optJSONObject(account)?.let { primary ->
+            val keys = primary.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                accountObject.put(key, primary.get(key))
+            }
+        }
         return buildMap {
             val keys = accountObject.keys()
             while (keys.hasNext()) {
@@ -1981,6 +1996,12 @@ object ConversationGroupRuntime {
         forceWrite: Boolean = false
     ) {
         val root = JSONObject(prefs.getString(KEY_ORIGINAL_PARENT_REFS, "{}").orEmpty().ifBlank { "{}" })
+        val backup = JSONObject(prefs.getString(KEY_ORIGINAL_PARENT_REFS_BACKUP, "{}").orEmpty().ifBlank { "{}" })
+        val accounts = backup.keys()
+        while (accounts.hasNext()) {
+            val key = accounts.next()
+            if (!root.has(key)) root.put(key, backup.get(key))
+        }
         if (values.isEmpty()) {
             root.remove(account)
         } else {
@@ -1989,8 +2010,12 @@ object ConversationGroupRuntime {
             root.put(account, accountObject)
         }
         val updated = root.toString()
-        if (!forceWrite && updated == prefs.getString(KEY_ORIGINAL_PARENT_REFS, "{}")) return
-        check(prefs.edit().putString(KEY_ORIGINAL_PARENT_REFS, updated).commit()) {
+        if (!forceWrite && updated == prefs.getString(KEY_ORIGINAL_PARENT_REFS, "{}") &&
+            updated == prefs.getString(KEY_ORIGINAL_PARENT_REFS_BACKUP, "{}")) return
+        check(prefs.edit()
+            .putString(KEY_ORIGINAL_PARENT_REFS, updated)
+            .putString(KEY_ORIGINAL_PARENT_REFS_BACKUP, updated)
+            .commit()) {
             "保存原始 parentRef 失败: account=$account"
         }
     }

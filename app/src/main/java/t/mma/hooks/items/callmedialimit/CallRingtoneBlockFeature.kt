@@ -9,6 +9,7 @@ import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
+import t.mma.utils.HLog
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Method
@@ -75,8 +76,12 @@ private class CallRingtoneBlockHooker(
         if (installed) return true
         return runCatching {
             val directionMethods = locateDirectionMethods()
-            val multiTalkDirectionMethods = locateMultiTalkDirectionMethods()
             val coreAccesses = locateCoreStartAccesses()
+            // 8.0.78 removed the legacy MT route. CoreV2 provides a replacement,
+            // but scan both paths for older hosts where they may coexist.
+            val multiTalkDirectionMethods = locateMultiTalkDirectionMethods(
+                reportMissing = coreAccesses.isEmpty()
+            )
             if (directionMethods.isEmpty() && multiTalkDirectionMethods.isEmpty() && coreAccesses.isEmpty()) {
                 return false
             }
@@ -109,6 +114,9 @@ private class CallRingtoneBlockHooker(
                 })
             }
             installed = true
+            HLog.i("[Hchat:call_ringtone_block] 铃声入口已安装 " +
+                "direction=${directionMethods.size} legacyGroup=${multiTalkDirectionMethods.size} " +
+                "coreV2=${coreAccesses.size}；实际来电/去电屏蔽仍需验证")
             true
         }.getOrElse {
             logger("通话铃声屏蔽 Hook 安装失败", it)
@@ -161,7 +169,7 @@ private class CallRingtoneBlockHooker(
         return result
     }
 
-    private fun locateMultiTalkDirectionMethods(): List<Method> {
+    private fun locateMultiTalkDirectionMethods(reportMissing: Boolean): List<Method> {
         val runtimeKey = runtimeKey()
         DexMethodCache.loadList(
             methodCache,
@@ -225,7 +233,7 @@ private class CallRingtoneBlockHooker(
         }
         if (methods.isEmpty()) {
             DexMethodCache.clear(methodCache, runtimeKey, CACHE_MULTI_TALK_DIRECTION_METHODS)
-            logger(
+            if (reportMissing) logger(
                 "未定位微信群通话铃声入口: routeCandidates=${routeData.size} " +
                     "directionCandidates=${routeData.mapNotNull { data ->
                         runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
@@ -410,7 +418,7 @@ private class CallRingtoneBlockHooker(
         const val CACHE_MULTI_TALK_DIRECTION_METHODS = "multi_talk_direction_methods_v2"
         const val CACHE_CORE_START_METHODS = "core_start_methods_v1"
         const val CACHE_CORE_ACK_METHODS = "core_ack_methods_v1"
-        const val CACHE_CORE_SCAN_RUNTIME = "core_scan_runtime_v1"
+        const val CACHE_CORE_SCAN_RUNTIME = "core_scan_runtime_v2"
         const val OUTGOING_ARGUMENT_INDEX = 2
         const val MULTI_TALK_OUTGOING_ARGUMENT_INDEX = 0
         const val MAX_MULTI_TALK_FALLBACK_METHODS = 8
