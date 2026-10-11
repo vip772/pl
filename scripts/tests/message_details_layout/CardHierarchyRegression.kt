@@ -30,6 +30,9 @@ fun main() {
         check(MessageDetailsCardHierarchy.isCardMessage(49, subtype))
     }
     check(MessageDetailsCardHierarchy.isCardMessage(48, null))
+    // Native contact cards must use the whole-card bottom anchor, not the inner time label.
+    check(MessageDetailsCardHierarchy.isCardMessage(42, null))
+    check(MessageDetailsCardHierarchy.isCardMessage(66, null))
     check(MessageDetailsCardHierarchy.isCardMessage(1040187441, 76))
     println("PASS links, music, mini programs and locations use card layout")
 

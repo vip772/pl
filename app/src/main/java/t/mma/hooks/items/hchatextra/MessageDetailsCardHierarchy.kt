@@ -22,6 +22,8 @@ internal object MessageDetailsCardHierarchy {
 
     fun isCardMessage(type: Int, appSubtype: Int?): Boolean {
         val normalized = WeChatMessageTypes.normalize(type)
+        // Personal/recommended contact cards are native types, not app-message subtypes.
+        if (normalized == 42 || normalized == 66) return true
         if (normalized == WeChatMessageTypes.LOCATION) return true
         if (normalized != WeChatMessageTypes.APP && type != 44 && type != 82 && appSubtype == null) {
             return false

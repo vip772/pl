@@ -3252,7 +3252,8 @@ private class HchatExtraHooker(
             findChattingAvatarView(root)?.let { directChildOf(row, it) }?.let(::add)
         }
         val holderCard = holderCardContainer(holder, row)
-            ?: if (WeChatMessageTypes.isLocation(type)) {
+            ?: if (WeChatMessageTypes.isLocation(type) ||
+                WeChatMessageTypes.normalize(type) in setOf(42, 66)) {
                 holderMainContentView(holder, row) ?: messageContentView(holder, row)
             } else null
         val holderDirectBranch = holderCard?.let { MessageDetailsCardHierarchy.contentBranch(row, it) }
