@@ -39,7 +39,6 @@ import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.items.hideavatar.HideChatAvatarSettings
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
-import t.mma.utils.HLog
 import org.json.JSONObject
 import org.luckypray.dexkit.query.FindClass
 import org.luckypray.dexkit.query.FindMethod
@@ -541,48 +540,6 @@ private class HchatExtraHooker(
         return hooked
     }
 
-    private val layoutDiagnosticCount = java.util.concurrent.atomic.AtomicInteger()
-    private val layoutDiagnosticRows = Collections.synchronizedMap(WeakHashMap<View, Int>())
-    private fun diagnosticView(view: View?): String {
-        if (view == null) return "null"
-        val resource = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("unknown")
-        return "${view.javaClass.name}#${System.identityHashCode(view)}:$resource" +
-            "[${view.left},${view.top},${view.right},${view.bottom};v=${view.visibility};" +
-            "attached=${view.isAttachedToWindow};module=${view.tag == TAG_MESSAGE_DETAILS_VIEW}]"
-    }
-    private fun diagnoseMessageLayout(root: View, holder: Any?, stage: String, extra: String = "") {
-        if (!layoutDiagnosticRows.containsKey(root)) {
-            val number = layoutDiagnosticCount.incrementAndGet()
-            if (number > 16) return
-            layoutDiagnosticRows[root] = number
-        }
-        val number = layoutDiagnosticRows[root] ?: return
-        // One line per stage/holder, not per scroll/bind. Never emit TextView text or message content.
-        val key = "layout_diag|$number|$stage|${holder?.javaClass?.name}"
-        if (!messageDetailsFailureKeys.add(key)) return
-        runCatching {
-            val time = holder?.let { findHolderTextView(it, "timeTV", holderTimeFieldCache) }
-            val paths = StringBuilder()
-            var view: View? = time
-            repeat(8) {
-                val current = view ?: return@repeat
-                paths.append(diagnosticView(current)).append(" <- ")
-                view = current.parent as? View
-            }
-            val tree = StringBuilder()
-            var count = 0
-            fun visit(node: View, depth: Int) {
-                if (depth > 6 || count++ >= 48) return
-                tree.append("\n").append(" ".repeat(depth)).append(diagnosticView(node))
-                if (node is ViewGroup) for (i in 0 until node.childCount) visit(node.getChildAt(i), depth + 1)
-            }
-            visit(root, 0)
-            HLog.i("[Hchat:MessageDetailsLayout] revision=bind-path-v2 row=$number stage=$stage " +
-                "holder=${holder?.javaClass?.name} enabled=${messageDetailsConfig.enabled} " +
-                "position=${messageDetailsConfig.position} $extra timePath=$paths tree=$tree")
-        }.onFailure { HLog.w("[Hchat:MessageDetailsLayout] diagnosticFailure=${it.javaClass.name}") }
-    }
-
     fun installMessageDetails(): Boolean {
         val itemBind = locateMessageViewBindMethod()
         val adapterBinds = locateChattingAdapterBindMethods()
@@ -618,7 +575,6 @@ private class HchatExtraHooker(
                         runCatching {
                             runCatching { bindDynamicRecall(param.thisObject, param.args, state) }
                                 .onFailure { logger("动态撤回消息绑定失败", it) }
-                            state.root?.let { diagnoseMessageLayout(it, state.holder, "bind_entry", "method=${bind.toGenericString()}") }
                             if (messageDetailsConfig.enabled) {
                                 bindBottomMessageDetails(param.thisObject, param.args, 0, state.holder, state.message, state.root)
                             }
@@ -1158,7 +1114,6 @@ private class HchatExtraHooker(
         val nativeMessage = capturedMessage ?: resolveMessageFromBindArgs(args)
             ?: resolveMessageFromAdapter(bindObject, messageBindPosition(args))
         if (nativeMessage == null) {
-            diagnoseMessageLayout(root, holder, "message_unresolved", "attempt=$attempt")
             if (attempt >= MESSAGE_DETAILS_MAX_RETRY) {
                 removeTaggedMessageDetailsViews(root)
                 logMessageDetailsFailure("message", holder, root)
@@ -1171,16 +1126,8 @@ private class HchatExtraHooker(
         val viewTag = capturedHolder?.takeIf { isMessageDetailsHolder(it, root) }
             ?: holderRoot.tag?.takeIf { isMessageDetailsHolder(it, root) }
             ?: holder
-        diagnoseMessageLayout(root, viewTag, "resolved", "type=$messageType attempt=$attempt")
         val label = findHolderTextView(viewTag, "timeTV", holderTimeFieldCache)
         val inserted = insertMessageDetailsLabel(root, label, viewTag, details, nativeMessage = nativeMessage)
-        diagnoseMessageLayout(root, viewTag, "insert_result_$inserted", "type=$messageType inserted=$inserted attempt=$attempt")
-        val diagnosticToken = messageDetailsBindToken(root)
-        if (layoutDiagnosticRows.containsKey(root)) root.post {
-                        if (isCurrentMessageDetailsBind(root, diagnosticToken)) {
-                diagnoseMessageLayout(root, viewTag, "post_dispatch_$inserted", "type=$messageType inserted=$inserted")
-            }
-        }
         val cardMessage = !isCenteredNotice(details.type) &&
             !isKnownNonCardHolder(viewTag) &&
             (MessageDetailsCardHierarchy.templateHolderClass(viewTag.javaClass) != null ||
@@ -1335,13 +1282,7 @@ private class HchatExtraHooker(
         val avatarContent = avatarAnchor
             ?.takeIf { it.hidden }
             ?.let { avatarDetailsContentView(holder, it.parent) }
-        val parent: ViewGroup = avatarAnchor?.parent ?: bottomAnchor?.parent ?: run {
-            diagnoseMessageLayout(root, holder, "anchor_unresolved", "type=${details.type} card=$cardMessage")
-            return false
-        }
-        diagnoseMessageLayout(root, holder, "anchor_selected", "type=${details.type} card=$cardMessage " +
-            "parent=${diagnosticView(parent)} anchor=${diagnosticView(bottomAnchor?.layoutView)} " +
-            "avatar=${diagnosticView(avatarAnchor?.positionView)}")
+        val parent: ViewGroup = avatarAnchor?.parent ?: bottomAnchor?.parent ?: return false
         if (parent !is RelativeLayout && parent !is LinearLayout &&
             parent !is android.widget.FrameLayout) return false
 
@@ -1390,15 +1331,6 @@ private class HchatExtraHooker(
         }
         if (inserted) {
             rememberMessageDetailsBinding(label, root, nativeTimeLabel, holder, nativeMessage, details)
-            if (MessageDetailsCardHierarchy.templateHolderClass(holder.javaClass) != null &&
-                messageDetailsFailureKeys.add("template_anchor|$position|${parent.javaClass.name}")) {
-                HLog.i("[Hchat:MessageDetailsLayout] templateAnchor revision=template-inheritance-v2 " +
-                    "holder=${holder.javaClass.name} type=${details.type} position=$position " +
-                    "card=$cardMessage root=${root.javaClass.name} parent=${parent.javaClass.name} " +
-                    "anchor=${bottomAnchor?.layoutView?.javaClass?.name} " +
-                    "anchorBottom=${bottomAnchor?.layoutView?.bottom} labelIndex=${parent.indexOfChild(label)} " +
-                    "anchorIndex=${bottomAnchor?.layoutView?.let { parent.indexOfChild(it) }}")
-            }
             if (cardMessage && avatarAnchor == null) {
                 observeCardDetailsLayout(root, label)
             } else {
@@ -1418,7 +1350,6 @@ private class HchatExtraHooker(
             val binding = synchronized(messageDetailsBindings) { messageDetailsBindings[currentLabel] }
                 ?: return@observe
             if (binding.root !== currentRoot) return@observe
-            diagnoseMessageLayout(currentRoot, binding.holder, "global_layout", "type=${binding.details.type}")
             runCatching {
                 insertMessageDetailsLabel(
                     currentRoot, binding.nativeTimeLabel, binding.holder, binding.details,

@@ -117,20 +117,12 @@ private class ChatTimeStyleRuntime(
         }
     }
 
-    private val diagnosticHolders = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
     private fun bindTime(args: Array<Any?>?) {
         val mode = currentMode()
         val holder = messageHolder(args) ?: return
         val root = findRootView(holder) ?: return
         val taggedHolder = root.tag ?: holder
         val timeView = findTimeView(taggedHolder) ?: findTimeView(holder) ?: return
-        if (diagnosticHolders.size < 12 && diagnosticHolders.add(taggedHolder.javaClass.name)) {
-            HLog.i("[Hchat:NativeTimeDiagnostic] revision=native-time-v1 " +
-                "holder=${taggedHolder.javaClass.name} mode=$mode root=${root.javaClass.name} " +
-                "timeIdentity=${System.identityHashCode(timeView)} " +
-                "parent=${timeView.parent?.javaClass?.name} visibility=${timeView.visibility} " +
-                "bounds=${timeView.left},${timeView.top},${timeView.right},${timeView.bottom}")
-        }
         if (mode == ChatTimeStyleSettings.MODE_ORIGINAL) {
             bindings.remove(timeView)
             return

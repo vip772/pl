@@ -45,7 +45,6 @@ private class FooterRuntime(private val context: FeatureContext) {
     private val hooked = HashSet<Member>()
     private val states = WeakHashMap<View, FooterState>()
     private val newMessageMargins = WeakHashMap<View, Int>()
-    private val diagnosedFooters = WeakHashMap<View, Boolean>()
     private val preDrawListeners = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
     private val footerTrackers = WeakHashMap<View, FooterTracker>()
     private val panelOriginalHeights = WeakHashMap<View, Int>()
@@ -495,6 +494,8 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
 
     private fun apply(footer: View): Boolean {
+        val performanceStarted = t.mma.utils.PerformanceSample.start()
+        try {
         if (!isEnabled()) {
             restore(footer)
             return false
@@ -567,6 +568,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             )
         }
         return true
+            } finally { t.mma.utils.PerformanceSample.finish("floating_footer", performanceStarted) }
     }
 
     private fun createState(
@@ -767,7 +769,6 @@ private class FooterRuntime(private val context: FeatureContext) {
         val content = find(footer.rootView) {
             it.javaClass.name == CHATTING_CONTENT_CLASS
         } as? ViewGroup
-        diagnoseFooterLayout(footer, content)
         content ?: return
         for (index in 0 until content.childCount) {
             val candidate = content.getChildAt(index)
@@ -785,30 +786,6 @@ private class FooterRuntime(private val context: FeatureContext) {
             }
             return
         }
-    }
-
-    private fun diagnoseFooterLayout(footer: View, content: ViewGroup?) {
-        if (diagnosedFooters.put(footer, true) != null) return
-        val footerLoc = IntArray(2).also(footer::getLocationOnScreen)
-        val children = if (content == null) {
-            "ChattingContent=missing"
-        } else {
-            (0 until content.childCount).joinToString(" | ") { index ->
-                val child = content.getChildAt(index)
-                val lp = child.layoutParams
-                val frame = lp as? FrameLayout.LayoutParams
-                val loc = IntArray(2).also(child::getLocationOnScreen)
-                "#$index ${child.javaClass.name} size=${child.width}x${child.height} " +
-                    "screen=${loc[0]},${loc[1]} vis=${child.visibility} " +
-                    "lp=${lp?.javaClass?.name}:${lp?.width}x${lp?.height} " +
-                    "gravity=${frame?.gravity} margins=${frame?.leftMargin},${frame?.topMargin}," +
-                    "${frame?.rightMargin},${frame?.bottomMargin} newMessage=${isNewMessageBubble(child)}"
-            }
-        }
-        HLog.i(
-            "[Hchat:$TAG] 新消息诊断: footerScreen=${footerLoc[0]},${footerLoc[1]} " +
-                "footerSize=${footer.width}x${footer.height} children=[$children]"
-        )
     }
 
     private fun originalNewMessageMargin(view: View): Int {

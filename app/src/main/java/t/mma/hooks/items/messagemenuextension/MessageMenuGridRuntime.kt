@@ -249,7 +249,6 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
             window.width = ViewGroup.LayoutParams.WRAP_CONTENT
             frame.changed = true
             content.requestLayout()
-            HLog.i("$TAG stage=reflow visible=${items.size} captured=${frame.views.size} displayed=${selected.size} rows=$count columns=6 rowWidth=$rowWidth itemWidth=$itemWidth nativeRowIndices=${indices.joinToString(",")} overflow=${(items.size - 30).coerceAtLeast(0)}")
         } catch (error: Throwable) {
             restore(); frame.undo = null; throw error
         }

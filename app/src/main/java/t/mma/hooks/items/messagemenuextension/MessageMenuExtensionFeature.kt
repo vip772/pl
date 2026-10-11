@@ -17,7 +17,6 @@ class MessageMenuExtensionFeature : BaseFeature() {
     override fun onFeatureInstall(context: FeatureContext) {
         if (!MessageMenuExtensionSettings.preferences(context.hostContext())
                 .getBoolean(MessageMenuExtensionSettings.KEY_ENABLE, false)) {
-            HLog.i("[Hchat:消息菜单扩展诊断] stage=installSkipped reason=disabled runtimeCreated=false hooks=0")
             return
         }
         runtime = MessageMenuGridRuntime(context)

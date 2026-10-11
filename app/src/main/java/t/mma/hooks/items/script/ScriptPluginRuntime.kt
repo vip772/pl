@@ -768,6 +768,8 @@ object ScriptPluginRuntime {
     }
 
     private fun dispatchSendButton(text: String, longClick: Boolean): SendButtonEventResult {
+        val performanceStarted = t.mma.utils.PerformanceSample.start()
+        try {
         if (loadedPlugins.isEmpty()) return SendButtonEventResult(false, emptyList())
         val handledBy = ArrayList<String>()
         var intercepted = false
@@ -818,6 +820,7 @@ object ScriptPluginRuntime {
             }
         }
         return SendButtonEventResult(intercepted, handledBy)
+            } finally { t.mma.utils.PerformanceSample.finish("script_send_button", performanceStarted) }
     }
 
     fun hasHandleMsgCallbacks(): Boolean = loadedPlugins.values.any { it.hasHandleMsgCallback }

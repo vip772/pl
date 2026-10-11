@@ -19,6 +19,16 @@ object RuntimeLogStore {
     private const val MAX_LOG_BYTES = 512 * 1024L
     private const val RETAIN_BYTES = 384 * 1024
     private val lock = Any()
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "Hchat-RuntimeLog").apply { isDaemon = true }
+    }
+    private val pending = java.util.concurrent.atomic.AtomicInteger()
+    private val dropped = java.util.concurrent.atomic.AtomicInteger()
+    private val formatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT)
+    private fun flushPending() {
+        if (Thread.currentThread().name == "Hchat-RuntimeLog") return
+        runCatching { writer.submit {}.get(3, java.util.concurrent.TimeUnit.SECONDS) }
+    }
     @Volatile private var applicationContext: Context? = null
 
     @JvmStatic
@@ -34,44 +44,55 @@ object RuntimeLogStore {
     fun clearRuntimeLog(context: Context? = applicationContext) {
         val appContext = context?.applicationContext ?: context ?: return
         runCatching {
-            synchronized(lock) {
-                runtimeLogFile(appContext).delete()
-            }
+            writer.submit { synchronized(lock) { runtimeLogFile(appContext).delete() } }
+                .get(3, java.util.concurrent.TimeUnit.SECONDS)
         }
     }
     @JvmStatic
     fun readRuntimeLog(context: Context? = applicationContext): String {
         val appContext = context?.applicationContext ?: context ?: return ""
+        flushPending()
         return synchronized(lock) { readLimited(runtimeLogFile(appContext)) }
     }
     @JvmStatic
     fun append(level: String, message: String, throwable: Throwable?) {
         val context = applicationContext ?: return
-        val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.ROOT).format(Date())
-        val entry = buildString {
-            append(timestamp).append(' ').append(level).append(' ').append(message).append('\n')
-            if (throwable != null) append(android.util.Log.getStackTraceString(throwable)).append('\n')
+        val time = System.currentTimeMillis()
+        if (pending.incrementAndGet() > 1024) {
+            pending.decrementAndGet()
+            dropped.incrementAndGet()
+            // ERROR/WARN are also recorded by HLog in LSPosed; never block the caller on disk.
+            return
         }
-        runCatching {
-            synchronized(lock) {
-                val file = runtimeLogFile(context)
-                file.parentFile?.mkdirs()
-                if (file.length() > MAX_LOG_BYTES) {
-                    val bytes = file.readBytes()
-                    val offset = (bytes.size - RETAIN_BYTES).coerceAtLeast(0)
-                    file.writeBytes(bytes.copyOfRange(offset, bytes.size))
+        writer.execute {
+            try {
+                val lost = dropped.getAndSet(0)
+                val entry = buildString {
+                    if (lost > 0) append("[Hchat:RuntimeLog] queue overflow dropped=").append(lost).append('\n')
+                    append(formatter.format(Date(time))).append(' ').append(level).append(' ').append(message).append('\n')
+                    if (throwable != null) append(android.util.Log.getStackTraceString(throwable)).append('\n')
                 }
-                file.appendText(entry, Charsets.UTF_8)
-            }
+                runCatching {
+                    synchronized(lock) {
+                        val file = runtimeLogFile(context)
+                        file.parentFile?.mkdirs()
+                        if (file.length() > MAX_LOG_BYTES) {
+                            val bytes = file.readBytes()
+                            val offset = (bytes.size - RETAIN_BYTES).coerceAtLeast(0)
+                            file.writeBytes(bytes.copyOfRange(offset, bytes.size))
+                        }
+                        file.appendText(entry, Charsets.UTF_8)
+                    }
+                }
+            } finally { pending.decrementAndGet() }
         }
     }
-
     @JvmStatic
     fun buildDiagnosticReport(context: Context): String {
         initialize(context)
         val appContext = context.applicationContext ?: context
         val version = runCatching { WeChatApis.version()?.current() }.getOrNull()
-        val runtimeLog = readLimited(runtimeLogFile(appContext))
+        val runtimeLog = readRuntimeLog(appContext)
         val crashLog = readLimited(File(File(HchatStorage.storageDir(appContext), CRASH_DIR), LAST_CRASH_FILE))
         return buildString {
             appendLine("Hchat 诊断日志")

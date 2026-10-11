@@ -38,6 +38,7 @@ object MessageBubbleStore {
     )
 
     private val cache = ConcurrentHashMap<MessageBubbleSlot, CacheEntry>()
+    private val checked = ConcurrentHashMap<MessageBubbleSlot, Long>()
 
     @JvmStatic
     fun hasAsset(context: Context, slot: MessageBubbleSlot): Boolean {
@@ -101,6 +102,7 @@ object MessageBubbleStore {
                 if (!temporary.renameTo(target)) error("气泡文件替换失败")
             }
             cache[slot] = CacheEntry(target.lastModified(), target.length(), decoded)
+            checked[slot] = android.os.SystemClock.elapsedRealtime()
             true
         }.getOrElse {
             temporary.delete()
@@ -113,12 +115,16 @@ object MessageBubbleStore {
     @Synchronized
     fun remove(context: Context, slot: MessageBubbleSlot): Boolean {
         cache.remove(slot)
+        checked.remove(slot)
         val file = assetFile(context, slot)
         return !file.exists() || file.delete()
     }
 
     @Synchronized
     private fun loadAsset(context: Context, slot: MessageBubbleSlot): BubbleAsset? {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - (checked[slot] ?: Long.MIN_VALUE / 2) < 2000L) return cache[slot]?.asset?.takeUnless { it.bitmap.isRecycled }
+        checked[slot] = now
         val file = assetFile(context, slot)
         if (!file.isFile || file.length() <= 0L) {
             cache.remove(slot)

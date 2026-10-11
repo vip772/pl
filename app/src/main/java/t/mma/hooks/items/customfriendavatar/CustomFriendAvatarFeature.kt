@@ -164,6 +164,7 @@ private class CustomFriendAvatarRuntime(
 
     @Synchronized
     fun install(): Boolean {
+        CustomFriendAvatarStore.preload(context.hostContext())
         val avatarMembers = locateAvatarMembers() ?: return false
         val legacy = hook(avatarMembers.legacyLoad, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {

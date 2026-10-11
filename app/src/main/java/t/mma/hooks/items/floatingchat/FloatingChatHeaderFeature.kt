@@ -56,7 +56,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val statusWrappersByLayout = WeakHashMap<ViewGroup, View>()
     private val contentCardTranslations = WeakHashMap<View, Float>()
 
-    private val diagnosedLayouts = WeakHashMap<View, Boolean>()
     private val diagnosedStatusWrappers = WeakHashMap<View, Boolean>()
     private val tipsGroups = WeakHashMap<View, View>()
     private val tipsAttachListeners = WeakHashMap<View, View.OnAttachStateChangeListener>()
@@ -205,6 +204,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun apply(sourceLayout: ViewGroup) {
+        val performanceStarted = t.mma.utils.PerformanceSample.start()
+        try {
         if (!isEnabled()) {
             restore(sourceLayout)
             visibleChatLayout(sourceLayout)?.takeIf { it !== sourceLayout }?.let(::restore)
@@ -235,7 +236,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         tipsCardBottoms.remove(layout)
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
-        diagnoseHeaderLayout(layout, header)
         val elevation = dp(ELEVATION_DP).toFloat()
         if (header.elevation != elevation) header.elevation = elevation
         header.outlineProvider = FloatingHeaderOutlineProvider
@@ -244,6 +244,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         header.bringToFront()
         header.invalidateOutline()
         (header.parent as? View)?.invalidate()
+            } finally { t.mma.utils.PerformanceSample.finish("floating_header", performanceStarted) }
     }
 
     private fun visibleChatLayout(source: ViewGroup): ViewGroup? {
@@ -678,33 +679,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         statusWrapperColors.remove(wrapper)?.let { originalColor ->
             if (originalColor != null) invokeStatusBarColor(wrapper, originalColor)
         }
-    }
-
-    private fun diagnoseHeaderLayout(layout: View, header: View) {
-        if (layout.width <= 0 || layout.height <= 0 || header.width <= 0 || header.height <= 0) return
-        if (diagnosedLayouts.put(layout, true) != null) return
-        val content = find(layout) { it.javaClass.name == CHATTING_CONTENT_CLASS } as? ViewGroup
-        val headerLoc = IntArray(2).also(header::getLocationOnScreen)
-        val children = if (content == null) {
-            "ChattingContent=missing"
-        } else {
-            (0 until content.childCount).joinToString(" | ") { index ->
-                val child = content.getChildAt(index)
-                val lp = child.layoutParams
-                val loc = IntArray(2).also(child::getLocationOnScreen)
-                "#$index ${child.javaClass.name} size=${child.width}x${child.height} " +
-                    "screen=${loc[0]},${loc[1]} vis=${child.visibility} " +
-                    "lp=${lp?.javaClass?.name}:${lp?.width}x${lp?.height} " +
-                    "translation=${child.translationX},${child.translationY}"
-            }
-        }
-        HLog.i(
-            "[Hchat:$TAG] 布局诊断: layout=${layout.javaClass.name} size=${layout.width}x${layout.height} " +
-                "padding=${layout.paddingLeft},${layout.paddingTop},${layout.paddingRight},${layout.paddingBottom} " +
-                "statusInset=${statusBarInset(layout)} header=${header.javaClass.name} " +
-                "headerScreen=${headerLoc[0]},${headerLoc[1]} headerSize=${header.width}x${header.height} " +
-                "windowBar=${isWindowBar(header, layout)} children=[$children]"
-        )
     }
 
     private fun restore(layout: ViewGroup) {

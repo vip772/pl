@@ -17,7 +17,19 @@ object CustomFriendAvatarStore {
     private data class CacheEntry(val modified: Long, val size: Long, val bitmap: Bitmap)
 
     private val cache = ConcurrentHashMap<String, CacheEntry>()
+    private val checked = ConcurrentHashMap<String, Long>()
 
+    private val preloader = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "Hchat-AvatarPreload").apply { isDaemon = true }
+    }
+    private val preloadStarted = java.util.concurrent.atomic.AtomicBoolean()
+    fun preload(context: Context) {
+        if (!preloadStarted.compareAndSet(false, true)) return
+        val app = context.applicationContext ?: context
+        preloader.execute {
+            configuredFriends(app).forEach { id -> runCatching { loadBitmap(app, id) } }
+        }
+    }
     @JvmStatic
     fun configuredFriends(context: Context): Set<String> {
         val saved = CustomFriendAvatarSettings.preferences(context)
@@ -42,6 +54,11 @@ object CustomFriendAvatarStore {
     fun loadBitmap(context: Context, wxid: String?): Bitmap? {
         val id = wxid?.trim().orEmpty()
         if (id.isEmpty()) return null
+        val now = android.os.SystemClock.elapsedRealtime()
+        val cached = cache[id]?.bitmap?.takeUnless { it.isRecycled }
+        if (now - (checked[id] ?: Long.MIN_VALUE / 2) < 2000L) return cached
+        if (checked.size > 256) checked.clear()
+        checked[id] = now
         val file = avatarFile(context, id)
         if (!file.isFile || file.length() <= 0L) return null
         cache[id]?.takeIf {
@@ -117,7 +134,8 @@ object CustomFriendAvatarStore {
                     .putStringSet(CustomFriendAvatarSettings.KEY_CONFIGURED_FRIENDS, ids)
                     .apply()
             }
-            cache.remove(id)
+            cache[id] = CacheEntry(target.lastModified(), target.length(), bitmap)
+            checked[id] = android.os.SystemClock.elapsedRealtime()
             true
         }.getOrElse {
             HLog.e("$TAG 保存自定义头像失败: wxid=$id, error=${it.message}", it)
@@ -137,12 +155,13 @@ object CustomFriendAvatarStore {
             .putStringSet(CustomFriendAvatarSettings.KEY_CONFIGURED_FRIENDS, ids)
             .apply()
         cache.remove(id)
+        checked.remove(id)
         return deleted
     }
 
     @JvmStatic
     fun invalidate(wxid: String?) {
-        wxid?.trim()?.takeIf { it.isNotEmpty() }?.let(cache::remove)
+        wxid?.trim()?.takeIf { it.isNotEmpty() }?.let { cache.remove(it); checked.remove(it) }
     }
 
     private fun avatarFile(context: Context, wxid: String): File {

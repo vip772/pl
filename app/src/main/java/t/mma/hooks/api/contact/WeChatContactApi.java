@@ -210,6 +210,8 @@ public final class WeChatContactApi {
     }
 
     public Map<String, String> getGroupMemberRoomDisplayNames(String groupId) {
+        long performanceStarted = t.mma.utils.PerformanceSample.start();
+        try {
         Map<String, String> result = new LinkedHashMap<>();
         if (!isGroup(groupId)) return result;
         try {
@@ -259,6 +261,7 @@ public final class WeChatContactApi {
             log("获取群成员昵称失败: group=" + groupId + " " + e.getMessage());
         }
         return result;
+            } finally { t.mma.utils.PerformanceSample.finish("group_member_names", performanceStarted); }
     }
 
     private Map<String, String> getRoomDataMemberDisplayNames(byte[] roomData) {
