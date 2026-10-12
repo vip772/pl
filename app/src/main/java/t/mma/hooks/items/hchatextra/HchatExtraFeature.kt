@@ -604,7 +604,10 @@ private class HchatExtraHooker(
         val talker = readMessageString(message, "getTalker", "field_talker", "talker")
         val id = messageId(message)
         val serverId = parseLong(readMessageValue(message, "getMsgSvrId", "field_msgSvrId", "msgSvrId")) ?: 0L
-        dynamicRecall.bind(root, talker, id, serverId) {
+        val isSelf = (parseInt(readMessageValue(message, "isSend", "field_isSend", "isSend"))
+            ?: parseInt(readMessageValue(message, "getIsSend", "field_isSend", "isSend"))
+            ?: readInt(message, "field_isSend", "isSend")) == 1
+        dynamicRecall.bind(root, talker, id, serverId, isSelf) {
             val parent = root as? ViewGroup
             if (parent == null) null else {
                 holderCardContainer(holder, parent)

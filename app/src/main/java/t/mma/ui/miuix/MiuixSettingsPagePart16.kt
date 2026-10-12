@@ -1443,16 +1443,9 @@ internal fun AntiRecallMiuixPage(
     var dynamicRecall by remember { mutableStateOf(sp.getBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, false)) }
     var dynamicColor by remember { mutableStateOf(sp.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
         t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty()) }
-    var recallMessageEnabled by remember { mutableStateOf(sp.getBoolean(
-        AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE, AntiRecallSettings.DEFAULT_DYNAMIC_MESSAGE_ENABLE)) }
-    var recallMessageColor by remember { mutableStateOf(
-        t.mma.hooks.items.antirecall.DynamicRecallTint.normalize(
-            sp.getString(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_COLOR,
-                t.mma.hooks.items.antirecall.DynamicRecallTint.DEFAULT_COLOR))) }
-    var recallMessageOpacity by remember { mutableStateOf(
-        t.mma.hooks.items.antirecall.DynamicRecallTint.opacity(
-            sp.getInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY,
-                t.mma.hooks.items.antirecall.DynamicRecallTint.DEFAULT_OPACITY))) }
+    var recallMarkerEnabled by remember { mutableStateOf(sp.getBoolean(
+        AntiRecallSettings.KEY_MARKER_ENABLE,
+        sp.getBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE, AntiRecallSettings.DEFAULT_MARKER_ENABLE))) }
     var dynamicSpeed by remember { mutableStateOf(sp.getInt(AntiRecallSettings.KEY_DYNAMIC_SPEED,
         t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings.DEFAULT_NUMBER_SPEED)) }
     var dynamicStroke by remember { mutableStateOf(sp.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
@@ -1487,10 +1480,7 @@ internal fun AntiRecallMiuixPage(
                         sp.edit()
                             .putBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, dynamicRecall)
                             .putString(AntiRecallSettings.KEY_DYNAMIC_COLOR, dynamicColor)
-                            .putBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE, recallMessageEnabled)
-                            .putString(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_COLOR,
-                                t.mma.hooks.items.antirecall.DynamicRecallTint.normalize(recallMessageColor))
-                            .putInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY, recallMessageOpacity)
+                            .putBoolean(AntiRecallSettings.KEY_MARKER_ENABLE, recallMarkerEnabled)
                             .putInt(AntiRecallSettings.KEY_DYNAMIC_SPEED, dynamicSpeed)
                             .putInt(AntiRecallSettings.KEY_DYNAMIC_STROKE, dynamicStroke)
                             .putString(
@@ -1571,28 +1561,6 @@ internal fun AntiRecallMiuixPage(
                 SwitchRow(dynamicRecall, "动态撤回", "为防撤回保留的原消息显示旋转渐变描边，保存后生效",
                     onCheckedChange = { dynamicRecall = it })
             }
-            item {
-                SwitchRow(recallMessageEnabled, "撤回信息颜色", "独立控制颜色覆盖和红色撤回标记，保存后生效",
-                    onCheckedChange = { recallMessageEnabled = it })
-            }
-            if (recallMessageEnabled) {
-                item {
-                    ColorPickerRow("颜色编辑", "覆盖保留消息内容，包含图片、视频、卡片和静态／动态表情", recallMessageColor,
-                        allowGradient = false,
-                        onReset = { recallMessageColor = t.mma.hooks.items.antirecall.DynamicRecallTint.DEFAULT_COLOR }
-                    ) { recallMessageColor = it }
-                }
-                item {
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                        Text("颜色覆盖强度 $recallMessageOpacity%", color = MiuixTheme.colorScheme.onSurface)
-                        Slider(value = recallMessageOpacity.toFloat(),
-                            onValueChange = { recallMessageOpacity = it.toInt().coerceIn(0, 80) },
-                            valueRange = 0f..80f, steps = 15,
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                        Text("0%不覆盖颜色，仍显示撤回标记；默认35%，保存后生效", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                    }
-                }
-            }
             if (dynamicRecall) {
                 item {
                     ColorPickerRow("渐变颜色", "断点描边三色渐变", dynamicColor,
@@ -1602,6 +1570,11 @@ internal fun AntiRecallMiuixPage(
                 }
                 item { speedControl("描边旋转周期", dynamicSpeed) { dynamicSpeed = it } }
                 item { strokeWidthControl("描边宽度", dynamicStroke) { dynamicStroke = it } }
+            }
+            item { SmallTitle(text = "撤回标记") }
+            item {
+                SwitchRow(recallMarkerEnabled, "撤回标记", "淡化被撤回的各类消息并显示红色标记，与动态描边独立，保存后生效",
+                    onCheckedChange = { recallMarkerEnabled = it })
             }
         }
     }

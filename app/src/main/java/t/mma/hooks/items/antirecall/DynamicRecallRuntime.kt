@@ -30,9 +30,9 @@ internal class DynamicRecallRuntime(private val context: Context) {
     }
     init { prefs.registerOnSharedPreferenceChangeListener(listener) }
 
-    fun bind(root: View, talker: String, id: Long, serverId: Long, content: () -> View?) {
+    fun bind(root: View, talker: String, id: Long, serverId: Long, isSelf: Boolean, content: () -> View?) {
         clear(root)
-        Binding(root, talker, id, serverId, content).also {
+        Binding(root, talker, id, serverId, isSelf, content).also {
             rows[root] = WeakReference(it)
             root.addOnAttachStateChangeListener(it)
             if (root.isAttachedToWindow) it.attach()
@@ -46,13 +46,13 @@ internal class DynamicRecallRuntime(private val context: Context) {
         handler.removeCallbacksAndMessages(null)
     }
     private fun borderEnabled() = prefs.getBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, false)
-    private fun colorEnabled() = prefs.getBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE,
-        AntiRecallSettings.DEFAULT_DYNAMIC_MESSAGE_ENABLE)
+    private fun markerEnabled() = prefs.getBoolean(AntiRecallSettings.KEY_MARKER_ENABLE,
+        prefs.getBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE, AntiRecallSettings.DEFAULT_MARKER_ENABLE))
     private fun enabled() = prefs.getBoolean(AntiRecallSettings.KEY_ENABLE, false) &&
-        (borderEnabled() || colorEnabled())
+        (borderEnabled() || markerEnabled())
 
     private inner class Binding(
-        val root: View, val talker: String, val id: Long, val serverId: Long,
+        val root: View, val talker: String, val id: Long, val serverId: Long, val isSelf: Boolean,
         var content: () -> View?
     ) : View.OnAttachStateChangeListener, ViewTreeObserver.OnGlobalLayoutListener {
         private var observer: ViewTreeObserver? = null
@@ -84,9 +84,9 @@ internal class DynamicRecallRuntime(private val context: Context) {
                     }
                 }
                 stroke?.update()
-                if (colorEnabled() && next != null) {
+                if (markerEnabled() && next != null) {
                     if (marker == null) marker = RecallMarker(root).also { root.overlay.add(it) }
-                    marker?.update(next)
+                    marker?.update(next, isSelf)
                 } else {
                     marker?.let { root.overlay.remove(it) }
                     marker = null
@@ -131,7 +131,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
         private var iconLeft = 0f
         private var iconTop = 0f
         private var iconSize = 0f
-        fun update(content: View) {
+        fun update(content: View, isSelf: Boolean) {
             setBounds(0, 0, root.width, root.height)
             val density = root.resources.displayMetrics.density
             iconSize = minOf(18f * density, root.width.toFloat(), content.height.toFloat())
@@ -139,15 +139,12 @@ internal class DynamicRecallRuntime(private val context: Context) {
             content.getLocationOnScreen(contentLocation)
             val left = (contentLocation[0] - rootLocation[0]).toFloat()
             val top = (contentLocation[1] - rootLocation[1]).toFloat()
-            val right = left + content.width + 4f * density
-            val before = left - 4f * density - iconSize
-            // Prefer the right side; sent messages near the edge use the free left side.
-            iconLeft = when {
-                right + iconSize <= root.width -> right
-                before >= 0f -> before
-                else -> left + content.width - iconSize - 4f * density
-            }.coerceIn(0f, maxOf(0f, root.width - iconSize))
-            iconTop = (top + (content.height - iconSize) / 2f)
+            // Incoming: lower right. Outgoing: lower left. Stay alongside the content,
+            // rather than centering the mark near the avatar or independent message time.
+            val x = if (isSelf) left - 4f * density - iconSize
+                else left + content.width + 4f * density
+            iconLeft = x.coerceIn(0f, maxOf(0f, root.width - iconSize))
+            iconTop = (top + content.height - iconSize)
                 .coerceIn(0f, maxOf(0f, root.height - iconSize))
             paint.strokeWidth = 1.6f * density
             body.set(.25f, .31f, .75f, .88f)
@@ -157,7 +154,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
             invalidateSelf()
         }
         override fun draw(canvas: Canvas) {
-            if (!enabled() || !colorEnabled() || !root.isShown || iconSize <= 0f) return
+            if (!enabled() || !markerEnabled() || !root.isShown || iconSize <= 0f) return
             val saved = canvas.save()
             canvas.translate(iconLeft, iconTop)
             canvas.scale(iconSize, iconSize)
@@ -207,9 +204,9 @@ internal class DynamicRecallRuntime(private val context: Context) {
             val density = view.resources.displayMetrics.density
             tintRect.set(0f, 0f, view.width.toFloat(), view.height.toFloat())
             tintRadius = minOf(12f * density, view.height / 2f)
-            tintPaint.color = if (colorEnabled()) DynamicRecallTint.color(
-                prefs.getString(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_COLOR, DynamicRecallTint.DEFAULT_COLOR),
-                prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY, DynamicRecallTint.DEFAULT_OPACITY)) else Color.TRANSPARENT
+            // Fixed translucent white wash fades all live content types without changing
+            // native view alpha, GIF playback, backgrounds, or touch handling.
+            tintPaint.color = if (markerEnabled()) Color.argb(89, 255, 255, 255) else Color.TRANSPARENT
             paint.strokeWidth = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
                 DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH)
                 .coerceIn(DynamicBadgeSettings.MIN_STROKE_WIDTH, DynamicBadgeSettings.MAX_STROKE_WIDTH) * density
