@@ -35,7 +35,7 @@ fun main(){
  subprocess.run(args,check=True)
  subprocess.run(['java','-cp',str(p/'tint.jar')+':'+str(std),'t.mma.hooks.items.antirecall.TestKt'],check=True)
 runtime=(repo/'app/src/main/java/t/mma/hooks/items/antirecall/DynamicRecallRuntime.kt').read_text()
-assert runtime.index('canvas.drawRoundRect(tintRect')<runtime.index('canvas.drawPath(segment')
+assert 'tintPaint' not in runtime and 'tintRect' not in runtime
 assert 'stroke?.stop()' in runtime
 assert 'key.startsWith("dynamic_recall_")' in runtime
 assert 'root.removeOnAttachStateChangeListener(this)' in runtime
@@ -44,10 +44,13 @@ ui=(repo/'app/src/main/java/t/mma/ui/miuix/MiuixSettingsPagePart16.kt').read_tex
 assert 'SwitchRow(recallMarkerEnabled, "撤回标记"' in ui
 assert '.putBoolean(AntiRecallSettings.KEY_MARKER_ENABLE' in ui
 assert 'recallMessageColor' not in ui and 'recallMessageOpacity' not in ui
-assert 'Color.argb(89, 255, 255, 255)' in runtime
+assert 'view.setTextColor(Color.rgb(128, 128, 128))' in runtime
+assert 'view.imageAlpha =' in runtime
+assert 'restoreContent()' in runtime
 assert 'marker?.update(next, isSelf)' in runtime
 assert 'top + content.height - iconSize' in runtime
 assert 'left - 4f * density - iconSize' in runtime
 assert '(borderEnabled() || markerEnabled())' in runtime
-assert 'else Color.TRANSPARENT' in runtime
-print('PASS marker persistence, removed color editor, fixed fade, independent border and bottom-corner wiring')
+assert 'view.setTextColor(colors)' in runtime
+assert 'view.imageAlpha = alpha' in runtime
+print('PASS marker persistence, removed color editor, foreground fade, independent border and bottom-corner wiring')

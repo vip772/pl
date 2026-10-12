@@ -8,6 +8,10 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.View
+import android.view.ViewGroup
+import android.widget.TextView
+import android.widget.ImageView
+import android.content.res.ColorStateList
 import android.view.ViewTreeObserver
 import t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings
 import t.mma.preferences.HchatStorage
@@ -59,6 +63,30 @@ internal class DynamicRecallRuntime(private val context: Context) {
         private var target: View? = null
         private var stroke: RecallStroke? = null
         private var marker: RecallMarker? = null
+        private val textColors = java.util.IdentityHashMap<TextView, ColorStateList>()
+        private val imageAlphas = java.util.IdentityHashMap<ImageView, Int>()
+        private fun restoreContent() {
+            textColors.forEach { (view, colors) -> view.setTextColor(colors) }
+            imageAlphas.forEach { (view, alpha) -> view.imageAlpha = alpha }
+            textColors.clear()
+            imageAlphas.clear()
+        }
+        private fun fadeContent(view: View) {
+            // Change foreground content only; never fade a container/background or its overlay.
+            when (view) {
+                is TextView -> {
+                    if (!textColors.containsKey(view)) textColors[view] = view.textColors
+                    view.setTextColor(Color.rgb(128, 128, 128))
+                }
+                is ImageView -> {
+                    if (!imageAlphas.containsKey(view)) imageAlphas[view] = view.imageAlpha
+                    view.imageAlpha = (imageAlphas.getValue(view) * .65f).toInt()
+                }
+                is ViewGroup -> {
+                    for (index in 0 until view.childCount) fadeContent(view.getChildAt(index))
+                }
+            }
+        }
         fun attach() {
             detachObserver()
             refresh()
@@ -87,7 +115,9 @@ internal class DynamicRecallRuntime(private val context: Context) {
                 if (markerEnabled() && next != null) {
                     if (marker == null) marker = RecallMarker(root).also { root.overlay.add(it) }
                     marker?.update(next, isSelf)
+                    fadeContent(next)
                 } else {
+                    restoreContent()
                     marker?.let { root.overlay.remove(it) }
                     marker = null
                 }
@@ -104,6 +134,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
             observer = null
         }
         private fun removeStroke() {
+            restoreContent()
             marker?.let { root.overlay.remove(it) }
             marker = null
             stroke?.stop()
@@ -175,9 +206,6 @@ internal class DynamicRecallRuntime(private val context: Context) {
     }
     private inner class RecallStroke(private val view: View) : Drawable() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
-        private val tintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
-        private val tintRect = RectF()
-        private var tintRadius = 0f
         private val rect = RectF()
         private val visible = Rect()
         private var running = false
@@ -202,11 +230,6 @@ internal class DynamicRecallRuntime(private val context: Context) {
         fun update() {
             setBounds(0, 0, view.width, view.height)
             val density = view.resources.displayMetrics.density
-            tintRect.set(0f, 0f, view.width.toFloat(), view.height.toFloat())
-            tintRadius = minOf(12f * density, view.height / 2f)
-            // Fixed translucent white wash fades all live content types without changing
-            // native view alpha, GIF playback, backgrounds, or touch handling.
-            tintPaint.color = if (markerEnabled()) Color.argb(89, 255, 255, 255) else Color.TRANSPARENT
             paint.strokeWidth = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
                 DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH)
                 .coerceIn(DynamicBadgeSettings.MIN_STROKE_WIDTH, DynamicBadgeSettings.MAX_STROKE_WIDTH) * density
@@ -233,8 +256,6 @@ internal class DynamicRecallRuntime(private val context: Context) {
         fun stop() { running = false; view.removeCallbacks(frame) }
         override fun draw(canvas: Canvas) {
             if (!enabled() || !view.isShown || rect.width() <= 0 || rect.height() <= 0) return
-            // Overlay remains above changing GIF/sticker frames; no snapshot, no touch interception.
-            if (tintPaint.alpha > 0) canvas.drawRoundRect(tintRect, tintRadius, tintRadius, tintPaint)
             if (!borderEnabled() || perimeter <= 0f) return
             val progress = (SystemClock.uptimeMillis() % period).toFloat() / period
             gradientMatrix.setRotate(progress * 360f, rect.centerX(), rect.centerY())
