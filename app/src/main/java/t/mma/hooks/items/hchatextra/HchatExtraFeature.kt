@@ -223,6 +223,7 @@ private class HchatExtraHooker(
         visit(root, 0)
         logger("[聊天记录时间诊断:v1] stage=$stage holder=${holder.javaClass.name} " +
             "position=${messageDetailsConfig.position} root=${describe(root)} " +
+            "source=${if (generateSequence(holder.javaClass) { it.superclass }.any { it.name == "kn5.z4" }) "kn5.z4.b" else "getMainContainerView"} " +
             "layout=${describe(anchor?.layoutView)} alignment=${describe(anchor?.alignmentView)} " +
             "fields={$candidates} tree={$tree}", null)
     }
@@ -3304,6 +3305,23 @@ private class HchatExtraHooker(
         val card = KavaReflector.readField(field, holder) as? android.widget.FrameLayout ?: return null
         return card.takeIf { isViewWithinRoot(it, row) }
     }
+    private fun forwardedRecordContainer(holder: Any, row: ViewGroup): View? {
+        // 8.0.78 runtime diagnostic: kn5.z4.b is the complete 917x531 record card.
+        // Resolve the declaring class explicitly so a subclass cannot shadow its field.
+        val declaringClass = generateSequence(holder.javaClass) { it.superclass }
+            .firstOrNull { it.name == "kn5.z4" }
+        if (declaringClass != null) {
+            val field = KavaReflector.declaredFields(declaringClass).firstOrNull {
+                it.name == "b" && View::class.java.isAssignableFrom(it.type)
+            } ?: return null
+            val content = KavaReflector.readField(field, holder) as? View ?: return null
+            return content.takeIf {
+                it.javaClass.name == "com.tencent.mm.ui.chatting.viewitems.mvvmview.ChattingRecordMvvmView" &&
+                    it.visibility == View.VISIBLE && isViewWithinRoot(it, row)
+            }
+        }
+        return holderMainContentView(holder, row)
+    }
     private fun cardBottomAnchor(root: View, holder: Any, type: Int, appSubtype: Int?): BottomDetailsAnchor? {
         val row = root as? ViewGroup ?: return null
         if (row !is RelativeLayout && row !is android.widget.FrameLayout &&
@@ -3318,7 +3336,7 @@ private class HchatExtraHooker(
         // Forwarded chat records are complete app cards, not native time/header rows.
         // Require the semantic container and wait for layout rather than guessing a branch.
         val forwardedRecord = appSubtype == 19
-        val holderCard = (if (forwardedRecord) holderMainContentView(holder, row)
+        val holderCard = (if (forwardedRecord) forwardedRecordContainer(holder, row)
             else holderCardContainer(holder, row))
             ?: if (WeChatMessageTypes.isLocation(type) ||
                 WeChatMessageTypes.normalize(type) in setOf(42, 66)) {
