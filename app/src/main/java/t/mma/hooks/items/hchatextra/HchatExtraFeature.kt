@@ -195,6 +195,37 @@ private class HchatExtraHooker(
     private val methodPrefs = DexMethodCache.prefs(context.hostContext(), "Hchat_extra_method_cache")
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
     private val hookedClasses = Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
+    private val forwardedTimeDiagnosticKeys = ConcurrentHashMap.newKeySet<String>()
+    private fun diagnoseForwardedTime(holder: Any, root: View, anchor: BottomDetailsAnchor?, stage: String) {
+        val key = "${holder.javaClass.name}|$stage|${anchor != null}|${root.width > 0}"
+        if (forwardedTimeDiagnosticKeys.size >= 24 || !forwardedTimeDiagnosticKeys.add(key)) return
+        fun describe(view: View?): String {
+            if (view == null) return "null"
+            val resource = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("unknown")
+            return "${view.javaClass.name}#$resource id=${view.id} vis=${view.visibility} " +
+                "bounds=${view.left},${view.top},${view.right},${view.bottom} " +
+                "measured=${view.measuredWidth}x${view.measuredHeight} parent=${view.parent?.javaClass?.name}"
+        }
+        val candidates = fieldsRecursive(holder.javaClass)
+            .filter { View::class.java.isAssignableFrom(it.type) }.take(48)
+            .joinToString("; ") { field ->
+                "${field.declaringClass.simpleName}.${field.name}=" +
+                    describe(runCatching { KavaReflector.readField(field, holder) as? View }.getOrNull())
+            }
+        val tree = StringBuilder()
+        var count = 0
+        fun visit(view: View, depth: Int) {
+            if (depth > 5 || count >= 64) return
+            count++
+            tree.append("[$depth ").append(describe(view)).append("] ")
+            if (view is ViewGroup) for (index in 0 until view.childCount) visit(view.getChildAt(index), depth + 1)
+        }
+        visit(root, 0)
+        logger("[聊天记录时间诊断:v1] stage=$stage holder=${holder.javaClass.name} " +
+            "position=${messageDetailsConfig.position} root=${describe(root)} " +
+            "layout=${describe(anchor?.layoutView)} alignment=${describe(anchor?.alignmentView)} " +
+            "fields={$candidates} tree={$tree}", null)
+    }
     private val holderRootFieldCache = ConcurrentHashMap<Class<*>, Field>()
     private val itemMethodCache = ConcurrentHashMap<Class<*>, Method>()
     private val itemListFieldCache = ConcurrentHashMap<Class<*>, Field>()
@@ -1282,6 +1313,9 @@ private class HchatExtraHooker(
                     }
             }
         } else null
+        if (appSubtype == 19 && avatarAnchor == null) {
+            diagnoseForwardedTime(holder, root, bottomAnchor, "anchor")
+        }
         val avatarContent = avatarAnchor
             ?.takeIf { it.hidden }
             ?.let { avatarDetailsContentView(holder, it.parent) }
@@ -1331,6 +1365,9 @@ private class HchatExtraHooker(
                 details,
                 configuredAvatarHidden || resolvedAvatarAnchor?.hidden == true
             )
+        }
+        if (appSubtype == 19 && avatarAnchor == null) {
+            diagnoseForwardedTime(holder, root, bottomAnchor, "inserted=$inserted label=${label.parent?.javaClass?.name}")
         }
         if (inserted) {
             rememberMessageDetailsBinding(label, root, nativeTimeLabel, holder, nativeMessage, details)
