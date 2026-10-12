@@ -44,13 +44,13 @@ ui=(repo/'app/src/main/java/t/mma/ui/miuix/MiuixSettingsPagePart16.kt').read_tex
 assert 'SwitchRow(recallMarkerEnabled, "撤回标记"' in ui
 assert '.putBoolean(AntiRecallSettings.KEY_MARKER_ENABLE' in ui
 assert 'recallMessageColor' not in ui and 'recallMessageOpacity' not in ui
-assert 'view.setTextColor(Color.rgb(128, 128, 128))' in runtime
-assert 'view.imageAlpha =' in runtime
+assert 'view.alpha = 0.5f' in runtime
+assert 'originalAlpha = view.alpha' in runtime
 assert 'restoreContent()' in runtime
 assert 'marker?.update(next, isSelf)' in runtime
 assert 'top + content.height - iconSize' in runtime
 assert 'left - 4f * density - iconSize' in runtime
 assert '(borderEnabled() || markerEnabled())' in runtime
-assert 'view.setTextColor(colors)' in runtime
-assert 'view.imageAlpha = alpha' in runtime
-print('PASS marker persistence, removed color editor, foreground fade, independent border and bottom-corner wiring')
+assert 'fadedContent?.alpha = originalAlpha' in runtime
+assert 'setTextColor' not in runtime and 'imageAlpha' not in runtime
+print('PASS marker persistence, removed color editor, 50% container alpha and original alpha restoration, independent border and bottom-corner wiring')

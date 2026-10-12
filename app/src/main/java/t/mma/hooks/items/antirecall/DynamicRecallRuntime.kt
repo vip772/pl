@@ -8,10 +8,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.View
-import android.view.ViewGroup
-import android.widget.TextView
-import android.widget.ImageView
-import android.content.res.ColorStateList
 import android.view.ViewTreeObserver
 import t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings
 import t.mma.preferences.HchatStorage
@@ -63,29 +59,21 @@ internal class DynamicRecallRuntime(private val context: Context) {
         private var target: View? = null
         private var stroke: RecallStroke? = null
         private var marker: RecallMarker? = null
-        private val textColors = java.util.IdentityHashMap<TextView, ColorStateList>()
-        private val imageAlphas = java.util.IdentityHashMap<ImageView, Int>()
+        private var fadedContent: View? = null
+        private var originalAlpha = 1f
         private fun restoreContent() {
-            textColors.forEach { (view, colors) -> view.setTextColor(colors) }
-            imageAlphas.forEach { (view, alpha) -> view.imageAlpha = alpha }
-            textColors.clear()
-            imageAlphas.clear()
+            fadedContent?.alpha = originalAlpha
+            fadedContent = null
         }
         private fun fadeContent(view: View) {
-            // Change foreground content only; never fade a container/background or its overlay.
-            when (view) {
-                is TextView -> {
-                    if (!textColors.containsKey(view)) textColors[view] = view.textColors
-                    view.setTextColor(Color.rgb(128, 128, 128))
-                }
-                is ImageView -> {
-                    if (!imageAlphas.containsKey(view)) imageAlphas[view] = view.imageAlpha
-                    view.imageAlpha = (imageAlphas.getValue(view) * .65f).toInt()
-                }
-                is ViewGroup -> {
-                    for (index in 0 until view.childCount) fadeContent(view.getChildAt(index))
-                }
+            if (fadedContent !== view) {
+                restoreContent()
+                fadedContent = view
+                originalAlpha = view.alpha
             }
+            // Follow WeKii: dim the semantic message container, including custom-drawn text
+            // and animated stickers. Use an absolute value so refreshes cannot compound it.
+            view.alpha = 0.5f
         }
         fun attach() {
             detachObserver()
