@@ -45,8 +45,11 @@ internal class DynamicRecallRuntime(private val context: Context) {
         rows.clear()
         handler.removeCallbacksAndMessages(null)
     }
+    private fun borderEnabled() = prefs.getBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, false)
+    private fun colorEnabled() = prefs.getBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE,
+        AntiRecallSettings.DEFAULT_DYNAMIC_MESSAGE_ENABLE)
     private fun enabled() = prefs.getBoolean(AntiRecallSettings.KEY_ENABLE, false) &&
-        prefs.getBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, false)
+        (borderEnabled() || colorEnabled())
 
     private inner class Binding(
         val root: View, val talker: String, val id: Long, val serverId: Long,
@@ -55,6 +58,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
         private var observer: ViewTreeObserver? = null
         private var target: View? = null
         private var stroke: RecallStroke? = null
+        private var marker: RecallMarker? = null
         fun attach() {
             detachObserver()
             refresh()
@@ -80,6 +84,13 @@ internal class DynamicRecallRuntime(private val context: Context) {
                     }
                 }
                 stroke?.update()
+                if (colorEnabled() && next != null) {
+                    if (marker == null) marker = RecallMarker(root).also { root.overlay.add(it) }
+                    marker?.update(next)
+                } else {
+                    marker?.let { root.overlay.remove(it) }
+                    marker = null
+                }
             } catch (error: Throwable) {
                 removeStroke()
                 HLog.e("[Hchat:动态撤回] 消息描边更新失败", error)
@@ -93,6 +104,8 @@ internal class DynamicRecallRuntime(private val context: Context) {
             observer = null
         }
         private fun removeStroke() {
+            marker?.let { root.overlay.remove(it) }
+            marker = null
             stroke?.stop()
             stroke?.let { target?.overlay?.remove(it) }
             stroke = null; target = null
@@ -104,6 +117,65 @@ internal class DynamicRecallRuntime(private val context: Context) {
         }
     }
 
+    private inner class RecallMarker(private val root: View) : Drawable() {
+        private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.rgb(229, 57, 53)
+            style = Paint.Style.STROKE
+            strokeCap = Paint.Cap.ROUND
+            strokeJoin = Paint.Join.ROUND
+        }
+        private val rootLocation = IntArray(2)
+        private val contentLocation = IntArray(2)
+        private val body = RectF()
+        private val path = Path()
+        private var iconLeft = 0f
+        private var iconTop = 0f
+        private var iconSize = 0f
+        fun update(content: View) {
+            setBounds(0, 0, root.width, root.height)
+            val density = root.resources.displayMetrics.density
+            iconSize = minOf(18f * density, root.width.toFloat(), content.height.toFloat())
+            root.getLocationOnScreen(rootLocation)
+            content.getLocationOnScreen(contentLocation)
+            val left = (contentLocation[0] - rootLocation[0]).toFloat()
+            val top = (contentLocation[1] - rootLocation[1]).toFloat()
+            val right = left + content.width + 4f * density
+            val before = left - 4f * density - iconSize
+            // Prefer the right side; sent messages near the edge use the free left side.
+            iconLeft = when {
+                right + iconSize <= root.width -> right
+                before >= 0f -> before
+                else -> left + content.width - iconSize - 4f * density
+            }.coerceIn(0f, maxOf(0f, root.width - iconSize))
+            iconTop = (top + (content.height - iconSize) / 2f)
+                .coerceIn(0f, maxOf(0f, root.height - iconSize))
+            paint.strokeWidth = 1.6f * density
+            body.set(.25f, .31f, .75f, .88f)
+            path.reset()
+            path.moveTo(.37f, .22f); path.lineTo(.37f, .12f)
+            path.lineTo(.63f, .12f); path.lineTo(.63f, .22f)
+            invalidateSelf()
+        }
+        override fun draw(canvas: Canvas) {
+            if (!enabled() || !colorEnabled() || !root.isShown || iconSize <= 0f) return
+            val saved = canvas.save()
+            canvas.translate(iconLeft, iconTop)
+            canvas.scale(iconSize, iconSize)
+            val width = paint.strokeWidth
+            paint.strokeWidth = width / iconSize
+            canvas.drawPath(path, paint)
+            canvas.drawLine(.16f, .24f, .84f, .24f, paint)
+            canvas.drawRoundRect(body, .06f, .06f, paint)
+            canvas.drawLine(.42f, .43f, .42f, .74f, paint)
+            canvas.drawLine(.58f, .43f, .58f, .74f, paint)
+            paint.strokeWidth = width
+            canvas.restoreToCount(saved)
+        }
+        override fun setAlpha(alpha: Int) { paint.alpha = alpha }
+        override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }
+        @Deprecated("Deprecated in Android")
+        override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    }
     private inner class RecallStroke(private val view: View) : Drawable() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
         private val tintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
@@ -123,7 +195,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
         private val frame = object : Runnable {
             override fun run() {
                 if (!running) return
-                if (!enabled() || !view.isAttachedToWindow) { stop(); return }
+                if (!enabled() || !borderEnabled() || !view.isAttachedToWindow) { stop(); return }
                 if (view.isShown && view.getGlobalVisibleRect(visible)) {
                     invalidateSelf()
                     view.postOnAnimation(this)
@@ -135,8 +207,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
             val density = view.resources.displayMetrics.density
             tintRect.set(0f, 0f, view.width.toFloat(), view.height.toFloat())
             tintRadius = minOf(12f * density, view.height / 2f)
-            tintPaint.color = if (prefs.getBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE,
-                AntiRecallSettings.DEFAULT_DYNAMIC_MESSAGE_ENABLE)) DynamicRecallTint.color(
+            tintPaint.color = if (colorEnabled()) DynamicRecallTint.color(
                 prefs.getString(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_COLOR, DynamicRecallTint.DEFAULT_COLOR),
                 prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY, DynamicRecallTint.DEFAULT_OPACITY)) else Color.TRANSPARENT
             paint.strokeWidth = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
@@ -157,15 +228,17 @@ internal class DynamicRecallRuntime(private val context: Context) {
             paint.strokeCap = Paint.Cap.ROUND
             period = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_SPEED, DynamicBadgeSettings.DEFAULT_NUMBER_SPEED)
                 .coerceIn(DynamicBadgeSettings.MIN_SPEED, DynamicBadgeSettings.MAX_SPEED)
-            if (!running) { running = true; view.postOnAnimation(frame) }
+            if (borderEnabled()) {
+                if (!running) { running = true; view.postOnAnimation(frame) }
+            } else stop()
             invalidateSelf()
         }
         fun stop() { running = false; view.removeCallbacks(frame) }
         override fun draw(canvas: Canvas) {
-            if (!running || !enabled() || !view.isShown || rect.width() <= 0 || rect.height() <= 0) return
+            if (!enabled() || !view.isShown || rect.width() <= 0 || rect.height() <= 0) return
             // Overlay remains above changing GIF/sticker frames; no snapshot, no touch interception.
             if (tintPaint.alpha > 0) canvas.drawRoundRect(tintRect, tintRadius, tintRadius, tintPaint)
-            if (perimeter <= 0f) return
+            if (!borderEnabled() || perimeter <= 0f) return
             val progress = (SystemClock.uptimeMillis() % period).toFloat() / period
             gradientMatrix.setRotate(progress * 360f, rect.centerX(), rect.centerY())
             gradient?.setLocalMatrix(gradientMatrix)

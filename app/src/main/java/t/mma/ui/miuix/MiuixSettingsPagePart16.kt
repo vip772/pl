@@ -1459,6 +1459,8 @@ internal fun AntiRecallMiuixPage(
         t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH)) }
     val usesTimeVariable = noticeText.contains(AntiRecallSettings.VAR_SEND_TIME) ||
         noticeText.contains(AntiRecallSettings.VAR_RECALL_TIME)
+    val actionBarDensity = LocalDensity.current
+    var actionBarHeight by remember { mutableStateOf(0.dp) }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
 
@@ -1467,45 +1469,49 @@ internal fun AntiRecallMiuixPage(
         largeTitle = provider.title(),
         scrollBehavior = scrollBehavior,
         bottomBar = {
-            BottomActionBar(
-                primaryText = "保存设置",
-                onPrimaryClick = save@{
-                    val normalizedTimeFormat = noticeTimeFormat.trim()
-                        .ifBlank { AntiRecallSettings.DEFAULT_NOTICE_TIME_FORMAT }
-                    val timeFormatValid = runCatching {
-                        SimpleDateFormat(normalizedTimeFormat, Locale.getDefault()).format(Date())
-                    }.isSuccess
-                    if (usesTimeVariable && !timeFormatValid) {
-                        Toast.makeText(context, "时间格式无效", Toast.LENGTH_SHORT).show()
-                        return@save
-                    }
-                    sp.edit()
-                        .putBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, dynamicRecall)
-                        .putString(AntiRecallSettings.KEY_DYNAMIC_COLOR, dynamicColor)
-                        .putBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE, recallMessageEnabled)
-                        .putString(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_COLOR,
-                            t.mma.hooks.items.antirecall.DynamicRecallTint.normalize(recallMessageColor))
-                        .putInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY, recallMessageOpacity)
-                        .putInt(AntiRecallSettings.KEY_DYNAMIC_SPEED, dynamicSpeed)
-                        .putInt(AntiRecallSettings.KEY_DYNAMIC_STROKE, dynamicStroke)
-                        .putString(
-                            AntiRecallSettings.KEY_NOTICE_TEXT,
-                            noticeText.ifBlank { AntiRecallSettings.DEFAULT_NOTICE_TEXT }
-                        )
-                        .putString(
-                            AntiRecallSettings.KEY_NOTICE_TIME_FORMAT,
-                            if (timeFormatValid) {
-                                normalizedTimeFormat
-                            } else {
-                                AntiRecallSettings.DEFAULT_NOTICE_TIME_FORMAT
-                            }
-                        )
-                        .apply()
-                    Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
-                },
-                secondaryText = "返回",
-                onSecondaryClick = onBack
-            )
+            Box(Modifier.onSizeChanged {
+                actionBarHeight = with(actionBarDensity) { it.height.toDp() }
+            }) {
+                BottomActionBar(
+                    primaryText = "保存设置",
+                    onPrimaryClick = save@{
+                        val normalizedTimeFormat = noticeTimeFormat.trim()
+                            .ifBlank { AntiRecallSettings.DEFAULT_NOTICE_TIME_FORMAT }
+                        val timeFormatValid = runCatching {
+                            SimpleDateFormat(normalizedTimeFormat, Locale.getDefault()).format(Date())
+                        }.isSuccess
+                        if (usesTimeVariable && !timeFormatValid) {
+                            Toast.makeText(context, "时间格式无效", Toast.LENGTH_SHORT).show()
+                            return@save
+                        }
+                        sp.edit()
+                            .putBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, dynamicRecall)
+                            .putString(AntiRecallSettings.KEY_DYNAMIC_COLOR, dynamicColor)
+                            .putBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE, recallMessageEnabled)
+                            .putString(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_COLOR,
+                                t.mma.hooks.items.antirecall.DynamicRecallTint.normalize(recallMessageColor))
+                            .putInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY, recallMessageOpacity)
+                            .putInt(AntiRecallSettings.KEY_DYNAMIC_SPEED, dynamicSpeed)
+                            .putInt(AntiRecallSettings.KEY_DYNAMIC_STROKE, dynamicStroke)
+                            .putString(
+                                AntiRecallSettings.KEY_NOTICE_TEXT,
+                                noticeText.ifBlank { AntiRecallSettings.DEFAULT_NOTICE_TEXT }
+                            )
+                            .putString(
+                                AntiRecallSettings.KEY_NOTICE_TIME_FORMAT,
+                                if (timeFormatValid) {
+                                    normalizedTimeFormat
+                                } else {
+                                    AntiRecallSettings.DEFAULT_NOTICE_TIME_FORMAT
+                                }
+                            )
+                            .apply()
+                        Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
+                    },
+                    secondaryText = "返回",
+                    onSecondaryClick = onBack
+                )
+            }
         }
     ) { padding ->
         LazyColumn(
@@ -1513,7 +1519,7 @@ internal fun AntiRecallMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 20.dp
+                bottom = padding.calculateBottomPadding() + maxOf(actionBarHeight, 64.dp) + 20.dp
             )
         ) {
             item { SmallTitle(text = "防撤回") }
@@ -1565,29 +1571,29 @@ internal fun AntiRecallMiuixPage(
                 SwitchRow(dynamicRecall, "动态撤回", "为防撤回保留的原消息显示旋转渐变描边，保存后生效",
                     onCheckedChange = { dynamicRecall = it })
             }
-            if (dynamicRecall) {
+            item {
+                SwitchRow(recallMessageEnabled, "撤回信息颜色", "独立控制颜色覆盖和红色撤回标记，保存后生效",
+                    onCheckedChange = { recallMessageEnabled = it })
+            }
+            if (recallMessageEnabled) {
                 item {
-                    SwitchRow(recallMessageEnabled, "撤回信息颜色", "为保留消息叠加自定义颜色，保存后生效",
-                        onCheckedChange = { recallMessageEnabled = it })
+                    ColorPickerRow("颜色编辑", "覆盖保留消息内容，包含图片、视频、卡片和静态／动态表情", recallMessageColor,
+                        allowGradient = false,
+                        onReset = { recallMessageColor = t.mma.hooks.items.antirecall.DynamicRecallTint.DEFAULT_COLOR }
+                    ) { recallMessageColor = it }
                 }
-                if (recallMessageEnabled) {
-                    item {
-                        ColorPickerRow("颜色编辑", "覆盖保留消息内容，包含图片、视频、卡片和静态／动态表情", recallMessageColor,
-                            allowGradient = false,
-                            onReset = { recallMessageColor = t.mma.hooks.items.antirecall.DynamicRecallTint.DEFAULT_COLOR }
-                        ) { recallMessageColor = it }
-                    }
-                    item {
-                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                            Text("颜色覆盖强度 $recallMessageOpacity%", color = MiuixTheme.colorScheme.onSurface)
-                            Slider(value = recallMessageOpacity.toFloat(),
-                                onValueChange = { recallMessageOpacity = it.toInt().coerceIn(0, 80) },
-                                valueRange = 0f..80f, steps = 15,
-                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                            Text("0%仅保留描边；默认35%，保存后生效", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
-                        }
+                item {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text("颜色覆盖强度 $recallMessageOpacity%", color = MiuixTheme.colorScheme.onSurface)
+                        Slider(value = recallMessageOpacity.toFloat(),
+                            onValueChange = { recallMessageOpacity = it.toInt().coerceIn(0, 80) },
+                            valueRange = 0f..80f, steps = 15,
+                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                        Text("0%不覆盖颜色，仍显示撤回标记；默认35%，保存后生效", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
                     }
                 }
+            }
+            if (dynamicRecall) {
                 item {
                     ColorPickerRow("渐变颜色", "断点描边三色渐变", dynamicColor,
                         threeColorGradient = true,
