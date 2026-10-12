@@ -52,7 +52,7 @@ fun main() {
     check(MessageDetailsCardHierarchy.contentBranch(row, cycle) == null)
     println("PASS foreign content, row itself and invalid parent cycles are rejected")
 
-    for (subtype in listOf(3, 4, 5, 33, 36, 76, 92)) {
+    for (subtype in listOf(3, 4, 5, 19, 33, 36, 76, 92)) {
         check(MessageDetailsCardHierarchy.isCardMessage(49, subtype))
     }
     check(MessageDetailsCardHierarchy.isCardMessage(48, null))
@@ -60,9 +60,9 @@ fun main() {
     check(MessageDetailsCardHierarchy.isCardMessage(42, null))
     check(MessageDetailsCardHierarchy.isCardMessage(66, null))
     check(MessageDetailsCardHierarchy.isCardMessage(1040187441, 76))
-    println("PASS links, music, mini programs and locations use card layout")
+    println("PASS forwarded chat records, links, music, mini programs and locations use card layout")
 
-    for (subtype in listOf(1, 2, 8, 19, 24, 57, 87)) {
+    for (subtype in listOf(1, 2, 8, 24, 57, 87)) {
         check(!MessageDetailsCardHierarchy.isCardMessage(49, subtype))
     }
     for (type in listOf(1, 3, 34, 43, 47, 10000, 10002)) {

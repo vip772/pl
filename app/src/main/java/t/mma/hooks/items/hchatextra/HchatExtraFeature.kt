@@ -1273,7 +1273,7 @@ private class HchatExtraHooker(
             if (cardMessage) {
                 // The native time/header and card may share one outer branch. Anchor below
                 // that complete measured branch so details cannot split the message body.
-                cardBottomAnchor(root, holder, details.type)
+                cardBottomAnchor(root, holder, details.type, appSubtype)
             } else {
                 noticeContentAnchor(root, nativeTimeLabel, details.type)
                     ?: (if (!centeredNotice) rowContentDetailsAnchor(root, holder, nativeTimeLabel) else null)
@@ -3267,7 +3267,7 @@ private class HchatExtraHooker(
         val card = KavaReflector.readField(field, holder) as? android.widget.FrameLayout ?: return null
         return card.takeIf { isViewWithinRoot(it, row) }
     }
-    private fun cardBottomAnchor(root: View, holder: Any, type: Int): BottomDetailsAnchor? {
+    private fun cardBottomAnchor(root: View, holder: Any, type: Int, appSubtype: Int?): BottomDetailsAnchor? {
         val row = root as? ViewGroup ?: return null
         if (row !is RelativeLayout && row !is android.widget.FrameLayout &&
             !(row is LinearLayout && row.orientation == LinearLayout.VERTICAL)
@@ -3278,7 +3278,11 @@ private class HchatExtraHooker(
             findHolderAvatarView(holder)?.let { directChildOf(row, it) }?.let(::add)
             findChattingAvatarView(root)?.let { directChildOf(row, it) }?.let(::add)
         }
-        val holderCard = holderCardContainer(holder, row)
+        // Forwarded chat records are complete app cards, not native time/header rows.
+        // Require the semantic container and wait for layout rather than guessing a branch.
+        val forwardedRecord = appSubtype == 19
+        val holderCard = (if (forwardedRecord) holderMainContentView(holder, row)
+            else holderCardContainer(holder, row))
             ?: if (WeChatMessageTypes.isLocation(type) ||
                 WeChatMessageTypes.normalize(type) in setOf(42, 66)) {
                 holderMainContentView(holder, row) ?: messageContentView(holder, row)
@@ -3299,7 +3303,7 @@ private class HchatExtraHooker(
         }
         // A verified card holder must never fall back to a guessed X2C/TextView branch.
         // Wait for its FrameLayout field to attach and let the existing retry handle it.
-        val branch = holderBranch ?: if (knownCardHolder) null else run {
+        val branch = holderBranch ?: if (knownCardHolder || forwardedRecord) null else run {
             val candidates = buildList<View> {
                 for (index in 0 until row.childCount) add(row.getChildAt(index))
             }
