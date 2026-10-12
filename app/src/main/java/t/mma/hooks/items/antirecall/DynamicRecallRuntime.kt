@@ -106,6 +106,9 @@ internal class DynamicRecallRuntime(private val context: Context) {
 
     private inner class RecallStroke(private val view: View) : Drawable() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
+        private val tintPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+        private val tintRect = RectF()
+        private var tintRadius = 0f
         private val rect = RectF()
         private val visible = Rect()
         private var running = false
@@ -130,6 +133,11 @@ internal class DynamicRecallRuntime(private val context: Context) {
         fun update() {
             setBounds(0, 0, view.width, view.height)
             val density = view.resources.displayMetrics.density
+            tintRect.set(0f, 0f, view.width.toFloat(), view.height.toFloat())
+            tintRadius = minOf(12f * density, view.height / 2f)
+            tintPaint.color = DynamicRecallTint.color(
+                prefs.getString(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_COLOR, DynamicRecallTint.DEFAULT_COLOR),
+                prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY, DynamicRecallTint.DEFAULT_OPACITY))
             paint.strokeWidth = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
                 DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH)
                 .coerceIn(DynamicBadgeSettings.MIN_STROKE_WIDTH, DynamicBadgeSettings.MAX_STROKE_WIDTH) * density
@@ -154,6 +162,8 @@ internal class DynamicRecallRuntime(private val context: Context) {
         fun stop() { running = false; view.removeCallbacks(frame) }
         override fun draw(canvas: Canvas) {
             if (!running || !enabled() || !view.isShown || rect.width() <= 0 || rect.height() <= 0) return
+            // Overlay remains above changing GIF/sticker frames; no snapshot, no touch interception.
+            canvas.drawRoundRect(tintRect, tintRadius, tintRadius, tintPaint)
             if (perimeter <= 0f) return
             val progress = (SystemClock.uptimeMillis() % period).toFloat() / period
             gradientMatrix.setRotate(progress * 360f, rect.centerX(), rect.centerY())

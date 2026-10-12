@@ -4,6 +4,8 @@ object AntiRecallSettings {
     const val PREFS_NAME = "Hchat_anti_recall_config"
     const val KEY_DYNAMIC_ENABLE = "dynamic_recall_enable"
     const val KEY_DYNAMIC_COLOR = "dynamic_recall_color"
+    const val KEY_DYNAMIC_MESSAGE_COLOR = "dynamic_recall_message_color"
+    const val KEY_DYNAMIC_MESSAGE_OPACITY = "dynamic_recall_message_opacity"
     const val KEY_DYNAMIC_SPEED = "dynamic_recall_speed"
     const val KEY_DYNAMIC_STROKE = "dynamic_recall_stroke"
     const val KEY_ENABLE = "anti_recall_enable"
