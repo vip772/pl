@@ -41,6 +41,11 @@ assert 'key.startsWith("dynamic_recall_")' in runtime
 assert 'root.removeOnAttachStateChangeListener(this)' in runtime
 assert 'Bitmap' not in runtime and 'setLayerType' not in runtime
 ui=(repo/'app/src/main/java/t/mma/ui/miuix/MiuixSettingsPagePart16.kt').read_text()
-assert 'ColorPickerRow("撤回信息颜色"' in ui and 'allowGradient = false' in ui
+assert 'ColorPickerRow("颜色编辑"' in ui and 'allowGradient = false' in ui
 assert '.putInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY' in ui
 print('PASS tint-before-outline wiring, animation cleanup, preference refresh and shared single-color editor')
+assert 'if (recallMessageEnabled) {' in ui
+assert 'SwitchRow(recallMessageEnabled, "撤回信息颜色"' in ui
+assert '.putBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE' in ui
+assert 'else Color.TRANSPARENT' in runtime and 'if (tintPaint.alpha > 0)' in runtime
+print('PASS independent switch persistence, editor visibility and disabled tint with outline retained')

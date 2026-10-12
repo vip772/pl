@@ -1443,6 +1443,8 @@ internal fun AntiRecallMiuixPage(
     var dynamicRecall by remember { mutableStateOf(sp.getBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, false)) }
     var dynamicColor by remember { mutableStateOf(sp.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
         t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty()) }
+    var recallMessageEnabled by remember { mutableStateOf(sp.getBoolean(
+        AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE, AntiRecallSettings.DEFAULT_DYNAMIC_MESSAGE_ENABLE)) }
     var recallMessageColor by remember { mutableStateOf(
         t.mma.hooks.items.antirecall.DynamicRecallTint.normalize(
             sp.getString(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_COLOR,
@@ -1480,6 +1482,7 @@ internal fun AntiRecallMiuixPage(
                     sp.edit()
                         .putBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, dynamicRecall)
                         .putString(AntiRecallSettings.KEY_DYNAMIC_COLOR, dynamicColor)
+                        .putBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE, recallMessageEnabled)
                         .putString(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_COLOR,
                             t.mma.hooks.items.antirecall.DynamicRecallTint.normalize(recallMessageColor))
                         .putInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY, recallMessageOpacity)
@@ -1564,19 +1567,25 @@ internal fun AntiRecallMiuixPage(
             }
             if (dynamicRecall) {
                 item {
-                    ColorPickerRow("撤回信息颜色", "覆盖保留消息内容，包含图片、视频、卡片和静态／动态表情", recallMessageColor,
-                        allowGradient = false,
-                        onReset = { recallMessageColor = t.mma.hooks.items.antirecall.DynamicRecallTint.DEFAULT_COLOR }
-                    ) { recallMessageColor = it }
+                    SwitchRow(recallMessageEnabled, "撤回信息颜色", "为保留消息叠加自定义颜色，保存后生效",
+                        onCheckedChange = { recallMessageEnabled = it })
                 }
-                item {
-                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                        Text("颜色覆盖强度 $recallMessageOpacity%", color = MiuixTheme.colorScheme.onSurface)
-                        Slider(value = recallMessageOpacity.toFloat(),
-                            onValueChange = { recallMessageOpacity = it.toInt().coerceIn(0, 80) },
-                            valueRange = 0f..80f, steps = 15,
-                            modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
-                        Text("0%仅保留描边；默认35%，保存后生效", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                if (recallMessageEnabled) {
+                    item {
+                        ColorPickerRow("颜色编辑", "覆盖保留消息内容，包含图片、视频、卡片和静态／动态表情", recallMessageColor,
+                            allowGradient = false,
+                            onReset = { recallMessageColor = t.mma.hooks.items.antirecall.DynamicRecallTint.DEFAULT_COLOR }
+                        ) { recallMessageColor = it }
+                    }
+                    item {
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                            Text("颜色覆盖强度 $recallMessageOpacity%", color = MiuixTheme.colorScheme.onSurface)
+                            Slider(value = recallMessageOpacity.toFloat(),
+                                onValueChange = { recallMessageOpacity = it.toInt().coerceIn(0, 80) },
+                                valueRange = 0f..80f, steps = 15,
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
+                            Text("0%仅保留描边；默认35%，保存后生效", color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                        }
                     }
                 }
                 item {

@@ -135,9 +135,10 @@ internal class DynamicRecallRuntime(private val context: Context) {
             val density = view.resources.displayMetrics.density
             tintRect.set(0f, 0f, view.width.toFloat(), view.height.toFloat())
             tintRadius = minOf(12f * density, view.height / 2f)
-            tintPaint.color = DynamicRecallTint.color(
+            tintPaint.color = if (prefs.getBoolean(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_ENABLE,
+                AntiRecallSettings.DEFAULT_DYNAMIC_MESSAGE_ENABLE)) DynamicRecallTint.color(
                 prefs.getString(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_COLOR, DynamicRecallTint.DEFAULT_COLOR),
-                prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY, DynamicRecallTint.DEFAULT_OPACITY))
+                prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_MESSAGE_OPACITY, DynamicRecallTint.DEFAULT_OPACITY)) else Color.TRANSPARENT
             paint.strokeWidth = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
                 DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH)
                 .coerceIn(DynamicBadgeSettings.MIN_STROKE_WIDTH, DynamicBadgeSettings.MAX_STROKE_WIDTH) * density
@@ -163,7 +164,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
         override fun draw(canvas: Canvas) {
             if (!running || !enabled() || !view.isShown || rect.width() <= 0 || rect.height() <= 0) return
             // Overlay remains above changing GIF/sticker frames; no snapshot, no touch interception.
-            canvas.drawRoundRect(tintRect, tintRadius, tintRadius, tintPaint)
+            if (tintPaint.alpha > 0) canvas.drawRoundRect(tintRect, tintRadius, tintRadius, tintPaint)
             if (perimeter <= 0f) return
             val progress = (SystemClock.uptimeMillis() % period).toFloat() / period
             gradientMatrix.setRotate(progress * 360f, rect.centerX(), rect.centerY())
