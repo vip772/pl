@@ -96,7 +96,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
                     removeStroke()
                     if (next != null) {
                         target = next
-                        stroke = RecallStroke(next).also { next.overlay.add(it) }
+                        stroke = RecallStroke(next, root).also { root.overlay.add(it) }
                     }
                 }
                 stroke?.update()
@@ -126,7 +126,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
             marker?.let { root.overlay.remove(it) }
             marker = null
             stroke?.stop()
-            stroke?.let { target?.overlay?.remove(it) }
+            stroke?.let { root.overlay.remove(it) }
             stroke = null; target = null
         }
         fun dispose() {
@@ -192,10 +192,12 @@ internal class DynamicRecallRuntime(private val context: Context) {
         @Deprecated("Deprecated in Android")
         override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     }
-    private inner class RecallStroke(private val view: View) : Drawable() {
+    private inner class RecallStroke(private val view: View, private val host: View) : Drawable() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE }
         private val rect = RectF()
         private val visible = Rect()
+        private val hostLocation = IntArray(2)
+        private val contentLocation = IntArray(2)
         private var running = false
         private val outline = Path()
         private val segment = Path()
@@ -216,7 +218,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
             }
         }
         fun update() {
-            setBounds(0, 0, view.width, view.height)
+            setBounds(0, 0, host.width, host.height)
             val density = view.resources.displayMetrics.density
             paint.strokeWidth = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
                 DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH)
@@ -261,7 +263,15 @@ internal class DynamicRecallRuntime(private val context: Context) {
                 measure.getSegment(start, minOf(end, perimeter), segment, true)
                 if (end > perimeter) measure.getSegment(0f, end - perimeter, segment, true)
             }
+            // The row overlay has full opacity. Translate the unchanged content-local
+            // stroke into row coordinates on every draw, including animated movement.
+            host.getLocationOnScreen(hostLocation)
+            view.getLocationOnScreen(contentLocation)
+            val saved = canvas.save()
+            canvas.translate((contentLocation[0] - hostLocation[0]).toFloat(),
+                (contentLocation[1] - hostLocation[1]).toFloat())
             canvas.drawPath(segment, paint)
+            canvas.restoreToCount(saved)
             paint.shader = null
         }
         override fun setAlpha(alpha: Int) { paint.alpha = alpha }

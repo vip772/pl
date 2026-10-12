@@ -54,3 +54,10 @@ assert '(borderEnabled() || markerEnabled())' in runtime
 assert 'fadedContent?.alpha = originalAlpha' in runtime
 assert 'setTextColor' not in runtime and 'imageAlpha' not in runtime
 print('PASS marker persistence, removed color editor, 50% container alpha and original alpha restoration, independent border and bottom-corner wiring')
+
+assert 'RecallStroke(next, root).also { root.overlay.add(it) }' in runtime
+assert 'stroke?.let { root.overlay.remove(it) }' in runtime
+assert 'host.getLocationOnScreen(hostLocation)' in runtime
+assert 'canvas.restoreToCount(saved)' in runtime
+assert 'next.overlay.add(it)' not in runtime
+print('PASS stroke owned by undimmed row overlay, content-relative draw position and row cleanup')
