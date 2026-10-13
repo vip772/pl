@@ -1432,39 +1432,77 @@ private class HchatExtraHooker(
         val listRef = WeakReference(list)
         return {
             tailRepairTokens[list] = repairToken
-            val deadline = SystemClock.uptimeMillis() + 900L
+            val deadline = SystemClock.uptimeMillis() + 1500L
             var corrections = 0
-            fun correct() {
-                val row = rowRef.get() ?: return
-                val container = listRef.get() ?: return
-                if (tailRepairTokens[container] !== repairToken) return
-                if (!isCurrentMessageDetailsBind(row, bindToken) || row.parent !== container ||
-                    !row.isAttachedToWindow || !container.isShown) {
-                    tailRepairTokens.remove(container)
-                    return
+            var finished = false
+            val observer = list.viewTreeObserver
+            lateinit var listener: android.view.ViewTreeObserver.OnPreDrawListener
+            lateinit var attach: View.OnAttachStateChangeListener
+            lateinit var timeout: Runnable
+            fun finish(reason: String) {
+                if (finished) return
+                finished = true
+                if (observer.isAlive) observer.removeOnPreDrawListener(listener)
+                listRef.get()?.let { container ->
+                    if (container.viewTreeObserver.isAlive) container.viewTreeObserver.removeOnPreDrawListener(listener)
+                    container.removeOnAttachStateChangeListener(attach)
+                    container.removeCallbacks(timeout)
+                    if (tailRepairTokens[container] === repairToken) tailRepairTokens.remove(container)
                 }
-                if (SystemClock.uptimeMillis() > deadline || corrections >= 3) return
-                if (row.isLayoutRequested || container.isLayoutRequested) return
-                val visible = Rect()
-                if (!container.getGlobalVisibleRect(visible) || visible.width() < container.width / 2) return
-                for (index in 0 until container.childCount) {
-                    val child = container.getChildAt(index)
-                    if (child !== row && child.visibility == View.VISIBLE && child.bottom > row.bottom) return
-                }
-                val delta = row.bottom - (container.height - container.paddingBottom)
-                if (delta > 1 && container.canScrollVertically(1)) {
-                    corrections++
-                    container.scrollBy(0, delta)
-                    logger("[末条贴底修复:v1] delta=$delta correction=$corrections rowHeight=${row.height}", null)
+                logger("[末条贴底修复:v2] finish=$reason corrections=$corrections", null)
+            }
+            listener = android.view.ViewTreeObserver.OnPreDrawListener {
+                val row = rowRef.get()
+                val container = listRef.get()
+                when {
+                    finished -> true
+                    row == null || container == null -> { finish("released"); true }
+                    tailRepairTokens[container] !== repairToken -> { finish("cancelled_touch_or_shutdown"); true }
+                    !isCurrentMessageDetailsBind(row, bindToken) || row.parent !== container -> {
+                        finish("binding_changed"); true
+                    }
+                    !row.isAttachedToWindow || !container.isShown -> { finish("hidden_or_detached"); true }
+                    SystemClock.uptimeMillis() > deadline || corrections >= 6 -> { finish("limit"); true }
+                    else -> {
+                        var bottommost = true
+                        for (index in 0 until container.childCount) {
+                            val child = container.getChildAt(index)
+                            if (child !== row && child.visibility == View.VISIBLE && child.bottom > row.bottom) bottommost = false
+                        }
+                        if (!bottommost) {
+                            finish("bottom_row_changed")
+                            true
+                        } else {
+                            // Pre-draw runs after measure/layout. Pending layout requests alone must
+                            // not reject valid geometry, as the previous timed repair did.
+                            val delta = row.bottom - (container.height - container.paddingBottom)
+                            if (delta > 1 && container.canScrollVertically(1)) {
+                                val before = row.bottom
+                                corrections++
+                                container.scrollBy(0, delta)
+                                val remaining = row.bottom - (container.height - container.paddingBottom)
+                                logger("[末条贴底修复:v2] delta=$delta remaining=$remaining " +
+                                    "correction=$corrections rowHeight=${row.height}", null)
+                                if (row.bottom != before) {
+                                    // Discard only a frame actually moved by this correction.
+                                    container.postInvalidateOnAnimation()
+                                    false
+                                } else true
+                            } else true
+                        }
+                    }
                 }
             }
-            // Retry boundedly while the first layout and page transition settle.
-            for (delay in longArrayOf(16L, 50L, 100L, 200L, 350L, 550L, 750L)) {
-                list.postDelayed({ correct() }, delay)
+            attach = object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(view: View) = Unit
+                override fun onViewDetachedFromWindow(view: View) { finish("detached") }
             }
-            list.postDelayed({
-                listRef.get()?.let { if (tailRepairTokens[it] === repairToken) tailRepairTokens.remove(it) }
-            }, 950L)
+            timeout = Runnable { finish("window_end") }
+            if (observer.isAlive) {
+                list.addOnAttachStateChangeListener(attach)
+                observer.addOnPreDrawListener(listener)
+                list.postDelayed(timeout, 1550L)
+            } else finish("observer_unavailable")
         }
     }
     private var tailLayoutDiagnosticCount = 0
