@@ -39,7 +39,14 @@ public final class StartupMainThreadDiagnostic {
                                 .append(now - sent).append(" pid=").append(Process.myPid())
                                 .append(" state=").append(ui.getState());
                             StackTraceElement[] stack = ui.getStackTrace();
-                            for (int i = 0; i < Math.min(stack.length, 32); i++) trace.append("\n  at ").append(stack[i]);
+                            trace.append(" mainFrames=").append(stack.length);
+                            for (int i = 0; i < Math.min(stack.length, 128); i++) trace.append("\n  at ").append(stack[i]);
+                            // Retain callers if repeated iterator frames fill the head.
+                            if (stack.length > 128) {
+                                int tailStart = Math.max(128, stack.length - 32);
+                                trace.append("\n  ... omittedFrames=").append(tailStart - 128);
+                                for (int i = tailStart; i < stack.length; i++) trace.append("\n  at ").append(stack[i]);
+                            }
                             java.util.Map<Thread, StackTraceElement[]> threads = Thread.getAllStackTraces();
                             int included = 0;
                             for (java.util.Map.Entry<Thread, StackTraceElement[]> entry : threads.entrySet()) {

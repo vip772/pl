@@ -1415,6 +1415,11 @@ private class HchatExtraHooker(
         return inserted
     }
 
+    // UI-thread counters; no additional view references retained.
+    private val tailPerformanceUntil = SystemClock.uptimeMillis() + 180_000L
+    private var tailPerformanceEvents = 0
+    private var tailPerformanceSessions = 0
+    private var tailActiveListeners = 0
     private val tailRepairTokens = java.util.WeakHashMap<ViewGroup, Any>()
     private val tailTouchMethods = mutableSetOf<Method>()
     private val tailLastTouch = java.util.WeakHashMap<ViewGroup, Long>()
@@ -1458,6 +1463,15 @@ private class HchatExtraHooker(
             val deadline = SystemClock.uptimeMillis() + 1500L
             var corrections = 0
             var finished = false
+            val performance = SystemClock.uptimeMillis() <= tailPerformanceUntil
+            val performanceSession = if (performance) ++tailPerformanceSessions else 0
+            var registered = false
+            var callbacks = 0
+            var cancelledFrames = 0
+            var maxCallbackNs = 0L
+            var maxScrollNs = 0L
+            var peakActive = tailActiveListeners
+            val startedAt = SystemClock.uptimeMillis()
             val observer = list.viewTreeObserver
             lateinit var listener: android.view.ViewTreeObserver.OnPreDrawListener
             lateinit var attach: View.OnAttachStateChangeListener
@@ -1465,6 +1479,17 @@ private class HchatExtraHooker(
             fun finish(reason: String) {
                 if (finished) return
                 finished = true
+                if (registered) {
+                    registered = false
+                    tailActiveListeners--
+                }
+                if (performance && performanceSession <= 24 && tailPerformanceEvents < 96) {
+                    tailPerformanceEvents++
+                    t.mma.utils.HLog.i("[末条贴底性能诊断:v1] session=$performanceSession stage=finish reason=$reason " +
+                        "elapsedMs=${SystemClock.uptimeMillis() - startedAt} callbacks=$callbacks " +
+                        "cancelledFrames=$cancelledFrames maxCallbackUs=${maxCallbackNs / 1000} " +
+                        "maxScrollUs=${maxScrollNs / 1000} active=$tailActiveListeners peakActive=$peakActive")
+                }
                 if (observer.isAlive) observer.removeOnPreDrawListener(listener)
                 listRef.get()?.let { container ->
                     if (container.viewTreeObserver.isAlive) container.viewTreeObserver.removeOnPreDrawListener(listener)
@@ -1475,43 +1500,63 @@ private class HchatExtraHooker(
                 logger("[末条贴底修复:v2] finish=$reason corrections=$corrections", null)
             }
             listener = android.view.ViewTreeObserver.OnPreDrawListener {
-                val row = rowRef.get()
-                val container = listRef.get()
-                when {
-                    finished -> true
-                    row == null || container == null -> { finish("released"); true }
-                    tailRepairTokens[container] !== repairToken -> { finish("cancelled_touch_or_shutdown"); true }
-                    !isCurrentMessageDetailsBind(row, bindToken) || row.parent !== container -> {
-                        finish("binding_changed"); true
-                    }
-                    !row.isAttachedToWindow || !container.isShown -> { finish("hidden_or_detached"); true }
-                    SystemClock.uptimeMillis() > deadline || corrections >= 6 -> { finish("limit"); true }
-                    else -> {
-                        var bottommost = true
-                        for (index in 0 until container.childCount) {
-                            val child = container.getChildAt(index)
-                            if (child !== row && child.visibility == View.VISIBLE && child.bottom > row.bottom) bottommost = false
+                val callbackStart = if (performance) SystemClock.elapsedRealtimeNanos() else 0L
+                if (performance) callbacks++
+                try {
+                    val row = rowRef.get()
+                    val container = listRef.get()
+                    when {
+                        finished -> true
+                        row == null || container == null -> { finish("released"); true }
+                        tailRepairTokens[container] !== repairToken -> { finish("cancelled_touch_or_shutdown"); true }
+                        !isCurrentMessageDetailsBind(row, bindToken) || row.parent !== container -> {
+                            finish("binding_changed"); true
                         }
-                        if (!bottommost) {
-                            finish("bottom_row_changed")
-                            true
-                        } else {
-                            // Pre-draw runs after measure/layout. Pending layout requests alone must
-                            // not reject valid geometry, as the previous timed repair did.
-                            val delta = row.bottom - (container.height - container.paddingBottom)
-                            if (delta > 1 && container.canScrollVertically(1)) {
-                                val before = row.bottom
-                                corrections++
-                                container.scrollBy(0, delta)
-                                val remaining = row.bottom - (container.height - container.paddingBottom)
-                                logger("[末条贴底修复:v2] delta=$delta remaining=$remaining " +
-                                    "correction=$corrections rowHeight=${row.height}", null)
-                                if (row.bottom != before) {
-                                    // Discard only a frame actually moved by this correction.
-                                    container.postInvalidateOnAnimation()
-                                    false
+                        !row.isAttachedToWindow || !container.isShown -> { finish("hidden_or_detached"); true }
+                        SystemClock.uptimeMillis() > deadline || corrections >= 6 -> { finish("limit"); true }
+                        else -> {
+                            var bottommost = true
+                            for (index in 0 until container.childCount) {
+                                val child = container.getChildAt(index)
+                                if (child !== row && child.visibility == View.VISIBLE && child.bottom > row.bottom) bottommost = false
+                            }
+                            if (!bottommost) {
+                                finish("bottom_row_changed")
+                                true
+                            } else {
+                                // Pre-draw runs after measure/layout. Pending layout requests alone must
+                                // not reject valid geometry, as the previous timed repair did.
+                                val delta = row.bottom - (container.height - container.paddingBottom)
+                                if (delta > 1 && container.canScrollVertically(1)) {
+                                    val before = row.bottom
+                                    corrections++
+                                    val scrollStart = if (performance) SystemClock.elapsedRealtimeNanos() else 0L
+                                    container.scrollBy(0, delta)
+                                    if (performance) maxScrollNs = maxOf(maxScrollNs, SystemClock.elapsedRealtimeNanos() - scrollStart)
+                                    val remaining = row.bottom - (container.height - container.paddingBottom)
+                                    logger("[末条贴底修复:v2] delta=$delta remaining=$remaining " +
+                                        "correction=$corrections rowHeight=${row.height}", null)
+                                    if (row.bottom != before) {
+                                        // Discard only a frame actually moved by this correction.
+                                        container.postInvalidateOnAnimation()
+                                        if (performance) cancelledFrames++
+                                        false
+                                    } else true
                                 } else true
-                            } else true
+                            }
+                        }
+                    }
+                } finally {
+                    if (performance) {
+                        val elapsedNs = SystemClock.elapsedRealtimeNanos() - callbackStart
+                        maxCallbackNs = maxOf(maxCallbackNs, elapsedNs)
+                        peakActive = maxOf(peakActive, tailActiveListeners)
+                        if (elapsedNs >= 8_000_000L && tailPerformanceEvents < 96 &&
+                            SystemClock.uptimeMillis() <= tailPerformanceUntil) {
+                            tailPerformanceEvents++
+                            t.mma.utils.HLog.i("[末条贴底性能诊断:v1] session=$performanceSession stage=slow_callback " +
+                                "callbackUs=${elapsedNs / 1000} maxScrollUs=${maxScrollNs / 1000} " +
+                                "active=$tailActiveListeners callbacks=$callbacks cancelledFrames=$cancelledFrames")
                         }
                     }
                 }
@@ -1524,6 +1569,9 @@ private class HchatExtraHooker(
             if (observer.isAlive) {
                 list.addOnAttachStateChangeListener(attach)
                 observer.addOnPreDrawListener(listener)
+                registered = true
+                tailActiveListeners++
+                peakActive = tailActiveListeners
                 list.postDelayed(timeout, 1550L)
             } else finish("observer_unavailable")
         }
