@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -37,16 +38,17 @@ internal fun RuntimeLogMiuixPage(
     activity: Activity,
     onBack: () -> Unit
 ) {
+    var enabled by remember { mutableStateOf(RuntimeLogStore.isEnabled(activity)) }
     var refreshVersion by remember { mutableIntStateOf(0) }
-    val content = remember(refreshVersion) {
-        RuntimeLogStore.readRuntimeLog(activity).ifBlank { "暂无运行日志" }
+    val content = remember(enabled, refreshVersion) {
+        if (enabled) RuntimeLogStore.readRuntimeLog(activity).ifBlank { "暂无运行日志" } else ""
     }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
 
     PageScaffold(
-        title = "运行日志",
-        largeTitle = "运行日志",
+        title = "开启运行日志",
+        largeTitle = "开启运行日志",
         scrollBehavior = scrollBehavior,
         bottomBar = {
             BottomActionBar(
@@ -65,28 +67,39 @@ internal fun RuntimeLogMiuixPage(
         ) {
             item {
                 SettingsCard {
-                    ActionRow("刷新", "重新读取最新功能状态和失效原因") {
+                    SwitchRow(enabled, "开启运行日志", "开启后记录，关闭后停止记录") { value ->
+                        RuntimeLogStore.setEnabled(activity, value)
+                        enabled = value
                         refreshVersion += 1
-                    }
-                    InsetDivider()
-                    ActionRow("清空日志", "删除当前运行日志，后续状态会继续记录") {
-                        RuntimeLogStore.clearRuntimeLog(activity)
-                        refreshVersion += 1
-                        Toast.makeText(activity, "运行日志已清空", Toast.LENGTH_SHORT).show()
-                    }
-                    InsetDivider()
-                    ActionRow("导出日志", "选择保存目录并导出为 .log 文件") {
-                        RuntimeLogExportBridge.launch(activity)
                     }
                 }
             }
-            item {
-                SelectionContainer {
-                    Text(
-                        text = content,
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                        fontSize = 12.sp
-                    )
+            if (enabled) {
+                item {
+                    SettingsCard {
+                        ActionRow("刷新", "重新读取最新功能状态和失效原因") {
+                            refreshVersion += 1
+                        }
+                        InsetDivider()
+                        ActionRow("清空日志", "删除当前运行日志") {
+                            RuntimeLogStore.clearRuntimeLog(activity)
+                            refreshVersion += 1
+                            Toast.makeText(activity, "运行日志已清空", Toast.LENGTH_SHORT).show()
+                        }
+                        InsetDivider()
+                        ActionRow("导出日志", "选择保存目录并导出为 .log 文件") {
+                            RuntimeLogExportBridge.launch(activity)
+                        }
+                    }
+                }
+                item {
+                    SelectionContainer {
+                        Text(
+                            text = content,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            fontSize = 12.sp
+                        )
+                    }
                 }
             }
         }

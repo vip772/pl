@@ -1,6 +1,7 @@
 package t.mma.utils
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.os.Build
 import t.mma.BuildConfig
 import t.mma.hooks.api.core.WeChatApis
@@ -12,6 +13,13 @@ import java.util.Locale
 
 /** Private, size-limited diagnostics log used by the in-app export action. */
 object RuntimeLogStore {
+    private const val PREFS_NAME = "Hchat_runtime_log"
+    private const val KEY_ENABLED = "enabled"
+    @Volatile private var enabled = false
+    private var settings: SharedPreferences? = null
+    private val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+        if (key == KEY_ENABLED) enabled = prefs.getBoolean(KEY_ENABLED, false)
+    }
     private const val LOG_DIR = "logs"
     private const val LOG_FILE = "runtime.log"
     private const val CRASH_DIR = "crash"
@@ -33,9 +41,32 @@ object RuntimeLogStore {
 
     @JvmStatic
     fun initialize(context: Context?) {
-        if (context != null) applicationContext = context.applicationContext ?: context
+        if (context == null) return
+        val appContext = context.applicationContext ?: context
+        applicationContext = appContext
+        synchronized(lock) {
+            if (settings == null) {
+                val prefs = HchatStorage.preferences(appContext, PREFS_NAME)
+                settings = prefs
+                enabled = prefs.getBoolean(KEY_ENABLED, false)
+                prefs.registerOnSharedPreferenceChangeListener(settingsListener)
+            }
+        }
     }
 
+    @JvmStatic
+    fun isEnabled(context: Context): Boolean {
+        initialize(context)
+        return enabled
+    }
+    @JvmStatic
+    fun setEnabled(context: Context, value: Boolean) {
+        initialize(context)
+        synchronized(lock) {
+            enabled = value
+            settings?.edit()?.putBoolean(KEY_ENABLED, value)?.apply()
+        }
+    }
     @JvmStatic
     fun log(level: String, message: String) {
         append(level, message, null)
@@ -56,6 +87,7 @@ object RuntimeLogStore {
     }
     @JvmStatic
     fun append(level: String, message: String, throwable: Throwable?) {
+        if (!enabled) return
         val context = applicationContext ?: return
         val time = System.currentTimeMillis()
         if (pending.incrementAndGet() > 1024) {
@@ -66,6 +98,7 @@ object RuntimeLogStore {
         }
         writer.execute {
             try {
+                if (!enabled) return@execute
                 val lost = dropped.getAndSet(0)
                 val entry = buildString {
                     if (lost > 0) append("[Hchat:RuntimeLog] queue overflow dropped=").append(lost).append('\n')
@@ -74,6 +107,7 @@ object RuntimeLogStore {
                 }
                 runCatching {
                     synchronized(lock) {
+                        if (!enabled) return@synchronized
                         val file = runtimeLogFile(context)
                         file.parentFile?.mkdirs()
                         if (file.length() > MAX_LOG_BYTES) {

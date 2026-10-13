@@ -69,7 +69,6 @@ public class ModuleEntry implements IXposedHookLoadPackage {
     public void handleLoadPackage(XC_LoadPackage.LoadPackageParam lpparam) throws Throwable {
         // 1. 包名过滤
         if (!isWeChatPackage(lpparam.packageName)) return;
-        if (isMainProcess(lpparam)) t.mma.utils.ServerErrorToastDiagnostic.install(lpparam.processName);
 
         // 热更新加载发生在 Tinker attach 阶段，必须早于普通功能初始化安装。
         installHotUpdateEarlyHook(lpparam);
@@ -79,17 +78,6 @@ public class ModuleEntry implements IXposedHookLoadPackage {
 
         // 2. 子进程只安装明确需要的最小 Hook。
         if (!isMainProcess(lpparam)) {
-            if ("com.tencent.mm:push".equals(lpparam.processName)) {
-                XposedBridge.hookAllMethods(Application.class, "onCreate", new XC_MethodHook() {
-                    @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
-                        Application app = (Application) param.thisObject;
-                        if (TermsGate.INSTANCE.isAccepted(app)) {
-                            t.mma.utils.NetworkOriginDiagnostic.install(app.getClassLoader(), lpparam.processName);
-                        }
-                    }
-                });
-            }
             if (isAppBrandProcess(lpparam)) {
                 installAppBrandProcessHook(lpparam);
             }
@@ -113,7 +101,6 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                     protected void beforeHookedMethod(MethodHookParam param) {
                         Application app = (Application) param.thisObject;
                         if (TermsGate.INSTANCE.isAccepted(app)) {
-                            t.mma.utils.ServerErrorToastDiagnostic.onApplicationReady(app);
                             CrashReportRuntime.prepare(app);
                         }
                     }
@@ -407,7 +394,6 @@ public class ModuleEntry implements IXposedHookLoadPackage {
 
     private void initModule(Context hostContext, XC_LoadPackage.LoadPackageParam lpparam) {
         HLog.initialize(hostContext);
-        t.mma.utils.StartupMainThreadDiagnostic.start();
         try {
             // 1. 加载 Native 库（DexKit）
             NativeLibraryLoader nativeLibraryLoader = new NativeLibraryLoader();

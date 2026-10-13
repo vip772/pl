@@ -197,38 +197,6 @@ private class HchatExtraHooker(
     private val methodPrefs = DexMethodCache.prefs(context.hostContext(), "Hchat_extra_method_cache")
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
     private val hookedClasses = Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
-    private val forwardedTimeDiagnosticKeys = ConcurrentHashMap.newKeySet<String>()
-    private fun diagnoseForwardedTime(holder: Any, root: View, anchor: BottomDetailsAnchor?, stage: String) {
-        val key = "${holder.javaClass.name}|$stage|${anchor != null}|${root.width > 0}"
-        if (forwardedTimeDiagnosticKeys.size >= 24 || !forwardedTimeDiagnosticKeys.add(key)) return
-        fun describe(view: View?): String {
-            if (view == null) return "null"
-            val resource = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("unknown")
-            return "${view.javaClass.name}#$resource id=${view.id} vis=${view.visibility} " +
-                "bounds=${view.left},${view.top},${view.right},${view.bottom} " +
-                "measured=${view.measuredWidth}x${view.measuredHeight} parent=${view.parent?.javaClass?.name}"
-        }
-        val candidates = fieldsRecursive(holder.javaClass)
-            .filter { View::class.java.isAssignableFrom(it.type) }.take(48)
-            .joinToString("; ") { field ->
-                "${field.declaringClass.simpleName}.${field.name}=" +
-                    describe(runCatching { KavaReflector.readField(field, holder) as? View }.getOrNull())
-            }
-        val tree = StringBuilder()
-        var count = 0
-        fun visit(view: View, depth: Int) {
-            if (depth > 5 || count >= 64) return
-            count++
-            tree.append("[$depth ").append(describe(view)).append("] ")
-            if (view is ViewGroup) for (index in 0 until view.childCount) visit(view.getChildAt(index), depth + 1)
-        }
-        visit(root, 0)
-        logger("[聊天记录时间诊断:v1] stage=$stage holder=${holder.javaClass.name} " +
-            "position=${messageDetailsConfig.position} root=${describe(root)} " +
-            "source=${if (generateSequence(holder.javaClass) { it.superclass }.any { it.name == "kn5.z4" }) "kn5.z4.b" else "getMainContainerView"} " +
-            "layout=${describe(anchor?.layoutView)} alignment=${describe(anchor?.alignmentView)} " +
-            "fields={$candidates} tree={$tree}", null)
-    }
     private val holderRootFieldCache = ConcurrentHashMap<Class<*>, Field>()
     private val itemMethodCache = ConcurrentHashMap<Class<*>, Method>()
     private val itemListFieldCache = ConcurrentHashMap<Class<*>, Field>()
@@ -1135,26 +1103,6 @@ private class HchatExtraHooker(
         json.put("headTitle", title)
     }
 
-    private val timeBindDiagnosticUntil = SystemClock.uptimeMillis() + 180_000L
-    private var timeBindDiagnosticCount = 0
-    private var timeBindDiagnosticEvents = 0
-    private val timeBindDiagnostics = java.util.WeakHashMap<View, Triple<Any, Int, Long>>()
-    private fun diagnoseTimeBinding(root: View, stage: String, attempt: Int, type: Int? = null) {
-        if (SystemClock.uptimeMillis() > timeBindDiagnosticUntil || timeBindDiagnosticEvents >= 96) return
-        val token = messageDetailsBindToken(root)
-        var state = timeBindDiagnostics[root]
-        if (state?.first !== token) {
-            if (timeBindDiagnosticCount >= 24) return
-            state = Triple(token, ++timeBindDiagnosticCount, SystemClock.uptimeMillis())
-            timeBindDiagnostics[root] = state
-        }
-        val current = state ?: return
-        timeBindDiagnosticEvents++
-        t.mma.utils.HLog.i("[消息时间绑定诊断:v1] seq=${current.second} stage=$stage attempt=$attempt type=$type " +
-            "elapsedMs=${SystemClock.uptimeMillis() - current.third} row=${root.width}x${root.height} " +
-            "attached=${root.isAttachedToWindow} layoutRequested=${root.isLayoutRequested}")
-        if (stage == "inserted") timeBindDiagnostics.remove(root)
-    }
     private fun bindBottomMessageDetails(
         bindObject: Any?,
         args: Array<Any?>?,
@@ -1169,12 +1117,10 @@ private class HchatExtraHooker(
         val holderRoot = capturedRoot ?: findRootView(holder) ?: return false
         if (isScrollingContainer(holderRoot)) return false
         val root = capturedRoot ?: messageRowRoot(holderRoot)
-        diagnoseTimeBinding(root, "bind", attempt)
         messageDetailsRetryListeners.cancel(root)
         val nativeMessage = capturedMessage ?: resolveMessageFromBindArgs(args)
             ?: resolveMessageFromAdapter(bindObject, messageBindPosition(args))
         if (nativeMessage == null) {
-            diagnoseTimeBinding(root, "message_pending", attempt)
             if (attempt >= MESSAGE_DETAILS_MAX_RETRY) {
                 removeTaggedMessageDetailsViews(root)
                 logMessageDetailsFailure("message", holder, root)
@@ -1189,7 +1135,6 @@ private class HchatExtraHooker(
             ?: holder
         val label = findHolderTextView(viewTag, "timeTV", holderTimeFieldCache)
         val inserted = insertMessageDetailsLabel(root, label, viewTag, details, nativeMessage = nativeMessage)
-        diagnoseTimeBinding(root, if (inserted) "inserted" else "layout_pending", attempt, messageType)
         val cardMessage = !isCenteredNotice(details.type) &&
             !isKnownNonCardHolder(viewTag) &&
             (MessageDetailsCardHierarchy.templateHolderClass(viewTag.javaClass) != null ||
@@ -1341,9 +1286,6 @@ private class HchatExtraHooker(
                     }
             }
         } else null
-        if (appSubtype == 19 && avatarAnchor == null) {
-            diagnoseForwardedTime(holder, root, bottomAnchor, "anchor")
-        }
         val avatarContent = avatarAnchor
             ?.takeIf { it.hidden }
             ?.let { avatarDetailsContentView(holder, it.parent) }
@@ -1382,7 +1324,6 @@ private class HchatExtraHooker(
             }
         }
         val preserveTail = if (avatarAnchor == null) prepareTailLayoutRepair(root) else null
-        val tailDiagnostic = if (avatarAnchor == null) diagnoseTailLayout(root, label, details.type) else null
         val inserted = if (avatarAnchor != null) {
             addAvatarDetailsView(root, avatarAnchor, avatarContent, label, position, details.isSelf)
         } else {
@@ -1397,10 +1338,6 @@ private class HchatExtraHooker(
             )
         }
         if (inserted) preserveTail?.invoke()
-        tailDiagnostic?.invoke()
-        if (appSubtype == 19 && avatarAnchor == null) {
-            diagnoseForwardedTime(holder, root, bottomAnchor, "inserted=$inserted label=${label.parent?.javaClass?.name}")
-        }
         if (inserted) {
             rememberMessageDetailsBinding(label, root, nativeTimeLabel, holder, nativeMessage, details)
             if (cardMessage && avatarAnchor == null) {
@@ -1416,11 +1353,6 @@ private class HchatExtraHooker(
         return inserted
     }
 
-    // UI-thread counters; no additional view references retained.
-    private val tailPerformanceUntil = SystemClock.uptimeMillis() + 180_000L
-    private var tailPerformanceEvents = 0
-    private var tailPerformanceSessions = 0
-    private var tailActiveListeners = 0
     private val tailRepairTokens = java.util.WeakHashMap<ViewGroup, Any>()
     private val tailTouchMethods = java.util.concurrent.ConcurrentHashMap.newKeySet<Method>()
     @Synchronized
@@ -1469,33 +1401,13 @@ private class HchatExtraHooker(
             val deadline = SystemClock.uptimeMillis() + 1500L
             var corrections = 0
             var finished = false
-            val performance = SystemClock.uptimeMillis() <= tailPerformanceUntil
-            val performanceSession = if (performance) ++tailPerformanceSessions else 0
-            var registered = false
-            var callbacks = 0
-            var cancelledFrames = 0
-            var maxCallbackNs = 0L
-            var maxScrollNs = 0L
-            var peakActive = tailActiveListeners
-            val startedAt = SystemClock.uptimeMillis()
             val observer = list.viewTreeObserver
             lateinit var listener: android.view.ViewTreeObserver.OnPreDrawListener
             lateinit var attach: View.OnAttachStateChangeListener
             lateinit var timeout: Runnable
-            fun finish(reason: String) {
+            fun finish() {
                 if (finished) return
                 finished = true
-                if (registered) {
-                    registered = false
-                    tailActiveListeners--
-                }
-                if (performance && performanceSession <= 24 && tailPerformanceEvents < 96) {
-                    tailPerformanceEvents++
-                    t.mma.utils.HLog.i("[末条贴底性能诊断:v1] session=$performanceSession stage=finish reason=$reason " +
-                        "elapsedMs=${SystemClock.uptimeMillis() - startedAt} callbacks=$callbacks " +
-                        "cancelledFrames=$cancelledFrames maxCallbackUs=${maxCallbackNs / 1000} " +
-                        "maxScrollUs=${maxScrollNs / 1000} active=$tailActiveListeners peakActive=$peakActive")
-                }
                 if (observer.isAlive) observer.removeOnPreDrawListener(listener)
                 listRef.get()?.let { container ->
                     if (container.viewTreeObserver.isAlive) container.viewTreeObserver.removeOnPreDrawListener(listener)
@@ -1503,148 +1415,56 @@ private class HchatExtraHooker(
                     container.removeCallbacks(timeout)
                     if (tailRepairTokens[container] === repairToken) tailRepairTokens.remove(container)
                 }
-                logger("[末条贴底修复:v2] finish=$reason corrections=$corrections", null)
             }
             listener = android.view.ViewTreeObserver.OnPreDrawListener {
-                val callbackStart = if (performance) SystemClock.elapsedRealtimeNanos() else 0L
-                if (performance) callbacks++
-                try {
-                    val row = rowRef.get()
-                    val container = listRef.get()
-                    when {
-                        finished -> true
-                        row == null || container == null -> { finish("released"); true }
-                        tailRepairTokens[container] !== repairToken -> { finish("cancelled_touch_or_shutdown"); true }
-                        !isCurrentMessageDetailsBind(row, bindToken) || row.parent !== container -> {
-                            finish("binding_changed"); true
-                        }
-                        !row.isAttachedToWindow || !container.isShown -> { finish("hidden_or_detached"); true }
-                        SystemClock.uptimeMillis() > deadline || corrections >= 6 -> { finish("limit"); true }
-                        else -> {
-                            var bottommost = true
-                            for (index in 0 until container.childCount) {
-                                val child = container.getChildAt(index)
-                                if (child !== row && child.visibility == View.VISIBLE && child.bottom > row.bottom) bottommost = false
-                            }
-                            if (!bottommost) {
-                                finish("bottom_row_changed")
-                                true
-                            } else {
-                                // Pre-draw runs after measure/layout. Pending layout requests alone must
-                                // not reject valid geometry, as the previous timed repair did.
-                                val delta = row.bottom - (container.height - container.paddingBottom)
-                                if (delta > 1 && container.canScrollVertically(1)) {
-                                    val before = row.bottom
-                                    corrections++
-                                    val scrollStart = if (performance) SystemClock.elapsedRealtimeNanos() else 0L
-                                    container.scrollBy(0, delta)
-                                    if (performance) maxScrollNs = maxOf(maxScrollNs, SystemClock.elapsedRealtimeNanos() - scrollStart)
-                                    val remaining = row.bottom - (container.height - container.paddingBottom)
-                                    logger("[末条贴底修复:v2] delta=$delta remaining=$remaining " +
-                                        "correction=$corrections rowHeight=${row.height}", null)
-                                    if (row.bottom != before) {
-                                        // Discard only a frame actually moved by this correction.
-                                        container.postInvalidateOnAnimation()
-                                        if (performance) cancelledFrames++
-                                        false
-                                    } else true
-                                } else true
-                            }
-                        }
+                val row = rowRef.get()
+                val container = listRef.get()
+                when {
+                    finished -> true
+                    row == null || container == null -> { finish(); true }
+                    tailRepairTokens[container] !== repairToken -> { finish(); true }
+                    !isCurrentMessageDetailsBind(row, bindToken) || row.parent !== container -> {
+                        finish(); true
                     }
-                } finally {
-                    if (performance) {
-                        val elapsedNs = SystemClock.elapsedRealtimeNanos() - callbackStart
-                        maxCallbackNs = maxOf(maxCallbackNs, elapsedNs)
-                        peakActive = maxOf(peakActive, tailActiveListeners)
-                        if (elapsedNs >= 8_000_000L && tailPerformanceEvents < 96 &&
-                            SystemClock.uptimeMillis() <= tailPerformanceUntil) {
-                            tailPerformanceEvents++
-                            t.mma.utils.HLog.i("[末条贴底性能诊断:v1] session=$performanceSession stage=slow_callback " +
-                                "callbackUs=${elapsedNs / 1000} maxScrollUs=${maxScrollNs / 1000} " +
-                                "active=$tailActiveListeners callbacks=$callbacks cancelledFrames=$cancelledFrames")
+                    !row.isAttachedToWindow || !container.isShown -> { finish(); true }
+                    SystemClock.uptimeMillis() > deadline || corrections >= 6 -> { finish(); true }
+                    else -> {
+                        var bottommost = true
+                        for (index in 0 until container.childCount) {
+                            val child = container.getChildAt(index)
+                            if (child !== row && child.visibility == View.VISIBLE && child.bottom > row.bottom) bottommost = false
+                        }
+                        if (!bottommost) {
+                            finish()
+                            true
+                        } else {
+                            // Pre-draw runs after measure/layout. Pending layout requests alone must
+                            // not reject valid geometry, as the previous timed repair did.
+                            val delta = row.bottom - (container.height - container.paddingBottom)
+                            if (delta > 1 && container.canScrollVertically(1)) {
+                                val before = row.bottom
+                                corrections++
+                                container.scrollBy(0, delta)
+                                if (row.bottom != before) {
+                                    // Discard only a frame actually moved by this correction.
+                                    container.postInvalidateOnAnimation()
+                                    false
+                                } else true
+                            } else true
                         }
                     }
                 }
             }
             attach = object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) = Unit
-                override fun onViewDetachedFromWindow(view: View) { finish("detached") }
+                override fun onViewDetachedFromWindow(view: View) { finish() }
             }
-            timeout = Runnable { finish("window_end") }
+            timeout = Runnable { finish() }
             if (observer.isAlive) {
                 list.addOnAttachStateChangeListener(attach)
                 observer.addOnPreDrawListener(listener)
-                registered = true
-                tailActiveListeners++
-                peakActive = tailActiveListeners
                 list.postDelayed(timeout, 1550L)
-            } else finish("observer_unavailable")
-        }
-    }
-    private var tailLayoutDiagnosticCount = 0
-    private val tailLayoutDiagnosticRows = java.util.WeakHashMap<View, Boolean>()
-    private fun diagnoseTailLayout(root: View, label: TextView, type: Int): (() -> Unit)? {
-        if (tailLayoutDiagnosticCount >= 12 || tailLayoutDiagnosticRows.containsKey(root)) return null
-        val list = root.parent as? ViewGroup ?: return null
-        if (!isScrollingContainer(list) || root.height <= 0 || list.height <= 0) return null
-        // Sample the bottommost attached row; adapter position tells whether it is the final item.
-        for (index in 0 until list.childCount) {
-            val child = list.getChildAt(index)
-            if (child !== root && child.visibility == View.VISIBLE && child.bottom > root.bottom) return null
-        }
-        tailLayoutDiagnosticRows[root] = true
-        val sequence = ++tailLayoutDiagnosticCount
-        val token = messageDetailsBindToken(root)
-        val rootRef = WeakReference(root)
-        val labelRef = WeakReference(label)
-        fun sample(stage: String) {
-            val row = rootRef.get() ?: return
-            val time = labelRef.get() ?: return
-            if (!isCurrentMessageDetailsBind(row, token)) return
-            val container = row.parent as? ViewGroup ?: return
-            if (!isScrollingContainer(container)) return
-            val rowXY = IntArray(2)
-            val listXY = IntArray(2)
-            row.getLocationOnScreen(rowXY)
-            container.getLocationOnScreen(listXY)
-            val visible = Rect()
-            container.getGlobalVisibleRect(visible)
-            val position = runCatching {
-                container.javaClass.methods.firstOrNull {
-                    it.name == "getChildAdapterPosition" && it.parameterTypes.contentEquals(arrayOf(View::class.java))
-                }?.invoke(container, row) as? Int
-            }.getOrNull()
-            val count = runCatching {
-                val adapter = container.javaClass.methods.firstOrNull {
-                    it.name == "getAdapter" && it.parameterTypes.isEmpty()
-                }?.invoke(container)
-                adapter?.javaClass?.methods?.firstOrNull {
-                    it.name == "getItemCount" && it.parameterTypes.isEmpty()
-                }?.invoke(adapter) as? Int
-            }.getOrNull()
-            val siblings = (container.parent as? ViewGroup)?.let { parent ->
-                (0 until minOf(parent.childCount, 12)).joinToString(";") { index ->
-                    val child = parent.getChildAt(index)
-                    "${child.javaClass.simpleName}:${child.top},${child.bottom},${child.height},vis=${child.visibility}"
-                }
-            }
-            logger("[末条布局诊断:v1] seq=$sequence stage=$stage type=$type " +
-                "position=$position count=$count last=${if (position != null && count != null) position == count - 1 else null} " +
-                "row=${row.top},${row.bottom},${row.height} rowScreenBottom=${rowXY[1] + row.height} " +
-                "list=${container.height} padding=${container.paddingTop},${container.paddingBottom} " +
-                "listScreenTop=${listXY[1]} viewport=$visible " +
-                "overflow=${rowXY[1] + row.height - visible.bottom} " +
-                "canScrollDown=${container.canScrollVertically(1)} " +
-                "label=${time.top},${time.bottom},${time.height},attached=${time.parent != null} " +
-                "layoutRequested=${row.isLayoutRequested},${container.isLayoutRequested} siblings={$siblings}", null)
-        }
-        sample("before")
-        return {
-            sample("afterInsert")
-            for (delay in longArrayOf(50L, 250L, 700L)) {
-                root.postDelayed({ sample("after${delay}ms") }, delay)
-            }
+            } else finish()
         }
     }
     private fun observeCardDetailsLayout(root: View, label: TextView) {
