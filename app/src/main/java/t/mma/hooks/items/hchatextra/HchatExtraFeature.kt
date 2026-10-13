@@ -17,6 +17,8 @@ import android.text.InputType
 import android.text.TextUtils
 import android.text.TextWatcher
 import android.util.TypedValue
+import android.view.MotionEvent
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -399,6 +401,7 @@ private class HchatExtraHooker(
     }
 
     fun destroy() {
+        tailRepairTokens.clear()
         dynamicRecall.destroy()
         forwardedRecordTypes.destroy()
         prefs.unregisterOnSharedPreferenceChangeListener(messageDetailsPrefsListener)
@@ -1354,6 +1357,7 @@ private class HchatExtraHooker(
                 label.isClickable = false
             }
         }
+        val preserveTail = if (avatarAnchor == null) prepareTailLayoutRepair(root) else null
         val tailDiagnostic = if (avatarAnchor == null) diagnoseTailLayout(root, label, details.type) else null
         val inserted = if (avatarAnchor != null) {
             addAvatarDetailsView(root, avatarAnchor, avatarContent, label, position, details.isSelf)
@@ -1368,6 +1372,7 @@ private class HchatExtraHooker(
                 configuredAvatarHidden || resolvedAvatarAnchor?.hidden == true
             )
         }
+        if (inserted) preserveTail?.invoke()
         tailDiagnostic?.invoke()
         if (appSubtype == 19 && avatarAnchor == null) {
             diagnoseForwardedTime(holder, root, bottomAnchor, "inserted=$inserted label=${label.parent?.javaClass?.name}")
@@ -1387,6 +1392,81 @@ private class HchatExtraHooker(
         return inserted
     }
 
+    private val tailRepairTokens = java.util.WeakHashMap<ViewGroup, Any>()
+    private val tailTouchMethods = mutableSetOf<Method>()
+    private val tailLastTouch = java.util.WeakHashMap<ViewGroup, Long>()
+    private fun prepareTailLayoutRepair(root: View): (() -> Unit)? {
+        val list = root.parent as? ViewGroup ?: return null
+        if (!isScrollingContainer(list) || root.height <= 0 || list.height <= 0 ||
+            list.canScrollVertically(1)) return null
+        if (SystemClock.uptimeMillis() - (tailLastTouch[list] ?: 0L) < 1500L) return null
+        for (index in 0 until list.childCount) {
+            val child = list.getChildAt(index)
+            if (child !== root && child.visibility == View.VISIBLE && child.bottom > root.bottom) return null
+        }
+        // Hook the actual dispatch implementation, without replacing the host's touch listener.
+        val touchMethod = runCatching {
+            list.javaClass.getMethod("dispatchTouchEvent", MotionEvent::class.java)
+        }.getOrNull() ?: return null
+        if (touchMethod !in tailTouchMethods) {
+            val hooked = runCatching {
+                HookRegistry.get().hook(touchMethod, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val event = param.args.firstOrNull() as? MotionEvent ?: return
+                        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                            val touched = param.thisObject as? ViewGroup ?: return
+                            tailRepairTokens.remove(touched)
+                            tailLastTouch[touched] = SystemClock.uptimeMillis()
+                        }
+                    }
+                })
+            }.isSuccess
+            if (!hooked) return null
+            tailTouchMethods.add(touchMethod)
+        }
+        // Do not continually extend the correction window when layout observers reinsert a label.
+        if (tailRepairTokens.containsKey(list)) return null
+        val repairToken = Any()
+        val bindToken = messageDetailsBindToken(root)
+        val rowRef = WeakReference(root)
+        val listRef = WeakReference(list)
+        return {
+            tailRepairTokens[list] = repairToken
+            val deadline = SystemClock.uptimeMillis() + 900L
+            var corrections = 0
+            fun correct() {
+                val row = rowRef.get() ?: return
+                val container = listRef.get() ?: return
+                if (tailRepairTokens[container] !== repairToken) return
+                if (!isCurrentMessageDetailsBind(row, bindToken) || row.parent !== container ||
+                    !row.isAttachedToWindow || !container.isShown) {
+                    tailRepairTokens.remove(container)
+                    return
+                }
+                if (SystemClock.uptimeMillis() > deadline || corrections >= 3) return
+                if (row.isLayoutRequested || container.isLayoutRequested) return
+                val visible = Rect()
+                if (!container.getGlobalVisibleRect(visible) || visible.width() < container.width / 2) return
+                for (index in 0 until container.childCount) {
+                    val child = container.getChildAt(index)
+                    if (child !== row && child.visibility == View.VISIBLE && child.bottom > row.bottom) return
+                }
+                val delta = row.bottom - (container.height - container.paddingBottom)
+                if (delta > 1 && container.canScrollVertically(1)) {
+                    corrections++
+                    container.scrollBy(0, delta)
+                    logger("[末条贴底修复:v1] delta=$delta correction=$corrections rowHeight=${row.height}", null)
+                }
+            }
+            // Retry boundedly while the first layout and page transition settle.
+            for (delay in longArrayOf(16L, 50L, 100L, 200L, 350L, 550L, 750L)) {
+                list.postDelayed({ correct() }, delay)
+            }
+            list.postDelayed({
+                listRef.get()?.let { if (tailRepairTokens[it] === repairToken) tailRepairTokens.remove(it) }
+            }, 950L)
+        }
+    }
     private var tailLayoutDiagnosticCount = 0
     private val tailLayoutDiagnosticRows = java.util.WeakHashMap<View, Boolean>()
     private fun diagnoseTailLayout(root: View, label: TextView, type: Int): (() -> Unit)? {
