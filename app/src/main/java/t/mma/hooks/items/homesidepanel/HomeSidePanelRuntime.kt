@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -49,6 +50,15 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         hook(launcher, "onCreate", arrayOf(Bundle::class.java)) { (it.thisObject as? Activity)?.let(::attach) }
         hook(launcher, "onResume", emptyArray()) { (it.thisObject as? Activity)?.let(::attach) }
         hook(launcher, "onDestroy", emptyArray()) { (it.thisObject as? Activity)?.let(::detach) }
+        KavaReflector.findMethodRecursive(launcher, "dispatchTouchEvent", MotionEvent::class.java)?.let { method ->
+            hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val activity = param.thisObject as? Activity ?: return
+                    val event = param.args.firstOrNull() as? MotionEvent ?: return
+                    if (sessions[activity]?.interceptTouch(event) == true) param.setResult(true)
+                }
+            })
+        }
     }
 
     private fun hook(owner: Class<*>, name: String, params: Array<Class<*>>, action: (XC_MethodHook.MethodHookParam) -> Unit) {
@@ -86,7 +96,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     fun destroy() {
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
         handler.post { sessions.values.toList().forEach { it.detach() }; sessions.clear() }
-        hooks.forEach { runCatching { it.unhook() } }
+        hooks.forEach { runCatching { HookRegistry.get().unhook(it) } }
         hooks.clear()
     }
 
@@ -105,6 +115,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private val avatarLoading = AtomicBoolean(false)
         private var avatarUrl: String? = null
         private var lastHomeVisible: Boolean? = null
+        private val originalGestureExclusions = if (Build.VERSION.SDK_INT >= 29) decor.systemGestureExclusionRects.toList() else emptyList()
         private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener {
             if (attached) refresh()
         }
@@ -135,11 +146,13 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (homeVisible) loadAvatar()
             if (Build.VERSION.SDK_INT >= 29 && stateChanged) {
                 decor.setSystemGestureExclusionRects(
-                    if (homeVisible) listOf(Rect(0, 0, dp(64), decor.height.coerceAtLeast(1))) else emptyList()
+                    if (homeVisible) originalGestureExclusions + Rect(0, 0, dp(24), decor.height.coerceAtLeast(1)) else originalGestureExclusions
                 )
             }
             lastHomeVisible = homeVisible
         }
+
+        fun interceptTouch(event: MotionEvent): Boolean = attached && !chatVisible && drawer.interceptEdgeTouch(event)
 
         fun setChatVisible(visible: Boolean) {
             chatVisible = visible
@@ -153,6 +166,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 decor.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
             }
             drawer.detach()
+            if (Build.VERSION.SDK_INT >= 29) decor.systemGestureExclusionRects = originalGestureExclusions
             (header?.parent as? ViewGroup)?.removeView(header)
             header = null
             lastHomeVisible = null

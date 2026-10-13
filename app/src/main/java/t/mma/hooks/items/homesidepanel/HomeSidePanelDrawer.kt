@@ -16,6 +16,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.ViewConfiguration
 import android.view.Window
 import android.view.animation.PathInterpolator
 import android.widget.EditText
@@ -38,7 +39,9 @@ internal class HomeSidePanelDrawer(
     private val root = FrameLayout(activity)
     private val scrim = View(activity)
     private val panel = LinearLayout(activity)
-    private val edge = View(activity)
+    private val edgeGesture = SidePanelEdgeGesture(dp(24).toFloat(), ViewConfiguration.get(activity).scaledTouchSlop.toFloat())
+    private var edgeDragging = false
+    private var edgeStartX = 0f
     private var host: ViewGroup? = null
     private var enabled = false
     private var opened = false
@@ -55,9 +58,8 @@ internal class HomeSidePanelDrawer(
         root.visibility = View.GONE
         root.elevation = dp(100).toFloat()
         root.isClickable = false
-        parent.addView(root, ViewGroup.LayoutParams(dp(72), -1))
+        parent.addView(root, ViewGroup.LayoutParams(-1, -1))
         root.bringToFront()
-        resizeRoot(open = false)
 
     }
 
@@ -67,6 +69,8 @@ internal class HomeSidePanelDrawer(
         (root.parent as? ViewGroup)?.removeView(root)
         host = null
         opened = false
+        edgeDragging = false
+        edgeGesture.reset()
     }
 
     fun setAvatar(bitmap: Bitmap?) {
@@ -77,8 +81,7 @@ internal class HomeSidePanelDrawer(
 
     fun setEnabled(value: Boolean) {
         enabled = value
-        root.visibility = if (value || opened) View.VISIBLE else View.GONE
-        edge.visibility = if (value || opened) View.VISIBLE else View.GONE
+        root.visibility = if (opened) View.VISIBLE else View.GONE
         if (!value && opened) close(false)
     }
 
@@ -86,10 +89,10 @@ internal class HomeSidePanelDrawer(
 
     fun show(animated: Boolean) {
         if (!enabled || opened) return
+        panel.animate().withEndAction(null).cancel()
+        scrim.animate().cancel()
         opened = true
-        resizeRoot(open = true)
         root.visibility = View.VISIBLE
-        edge.visibility = View.GONE
         scrim.visibility = View.VISIBLE
         panel.visibility = View.VISIBLE
         if (!animated) {
@@ -104,21 +107,21 @@ internal class HomeSidePanelDrawer(
     }
 
     fun close(animated: Boolean) {
-        if (!opened && !animated) return
         opened = false
+        edgeDragging = false
+        edgeGesture.reset()
         if (!animated) {
             panel.animate().cancel(); scrim.animate().cancel()
             panel.translationX = -panelWidth.toFloat(); scrim.alpha = 0f; scrim.visibility = View.GONE
-            edge.visibility = if (enabled) View.VISIBLE else View.GONE
-            resizeRoot(open = false)
-            root.visibility = if (enabled) View.VISIBLE else View.GONE
+            panel.visibility = View.GONE
+                root.visibility = View.GONE
             return
         }
         panel.animate().translationX(-panelWidth.toFloat()).setDuration(180L).setInterpolator(PathInterpolator(.3f, 0f, .8f, .15f)).withEndAction {
+            if (opened) return@withEndAction
             scrim.visibility = View.GONE
-            edge.visibility = if (enabled) View.VISIBLE else View.GONE
-            resizeRoot(open = false)
-            if (!enabled) root.visibility = View.GONE
+            panel.visibility = View.GONE
+                root.visibility = View.GONE
         }.start()
         scrim.animate().alpha(0f).setDuration(180L).start()
     }
@@ -160,12 +163,10 @@ internal class HomeSidePanelDrawer(
 
         root.addView(scrim, FrameLayout.LayoutParams(-1, -1))
         root.addView(panel, FrameLayout.LayoutParams(panelWidth, -1, Gravity.START))
-        root.addView(edge, FrameLayout.LayoutParams(dp(72), -1, Gravity.START))
         panel.translationX = -panelWidth.toFloat()
         scrim.setBackgroundColor(Color.BLACK)
         scrim.alpha = 0f; scrim.visibility = View.GONE
         scrim.setOnClickListener { close(true) }
-        edge.setOnTouchListener { _, event -> onEdgeTouch(event) }
         panel.setOnTouchListener { _, event -> onPanelTouch(event) }
         root.isFocusable = true; root.isFocusableInTouchMode = true
         root.setOnKeyListener { _, key, ev ->
@@ -303,33 +304,42 @@ internal class HomeSidePanelDrawer(
         host?.let { attachTo(it); setEnabled(enabled) }
     }
 
-    private fun onEdgeTouch(event: MotionEvent): Boolean {
+    fun interceptEdgeTouch(event: MotionEvent): Boolean {
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = event.rawX; lastX = downX; dragging = false; return true }
+            MotionEvent.ACTION_DOWN -> {
+                edgeStartX = event.x
+                edgeDragging = false
+                edgeGesture.down(event.x, event.y, enabled && !opened)
+                return false
+            }
             MotionEvent.ACTION_MOVE -> {
-                val dx = event.rawX - downX
-                if (!opened && dx > dp(8)) {
-                    opened = true
-                    resizeRoot(open = true)
-                    root.visibility = View.VISIBLE
-                    panel.translationX = -panelWidth.toFloat()
-                    scrim.visibility = View.VISIBLE
-                    dragging = true
+                if (!edgeGesture.move(event.x, event.y)) return false
+                if (!edgeDragging) {
+                    edgeDragging = true
+                    val cancel = MotionEvent.obtain(event)
+                    cancel.action = MotionEvent.ACTION_CANCEL
+                    try { activity.window.decorView.dispatchTouchEvent(cancel) } finally { cancel.recycle() }
+                    show(false)
                 }
-                if (opened && (dragging || dx < -dp(8))) {
-                    dragging = true
-                    edge.visibility = View.GONE
-                    panel.translationX = (panel.translationX + event.rawX - lastX).coerceIn(-panelWidth.toFloat(), 0f)
-                    scrim.alpha = .42f * (1f + panel.translationX / panelWidth)
-                    lastX = event.rawX
-                    return true
-                }
+                panel.translationX = (-panelWidth + event.x - edgeStartX).coerceIn(-panelWidth.toFloat(), 0f)
+                scrim.alpha = .42f * (1f + panel.translationX / panelWidth)
+                return true
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (opened && dragging) { if (panel.translationX > -panelWidth * .55f) settleOpen() else close(true); dragging = false; return true }
+                val consumed = edgeDragging
+                if (consumed) {
+                    if (event.actionMasked == MotionEvent.ACTION_UP && panel.translationX > -panelWidth * .55f) settleOpen()
+                    else close(true)
+                }
+                edgeDragging = false
+                edgeGesture.reset()
+                return consumed
+            }
+            MotionEvent.ACTION_POINTER_DOWN -> {
+                if (!edgeDragging) edgeGesture.reset()
             }
         }
-        return true
+        return edgeDragging
     }
 
     private fun onPanelTouch(event: MotionEvent): Boolean {
@@ -357,21 +367,11 @@ internal class HomeSidePanelDrawer(
 
     private fun settleOpen() {
         opened = true
-        resizeRoot(open = true)
-        edge.visibility = View.GONE
         scrim.visibility = View.VISIBLE
         panel.animate().translationX(0f).setDuration(200L).setInterpolator(PathInterpolator(.4f, 0f, .2f, 1f)).start()
         scrim.animate().alpha(.42f).setDuration(200L).start()
     }
     private fun openUrl(url: String) { runCatching { activity.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure { toast("无法打开链接") } }
-    private fun resizeRoot(open: Boolean) {
-        val params = root.layoutParams ?: return
-        val targetWidth = if (open) ViewGroup.LayoutParams.MATCH_PARENT else dp(72)
-        if (params.width != targetWidth) {
-            params.width = targetWidth
-            root.layoutParams = params
-        }
-    }
     private fun toast(message: String) { Toast.makeText(activity, message, Toast.LENGTH_SHORT).show() }
     private fun dp(value: Int): Int = (value * density + .5f).toInt()
     private fun statusBarHeight(): Int { val id = activity.resources.getIdentifier("status_bar_height", "dimen", "android"); return if (id > 0) activity.resources.getDimensionPixelSize(id) else dp(28) }

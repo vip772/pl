@@ -92,6 +92,30 @@ private class BackgroundBeautyTransparentDrawable : Drawable() {
     override fun getOpacity(): Int = PixelFormat.TRANSPARENT
 }
 
+private class BackgroundBeautyFeedbackDrawable(private val original: Drawable) : Drawable(), Drawable.Callback {
+    init { original.callback = this }
+    override fun draw(canvas: Canvas) {
+        if (state.any { it == android.R.attr.state_pressed || it == android.R.attr.state_focused || it == android.R.attr.state_selected }) {
+            original.bounds = bounds
+            original.draw(canvas)
+        }
+    }
+    override fun isStateful(): Boolean = true
+    override fun onStateChange(state: IntArray): Boolean {
+        original.state = state
+        invalidateSelf()
+        return true
+    }
+    override fun setAlpha(alpha: Int) { original.alpha = alpha }
+    override fun setColorFilter(colorFilter: ColorFilter?) { original.colorFilter = colorFilter }
+    @Deprecated("Drawable opacity is not used by the background renderer")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    override fun invalidateDrawable(who: Drawable) = invalidateSelf()
+    override fun scheduleDrawable(who: Drawable, what: Runnable, `when`: Long) = scheduleSelf(what, `when`)
+    override fun unscheduleDrawable(who: Drawable, what: Runnable) = unscheduleSelf(what)
+}
+
+
 private class ScreenAlignedBitmapDrawable(
     bitmap: Bitmap,
     anchor: View,
@@ -178,6 +202,7 @@ private class BackgroundBeautyRuntime(
         const val MAIN_TAB_CLASS = "com.tencent.mm.ui.MainTabUI"
         const val BOTTOM_TAB_CLASS = "com.tencent.mm.ui.LauncherUIBottomTabView"
         const val CHATTING_IMAGE_BG_VIEW = "com.tencent.mm.ui.chatting.ChattingImageBGView"
+        const val NESTED_BOUNCE_VIEW = "com.tencent.mm.ui.widget.pulldown.NestedBounceView"
         const val BOUNCE_VIEW = "com.tencent.mm.ui.widget.pulldown.WeUIBounceViewV2"
         const val APP_BRAND_DESKTOP_CONTAINER =
             "com.tencent.mm.plugin.appbrand.widget.desktop.AppBrandDesktopContainerView"
@@ -193,7 +218,6 @@ private class BackgroundBeautyRuntime(
         const val MAX_INITIAL_REFRESHES = 2
         const val MAX_LAUNCHER_BITMAPS = 2
         const val MAX_SCAN_NODES = 1200
-        const val MAX_MAJOR_SURFACE_DEPTH = 3
         const val TAB_WECHAT = 0
         const val TAB_CONTACTS = 1
         const val TAB_DISCOVER = 2
@@ -258,6 +282,7 @@ private class BackgroundBeautyRuntime(
             activity.window.isNavigationBarContrastEnforced
         } else null
         var systemBarsApplied = false
+        var lastLoggedSlot: BackgroundBeautySettings.Slot? = null
     }
 
     private val prefs = HchatStorage.preferences(
@@ -284,6 +309,13 @@ private class BackgroundBeautyRuntime(
         WeakHashMap<View, View.OnLayoutChangeListener>()
     )
     private val hookedMembers = ConcurrentHashMap.newKeySet<Member>()
+    private val ownedHooks = java.util.concurrent.CopyOnWriteArrayList<XC_MethodHook.Unhook>()
+    private var surfaceMutationDepth = 0
+    private val surfaceOwners = WeakHashMap<View, HostState>()
+    private val listAdapters = WeakHashMap<View, Any>()
+    private val bounceColors = WeakHashMap<View, MutableMap<java.lang.reflect.Method, Int>>()
+    private var restoringBounce = false
+    private val homeLists = WeakHashMap<View, BackgroundBeautySettings.Slot>()
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == BackgroundBeautySettings.KEY_ENABLE ||
             key == BackgroundBeautySettings.KEY_REVISION ||
@@ -303,7 +335,7 @@ private class BackgroundBeautyRuntime(
         val installed = installActivityHooks() or
             installTabHooks() or
             installFragmentHooks() or
-            installSurfaceHooks()
+            installSurfaceHooks() or installBackgroundWriteHook()
         installChatBackgroundComponentHook(allowDexSearch = false)
         if (!installed) HLog.e("$TAG 未安装任何页面 Hook")
         main.post(::refreshAll)
@@ -312,6 +344,13 @@ private class BackgroundBeautyRuntime(
 
     fun destroy() {
         destroyed = true
+        ownedHooks.toList().forEach { runCatching { HookRegistry.get().unhook(it) } }
+        ownedHooks.clear()
+        hookedMembers.clear()
+        restoreBounceColors(null)
+        homeLists.clear()
+        listAdapters.clear()
+        surfaceOwners.clear()
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         main.removeCallbacksAndMessages(null)
         loader.shutdownNow()
@@ -436,10 +475,13 @@ private class BackgroundBeautyRuntime(
                     rememberFragmentRoot(param.thisObject, param.args.firstOrNull() as? View)
                 }) || installed
             }
-            KavaReflector.findMethodRecursive(clazz, "onResume")?.let { method ->
-                installed = hookOnce(method, after = { param ->
-                    rememberFragmentRoot(param.thisObject, null)
-                }) || installed
+            listOf("onResume", "onActivityCreated").forEach { name ->
+                val parameters = if (name == "onActivityCreated") arrayOf(Bundle::class.java) else emptyArray()
+                KavaReflector.findMethodRecursive(clazz, name, *parameters)?.let { method ->
+                    installed = hookOnce(method, after = { param ->
+                        rememberFragmentRoot(param.thisObject, null)
+                    }) || installed
+                }
             }
         }
         return installed
@@ -467,7 +509,8 @@ private class BackgroundBeautyRuntime(
                 }) || installed
             }
         }
-        val bounceClass = KavaReflector.loadClass(BOUNCE_VIEW, context.hostClassLoader())
+        listOf(BOUNCE_VIEW, NESTED_BOUNCE_VIEW).forEach { bounceName ->
+        val bounceClass = KavaReflector.loadClass(bounceName, context.hostClassLoader())
         listOf(
             "setStart2EndBgColorByActionBar",
             "setEnd2StartBgColorByNavigationBar",
@@ -483,12 +526,138 @@ private class BackgroundBeautyRuntime(
                 installed = hookOnce(method, before = { param ->
                     val view = param.thisObject as? View ?: return@hookOnce
                     val activity = findActivity(view) ?: return@hookOnce
-                    if (hasConfiguredBackground(activity)) param.args[0] = Color.TRANSPARENT
+                    if (!restoringBounce && hasConfiguredBackground(activity)) {
+                        bounceColors.getOrPut(view) { LinkedHashMap() }[method] = param.args[0] as Int
+                        param.args[0] = Color.TRANSPARENT
+                    }
+                }) || installed
+            }
+        }
+        }
+        return installed
+    }
+
+    private fun restoreBounceColors(activity: Activity?) {
+        val entries = bounceColors.entries.filter { activity == null || findActivity(it.key) === activity }
+            .map { it.key to it.value.toMap() }
+        restoringBounce = true
+        try {
+            entries.forEach { (view, colors) ->
+                colors.forEach { (method, color) -> KavaReflector.invoke(method, view, color) }
+                bounceColors.remove(view)
+            }
+        } finally { restoringBounce = false }
+    }
+
+    private fun installBackgroundWriteHook(): Boolean {
+        var installed = false
+        listOf("setBackgroundDrawable" to Drawable::class.java, "setBackgroundColor" to Integer.TYPE).forEach { (name, parameter) ->
+            KavaReflector.findMethodRecursive(View::class.java, name, parameter)?.let { method ->
+                installed = hookOnce(method, after = { param ->
+                    if (surfaceMutationDepth != 0 || Looper.myLooper() != Looper.getMainLooper()) return@hookOnce
+                    val view = param.thisObject as? View ?: return@hookOnce
+                    val state = surfaceOwners[view] ?: return@hookOnce
+                    val snapshot = state.surfaces[view] ?: return@hookOnce
+                    if (name == "setBackgroundColor" || view.background !== snapshot.appliedBackground) {
+                        snapshot.originalBackground = view.background
+                        snapshot.originalTintList = view.backgroundTintList
+                        snapshot.originalTintMode = view.backgroundTintMode
+                        snapshot.appliedBackground = null
+                        snapshot.appliedBitmap = null
+                        snapshot.appliedOpacity = null
+                        scheduleRefresh(state.activity)
+                    }
                 }) || installed
             }
         }
         return installed
     }
+
+    private fun installRecyclerBinding(view: View) {
+        if (view is AbsListView) {
+            val adapter = view.adapter ?: return
+            if (listAdapters[view] === adapter) return
+            listAdapters[view] = adapter
+            KavaReflector.findMethodRecursive(adapter.javaClass, "getView", Integer.TYPE, View::class.java, ViewGroup::class.java)?.let { method ->
+                hookOnce(method, after = { param ->
+                    val list = param.args.getOrNull(2) as? View ?: return@hookOnce
+                    val row = param.result as? View ?: return@hookOnce
+                    applyBoundRow(list, row)
+                })
+            }
+            return
+        }
+        if (!view.javaClass.name.contains("RecyclerView")) return
+        val adapter = KavaReflector.findMethodRecursive(view.javaClass, "getAdapter")?.let { KavaReflector.invoke(it, view) }
+        if (adapter != null && listAdapters[view] !== adapter) {
+            listAdapters[view] = adapter
+            installRecyclerAdapter(adapter)
+        }
+        var type: Class<*>? = view.javaClass
+        while (type != null && type != ViewGroup::class.java) {
+            KavaReflector.declaredMethods(type).filter { method ->
+                method.name == "dispatchChildAttached" &&
+                    method.parameterTypes.contentEquals(arrayOf(View::class.java))
+            }.forEach { method ->
+                hookOnce(method, after = { param ->
+                    val list = param.thisObject as? View ?: return@hookOnce
+                    val row = param.args.firstOrNull() as? View ?: return@hookOnce
+                    applyBoundRow(list, row)
+                })
+            }
+            type = type.superclass
+        }
+    }
+
+    private fun installRecyclerAdapter(adapter: Any) {
+        var type: Class<*>? = adapter.javaClass
+        while (type != null && type != Any::class.java) {
+            KavaReflector.declaredMethods(type).filter { method ->
+                method.name == "onBindViewHolder" && !java.lang.reflect.Modifier.isAbstract(method.modifiers) &&
+                    method.parameterTypes.size in 2..3 &&
+                    method.parameterTypes.getOrNull(1) == Integer.TYPE
+            }.forEach { method ->
+                hookOnce(method, after = { param ->
+                    val holder = param.args.firstOrNull() ?: return@hookOnce
+                    val row = KavaReflector.readField(holder, "itemView") as? View ?: return@hookOnce
+                    val list = row.parent as? View ?: return@hookOnce
+                    applyBoundRow(list, row)
+                })
+            }
+            type = type.superclass
+        }
+    }
+
+    private fun applyBoundRow(list: View, row: View) {
+        if (Looper.myLooper() != Looper.getMainLooper()) return
+        val slot = homeLists[list] ?: return
+        val activity = findActivity(list) ?: return
+        if (resolveTarget(activity) != slot || !hasConfiguredBackground(activity)) return
+        val state = states[activity] ?: return
+        applyHomeRow(state, row, slot)
+    }
+
+    private fun applyHomeRow(state: HostState, row: View, slot: BackgroundBeautySettings.Slot) {
+        state.surfaces[row]?.let { snapshot ->
+            snapshot.originalPaddingLeft = row.paddingLeft
+            snapshot.originalPaddingTop = row.paddingTop
+            snapshot.originalPaddingRight = row.paddingRight
+            snapshot.originalPaddingBottom = row.paddingBottom
+            snapshot.originalMinimumWidth = row.minimumWidth
+            snapshot.originalMinimumHeight = row.minimumHeight
+        }
+        setTransparentSurface(state, row, slot, preserveFeedback = true)
+        if (slot == BackgroundBeautySettings.Slot.DISCOVER || slot == BackgroundBeautySettings.Slot.ME) {
+            listOf("cgi", "cg7", "oct").forEach { name ->
+                val id = resourceId(name)
+                if (id != 0) row.findViewById<View>(id)?.let {
+                    setTransparentSurface(state, it, slot, preserveFeedback = true)
+                }
+            }
+        }
+    }
+
+
 
     @Synchronized
     fun installChatBackgroundComponentHook(allowDexSearch: Boolean): Boolean {
@@ -604,13 +773,13 @@ private class BackgroundBeautyRuntime(
     ): Boolean {
         if (!hookedMembers.add(member)) return true
         return runCatching {
-            HookRegistry.get().hook(member, object : XC_MethodHook() {
+            ownedHooks += HookRegistry.get().hook(member, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    before?.invoke(param)
+                    if (!destroyed) before?.invoke(param)
                 }
 
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    after?.invoke(param)
+                    if (!destroyed) after?.invoke(param)
                 }
             })
             true
@@ -661,6 +830,7 @@ private class BackgroundBeautyRuntime(
             return
         }
         if (!BackgroundBeautyStore.hasImage(context.hostContext(), slot)) {
+            restoreBounceColors(activity)
             synchronized(states) { states[activity] }?.let { state ->
                 restoreSlot(state, slot)
                 restoreSharedSurfaces(state)
@@ -724,6 +894,12 @@ private class BackgroundBeautyRuntime(
         bitmap: Bitmap
     ) {
         if (bitmap.isRecycled) return
+        state.surfaces.entries.toList().forEach { (view, snapshot) ->
+            if (!view.isAttachedToWindow) {
+                restoreSurface(view, snapshot)
+                state.surfaces.remove(view)
+            }
+        }
         val activity = state.activity
         val opacity = BackgroundBeautySettings.opacity(
             prefs.getFloat(
@@ -742,6 +918,10 @@ private class BackgroundBeautyRuntime(
         }
         applyChromeTransparency(state, slot)
         applySystemBars(state)
+        if (state.lastLoggedSlot != slot) {
+            state.lastLoggedSlot = slot
+            HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size}")
+        }
     }
 
     private fun applyLauncherBackground(
@@ -768,6 +948,12 @@ private class BackgroundBeautyRuntime(
         roots.filter { it.isAttachedToWindow }.forEach { root ->
             observeLayout(root)
             setImageSurface(state, root, slot, bitmap, opacity)
+            var parent = root.parent as? View
+            val host = resolveBackgroundHost(state.activity)
+            while (parent != null && parent !== host && parent !== state.activity.window.decorView) {
+                setTransparentSurface(state, parent, slot)
+                parent = parent.parent as? View
+            }
             applyWhitelistedSurfaces(state, root, slot)
         }
     }
@@ -797,23 +983,27 @@ private class BackgroundBeautyRuntime(
     ) {
         val targetIds = targetResourceIds(slot)
         val queue = ArrayDeque<View>()
-        val depths = ArrayDeque<Int>()
         queue.add(root)
-        depths.add(0)
         var visited = 0
         while (queue.isNotEmpty() && visited++ < MAX_SCAN_NODES) {
             val view = queue.removeFirst()
-            val depth = depths.removeFirst()
             val name = view.javaClass.name
             if (view !== root && isBottomBar(view)) continue
             if (view !== root && isComposeSurface(view)) continue
             if (name == APP_BRAND_DESKTOP_CONTAINER ||
-                name == BOUNCE_VIEW ||
+                name == BOUNCE_VIEW || name == NESTED_BOUNCE_VIEW ||
                 name == CHAT_FOOTER_CUSTOM ||
-                (view !== root && depth <= MAX_MAJOR_SURFACE_DEPTH && isMajorSurface(view))
+                (view !== root && isMajorSurface(view))
             ) {
                 if (!hasClassName(view, CHATTING_IMAGE_BG_VIEW)) {
                     setTransparentSurface(state, view, slot)
+                }
+            }
+            if (isMajorSurface(view) && slot != BackgroundBeautySettings.Slot.CHAT) {
+                homeLists[view] = slot
+                installRecyclerBinding(view)
+                if (view is ViewGroup) {
+                    for (index in 0 until view.childCount) applyHomeRow(state, view.getChildAt(index), slot)
                 }
             }
             if (view.id in targetIds) {
@@ -822,7 +1012,6 @@ private class BackgroundBeautyRuntime(
             if (view is ViewGroup) {
                 for (index in 0 until view.childCount) {
                     queue.addLast(view.getChildAt(index))
-                    depths.addLast(depth + 1)
                 }
             }
         }
@@ -836,10 +1025,7 @@ private class BackgroundBeautyRuntime(
         val cached = state.surfaces.keys.filter { view ->
             view !== host && view.isAttachedToWindow && isChromeSurface(view)
         }
-        if (cached.isNotEmpty()) {
-            cached.forEach { view -> setTransparentSurface(state, view, slot) }
-            return
-        }
+        cached.forEach { view -> setTransparentSurface(state, view, slot) }
         val decor = state.activity.window.decorView
         val queue = ArrayDeque<View>()
         queue.add(decor)
@@ -859,8 +1045,8 @@ private class BackgroundBeautyRuntime(
 
     private fun targetResourceIds(slot: BackgroundBeautySettings.Slot): Set<Int> {
         val names = when (slot) {
-            BackgroundBeautySettings.Slot.WECHAT -> listOf("cj1")
-            BackgroundBeautySettings.Slot.ME -> listOf("gxp", "gxn", "hxi")
+            BackgroundBeautySettings.Slot.WECHAT -> listOf("cj1", "og9")
+            BackgroundBeautySettings.Slot.ME -> listOf("gxp", "gxn", "hxi", "jlt")
             else -> emptyList()
         }
         return names.mapNotNull { name -> resourceId(name).takeIf { it != 0 } }.toSet()
@@ -892,66 +1078,78 @@ private class BackgroundBeautyRuntime(
         bitmap: Bitmap,
         opacity: Float
     ) {
-        val snapshot = surfaceSnapshot(state, view)
-        synchronizeExternalBackground(snapshot, view)
-        if (snapshot.slot == slot &&
-            snapshot.appliedBitmap === bitmap &&
-            snapshot.appliedOpacity == opacity &&
-            view.background === snapshot.appliedBackground
-        ) return
-        val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity)
-        val applied = if (opacity < 0.999f) {
-            LayerDrawable(
-                arrayOf(
-                    cloneDrawable(snapshot.originalBackground, view.context)
-                        ?: ColorDrawable(resolveThemeBackground(view.context)),
-                    image
+        surfaceMutationDepth++
+        try {
+            val snapshot = surfaceSnapshot(state, view)
+            synchronizeExternalBackground(snapshot, view)
+            if (snapshot.slot == slot &&
+                snapshot.appliedBitmap === bitmap &&
+                snapshot.appliedOpacity == opacity &&
+                view.background === snapshot.appliedBackground
+            ) return
+            val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity)
+            val applied = if (opacity < 0.999f) {
+                LayerDrawable(
+                    arrayOf(
+                        cloneDrawable(snapshot.originalBackground, view.context)
+                            ?: ColorDrawable(resolveThemeBackground(view.context)),
+                        image
+                    )
                 )
-            )
-        } else {
-            image
-        }
-        view.backgroundTintList = null
-        view.backgroundTintMode = null
-        view.background = applied
-        restoreSurfaceGeometry(view, snapshot)
-        snapshot.appliedBackground = applied
-        snapshot.appliedBitmap = bitmap
-        snapshot.appliedOpacity = opacity
-        snapshot.slot = slot
+            } else {
+                image
+            }
+            view.backgroundTintList = null
+            view.backgroundTintMode = null
+            view.background = applied
+            restoreSurfaceGeometry(view, snapshot)
+            snapshot.appliedBackground = applied
+            snapshot.appliedBitmap = bitmap
+            snapshot.appliedOpacity = opacity
+            snapshot.slot = slot
+
+        } finally { surfaceMutationDepth-- }
     }
 
     private fun setTransparentSurface(
         state: HostState,
         view: View,
         slot: BackgroundBeautySettings.Slot,
-        clearForeground: Boolean = false
+        clearForeground: Boolean = false,
+        preserveFeedback: Boolean = false
     ) {
-        val snapshot = surfaceSnapshot(state, view)
-        synchronizeExternalBackground(snapshot, view)
-        if (snapshot.slot == slot &&
-            snapshot.appliedBitmap == null &&
-            snapshot.appliedBackground != null &&
-            view.background === snapshot.appliedBackground &&
-            (!clearForeground || view.foreground === snapshot.appliedForeground)
-        ) return
-        val marker = BackgroundBeautyTransparentDrawable()
-        view.backgroundTintList = null
-        view.backgroundTintMode = null
-        view.background = marker
-        restoreSurfaceGeometry(view, snapshot)
-        snapshot.appliedBackground = marker
-        snapshot.appliedBitmap = null
-        snapshot.appliedOpacity = null
-        if (clearForeground) {
-            val foregroundMarker = BackgroundBeautyTransparentDrawable()
-            view.foreground = foregroundMarker
-            snapshot.appliedForeground = foregroundMarker
-        }
-        snapshot.slot = slot
+        surfaceMutationDepth++
+        try {
+            val snapshot = surfaceSnapshot(state, view)
+            synchronizeExternalBackground(snapshot, view)
+            if (snapshot.slot == slot &&
+                snapshot.appliedBitmap == null &&
+                snapshot.appliedBackground != null &&
+                view.background === snapshot.appliedBackground &&
+                (!clearForeground || view.foreground === snapshot.appliedForeground)
+            ) return
+            val marker: Drawable = if (preserveFeedback && snapshot.originalBackground != null) {
+                BackgroundBeautyFeedbackDrawable(snapshot.originalBackground!!)
+            } else BackgroundBeautyTransparentDrawable()
+            view.backgroundTintList = null
+            view.backgroundTintMode = null
+            view.background = marker
+            restoreSurfaceGeometry(view, snapshot)
+            snapshot.appliedBackground = marker
+            snapshot.appliedBitmap = null
+            snapshot.appliedOpacity = null
+            if (clearForeground) {
+                val foregroundMarker = BackgroundBeautyTransparentDrawable()
+                view.foreground = foregroundMarker
+                snapshot.appliedForeground = foregroundMarker
+            }
+            snapshot.slot = slot
+
+        } finally { surfaceMutationDepth-- }
     }
 
     private fun surfaceSnapshot(state: HostState, view: View): SurfaceSnapshot {
+        surfaceOwners[view] = state
         return state.surfaces[view] ?: SurfaceSnapshot(view).also { state.surfaces[view] = it }
     }
 
@@ -1036,18 +1234,23 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun restoreSurface(view: View, snapshot: SurfaceSnapshot) {
-        val appliedBackground = snapshot.appliedBackground
-        if (appliedBackground != null && view.background === appliedBackground) {
-            view.background = snapshot.originalBackground
-            view.backgroundTintList = snapshot.originalTintList
-            view.backgroundTintMode = snapshot.originalTintMode
-            restoreSurfaceGeometry(view, snapshot)
-        }
-        snapshot.appliedForeground?.let { appliedForeground ->
-            if (view.foreground === appliedForeground) {
-                view.foreground = snapshot.originalForeground
+        surfaceOwners.remove(view)
+        surfaceMutationDepth++
+        try {
+            val appliedBackground = snapshot.appliedBackground
+            if (appliedBackground != null && view.background === appliedBackground) {
+                view.background = snapshot.originalBackground
+                view.backgroundTintList = snapshot.originalTintList
+                view.backgroundTintMode = snapshot.originalTintMode
+                restoreSurfaceGeometry(view, snapshot)
             }
-        }
+            snapshot.appliedForeground?.let { appliedForeground ->
+                if (view.foreground === appliedForeground) {
+                    view.foreground = snapshot.originalForeground
+                }
+            }
+
+        } finally { surfaceMutationDepth-- }
     }
 
     private fun restoreNativeImage(view: ImageView, snapshot: NativeImageSnapshot) {
@@ -1114,9 +1317,12 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun clearActivity(activity: Activity) {
+        restoreBounceColors(activity)
         synchronized(pendingLoads) { pendingLoads.remove(activity) }
         synchronized(pendingRefreshes) { pendingRefreshes.remove(activity) }
         removeLayoutListeners(activity)
+        homeLists.keys.removeAll { findActivity(it) === activity }
+        listAdapters.keys.removeAll { findActivity(it) === activity }
         val state = synchronized(states) { states.remove(activity) } ?: return
         restoreState(state)
     }
@@ -1191,8 +1397,15 @@ private class BackgroundBeautyRuntime(
         KavaReflector.findMethodRecursive(activity.javaClass, "getCurrentFragmet")
             ?.takeIf { it.parameterTypes.isEmpty() }
             ?.let { method -> KavaReflector.invoke(method, activity) }
+            ?.takeIf { it.javaClass.name.contains("chatting", ignoreCase = true) }
             ?.let { return it }
-        val mainTab = findFieldValueByClassName(activity, MAIN_TAB_CLASS) ?: return null
+        val home = KavaReflector.findMethodRecursive(activity.javaClass, "getHomeUI")
+            ?.let { KavaReflector.invoke(it, activity) }
+        val mainTab = home?.let { owner ->
+            KavaReflector.findMethodRecursive(owner.javaClass, "getMainTabUI")
+                ?.let { KavaReflector.invoke(it, owner) }
+                ?: findFieldValueByClassName(owner, MAIN_TAB_CLASS)
+        } ?: findFieldValueByClassName(activity, MAIN_TAB_CLASS) ?: return null
         return KavaReflector.findMethodRecursive(mainTab.javaClass, "g")
             ?.takeIf { it.parameterTypes.isEmpty() }
             ?.let { method -> KavaReflector.invoke(method, mainTab) }
