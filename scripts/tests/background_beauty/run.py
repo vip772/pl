@@ -35,6 +35,10 @@ fun main(){
  g.down(10f,200f,true);check(g.move(40f,202f));check(g.move(20f,203f));g.reset();check(!g.move(100f,203f))
  g.down(10f,200f,true);check(!g.move(-5f,200f));check(!g.move(100f,200f));g.reset()
  repeat(1000){g.down(5f,5f,true);check(!g.move(6f,6f));g.reset()}
+ val wide=SidePanelEdgeGesture(270f,30f)
+ wide.down(116.71875f,1536.3867f,true);check(!wide.move(116.71875f,1536.3867f));check(wide.move(960.46875f,1571.4258f));wide.reset()
+ wide.down(116.71875f,1536.3867f,true);check(!wide.move(120f,1600f));check(!wide.move(960f,1601f));wide.reset()
+ wide.down(271f,1536f,true);check(!wide.move(960f,1536f))
  val native=PaintDrawable();val wrapper=BackgroundBeautyFeedbackDrawable();val canvas=Canvas()
  wrapper.draw(canvas);check(native.draws==0)
  wrapper.state=intArrayOf(android.R.attr.state_pressed);wrapper.draw(canvas);check(native.draws==0)

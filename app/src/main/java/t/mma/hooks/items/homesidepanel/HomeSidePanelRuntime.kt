@@ -164,13 +164,13 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private var diagnosticEdge = false
         fun interceptTouch(event: MotionEvent): Boolean {
             if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                diagnosticEdge = event.x <= dp(40)
+                diagnosticEdge = event.x <= dp(72)
                 if (diagnosticEdge) diagnosticGestures++
                 diagnosticMoves = 0
             }
             val result = attached && !chatVisible && drawer.interceptEdgeTouch(event)
             if (diagnosticEdge && diagnosticGestures <= 12 && (event.actionMasked != MotionEvent.ACTION_MOVE || diagnosticMoves++ < 3)) {
-                HLog.i("[Hchat:HomeSidePanel] DIAG gesture action=${event.actionMasked} x=${event.x} y=${event.y} attached=$attached chat=$chatVisible enabled=${HomeSidePanelSettings.enabled(activity)} consumed=$result")
+                HLog.i("[Hchat:HomeSidePanel] DIAG gesture action=${event.actionMasked} x=${event.x} y=${event.y} attached=$attached chat=$chatVisible enabled=${HomeSidePanelSettings.enabled(activity)} density=${activity.resources.displayMetrics.density} edgePx=${dp(72)} consumed=$result")
             }
             return result
         }

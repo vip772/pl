@@ -310,7 +310,7 @@ private class BackgroundBeautyRuntime(
     private val diagnosticCounts = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
     private val diagnosedLists = WeakHashMap<View, Boolean>()
     private val listAdapters = WeakHashMap<View, Any>()
-    private val bounceColors = WeakHashMap<View, MutableMap<java.lang.reflect.Method, Int>>()
+    private val bounceColors = WeakHashMap<View, MutableMap<java.lang.reflect.Method, Any?>>()
     private var restoringBounce = false
     private val homeLists = WeakHashMap<View, BackgroundBeautySettings.Slot>()
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -523,13 +523,29 @@ private class BackgroundBeautyRuntime(
                 installed = hookOnce(method, before = { param ->
                     val view = param.thisObject as? View ?: return@hookOnce
                     val activity = findActivity(view) ?: return@hookOnce
-                    if (!restoringBounce && hasConfiguredBackground(activity)) {
+                    if (!restoringBounce && surfaceMutationDepth == 0 && hasConfiguredBackground(activity)) {
                         if (diagnosticCounts.computeIfAbsent("bounce:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
                             HLog.i("$TAG DIAG bounce class=${view.javaClass.name} method=$name input=${param.args[0]}")
                             main.postDelayed({ diagnosticTree(activity, "bounce") }, 120L)
                         }
-                        bounceColors.getOrPut(view) { LinkedHashMap() }[method] = param.args[0] as Int
+                        recordBounceArgument(view, method, param.args[0])
                         param.args[0] = Color.TRANSPARENT
+                    }
+                }) || installed
+            }
+        }
+        listOf("setStart2EndBg", "setEnd2StartBg", "setBg", "setMStart2EndBg", "setMEnd2StartBg",
+            "setMStart2EndBgByActionBar", "setMEnd2StartBgByNavigationBar").forEach { name ->
+            KavaReflector.findMethodRecursive(bounceClass, name, Drawable::class.java)?.let { method ->
+                installed = hookOnce(method, before = { param ->
+                    val view = param.thisObject as? View ?: return@hookOnce
+                    val activity = findActivity(view) ?: return@hookOnce
+                    if (!restoringBounce && surfaceMutationDepth == 0 && hasConfiguredBackground(activity)) {
+                        recordBounceArgument(view, method, param.args[0])
+                        param.args[0] = ColorDrawable(Color.TRANSPARENT)
+                        if (diagnosticCounts.computeIfAbsent("bounce:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+                            HLog.i("$TAG DIAG bounce drawable class=${view.javaClass.name} method=$name")
+                        }
                     }
                 }) || installed
             }
@@ -537,7 +553,23 @@ private class BackgroundBeautyRuntime(
         }
         return installed
     }
-
+    private fun recordBounceArgument(view: View, method: java.lang.reflect.Method, argument: Any?) {
+        val properties = when (method.name) {
+            "setStart2EndBgColor", "setStart2EndBg", "setMStart2EndBg" -> listOf("MStart2EndBg")
+            "setEnd2StartBgColor", "setEnd2StartBg", "setMEnd2StartBg" -> listOf("MEnd2StartBg")
+            "setStart2EndBgColorByActionBar", "setMStart2EndBgByActionBar" -> listOf("MStart2EndBgByActionBar")
+            "setEnd2StartBgColorByNavigationBar", "setMEnd2StartBgByNavigationBar" -> listOf("MEnd2StartBgByNavigationBar")
+            "setBg", "setBgColor" -> listOf("MStart2EndBg", "MEnd2StartBg")
+            else -> emptyList()
+        }
+        val setters = properties.mapNotNull { property ->
+            KavaReflector.findMethodRecursive(view.javaClass, "set$property", Drawable::class.java)
+        }
+        val values = bounceColors.getOrPut(view) { LinkedHashMap() }
+        if (setters.size == properties.size && setters.isNotEmpty()) {
+            setters.forEach { setter -> values[setter] = if (argument is Int) ColorDrawable(argument) else argument }
+        } else values[method] = argument
+    }
     private fun restoreBounceColors(activity: Activity?) {
         val entries = bounceColors.entries.filter { activity == null || findActivity(it.key) === activity }
             .map { it.key to it.value.toMap() }
@@ -1003,7 +1035,7 @@ private class BackgroundBeautyRuntime(
             val name = view.javaClass.name
             if (view !== root && isBottomBar(view)) continue
             if (view !== root && isComposeSurface(view)) continue
-            if (name == APP_BRAND_DESKTOP_CONTAINER ||
+            if (name == "com.tencent.mm.ui.FrostedContentView" || name == APP_BRAND_DESKTOP_CONTAINER ||
                 name == BOUNCE_VIEW || name == NESTED_BOUNCE_VIEW ||
                 name == CHAT_FOOTER_CUSTOM ||
                 (view !== root && isMajorSurface(view))
@@ -1056,6 +1088,19 @@ private class BackgroundBeautyRuntime(
             if (view !== decor && isBottomBar(view)) {
                 if (slot != BackgroundBeautySettings.Slot.CHAT && view.tag != "Hchat:FloatingBottomBar") {
                     setTransparentSurface(state, view, slot)
+                    // 微信 8.0.78 的底栏实色来自内部 LinearLayout，而非外层 RelativeLayout。
+                    if (view.javaClass.name == "com.tencent.mm.ui.LauncherUIBottomTabView" && view is ViewGroup) {
+                        for (index in 0 until view.childCount) {
+                            val child = view.getChildAt(index)
+                            if (child is android.widget.LinearLayout) {
+                                setTransparentSurface(state, child, slot)
+                                for (tabIndex in 0 until child.childCount) {
+                                    val tab = child.getChildAt(tabIndex)
+                                    if (tab is ViewGroup) setTransparentSurface(state, tab, slot, preserveFeedback = true)
+                                }
+                            }
+                        }
+                    }
                 }
                 continue
             }
@@ -1072,7 +1117,8 @@ private class BackgroundBeautyRuntime(
     private fun targetResourceIds(slot: BackgroundBeautySettings.Slot): Set<Int> {
         val names = when (slot) {
             BackgroundBeautySettings.Slot.WECHAT -> listOf("cj1", "og9")
-            BackgroundBeautySettings.Slot.ME -> listOf("gxp", "gxn", "hxi", "jlt")
+            BackgroundBeautySettings.Slot.ME -> listOf("gxp", "gxn", "hxi", "jlt", "imk", "s1d")
+            BackgroundBeautySettings.Slot.CONTACTS, BackgroundBeautySettings.Slot.DISCOVER -> listOf("imk")
             else -> emptyList()
         }
         return names.mapNotNull { name -> resourceId(name).takeIf { it != 0 } }.toSet()
@@ -1169,7 +1215,7 @@ private class BackgroundBeautyRuntime(
                 view.background === snapshot.appliedBackground
             ) return
             val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity)
-            val applied = if (opacity < 0.999f) {
+            val applied = if (slot == BackgroundBeautySettings.Slot.CHAT && opacity < 0.999f) {
                 LayerDrawable(
                     arrayOf(
                         cloneDrawable(snapshot.originalBackground, view.context)
@@ -1192,6 +1238,70 @@ private class BackgroundBeautyRuntime(
         } finally { surfaceMutationDepth-- }
     }
 
+    private fun applyNativeChrome(view: View, slot: BackgroundBeautySettings.Slot) {
+        if (slot == BackgroundBeautySettings.Slot.CHAT || restoringBounce) return
+        if (view.javaClass.name == BOUNCE_VIEW || view.javaClass.name == NESTED_BOUNCE_VIEW) {
+            listOf("MStart2EndBg", "MEnd2StartBg", "MStart2EndBgByActionBar", "MEnd2StartBgByNavigationBar").forEach { property ->
+                val getter = KavaReflector.findMethodRecursive(view.javaClass, "get$property") ?: return@forEach
+                val setter = KavaReflector.findMethodRecursive(view.javaClass, "set$property", Drawable::class.java) ?: return@forEach
+                val values = bounceColors.getOrPut(view) { LinkedHashMap() }
+                if (!values.containsKey(setter)) {
+                    values[setter] = KavaReflector.invoke(getter, view)
+                    surfaceMutationDepth++
+                    try { KavaReflector.invoke(setter, view, ColorDrawable(Color.TRANSPARENT)) } finally { surfaceMutationDepth-- }
+                }
+            }
+        }
+        if (view.javaClass.name == "com.tencent.mm.ui.FrostedContentView") {
+            val getter = KavaReflector.findMethodRecursive(view.javaClass, "getFrostedEnabled") ?: return
+            val setter = KavaReflector.findMethodRecursive(view.javaClass, "setFrostedEnabled", Boolean::class.javaPrimitiveType!!) ?: return
+            val enabled = KavaReflector.invoke(getter, view) as? Boolean ?: return
+            val values = bounceColors.getOrPut(view) { LinkedHashMap() }
+            if (!values.containsKey(setter) || enabled) values[setter] = enabled
+            if (enabled) {
+                surfaceMutationDepth++
+                try { KavaReflector.invoke(setter, view, false) } finally { surfaceMutationDepth-- }
+            }
+            KavaReflector.findMethodRecursive(view.javaClass, "dispatchDraw", android.graphics.Canvas::class.java)?.let { draw ->
+                hookOnce(draw, before = { param ->
+                    val target = param.thisObject as? View ?: return@hookOnce
+                    val owner = findActivity(target) ?: return@hookOnce
+                    if (!restoringBounce && hasConfiguredBackground(owner) && bounceColors[target]?.containsKey(setter) == true) {
+                        if (KavaReflector.invoke(getter, target) == true) {
+                            bounceColors[target]!![setter] = true
+                            surfaceMutationDepth++
+                            try { KavaReflector.invoke(setter, target, false) } finally { surfaceMutationDepth-- }
+                        }
+                    }
+                })
+            }
+            hookOnce(setter, before = { param ->
+                val target = param.thisObject as? View ?: return@hookOnce
+                if (!restoringBounce && surfaceMutationDepth == 0 && bounceColors[target]?.containsKey(setter) == true) {
+                    bounceColors[target]!![setter] = param.args[0]
+                    param.args[0] = false
+                }
+            })
+        }
+        if (view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") {
+            listOf("setPrimaryBackground" to "h", "setStackedBackground" to "i", "setSplitBackground" to "m").forEach { (name, field) ->
+                val setter = KavaReflector.findMethodRecursive(view.javaClass, name, Drawable::class.java) ?: return@forEach
+                val values = bounceColors.getOrPut(view) { LinkedHashMap() }
+                if (!values.containsKey(setter)) {
+                    values[setter] = KavaReflector.readField(view, field) as? Drawable
+                    surfaceMutationDepth++
+                    try { KavaReflector.invoke(setter, view, null) } finally { surfaceMutationDepth-- }
+                }
+                hookOnce(setter, before = { param ->
+                    val target = param.thisObject as? View ?: return@hookOnce
+                    if (!restoringBounce && surfaceMutationDepth == 0 && bounceColors[target]?.containsKey(setter) == true) {
+                        bounceColors[target]!![setter] = param.args[0]
+                        param.args[0] = null
+                    }
+                })
+            }
+        }
+    }
     private fun setTransparentSurface(
         state: HostState,
         view: View,
@@ -1199,6 +1309,7 @@ private class BackgroundBeautyRuntime(
         clearForeground: Boolean = false,
         preserveFeedback: Boolean = false
     ) {
+        applyNativeChrome(view, slot)
         surfaceMutationDepth++
         try {
             val snapshot = surfaceSnapshot(state, view)

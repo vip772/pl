@@ -39,7 +39,7 @@ internal class HomeSidePanelDrawer(
     private val root = FrameLayout(activity)
     private val scrim = View(activity)
     private val panel = LinearLayout(activity)
-    private val edgeGesture = SidePanelEdgeGesture(dp(24).toFloat(), ViewConfiguration.get(activity).scaledTouchSlop.toFloat())
+    private val edgeGesture = SidePanelEdgeGesture(dp(72).toFloat(), ViewConfiguration.get(activity).scaledTouchSlop.toFloat())
     private var dispatchingHostCancel = false
     private var edgeDragging = false
     private var edgeStartX = 0f
