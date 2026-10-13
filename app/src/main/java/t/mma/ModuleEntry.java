@@ -407,6 +407,7 @@ public class ModuleEntry implements IXposedHookLoadPackage {
 
     private void initModule(Context hostContext, XC_LoadPackage.LoadPackageParam lpparam) {
         HLog.initialize(hostContext);
+        t.mma.utils.StartupMainThreadDiagnostic.start();
         try {
             // 1. 加载 Native 库（DexKit）
             NativeLibraryLoader nativeLibraryLoader = new NativeLibraryLoader();
