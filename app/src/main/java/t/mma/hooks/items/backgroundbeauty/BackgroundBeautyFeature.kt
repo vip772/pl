@@ -23,6 +23,7 @@ import android.os.Handler
 import android.os.Looper
 import android.util.TypedValue
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.ViewGroup
 import android.widget.AbsListView
 import android.widget.ImageView
@@ -167,9 +168,11 @@ private class ScreenAlignedBitmapDrawable(
         updateDestination()
     }
 
+    private var drawDiagnostics = 0
     override fun draw(canvas: Canvas) {
-        val bitmap = bitmapRef.get() ?: return
-        if (bitmap.isRecycled || destination.isEmpty) return
+        val bitmap = bitmapRef.get()
+        if (drawDiagnostics++ < 8) HLog.i("[Hchat:沉浸式背景] DIAG imageDraw bitmap=${bitmap != null} recycled=${bitmap?.isRecycled} alpha=${paint.alpha} destination=$destination clip=${canvas.clipBounds} hardware=${canvas.isHardwareAccelerated}")
+        if (bitmap == null || bitmap.isRecycled || destination.isEmpty) return
         canvas.drawBitmap(bitmap, null, destination, paint)
     }
 
@@ -571,6 +574,12 @@ private class BackgroundBeautyRuntime(
         } else values[method] = argument
     }
     private fun restoreBounceColors(activity: Activity?) {
+        frameDiagnostics.entries.filter { activity == null || it.key === activity }.toList().forEach { (owner, listener) ->
+            val observer = owner.window.decorView.viewTreeObserver
+            if (observer.isAlive) observer.removeOnPreDrawListener(listener)
+            scrollDiagnostics.remove(owner)?.let { if (observer.isAlive) observer.removeOnScrollChangedListener(it) }
+            frameDiagnostics.remove(owner)
+        }
         val entries = bounceColors.entries.filter { activity == null || findActivity(it.key) === activity }
             .map { it.key to it.value.toMap() }
         restoringBounce = true
@@ -601,6 +610,8 @@ private class BackgroundBeautyRuntime(
                         snapshot.appliedBackground = null
                         snapshot.appliedBitmap = null
                         snapshot.appliedOpacity = null
+                        // 保留诊断时间线，下一帧处理的时序问题先通过绘制前日志确认。
+                        diagnoseTransient(state.activity, "rewrite:$name", view)
                         scheduleRefresh(state.activity)
                     }
                 }) || installed
@@ -656,8 +667,10 @@ private class BackgroundBeautyRuntime(
                 hookOnce(method, after = { param ->
                     val holder = param.args.firstOrNull() ?: return@hookOnce
                     val row = KavaReflector.readField(holder, "itemView") as? View ?: return@hookOnce
-                    val list = row.parent as? View ?: return@hookOnce
-                    applyBoundRow(list, row)
+                    val list = row.parent as? View
+                    val owner = list?.let(::findActivity) ?: findActivity(row)
+                    if (owner != null) diagnoseTransient(owner, "bind:${method.name}:parent=${list?.javaClass?.name}", row)
+                    if (list != null) applyBoundRow(list, row)
                 })
             }
             type = type.superclass
@@ -1059,6 +1072,14 @@ private class BackgroundBeautyRuntime(
                 val parent = view.parent as? ViewGroup
                 if (parent != null && parent !== root) setTransparentSurface(state, parent, slot, preserveFeedback = true)
             }
+            if (slot == BackgroundBeautySettings.Slot.CONTACTS && view.id == resourceId("imk")) {
+                // 运行快照确认该页 imk 外层 LinearLayout 仍绘制 #FF232323。
+                val parent = view.parent as? View
+                val container = parent?.parent as? View
+                if (container is android.widget.LinearLayout && (container.background as? ColorDrawable)?.color == 0xFF232323.toInt()) {
+                    setTransparentSurface(state, container, slot)
+                }
+            }
             if (view.id in targetIds) {
                 setTransparentSurface(state, view, slot, clearForeground = true)
             }
@@ -1116,7 +1137,7 @@ private class BackgroundBeautyRuntime(
 
     private fun targetResourceIds(slot: BackgroundBeautySettings.Slot): Set<Int> {
         val names = when (slot) {
-            BackgroundBeautySettings.Slot.WECHAT -> listOf("cj1", "og9")
+            BackgroundBeautySettings.Slot.WECHAT -> listOf("cj1", "og9", "nhm")
             BackgroundBeautySettings.Slot.ME -> listOf("gxp", "gxn", "hxi", "jlt", "imk", "s1d")
             BackgroundBeautySettings.Slot.CONTACTS, BackgroundBeautySettings.Slot.DISCOVER -> listOf("imk")
             else -> emptyList()
@@ -1146,10 +1167,72 @@ private class BackgroundBeautyRuntime(
         }
     }
 
+    private val frameDiagnostics = WeakHashMap<Activity, ViewTreeObserver.OnPreDrawListener>()
+    private val scrollDiagnostics = WeakHashMap<Activity, ViewTreeObserver.OnScrollChangedListener>()
+    private fun diagnoseTransient(activity: Activity, reason: String, target: View? = null) {
+        if (destroyed || restoringBounce) return
+        val slot = resolveTarget(activity) ?: return
+        if (slot == BackgroundBeautySettings.Slot.CHAT) return
+        val key = "transient:${slot.key}:$reason"
+        if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 8) return
+        if (reason.startsWith("rewrite:") || reason.startsWith("bind:") || reason == "scroll") {
+            diagnosticCounts["frames:${slot.key}"]?.set(0)
+            diagnosticCounts["transient:${slot.key}:predraw"]?.set(0)
+        }
+        val view = target ?: activity.window.decorView
+        val state = states[activity]
+        val bg = view.background
+        val id = runCatching { view.resources.getResourceName(view.id) }.getOrDefault("none")
+        val path = generateSequence(view as View?) { it.parent as? View }.take(7).joinToString("<") { it.javaClass.name }
+        val image = state?.loadedBitmaps?.get(slot)?.bitmap
+        val imageInfo = image?.let { "${it.width}x${it.height},recycled=${it.isRecycled},alpha=${it.hasAlpha()}" }
+        val extras = if (view.javaClass.name == "com.tencent.mm.ui.FrostedContentView") {
+            listOf("getFrostedEnabled", "getFrostedColor", "getTopBlurAreaHeight", "getBottomBlurAreaHeight").joinToString(",") { name ->
+                "$name=${KavaReflector.findMethodRecursive(view.javaClass, name)?.let { KavaReflector.invoke(it, view) }}"
+            }
+        } else if (view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") {
+            listOf("h", "i", "m").joinToString(",") { field ->
+                val drawable = KavaReflector.readField(view, field) as? Drawable
+                "$field=${drawable?.javaClass?.name}:${(drawable as? ColorDrawable)?.color}"
+            }
+        } else "-"
+        HLog.i("$TAG DIAG transient slot=${slot.key} reason=$reason id=$id class=${view.javaClass.name} bg=${bg?.javaClass?.name} color=${(bg as? ColorDrawable)?.color} opacity=${bg?.opacity} layer=${view.layerType} scroll=${view.scrollX}/${view.scrollY} translation=${view.translationX}/${view.translationY} bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} pending=${pendingRefreshes.containsKey(activity)} image=$imageInfo extras=$extras path=$path")
+    }
+    private fun installFrameDiagnostics(activity: Activity) {
+        if (frameDiagnostics.containsKey(activity)) return
+        val listener = ViewTreeObserver.OnPreDrawListener {
+            val slot = resolveTarget(activity)
+            if (slot != null && slot != BackgroundBeautySettings.Slot.CHAT) {
+                val key = "frames:${slot.key}"
+                if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
+                    diagnoseTransient(activity, "predraw")
+                    val state = states[activity]
+                    state?.surfaces?.keys?.filter { it.isShown && (isChromeSurface(it) || it.javaClass.name == "com.tencent.mm.ui.FrostedContentView" || homeLists.containsKey(it) || it.id in targetResourceIds(slot)) }?.take(18)?.forEach { diagnoseTransient(activity, "predraw:${it.javaClass.name}", it) }
+                }
+            }
+            true
+        }
+        var scrollSamples = 0
+        val scrollListener = ViewTreeObserver.OnScrollChangedListener {
+            if (++scrollSamples > 48) return@OnScrollChangedListener
+            diagnoseTransient(activity, "scroll")
+            states[activity]?.surfaces?.keys?.filter { it.isShown && homeLists.containsKey(it) }?.forEach { list ->
+                diagnoseTransient(activity, "scroll-list", list)
+                if (list is ViewGroup) {
+                    for (index in 0 until minOf(list.childCount, 3)) diagnoseTransient(activity, "scroll-row:$index", list.getChildAt(index))
+                }
+            }
+        }
+        scrollDiagnostics[activity] = scrollListener
+        activity.window.decorView.viewTreeObserver.addOnScrollChangedListener(scrollListener)
+        frameDiagnostics[activity] = listener
+        activity.window.decorView.viewTreeObserver.addOnPreDrawListener(listener)
+    }
     private fun diagnosticTree(activity: Activity, reason: String) {
         if (destroyed || activity.isDestroyed || activity.isFinishing) return
         val slot = resolveTarget(activity) ?: return
         if (slot == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return
+        installFrameDiagnostics(activity)
         val key = "${slot.key}:$reason"
         if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 1) return
         val state = states[activity]
