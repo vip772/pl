@@ -198,6 +198,12 @@ public final class ServerErrorToastDiagnostic {
                                 + " thread=" + Thread.currentThread().getName();
                         networkOrigins.put(param.thisObject, entry);
                         emit(TAG + " syncNetworkEnd " + entry);
+                        if (Integer.valueOf(1).equals(param.args[1]) && Integer.valueOf(-7).equals(param.args[2])) {
+                            StringBuilder stack = new StringBuilder(TAG + " syncFailureOrigin " + entry);
+                            StackTraceElement[] frames = Thread.currentThread().getStackTrace();
+                            for (int i = 0; i < Math.min(frames.length, 24); i++) stack.append("\n  at ").append(frames[i]);
+                            HLog.i(stack.toString());
+                        }
                     } catch (Throwable error) { emit(TAG + " syncCaptureFailure=" + error.getClass().getName()); }
                 }
             }));

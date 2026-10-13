@@ -40,6 +40,20 @@ public final class StartupMainThreadDiagnostic {
                                 .append(" state=").append(ui.getState());
                             StackTraceElement[] stack = ui.getStackTrace();
                             for (int i = 0; i < Math.min(stack.length, 32); i++) trace.append("\n  at ").append(stack[i]);
+                            java.util.Map<Thread, StackTraceElement[]> threads = Thread.getAllStackTraces();
+                            int included = 0;
+                            for (java.util.Map.Entry<Thread, StackTraceElement[]> entry : threads.entrySet()) {
+                                Thread worker = entry.getKey();
+                                if (worker == ui || worker == Thread.currentThread() ||
+                                    !worker.getName().startsWith("Hchat") || included >= 8) continue;
+                                included++;
+                                trace.append("\nworker=").append(worker.getName()).append(" state=").append(worker.getState());
+                                StackTraceElement[] frames = entry.getValue();
+                                for (int i = 0; i < Math.min(frames.length, 20); i++) trace.append("\n  at ").append(frames[i]);
+                            }
+                            Runtime runtime = Runtime.getRuntime();
+                            trace.append("\nheapUsed=").append(runtime.totalMemory() - runtime.freeMemory())
+                                .append(" heapMax=").append(runtime.maxMemory());
                             HLog.i(trace.toString());
                         }
                     }

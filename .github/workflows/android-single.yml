@@ -184,6 +184,12 @@ jobs:
           name: Hchat-single-release
           path: dist/${{ env.HCAT_APK_NAME }}
 
+      - name: 保存版本对应的混淆映射
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hchat-release-mapping-${{ github.sha }}
+          path: app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: warn
       - name: 发布单频道发行版
         env:
           GH_TOKEN: ${{ github.token }}

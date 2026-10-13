@@ -1134,6 +1134,26 @@ private class HchatExtraHooker(
         json.put("headTitle", title)
     }
 
+    private val timeBindDiagnosticUntil = SystemClock.uptimeMillis() + 180_000L
+    private var timeBindDiagnosticCount = 0
+    private var timeBindDiagnosticEvents = 0
+    private val timeBindDiagnostics = java.util.WeakHashMap<View, Triple<Any, Int, Long>>()
+    private fun diagnoseTimeBinding(root: View, stage: String, attempt: Int, type: Int? = null) {
+        if (SystemClock.uptimeMillis() > timeBindDiagnosticUntil || timeBindDiagnosticEvents >= 96) return
+        val token = messageDetailsBindToken(root)
+        var state = timeBindDiagnostics[root]
+        if (state?.first !== token) {
+            if (timeBindDiagnosticCount >= 24) return
+            state = Triple(token, ++timeBindDiagnosticCount, SystemClock.uptimeMillis())
+            timeBindDiagnostics[root] = state
+        }
+        val current = state ?: return
+        timeBindDiagnosticEvents++
+        t.mma.utils.HLog.i("[消息时间绑定诊断:v1] seq=${current.second} stage=$stage attempt=$attempt type=$type " +
+            "elapsedMs=${SystemClock.uptimeMillis() - current.third} row=${root.width}x${root.height} " +
+            "attached=${root.isAttachedToWindow} layoutRequested=${root.isLayoutRequested}")
+        if (stage == "inserted") timeBindDiagnostics.remove(root)
+    }
     private fun bindBottomMessageDetails(
         bindObject: Any?,
         args: Array<Any?>?,
@@ -1148,10 +1168,12 @@ private class HchatExtraHooker(
         val holderRoot = capturedRoot ?: findRootView(holder) ?: return false
         if (isScrollingContainer(holderRoot)) return false
         val root = capturedRoot ?: messageRowRoot(holderRoot)
+        diagnoseTimeBinding(root, "bind", attempt)
         messageDetailsRetryListeners.cancel(root)
         val nativeMessage = capturedMessage ?: resolveMessageFromBindArgs(args)
             ?: resolveMessageFromAdapter(bindObject, messageBindPosition(args))
         if (nativeMessage == null) {
+            diagnoseTimeBinding(root, "message_pending", attempt)
             if (attempt >= MESSAGE_DETAILS_MAX_RETRY) {
                 removeTaggedMessageDetailsViews(root)
                 logMessageDetailsFailure("message", holder, root)
@@ -1166,6 +1188,7 @@ private class HchatExtraHooker(
             ?: holder
         val label = findHolderTextView(viewTag, "timeTV", holderTimeFieldCache)
         val inserted = insertMessageDetailsLabel(root, label, viewTag, details, nativeMessage = nativeMessage)
+        diagnoseTimeBinding(root, if (inserted) "inserted" else "layout_pending", attempt, messageType)
         val cardMessage = !isCenteredNotice(details.type) &&
             !isKnownNonCardHolder(viewTag) &&
             (MessageDetailsCardHierarchy.templateHolderClass(viewTag.javaClass) != null ||
