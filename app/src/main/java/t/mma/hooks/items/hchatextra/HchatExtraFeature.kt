@@ -1354,6 +1354,7 @@ private class HchatExtraHooker(
                 label.isClickable = false
             }
         }
+        val tailDiagnostic = if (avatarAnchor == null) diagnoseTailLayout(root, label, details.type) else null
         val inserted = if (avatarAnchor != null) {
             addAvatarDetailsView(root, avatarAnchor, avatarContent, label, position, details.isSelf)
         } else {
@@ -1367,6 +1368,7 @@ private class HchatExtraHooker(
                 configuredAvatarHidden || resolvedAvatarAnchor?.hidden == true
             )
         }
+        tailDiagnostic?.invoke()
         if (appSubtype == 19 && avatarAnchor == null) {
             diagnoseForwardedTime(holder, root, bottomAnchor, "inserted=$inserted label=${label.parent?.javaClass?.name}")
         }
@@ -1385,6 +1387,71 @@ private class HchatExtraHooker(
         return inserted
     }
 
+    private var tailLayoutDiagnosticCount = 0
+    private val tailLayoutDiagnosticRows = java.util.WeakHashMap<View, Boolean>()
+    private fun diagnoseTailLayout(root: View, label: TextView, type: Int): (() -> Unit)? {
+        if (tailLayoutDiagnosticCount >= 12 || tailLayoutDiagnosticRows.containsKey(root)) return null
+        val list = root.parent as? ViewGroup ?: return null
+        if (!isScrollingContainer(list) || root.height <= 0 || list.height <= 0) return null
+        // Sample the bottommost attached row; adapter position tells whether it is the final item.
+        for (index in 0 until list.childCount) {
+            val child = list.getChildAt(index)
+            if (child !== root && child.visibility == View.VISIBLE && child.bottom > root.bottom) return null
+        }
+        tailLayoutDiagnosticRows[root] = true
+        val sequence = ++tailLayoutDiagnosticCount
+        val token = messageDetailsBindToken(root)
+        val rootRef = WeakReference(root)
+        val labelRef = WeakReference(label)
+        fun sample(stage: String) {
+            val row = rootRef.get() ?: return
+            val time = labelRef.get() ?: return
+            if (!isCurrentMessageDetailsBind(row, token)) return
+            val container = row.parent as? ViewGroup ?: return
+            if (!isScrollingContainer(container)) return
+            val rowXY = IntArray(2)
+            val listXY = IntArray(2)
+            row.getLocationOnScreen(rowXY)
+            container.getLocationOnScreen(listXY)
+            val visible = Rect()
+            container.getGlobalVisibleRect(visible)
+            val position = runCatching {
+                container.javaClass.methods.firstOrNull {
+                    it.name == "getChildAdapterPosition" && it.parameterTypes.contentEquals(arrayOf(View::class.java))
+                }?.invoke(container, row) as? Int
+            }.getOrNull()
+            val count = runCatching {
+                val adapter = container.javaClass.methods.firstOrNull {
+                    it.name == "getAdapter" && it.parameterTypes.isEmpty()
+                }?.invoke(container)
+                adapter?.javaClass?.methods?.firstOrNull {
+                    it.name == "getItemCount" && it.parameterTypes.isEmpty()
+                }?.invoke(adapter) as? Int
+            }.getOrNull()
+            val siblings = (container.parent as? ViewGroup)?.let { parent ->
+                (0 until minOf(parent.childCount, 12)).joinToString(";") { index ->
+                    val child = parent.getChildAt(index)
+                    "${child.javaClass.simpleName}:${child.top},${child.bottom},${child.height},vis=${child.visibility}"
+                }
+            }
+            logger("[末条布局诊断:v1] seq=$sequence stage=$stage type=$type " +
+                "position=$position count=$count last=${if (position != null && count != null) position == count - 1 else null} " +
+                "row=${row.top},${row.bottom},${row.height} rowScreenBottom=${rowXY[1] + row.height} " +
+                "list=${container.height} padding=${container.paddingTop},${container.paddingBottom} " +
+                "listScreenTop=${listXY[1]} viewport=$visible " +
+                "overflow=${rowXY[1] + row.height - visible.bottom} " +
+                "canScrollDown=${container.canScrollVertically(1)} " +
+                "label=${time.top},${time.bottom},${time.height},attached=${time.parent != null} " +
+                "layoutRequested=${row.isLayoutRequested},${container.isLayoutRequested} siblings={$siblings}", null)
+        }
+        sample("before")
+        return {
+            sample("afterInsert")
+            for (delay in longArrayOf(50L, 250L, 700L)) {
+                root.postDelayed({ sample("after${delay}ms") }, delay)
+            }
+        }
+    }
     private fun observeCardDetailsLayout(root: View, label: TextView) {
         messageDetailsLayoutCallbacks.observe(root, label) { currentRoot, currentLabel ->
             if (!messageDetailsConfig.enabled) return@observe
