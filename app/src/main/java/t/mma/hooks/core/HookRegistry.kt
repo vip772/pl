@@ -12,7 +12,12 @@ class HookRegistry private constructor() {
     private val unhooks = CopyOnWriteArrayList<XC_MethodHook.Unhook>()
 
     fun hook(method: Member, callback: XC_MethodHook): XC_MethodHook.Unhook {
-        val unhook = XposedBridge.hookMethod(method, callback)
+        val startedAt = android.os.SystemClock.uptimeMillis()
+        val unhook = try {
+            XposedBridge.hookMethod(method, callback)
+        } finally {
+            t.mma.utils.StartupMainThreadDiagnostic.recordOperation("hook_install", method.toString(), startedAt)
+        }
         if (unhook != null) {
             unhooks.add(unhook)
         }

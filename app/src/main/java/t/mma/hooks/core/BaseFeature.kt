@@ -25,7 +25,12 @@ abstract class BaseFeature : Feature {
     @Throws(Throwable::class)
     final override fun install(context: FeatureContext) {
         this.context = context
-        onFeatureInstall(context)
+        val startedAt = android.os.SystemClock.uptimeMillis()
+        try {
+            onFeatureInstall(context)
+        } finally {
+            t.mma.utils.StartupMainThreadDiagnostic.recordOperation("feature_install", featureId(), startedAt)
+        }
     }
 
     final override fun onDestroy(context: FeatureContext) {

@@ -652,11 +652,13 @@ object CustomNotificationRuntime {
 
     private fun installNativeNotificationMarker(context: FeatureContext) {
         val clazz = findNotificationItemClass(context) ?: return
+        val startedAt = SystemClock.uptimeMillis()
         val constructorHooks = XposedBridge.hookAllConstructors(clazz, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 markNotificationItem(param.thisObject, context.hostContext())
             }
         })
+        t.mma.utils.StartupMainThreadDiagnostic.recordOperation("constructor_hooks", clazz.name, startedAt)
         constructorHooks?.forEach { HookRegistry.get().add(it) }
         for (method in KavaReflector.declaredMethods(clazz)) {
             val types = method.parameterTypes ?: continue

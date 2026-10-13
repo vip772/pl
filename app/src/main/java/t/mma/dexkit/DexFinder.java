@@ -46,6 +46,7 @@ public class DexFinder {
     private final DexKitBridge dexKit;
     private final ClassLoader classLoader;
     private final SharedPreferences cachePrefs;
+    private final SharedPreferences chatPageCachePrefs;
     private final String runtimeCacheKey;
     private boolean resolvedAll;
 
@@ -246,6 +247,8 @@ public class DexFinder {
     public DexFinder(DexKitBridge dexKit, ClassLoader classLoader, Context hostContext) {
         this.dexKit = dexKit;
         this.classLoader = classLoader;
+        this.chatPageCachePrefs = hostContext != null
+                ? HchatStorage.preferences(hostContext, "Hchat_chat_page_cache") : null;
         this.cachePrefs = hostContext != null
                 ? HchatStorage.preferences(hostContext, CACHE_PREFS)
                 : null;
@@ -3497,13 +3500,38 @@ public class DexFinder {
         }
     }
 
-    public void resolveChatPageApi() {
+    public synchronized void resolveChatPageApi() {
+        long startedAt = android.os.SystemClock.uptimeMillis();
+        int searches = 0;
+        String cacheState = "unavailable";
+        SharedPreferences chatCache = null;
         try {
             if (chatPageStartMethod != null
                     && chatPageFragmentEnterMethod != null
                     && chatPageFragmentExitMethod != null) return;
 
+            if (cachePrefs != null && !runtimeCacheKey.isEmpty()) {
+                // Early chat-page installation precedes resolveAll/loadCache.
+                boolean sharedValid = runtimeCacheKey.equals(cachePrefs.getString(CACHE_KEY, ""));
+                if (sharedValid) {
+                    if (chatPageStartMethod == null) chatPageStartMethod = loadMethod("chatPageStartMethod");
+                    if (chatPageFragmentEnterMethod == null) chatPageFragmentEnterMethod = loadMethod("chatPageFragmentEnterMethod");
+                    if (chatPageFragmentExitMethod == null) chatPageFragmentExitMethod = loadMethod("chatPageFragmentExitMethod");
+                }
+                chatCache = chatPageCachePrefs;
+                if (runtimeCacheKey.equals(chatCache.getString(CACHE_KEY, ""))) {
+                    if (chatPageStartMethod == null) chatPageStartMethod = loadMethodSpec(chatCache.getString("start", ""));
+                    if (chatPageFragmentEnterMethod == null) chatPageFragmentEnterMethod = loadMethodSpec(chatCache.getString("enter", ""));
+                    if (chatPageFragmentExitMethod == null) chatPageFragmentExitMethod = loadMethodSpec(chatCache.getString("exit", ""));
+                }
+                if (chatPageStartMethod != null && !isChatPageStartMethod(chatPageStartMethod)) chatPageStartMethod = null;
+                if (chatPageFragmentEnterMethod != null && !isNoArgVoidMethod(chatPageFragmentEnterMethod)) chatPageFragmentEnterMethod = null;
+                if (chatPageFragmentExitMethod != null && (!isNoArgVoidMethod(chatPageFragmentExitMethod) ||
+                    chatPageFragmentEnterMethod == null || chatPageFragmentExitMethod.getDeclaringClass() != chatPageFragmentEnterMethod.getDeclaringClass())) chatPageFragmentExitMethod = null;
+                cacheState = chatPageStartMethod != null && chatPageFragmentEnterMethod != null && chatPageFragmentExitMethod != null ? "hit" : "partial_or_miss";
+            }
             if (chatPageStartMethod == null) {
+                searches++;
                 List<MethodData> methods = dexKit.findMethod(
                         mkMethodUsingStrings("try startChatting, ishow:%b userName:%s needAnim:%b"));
                 for (MethodData methodData : methods) {
@@ -3518,6 +3546,7 @@ public class DexFinder {
             }
 
             if (chatPageFragmentEnterMethod == null) {
+                searches++;
                 List<MethodData> methods = dexKit.findMethod(
                         mkMethodUsingStrings("onEnterBegin", "Chat_User"));
                 for (MethodData methodData : methods) {
@@ -3533,6 +3562,7 @@ public class DexFinder {
 
             if (chatPageFragmentExitMethod == null && chatPageFragmentEnterMethod != null) {
                 Class<?> fragmentClass = chatPageFragmentEnterMethod.getDeclaringClass();
+                searches++;
                 List<MethodData> methods = dexKit.findMethod(
                         mkMethodUsingStrings("onExitBegin"));
                 for (MethodData methodData : methods) {
@@ -3547,12 +3577,23 @@ public class DexFinder {
                 }
             }
 
+            if (chatCache != null) {
+                SharedPreferences.Editor editor = chatCache.edit();
+                if (!runtimeCacheKey.equals(chatCache.getString(CACHE_KEY, ""))) editor.clear();
+                editor.putString(CACHE_KEY, runtimeCacheKey);
+                putMethod(editor, "start", chatPageStartMethod);
+                putMethod(editor, "enter", chatPageFragmentEnterMethod);
+                putMethod(editor, "exit", chatPageFragmentExitMethod);
+                editor.apply();
+            }
             logDetail("聊天页API: start="
                     + methodName(chatPageStartMethod)
                     + " fragmentEnter=" + methodName(chatPageFragmentEnterMethod)
                     + " fragmentExit=" + methodName(chatPageFragmentExitMethod));
         } catch (Throwable e) {
             HLog.e(TAG + " resolveChatPageApi 失败: " + e.getMessage(), e);
+        } finally {
+            t.mma.utils.StartupMainThreadDiagnostic.recordOperation("chat_page_resolve", cacheState + ":searches=" + searches, startedAt);
         }
     }
 

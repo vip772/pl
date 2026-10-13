@@ -10,9 +10,19 @@ import java.util.concurrent.atomic.AtomicLong;
 /** Bounded startup heartbeat. Stack capture and formatting run off the UI thread. */
 public final class StartupMainThreadDiagnostic {
     private static final AtomicBoolean started = new AtomicBoolean();
+    private static volatile long diagnosticUntil;
+    private static final java.util.concurrent.atomic.AtomicInteger operationEvents = new java.util.concurrent.atomic.AtomicInteger();
+    public static void recordOperation(String kind, String target, long startedAt) {
+        long now = SystemClock.uptimeMillis();
+        if (now > diagnosticUntil || (now - startedAt < 20L && !"chat_page_resolve".equals(kind))) return;
+        if (operationEvents.incrementAndGet() > 96) return;
+        HLog.i("[Hchat:StartupOperation:v1] kind=" + kind + " target=" + target +
+            " elapsedMs=" + (now - startedAt) + " thread=" + Thread.currentThread().getName());
+    }
     private StartupMainThreadDiagnostic() {}
     public static void start() {
         if (!started.compareAndSet(false, true)) return;
+        diagnosticUntil = SystemClock.uptimeMillis() + 180000L;
         final Handler main = new Handler(Looper.getMainLooper());
         final Thread ui = Looper.getMainLooper().getThread();
         final AtomicLong acknowledged = new AtomicLong();
