@@ -576,11 +576,12 @@ private class HchatExtraHooker(
     }
 
     fun installMessageDetails(): Boolean {
+        val touchReady = installTailTouchHook(ViewGroup::class.java.getMethod("dispatchTouchEvent", MotionEvent::class.java))
         val itemBind = locateMessageViewBindMethod()
         val adapterBinds = locateChattingAdapterBindMethods()
         val adapterClass = locateChattingDataAdapterClass()
         val binds = (listOfNotNull(itemBind) + adapterBinds).distinct()
-        var complete = itemBind != null && adapterClass != null &&
+        var complete = touchReady && itemBind != null && adapterClass != null &&
             adapterBinds.any { it.parameterTypes.size == 2 } && adapterBinds.any { it.parameterTypes.size == 3 }
         for (bind in binds) {
             if (!hookedMethods.add(bind)) continue
@@ -1421,7 +1422,25 @@ private class HchatExtraHooker(
     private var tailPerformanceSessions = 0
     private var tailActiveListeners = 0
     private val tailRepairTokens = java.util.WeakHashMap<ViewGroup, Any>()
-    private val tailTouchMethods = mutableSetOf<Method>()
+    private val tailTouchMethods = java.util.concurrent.ConcurrentHashMap.newKeySet<Method>()
+    @Synchronized
+    private fun installTailTouchHook(touchMethod: Method): Boolean {
+        if (touchMethod in tailTouchMethods) return true
+        val hooked = runCatching {
+            HookRegistry.get().hook(touchMethod, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val event = param.args.firstOrNull() as? MotionEvent ?: return
+                    if (event.actionMasked != MotionEvent.ACTION_DOWN) return
+                    val touched = param.thisObject as? ViewGroup ?: return
+                    if (!isScrollingContainer(touched)) return
+                    tailRepairTokens.remove(touched)
+                    tailLastTouch[touched] = SystemClock.uptimeMillis()
+                }
+            })
+        }.isSuccess
+        if (hooked) tailTouchMethods.add(touchMethod)
+        return hooked
+    }
     private val tailLastTouch = java.util.WeakHashMap<ViewGroup, Long>()
     private fun prepareTailLayoutRepair(root: View): (() -> Unit)? {
         val list = root.parent as? ViewGroup ?: return null
@@ -1436,22 +1455,9 @@ private class HchatExtraHooker(
         val touchMethod = runCatching {
             list.javaClass.getMethod("dispatchTouchEvent", MotionEvent::class.java)
         }.getOrNull() ?: return null
-        if (touchMethod !in tailTouchMethods) {
-            val hooked = runCatching {
-                HookRegistry.get().hook(touchMethod, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        val event = param.args.firstOrNull() as? MotionEvent ?: return
-                        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                            val touched = param.thisObject as? ViewGroup ?: return
-                            tailRepairTokens.remove(touched)
-                            tailLastTouch[touched] = SystemClock.uptimeMillis()
-                        }
-                    }
-                })
-            }.isSuccess
-            if (!hooked) return null
-            tailTouchMethods.add(touchMethod)
-        }
+        // Common ViewGroup dispatch is installed by the background feature task.
+        // An overriding implementation retains the existing guarded fallback.
+        if (touchMethod !in tailTouchMethods && !installTailTouchHook(touchMethod)) return null
         // Do not continually extend the correction window when layout observers reinsert a label.
         if (tailRepairTokens.containsKey(list)) return null
         val repairToken = Any()

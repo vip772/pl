@@ -16,8 +16,14 @@ public final class StartupMainThreadDiagnostic {
         long now = SystemClock.uptimeMillis();
         if (now > diagnosticUntil || (now - startedAt < 20L && !"chat_page_resolve".equals(kind))) return;
         if (operationEvents.incrementAndGet() > 96) return;
-        HLog.i("[Hchat:StartupOperation:v1] kind=" + kind + " target=" + target +
-            " elapsedMs=" + (now - startedAt) + " thread=" + Thread.currentThread().getName());
+        StringBuilder operation = new StringBuilder("[Hchat:StartupOperation:v1] kind=").append(kind)
+            .append(" target=").append(target).append(" elapsedMs=").append(now - startedAt)
+            .append(" thread=").append(Thread.currentThread().getName());
+        if (Looper.myLooper() == Looper.getMainLooper() && "hook_install".equals(kind)) {
+            StackTraceElement[] callers = Thread.currentThread().getStackTrace();
+            for (int i = 0; i < Math.min(callers.length, 32); i++) operation.append("\n  at ").append(callers[i]);
+        }
+        HLog.i(operation.toString());
     }
     private StartupMainThreadDiagnostic() {}
     public static void start() {
@@ -67,6 +73,26 @@ public final class StartupMainThreadDiagnostic {
                                 trace.append("\nworker=").append(worker.getName()).append(" state=").append(worker.getState());
                                 StackTraceElement[] frames = entry.getValue();
                                 for (int i = 0; i < Math.min(frames.length, 20); i++) trace.append("\n  at ").append(frames[i]);
+                            }
+                            int hostIncluded = 0;
+                            for (java.util.Map.Entry<Thread, StackTraceElement[]> entry : threads.entrySet()) {
+                                Thread worker = entry.getKey();
+                                if (worker == ui || worker == Thread.currentThread() || worker.getName().startsWith("Hchat")) continue;
+                                if (worker.getState() == Thread.State.TIMED_WAITING || worker.getState() == Thread.State.TERMINATED) continue;
+                                boolean relevant = false;
+                                for (StackTraceElement frame : entry.getValue()) {
+                                    String owner = frame.getClassName();
+                                    if (owner.startsWith("com.tencent.wcdb.") || owner.startsWith("com.tencent.mm.plugin.lite.") ||
+                                        owner.startsWith("com.tencent.mm.feature.lite.") || owner.startsWith("org.lsposed.")) {
+                                        relevant = true;
+                                        break;
+                                    }
+                                }
+                                if (!relevant || hostIncluded >= 8) continue;
+                                hostIncluded++;
+                                trace.append("\nhostWorker=").append(worker.getName()).append(" state=").append(worker.getState());
+                                StackTraceElement[] frames = entry.getValue();
+                                for (int i = 0; i < Math.min(frames.length, 32); i++) trace.append("\n  at ").append(frames[i]);
                             }
                             Runtime runtime = Runtime.getRuntime();
                             trace.append("\nheapUsed=").append(runtime.totalMemory() - runtime.freeMemory())
