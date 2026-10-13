@@ -95,7 +95,7 @@ private class BackgroundBeautyTransparentDrawable : Drawable() {
 private class BackgroundBeautyFeedbackDrawable(private val original: Drawable) : Drawable(), Drawable.Callback {
     init { original.callback = this }
     override fun draw(canvas: Canvas) {
-        if (state.any { it == android.R.attr.state_pressed || it == android.R.attr.state_focused || it == android.R.attr.state_selected }) {
+        if (state.any { it == android.R.attr.state_pressed }) {
             original.bounds = bounds
             original.draw(canvas)
         }
@@ -312,6 +312,7 @@ private class BackgroundBeautyRuntime(
     private val ownedHooks = java.util.concurrent.CopyOnWriteArrayList<XC_MethodHook.Unhook>()
     private var surfaceMutationDepth = 0
     private val surfaceOwners = WeakHashMap<View, HostState>()
+    private val diagnosedLists = WeakHashMap<View, Boolean>()
     private val listAdapters = WeakHashMap<View, Any>()
     private val bounceColors = WeakHashMap<View, MutableMap<java.lang.reflect.Method, Int>>()
     private var restoringBounce = false
@@ -558,7 +559,7 @@ private class BackgroundBeautyRuntime(
                     val view = param.thisObject as? View ?: return@hookOnce
                     val state = surfaceOwners[view] ?: return@hookOnce
                     val snapshot = state.surfaces[view] ?: return@hookOnce
-                    if (name == "setBackgroundColor" || view.background !== snapshot.appliedBackground) {
+                    if (view.background !== snapshot.appliedBackground) {
                         snapshot.originalBackground = view.background
                         snapshot.originalTintList = view.backgroundTintList
                         snapshot.originalTintMode = view.backgroundTintMode
@@ -587,7 +588,7 @@ private class BackgroundBeautyRuntime(
             }
             return
         }
-        if (!view.javaClass.name.contains("RecyclerView")) return
+        if (!isMajorSurface(view) || view is ScrollView) return
         val adapter = KavaReflector.findMethodRecursive(view.javaClass, "getAdapter")?.let { KavaReflector.invoke(it, view) }
         if (adapter != null && listAdapters[view] !== adapter) {
             listAdapters[view] = adapter
@@ -647,12 +648,15 @@ private class BackgroundBeautyRuntime(
             snapshot.originalMinimumHeight = row.minimumHeight
         }
         setTransparentSurface(state, row, slot, preserveFeedback = true)
-        if (slot == BackgroundBeautySettings.Slot.DISCOVER || slot == BackgroundBeautySettings.Slot.ME) {
-            listOf("cgi", "cg7", "oct").forEach { name ->
-                val id = resourceId(name)
-                if (id != 0) row.findViewById<View>(id)?.let {
-                    setTransparentSurface(state, it, slot, preserveFeedback = true)
-                }
+        val queue = ArrayDeque<View>()
+        if (row is ViewGroup) for (i in 0 until row.childCount) queue.add(row.getChildAt(i))
+        var visited = 0
+        while (queue.isNotEmpty() && visited++ < 160) {
+            val child = queue.removeFirst()
+            if (isComposeSurface(child) || isBottomBar(child)) continue
+            if (child is ViewGroup) {
+                if (child.background != null) setTransparentSurface(state, child, slot, preserveFeedback = true)
+                for (i in 0 until child.childCount) queue.add(child.getChildAt(i))
             }
         }
     }
@@ -908,7 +912,12 @@ private class BackgroundBeautyRuntime(
             )
         )
         val host = resolveBackgroundHost(activity) ?: return
-        setImageSurface(state, host, slot, bitmap, opacity)
+        if (slot == BackgroundBeautySettings.Slot.CHAT) {
+            setImageSurface(state, host, slot, bitmap, opacity)
+        } else {
+            setImageSurface(state, activity.window.decorView, slot, bitmap, opacity)
+            if (host !== activity.window.decorView) setTransparentSurface(state, host, slot)
+        }
         val content = activity.findViewById<View>(android.R.id.content)
         if (content != null && content !== host) setTransparentSurface(state, content, slot)
         if (slot == BackgroundBeautySettings.Slot.CHAT) {
@@ -920,7 +929,7 @@ private class BackgroundBeautyRuntime(
         applySystemBars(state)
         if (state.lastLoggedSlot != slot) {
             state.lastLoggedSlot = slot
-            HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size}")
+            HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size} singleWindowImage=${slot != BackgroundBeautySettings.Slot.CHAT}")
         }
     }
 
@@ -947,7 +956,7 @@ private class BackgroundBeautyRuntime(
         }
         roots.filter { it.isAttachedToWindow }.forEach { root ->
             observeLayout(root)
-            setImageSurface(state, root, slot, bitmap, opacity)
+            setTransparentSurface(state, root, slot)
             var parent = root.parent as? View
             val host = resolveBackgroundHost(state.activity)
             while (parent != null && parent !== host && parent !== state.activity.window.decorView) {
@@ -1001,10 +1010,18 @@ private class BackgroundBeautyRuntime(
             }
             if (isMajorSurface(view) && slot != BackgroundBeautySettings.Slot.CHAT) {
                 homeLists[view] = slot
+                if (diagnosedLists.put(view, true) == null) {
+                    HLog.i("$TAG 主页列表: slot=${slot.key} class=${view.javaClass.name} children=${(view as? ViewGroup)?.childCount ?: 0}")
+                }
                 installRecyclerBinding(view)
                 if (view is ViewGroup) {
                     for (index in 0 until view.childCount) applyHomeRow(state, view.getChildAt(index), slot)
                 }
+            }
+            if (slot == BackgroundBeautySettings.Slot.WECHAT && view is android.widget.TextView &&
+                view.text?.toString()?.trim() == "折叠置顶聊天") {
+                val parent = view.parent as? ViewGroup
+                if (parent != null && parent !== root) setTransparentSurface(state, parent, slot, preserveFeedback = true)
             }
             if (view.id in targetIds) {
                 setTransparentSurface(state, view, slot, clearForeground = true)
@@ -1032,9 +1049,14 @@ private class BackgroundBeautyRuntime(
         var visited = 0
         while (queue.isNotEmpty() && visited++ < MAX_SCAN_NODES) {
             val view = queue.removeFirst()
-            if (view !== decor && isBottomBar(view)) continue
+            if (view !== decor && isBottomBar(view)) {
+                if (slot != BackgroundBeautySettings.Slot.CHAT && view.tag != "Hchat:FloatingBottomBar") {
+                    setTransparentSurface(state, view, slot)
+                }
+                continue
+            }
             if (view !== decor && isComposeSurface(view)) continue
-            if (view !== host && isChromeSurface(view)) {
+            if (view !== host && (isChromeSurface(view) || isSystemBarBackground(view))) {
                 setTransparentSurface(state, view, slot)
             }
             if (view is ViewGroup) {
@@ -1053,11 +1075,22 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun isMajorSurface(view: View): Boolean {
-        val name = view.javaClass.name
-        return view is AbsListView ||
-            view is ScrollView ||
-            name.contains("RecyclerView") ||
-            name.contains("NestedScrollView")
+        var type: Class<*>? = view.javaClass
+        if (view is AbsListView || view is ScrollView) return true
+        while (type != null) {
+            if (type.name.contains("RecyclerView") || type.name.contains("NestedScrollView")) return true
+            type = type.superclass
+        }
+        return false
+    }
+
+    private fun isSystemBarBackground(view: View): Boolean {
+        val id = view.id
+        if (id == View.NO_ID) return false
+        return runCatching {
+            view.resources.getResourcePackageName(id) == "android" &&
+                view.resources.getResourceEntryName(id) in setOf("statusBarBackground", "navigationBarBackground")
+        }.getOrDefault(false)
     }
 
     private fun isChromeSurface(view: View): Boolean {
@@ -1134,6 +1167,7 @@ private class BackgroundBeautyRuntime(
             view.backgroundTintList = null
             view.backgroundTintMode = null
             view.background = marker
+            marker.state = view.drawableState
             restoreSurfaceGeometry(view, snapshot)
             snapshot.appliedBackground = marker
             snapshot.appliedBitmap = null
@@ -1226,7 +1260,8 @@ private class BackgroundBeautyRuntime(
         val host = resolveBackgroundHost(state.activity)
         val content = state.activity.findViewById<View>(android.R.id.content)
         state.surfaces.entries.toList().forEach { (view, snapshot) ->
-            if (view === host || view === content || isChromeSurface(view)) {
+            if (view === state.activity.window.decorView || view === host || view === content || isChromeSurface(view) ||
+                isBottomBar(view) || isSystemBarBackground(view)) {
                 restoreSurface(view, snapshot)
                 state.surfaces.remove(view)
             }

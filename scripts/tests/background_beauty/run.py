@@ -38,12 +38,47 @@ fun main(){
  val native=PaintDrawable();val wrapper=BackgroundBeautyFeedbackDrawable(native);val canvas=Canvas()
  wrapper.draw(canvas);check(native.draws==0)
  wrapper.state=intArrayOf(android.R.attr.state_pressed);wrapper.draw(canvas);check(native.draws==1)
+ wrapper.state=intArrayOf(android.R.attr.state_focused,android.R.attr.state_selected);wrapper.draw(canvas);check(native.draws==1)
  wrapper.state=intArrayOf();wrapper.draw(canvas);check(native.draws==1)
  check(native.state.isEmpty());check(wrapper.isStateful())
- println("PASS: tap/jitter/vertical/outside/disabled/leftward pass-through, horizontal takeover and reset; normal background hidden, pressed feedback retained and released")
+ val drawer=DrawerHarness()
+ check(!drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_DOWN,5f,50f)))
+ check(drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_MOVE,40f,50f)))
+ check(drawer.cancelCount==1 && drawer.opened)
+ check(drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_MOVE,240f,50f)))
+ check(drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_UP,240f,50f)))
+ check(drawer.opened)
+ drawer.close(false)
+ check(!drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_DOWN,5f,50f)))
+ check(!drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_UP,5f,50f)))
+ check(!drawer.opened)
+ println("PASS: tap/jitter/vertical/outside/disabled/leftward pass-through, horizontal takeover and reset, production CANCEL reentry; focused/selected background hidden, pressed feedback retained and released")
 }
 '''
 }
+drawer_source = (repo/'app/src/main/java/t/mma/hooks/items/homesidepanel/HomeSidePanelDrawer.kt').read_text()
+method_start = drawer_source.index('    fun interceptEdgeTouch(')
+method_end = drawer_source.index('    private fun onPanelTouch(', method_start)
+harness = """
+class MotionEvent(val actionMasked:Int,val x:Float,val y:Float) {
+ var action=actionMasked
+ fun recycle(){}
+ companion object {const val ACTION_DOWN=0;const val ACTION_UP=1;const val ACTION_MOVE=2;const val ACTION_CANCEL=3;const val ACTION_POINTER_DOWN=5
+ fun obtain(e:MotionEvent)=MotionEvent(e.actionMasked,e.x,e.y)}
+}
+class Surface {var translationX=0f;var alpha=0f}
+internal class DrawerHarness {
+ val panelWidth=300;val panel=Surface();val scrim=Surface()
+ val edgeGesture=SidePanelEdgeGesture(24f,8f)
+ var enabled=true;var opened=false;var edgeDragging=false;var edgeStartX=0f;var dispatchingHostCancel=false;var cancelCount=0
+ val activity=Host()
+ inner class Host {val window=Win()}
+ inner class Win {val decorView=Decor()}
+ inner class Decor {fun dispatchTouchEvent(e:MotionEvent){cancelCount++;interceptEdgeTouch(MotionEvent(e.action,e.x,e.y))}}
+ fun show(animated:Boolean){opened=true}
+ fun settleOpen(){opened=true}
+ fun close(animated:Boolean){opened=false;edgeDragging=false;edgeGesture.reset()}
+""" + drawer_source[method_start:method_end] + "}"
 # Java Drawable stub avoids JVM setter collisions and matches Android's Java API.
 with tempfile.TemporaryDirectory(prefix='background-regression-') as directory:
     work=Path(directory)
@@ -69,7 +104,7 @@ public abstract class Drawable {
     subprocess.run(['javac','-d',str(work/'classes'),*map(str,work.rglob('*.java'))],check=True)
     files=[]
     for name in ['R.kt','Test.kt']:
-        p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end] if name == 'Test.kt' else ''));files.append(str(p))
+        p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end] + chr(10) + harness if name == 'Test.kt' else ''));files.append(str(p))
     (work/'PixelFormat.kt').write_text('package android.graphics\nobject PixelFormat { const val TRANSLUCENT=-3 }')
 
     prod=repo/'app/src/main/java/t/mma/hooks/items/homesidepanel/SidePanelEdgeGesture.kt'

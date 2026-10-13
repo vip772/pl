@@ -40,6 +40,7 @@ internal class HomeSidePanelDrawer(
     private val scrim = View(activity)
     private val panel = LinearLayout(activity)
     private val edgeGesture = SidePanelEdgeGesture(dp(24).toFloat(), ViewConfiguration.get(activity).scaledTouchSlop.toFloat())
+    private var dispatchingHostCancel = false
     private var edgeDragging = false
     private var edgeStartX = 0f
     private var host: ViewGroup? = null
@@ -305,6 +306,7 @@ internal class HomeSidePanelDrawer(
     }
 
     fun interceptEdgeTouch(event: MotionEvent): Boolean {
+        if (dispatchingHostCancel) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 edgeStartX = event.x
@@ -318,7 +320,9 @@ internal class HomeSidePanelDrawer(
                     edgeDragging = true
                     val cancel = MotionEvent.obtain(event)
                     cancel.action = MotionEvent.ACTION_CANCEL
-                    try { activity.window.decorView.dispatchTouchEvent(cancel) } finally { cancel.recycle() }
+                    dispatchingHostCancel = true
+                    try { activity.window.decorView.dispatchTouchEvent(cancel) }
+                    finally { dispatchingHostCancel = false; cancel.recycle() }
                     show(false)
                 }
                 panel.translationX = (-panelWidth + event.x - edgeStartX).coerceIn(-panelWidth.toFloat(), 0f)
