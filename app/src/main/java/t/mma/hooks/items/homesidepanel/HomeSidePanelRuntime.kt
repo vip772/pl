@@ -36,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = Collections.synchronizedMap(WeakHashMap<Activity, Session>())
+    private var diagnosticDispatchCount = 0
     private val hooks = ArrayList<XC_MethodHook.Unhook>()
     private val prefs = HomeSidePanelSettings.preferences(context.hostContext())
     private val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -50,12 +51,18 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         hook(launcher, "onCreate", arrayOf(Bundle::class.java)) { (it.thisObject as? Activity)?.let(::attach) }
         hook(launcher, "onResume", emptyArray()) { (it.thisObject as? Activity)?.let(::attach) }
         hook(launcher, "onDestroy", emptyArray()) { (it.thisObject as? Activity)?.let(::detach) }
-        KavaReflector.findMethodRecursive(launcher, "dispatchTouchEvent", MotionEvent::class.java)?.let { method ->
+        val dispatchMethod = KavaReflector.findMethodRecursive(launcher, "dispatchTouchEvent", MotionEvent::class.java)
+        HLog.i("[Hchat:HomeSidePanel] DIAG install dispatch=$dispatchMethod")
+        dispatchMethod?.let { method ->
             hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val activity = param.thisObject as? Activity ?: return
                     val event = param.args.firstOrNull() as? MotionEvent ?: return
-                    if (sessions[activity]?.interceptTouch(event) == true) param.setResult(true)
+                    val session = sessions[activity]
+                    if (event.actionMasked == MotionEvent.ACTION_DOWN && event.x <= 100f && diagnosticDispatchCount++ < 12) {
+                        HLog.i("[Hchat:HomeSidePanel] DIAG dispatch down x=${event.x} y=${event.y} session=${session != null}")
+                    }
+                    if (session?.interceptTouch(event) == true) param.setResult(true)
                 }
             })
         }
@@ -152,7 +159,21 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             lastHomeVisible = homeVisible
         }
 
-        fun interceptTouch(event: MotionEvent): Boolean = attached && !chatVisible && drawer.interceptEdgeTouch(event)
+        private var diagnosticGestures = 0
+        private var diagnosticMoves = 0
+        private var diagnosticEdge = false
+        fun interceptTouch(event: MotionEvent): Boolean {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
+                diagnosticEdge = event.x <= dp(40)
+                if (diagnosticEdge) diagnosticGestures++
+                diagnosticMoves = 0
+            }
+            val result = attached && !chatVisible && drawer.interceptEdgeTouch(event)
+            if (diagnosticEdge && diagnosticGestures <= 12 && (event.actionMasked != MotionEvent.ACTION_MOVE || diagnosticMoves++ < 3)) {
+                HLog.i("[Hchat:HomeSidePanel] DIAG gesture action=${event.actionMasked} x=${event.x} y=${event.y} attached=$attached chat=$chatVisible enabled=${HomeSidePanelSettings.enabled(activity)} consumed=$result")
+            }
+            return result
+        }
 
         fun setChatVisible(visible: Boolean) {
             chatVisible = visible

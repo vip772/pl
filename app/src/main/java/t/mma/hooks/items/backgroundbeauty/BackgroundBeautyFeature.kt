@@ -92,30 +92,25 @@ private class BackgroundBeautyTransparentDrawable : Drawable() {
     override fun getOpacity(): Int = PixelFormat.TRANSPARENT
 }
 
-private class BackgroundBeautyFeedbackDrawable(private val original: Drawable) : Drawable(), Drawable.Callback {
-    init { original.callback = this }
-    override fun draw(canvas: Canvas) {
-        if (state.any { it == android.R.attr.state_pressed }) {
-            original.bounds = bounds
-            original.draw(canvas)
-        }
-    }
+private class BackgroundBeautyFeedbackDrawable() : Drawable(), Drawable.Callback {
+    private val ripple = android.graphics.drawable.RippleDrawable(
+            ColorStateList.valueOf(0x30ffffff), null, ColorDrawable(Color.WHITE)
+    ).apply { callback = this@BackgroundBeautyFeedbackDrawable }
+    override fun draw(canvas: Canvas) { ripple.bounds = bounds; ripple.draw(canvas) }
     override fun isStateful(): Boolean = true
-    override fun onStateChange(state: IntArray): Boolean {
-        original.state = state
-        invalidateSelf()
-        return true
-    }
-    override fun setAlpha(alpha: Int) { original.alpha = alpha }
-    override fun setColorFilter(colorFilter: ColorFilter?) { original.colorFilter = colorFilter }
+    override fun onStateChange(state: IntArray): Boolean { ripple.state = state; invalidateSelf(); return true }
+    override fun onBoundsChange(bounds: Rect) { ripple.bounds = bounds }
+    override fun setHotspot(x: Float, y: Float) { ripple.setHotspot(x, y) }
+    override fun setHotspotBounds(left: Int, top: Int, right: Int, bottom: Int) { ripple.setHotspotBounds(left, top, right, bottom) }
+    override fun jumpToCurrentState() { ripple.jumpToCurrentState() }
+    override fun setAlpha(alpha: Int) { ripple.alpha = alpha }
+    override fun setColorFilter(colorFilter: ColorFilter?) { ripple.colorFilter = colorFilter }
     @Deprecated("Drawable opacity is not used by the background renderer")
     override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
     override fun invalidateDrawable(who: Drawable) = invalidateSelf()
     override fun scheduleDrawable(who: Drawable, what: Runnable, `when`: Long) = scheduleSelf(what, `when`)
     override fun unscheduleDrawable(who: Drawable, what: Runnable) = unscheduleSelf(what)
 }
-
-
 private class ScreenAlignedBitmapDrawable(
     bitmap: Bitmap,
     anchor: View,
@@ -312,6 +307,7 @@ private class BackgroundBeautyRuntime(
     private val ownedHooks = java.util.concurrent.CopyOnWriteArrayList<XC_MethodHook.Unhook>()
     private var surfaceMutationDepth = 0
     private val surfaceOwners = WeakHashMap<View, HostState>()
+    private val diagnosticCounts = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
     private val diagnosedLists = WeakHashMap<View, Boolean>()
     private val listAdapters = WeakHashMap<View, Any>()
     private val bounceColors = WeakHashMap<View, MutableMap<java.lang.reflect.Method, Int>>()
@@ -528,6 +524,10 @@ private class BackgroundBeautyRuntime(
                     val view = param.thisObject as? View ?: return@hookOnce
                     val activity = findActivity(view) ?: return@hookOnce
                     if (!restoringBounce && hasConfiguredBackground(activity)) {
+                        if (diagnosticCounts.computeIfAbsent("bounce:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+                            HLog.i("$TAG DIAG bounce class=${view.javaClass.name} method=$name input=${param.args[0]}")
+                            main.postDelayed({ diagnosticTree(activity, "bounce") }, 120L)
+                        }
                         bounceColors.getOrPut(view) { LinkedHashMap() }[method] = param.args[0] as Int
                         param.args[0] = Color.TRANSPARENT
                     }
@@ -560,6 +560,9 @@ private class BackgroundBeautyRuntime(
                     val state = surfaceOwners[view] ?: return@hookOnce
                     val snapshot = state.surfaces[view] ?: return@hookOnce
                     if (view.background !== snapshot.appliedBackground) {
+                        if (diagnosticCounts.computeIfAbsent("write:${view.javaClass.name}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
+                            HLog.i("$TAG DIAG rewrite class=${view.javaClass.name} setter=$name background=${view.background?.javaClass?.name}")
+                        }
                         snapshot.originalBackground = view.background
                         snapshot.originalTintList = view.backgroundTintList
                         snapshot.originalTintMode = view.backgroundTintMode
@@ -929,6 +932,7 @@ private class BackgroundBeautyRuntime(
         applySystemBars(state)
         if (state.lastLoggedSlot != slot) {
             state.lastLoggedSlot = slot
+            main.postDelayed({ diagnosticTree(activity, "after_apply") }, 600L)
             HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size} singleWindowImage=${slot != BackgroundBeautySettings.Slot.CHAT}")
         }
     }
@@ -1008,7 +1012,7 @@ private class BackgroundBeautyRuntime(
                     setTransparentSurface(state, view, slot)
                 }
             }
-            if (isMajorSurface(view) && slot != BackgroundBeautySettings.Slot.CHAT) {
+            if (isHomeContentList(view, slot)) {
                 homeLists[view] = slot
                 if (diagnosedLists.put(view, true) == null) {
                     HLog.i("$TAG 主页列表: slot=${slot.key} class=${view.javaClass.name} children=${(view as? ViewGroup)?.childCount ?: 0}")
@@ -1082,6 +1086,50 @@ private class BackgroundBeautyRuntime(
             type = type.superclass
         }
         return false
+    }
+
+    private fun isHomeContentList(view: View, slot: BackgroundBeautySettings.Slot): Boolean {
+        if (slot == BackgroundBeautySettings.Slot.CHAT) return false
+        return when (slot) {
+            BackgroundBeautySettings.Slot.WECHAT -> hasClassName(view, "com.tencent.mm.ui.conversation.ConversationListView") ||
+                hasClassName(view, "com.tencent.mm.ui.conversation.ConversationRecyclerView")
+            BackgroundBeautySettings.Slot.CONTACTS -> hasClassName(view, "com.tencent.mm.view.recyclerview.WxRecyclerView")
+            BackgroundBeautySettings.Slot.DISCOVER, BackgroundBeautySettings.Slot.ME ->
+                hasClassName(view, "com.tencent.mm.ui.widget.listview.PullDownListView")
+            else -> false
+        }
+    }
+
+    private fun diagnosticTree(activity: Activity, reason: String) {
+        if (destroyed || activity.isDestroyed || activity.isFinishing) return
+        val slot = resolveTarget(activity) ?: return
+        if (slot == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return
+        val key = "${slot.key}:$reason"
+        if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 1) return
+        val state = states[activity]
+        val window = activity.window
+        HLog.i("$TAG DIAG begin slot=${slot.key} reason=$reason bars=${window.statusBarColor}/${window.navigationBarColor} flags=${window.decorView.systemUiVisibility}")
+        val queue = ArrayDeque<Pair<View, Int>>()
+        queue.add(window.decorView to 0)
+        var count = 0
+        while (queue.isNotEmpty() && count++ < 220) {
+            val (view, depth) = queue.removeFirst()
+            val rect = android.graphics.Rect()
+            if (!view.getGlobalVisibleRect(rect)) continue
+            val id = runCatching { view.resources.getResourceName(view.id) }.getOrDefault("none")
+            val bg = view.background
+            val fg = view.foreground
+            val managed = state?.surfaces?.get(view)
+            val color = (bg as? ColorDrawable)?.color?.toUInt()?.toString(16) ?: "-"
+            val overrides = listOf("onDraw", "dispatchDraw", "draw").filter { name ->
+                KavaReflector.declaredMethods(view.javaClass).any { it.name == name }
+            }.joinToString(",")
+            HLog.i("$TAG DIAG node depth=$depth class=${view.javaClass.name} id=$id bounds=$rect alpha=${view.alpha} bg=${bg?.javaClass?.name} color=$color fg=${fg?.javaClass?.name} tint=${view.backgroundTintList} managed=${managed != null} owned=${bg === managed?.appliedBackground} draw=$overrides")
+            if (view is ViewGroup && !isComposeSurface(view)) {
+                for (i in 0 until view.childCount) queue.add(view.getChildAt(i) to depth + 1)
+            }
+        }
+        HLog.i("$TAG DIAG end slot=${slot.key} nodes=$count truncated=${queue.isNotEmpty()}")
     }
 
     private fun isSystemBarBackground(view: View): Boolean {
@@ -1162,7 +1210,7 @@ private class BackgroundBeautyRuntime(
                 (!clearForeground || view.foreground === snapshot.appliedForeground)
             ) return
             val marker: Drawable = if (preserveFeedback && snapshot.originalBackground != null) {
-                BackgroundBeautyFeedbackDrawable(snapshot.originalBackground!!)
+                BackgroundBeautyFeedbackDrawable()
             } else BackgroundBeautyTransparentDrawable()
             view.backgroundTintList = null
             view.backgroundTintMode = null

@@ -17,7 +17,7 @@ stubs = {
 object R { object attr { const val state_pressed=1; const val state_focused=2; const val state_selected=3 } }
 ''',
     'Test.kt': '''import android.graphics.*
-import android.graphics.drawable.Drawable
+import android.graphics.drawable.*
 import t.mma.hooks.items.homesidepanel.SidePanelEdgeGesture
 class PaintDrawable:Drawable() {
  var draws=0
@@ -35,12 +35,12 @@ fun main(){
  g.down(10f,200f,true);check(g.move(40f,202f));check(g.move(20f,203f));g.reset();check(!g.move(100f,203f))
  g.down(10f,200f,true);check(!g.move(-5f,200f));check(!g.move(100f,200f));g.reset()
  repeat(1000){g.down(5f,5f,true);check(!g.move(6f,6f));g.reset()}
- val native=PaintDrawable();val wrapper=BackgroundBeautyFeedbackDrawable(native);val canvas=Canvas()
+ val native=PaintDrawable();val wrapper=BackgroundBeautyFeedbackDrawable();val canvas=Canvas()
  wrapper.draw(canvas);check(native.draws==0)
- wrapper.state=intArrayOf(android.R.attr.state_pressed);wrapper.draw(canvas);check(native.draws==1)
- wrapper.state=intArrayOf(android.R.attr.state_focused,android.R.attr.state_selected);wrapper.draw(canvas);check(native.draws==1)
- wrapper.state=intArrayOf();wrapper.draw(canvas);check(native.draws==1)
- check(native.state.isEmpty());check(wrapper.isStateful())
+ wrapper.state=intArrayOf(android.R.attr.state_pressed);wrapper.draw(canvas);check(native.draws==0)
+ wrapper.state=intArrayOf(android.R.attr.state_focused,android.R.attr.state_selected);wrapper.draw(canvas);check(native.draws==0)
+ wrapper.state=intArrayOf();wrapper.draw(canvas);check(native.draws==0)
+ check(wrapper.isStateful())
  val drawer=DrawerHarness()
  check(!drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_DOWN,5f,50f)))
  check(drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_MOVE,40f,50f)))
@@ -52,7 +52,7 @@ fun main(){
  check(!drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_DOWN,5f,50f)))
  check(!drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_UP,5f,50f)))
  check(!drawer.opened)
- println("PASS: tap/jitter/vertical/outside/disabled/leftward pass-through, horizontal takeover and reset, production CANCEL reentry; focused/selected background hidden, pressed feedback retained and released")
+ println("PASS: tap/jitter/vertical/outside/disabled/leftward pass-through, horizontal takeover and reset, production CANCEL reentry; original solid background never drawn; ripple-only content and state forwarding")
 }
 '''
 }
@@ -93,6 +93,7 @@ public abstract class Drawable {
  public Callback getCallback(){return callback;} public void setCallback(Callback c){callback=c;}
  public android.graphics.Rect getBounds(){return bounds;} public void setBounds(android.graphics.Rect r){bounds=r;}
  public int[] getState(){return state;} public boolean setState(int[] s){state=s;return onStateChange(s);}
+ public void setHotspot(float x,float y){}public void setHotspotBounds(int l,int t,int r,int b){}public void jumpToCurrentState(){}protected void onBoundsChange(android.graphics.Rect r){}
  public void invalidateSelf(){}public void scheduleSelf(Runnable r,long t){}public void unscheduleSelf(Runnable r){}
 }
 ''')
@@ -101,10 +102,18 @@ public abstract class Drawable {
     # Production calls setters via Kotlin Java synthetic properties.
     j=java.read_text().replace('public abstract int getOpacity();','public abstract int getOpacity(); public int getAlpha(){return 255;}public android.graphics.ColorFilter getColorFilter(){return null;}')
     java.write_text(j)
+    extra = {
+      'android/content/res/ColorStateList.java': 'package android.content.res; public class ColorStateList {public static ColorStateList valueOf(int c){return new ColorStateList();}}',
+      'android/graphics/Color.java': 'package android.graphics; public class Color {public static final int WHITE=-1;}',
+      'android/graphics/drawable/ColorDrawable.java': 'package android.graphics.drawable; public class ColorDrawable extends Drawable {public ColorDrawable(int c){} public void draw(android.graphics.Canvas c){}public void setAlpha(int a){}public void setColorFilter(android.graphics.ColorFilter c){}public int getOpacity(){return 0;}}',
+      'android/graphics/drawable/RippleDrawable.java': 'package android.graphics.drawable; public class RippleDrawable extends ColorDrawable {public RippleDrawable(android.content.res.ColorStateList c,Drawable content,Drawable mask){super(0);if(content!=null)throw new AssertionError("solid ripple content");}}'
+    }
+    for path, content in extra.items():
+        target=work/path;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(content)
     subprocess.run(['javac','-d',str(work/'classes'),*map(str,work.rglob('*.java'))],check=True)
     files=[]
     for name in ['R.kt','Test.kt']:
-        p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end] + chr(10) + harness if name == 'Test.kt' else ''));files.append(str(p))
+        p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end].replace('ColorStateList.valueOf', 'android.content.res.ColorStateList.valueOf') + chr(10) + harness if name == 'Test.kt' else ''));files.append(str(p))
     (work/'PixelFormat.kt').write_text('package android.graphics\nobject PixelFormat { const val TRANSLUCENT=-3 }')
 
     prod=repo/'app/src/main/java/t/mma/hooks/items/homesidepanel/SidePanelEdgeGesture.kt'
