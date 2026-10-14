@@ -2032,8 +2032,13 @@ private class BackgroundBeautyRuntime(
             val location = IntArray(2)
             view.getLocationOnScreen(location)
             val bg = view.background
-            if (view.isShown && location[1] >= activity.window.decorView.height * 0.8f &&
-                bg != null && bottomEmitted++ < 16) {
+            val intersectsBottom = location[1] < activity.window.decorView.height &&
+                location[1] + view.height > activity.window.decorView.height * 0.9f
+            val nativeBackground = bg != null && bg !is BackgroundBeautyTransparentDrawable &&
+                bg !is BackgroundBeautyFeedbackDrawable && bg !is ScreenAlignedBitmapDrawable
+            val selfDraw = view.javaClass.name.contains("Background") || view.javaClass.name.contains("SurfaceView")
+            if (view.isShown && view.alpha > 0f && intersectsBottom &&
+                (nativeBackground || selfDraw || isSystemBarBackground(view)) && bottomEmitted++ < 24) {
                 HLog.i("$TAG WXBOTTOM ${wechatProbeView(view, activity)}")
             }
             if (view is ViewGroup) for (i in 0 until view.childCount) bottomQueue.add(view.getChildAt(i))

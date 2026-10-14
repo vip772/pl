@@ -35,6 +35,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = Collections.synchronizedMap(WeakHashMap<Activity, Session>())
     private val hooks = ArrayList<XC_MethodHook.Unhook>()
+    private val scrollTitleSessions = WeakHashMap<View, Session>()
+    private var restoringScrollTitles = false
     private val prefs = HomeSidePanelSettings.preferences(context.hostContext())
     private val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == HomeSidePanelSettings.KEY_ENABLE || key == HomeSidePanelSettings.KEY_SIGNATURE || key == HomeSidePanelSettings.KEY_SHORTCUTS) {
@@ -45,6 +47,18 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     fun install() {
         prefs.registerOnSharedPreferenceChangeListener(listener)
         val launcher = KavaReflector.loadClass("com.tencent.mm.ui.LauncherUI", context.hostClassLoader()) ?: return
+        KavaReflector.findMethodRecursive(View::class.java, "setVisibility", Int::class.javaPrimitiveType!!)?.let { method ->
+            hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (restoringScrollTitles) return
+                    val view = param.thisObject as? View ?: return
+                    val session = scrollTitleSessions[view] ?: return
+                    val requested = param.args.firstOrNull() as? Int ?: return
+                    session.recordScrollTitleVisibility(view, requested)
+                    if (session.hideScrollTitle()) param.args[0] = View.GONE
+                }
+            })
+        }
         hook(launcher, "onCreate", arrayOf(Bundle::class.java)) { (it.thisObject as? Activity)?.let(::attach) }
         hook(launcher, "onResume", emptyArray()) { (it.thisObject as? Activity)?.let(::attach) }
         hook(launcher, "onDestroy", emptyArray()) { (it.thisObject as? Activity)?.let(::detach) }
@@ -103,6 +117,19 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private val drawer = HomeSidePanelDrawer(activity) { close() }
         private var header: ViewGroup? = null
         private val replacedTitles = WeakHashMap<View, Int>()
+        private val scrollTitles = WeakHashMap<View, Int>()
+        fun hideScrollTitle(): Boolean = attached && !chatVisible && isWechatTab() && HomeSidePanelSettings.enabled(activity)
+        fun recordScrollTitleVisibility(view: View, requested: Int) { scrollTitles[view] = requested }
+        private fun restoreScrollTitles() {
+            restoringScrollTitles = true
+            try {
+                scrollTitles.entries.toList().forEach { (view, requested) ->
+                    scrollTitleSessions.remove(view)
+                    view.visibility = requested
+                }
+                scrollTitles.clear()
+            } finally { restoringScrollTitles = false }
+        }
         private fun restoreTitles() {
             replacedTitles.entries.toList().forEach { (view, visibility) -> view.visibility = visibility }
             replacedTitles.clear()
@@ -117,13 +144,21 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (title.visibility != View.INVISIBLE) title.visibility = View.INVISIBLE
         }
         private fun updateScrollableTitle(visible: Boolean) {
+            if (!HomeSidePanelSettings.enabled(activity)) { restoreScrollTitles(); return }
             if (!visible) return
             fun walk(view: View, inTaskBar: Boolean, depth: Int) {
                 if (depth > 24) return
                 val task = inTaskBar || view.javaClass.name == "com.tencent.mm.plugin.taskbar.ui.TaskBarContainer"
                 if (task && view is TextView && view.text?.toString()?.trim()?.matches(Regex("微信(?:[（(]\\d+[）)])?")) == true) {
-                    if (!replacedTitles.containsKey(view)) replacedTitles[view] = view.visibility
-                    if (view.visibility != View.GONE) view.visibility = View.GONE
+                    if (!scrollTitles.containsKey(view)) {
+                        scrollTitles[view] = view.visibility
+                        scrollTitleSessions[view] = this@Session
+                        HLog.i("[Hchat:HomeSidePanel] scrollTitleRegistered id=${view.id} class=${view.javaClass.name}")
+                    }
+                    if (view.visibility != View.GONE) {
+                        restoringScrollTitles = true
+                        try { view.visibility = View.GONE } finally { restoringScrollTitles = false }
+                    }
                 }
                 if (view is ViewGroup) for (i in 0 until view.childCount) walk(view.getChildAt(i), task, depth + 1)
             }
@@ -212,6 +247,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 decor.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
             }
             drawer.detach()
+            restoreScrollTitles()
             restoreTitles()
             (header?.parent as? ViewGroup)?.removeView(header)
             header = null
