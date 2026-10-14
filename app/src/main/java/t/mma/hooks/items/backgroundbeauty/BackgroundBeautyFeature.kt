@@ -356,7 +356,7 @@ private class BackgroundBeautyRuntime(
         val installed = installActivityHooks() or
             installTabHooks() or
             installFragmentHooks() or
-            installSurfaceHooks() or installBackgroundWriteHook()
+            installSurfaceHooks() or installBackgroundWriteHook() or installWechatTargetDiagnostics()
         installChatBackgroundComponentHook(allowDexSearch = false)
         if (!installed) HLog.e("$TAG 未安装任何页面 Hook")
         main.post(::refreshAll)
@@ -539,6 +539,100 @@ private class BackgroundBeautyRuntime(
         return installed
     }
 
+    private fun wechatProbeField(owner: Any?, name: String): Any? = owner?.let { KavaReflector.readField(it, name) }
+    // APK 8.0.78 class definitions and method bodies verified before installing these probes.
+    private var wechatProbeDragAt = 0L
+    private val wechatProbeCalls = java.util.concurrent.atomic.AtomicInteger()
+    private val wechatProbePending = IdentityHashMap<XC_MethodHook.MethodHookParam, Pair<Int, Activity>>()
+    private fun wechatProbeView(view: View?, activity: Activity): String {
+        if (view == null) return "null"
+        val snapshot = states[activity]?.surfaces?.get(view)
+        val location = IntArray(2)
+        view.getLocationOnScreen(location)
+        val parents = ArrayList<String>(3)
+        var parent = view.parent
+        repeat(3) {
+            val node = parent as? View ?: return@repeat
+            parents += "${node.javaClass.name}@${System.identityHashCode(node)}"
+            parent = node.parent
+        }
+        val bg = view.background
+        return "${view.javaClass.name}@${System.identityHashCode(view)} id=${view.id} bg=${bg?.javaClass?.name}:${(bg as? ColorDrawable)?.color} managed=${snapshot != null} retained=${snapshot != null && bg === snapshot.appliedBackground} slot=${snapshot?.slot} visibility=${view.visibility} shown=${view.isShown} alpha=${view.alpha} xy=${location[0]},${location[1]} size=${view.width}x${view.height} translationY=${view.translationY} parents=$parents"
+    }
+    private fun wechatProbeState(activity: Activity): String =
+        "activity=${activity.javaClass.name}@${System.identityHashCode(activity)} target=${resolveTarget(activity)} tab=${launcherTabIndices[activity]} chat=$launcherChatActive bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} barsApplied=${states[activity]?.systemBarsApplied} configured=${hasConfiguredBackground(activity)} mutation=$surfaceMutationDepth restoring=$restoringBounce pending=${pendingRefreshes.containsKey(activity)}"
+
+    private fun installWechatTargetDiagnostics(): Boolean {
+        var installed = false
+        val probes = listOf(
+            Triple("com.tencent.mm.plugin.taskbar.ui.b0", "y", arrayOf(Float::class.javaPrimitiveType!!)),
+            Triple("com.tencent.mm.plugin.taskbar.ui.TaskBarContainer", "l", emptyArray<Class<*>>()),
+            Triple("com.tencent.mm.plugin.taskbar.ui.TaskBarView", "z1", emptyArray<Class<*>>()),
+            Triple("com.tencent.mm.ui.HomeUI", "v", arrayOf(Int::class.javaPrimitiveType!!)),
+            Triple("com.tencent.mm.dynamicbackground.view.GradientColorBackgroundView", "onDraw", arrayOf(android.graphics.Canvas::class.java))
+        )
+        probes.forEach { (className, name, types) ->
+            val clazz = KavaReflector.loadClass(className, context.hostClassLoader())
+            val method = KavaReflector.findMethodRecursive(clazz, name, *types)
+            if (method == null) {
+                HLog.i("$TAG WXPROBE install class=$className method=$name found=false")
+                return@forEach
+            }
+            val hooked = hookOnce(method, before = { param ->
+                // Check the limit before any reflection or parent inspection in drawing/dragging.
+                val count = diagnosticCounts.computeIfAbsent("wx-probe:$className:$name") { java.util.concurrent.atomic.AtomicInteger() }
+                val limit = if (name == "y") 32 else if (name == "onDraw") 6 else 12
+                if (count.get() >= limit) return@hookOnce
+                if (name == "onDraw" && (wechatProbeDragAt == 0L || android.os.SystemClock.uptimeMillis() - wechatProbeDragAt > 2000L)) return@hookOnce
+                val owner = param.thisObject ?: return@hookOnce
+                val activity = when {
+                    owner is View -> findActivity(owner)
+                    name == "y" -> findActivity(wechatProbeField(owner, "g"))
+                    else -> wechatProbeField(owner, "q") as? Activity
+                } ?: return@hookOnce
+                if (activity.javaClass.name != LAUNCHER_ACTIVITY || !hasConfiguredBackground(activity)) return@hookOnce
+                if (name == "onDraw" && resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT) return@hookOnce
+                if (count.incrementAndGet() > limit) return@hookOnce
+                if (name == "y") wechatProbeDragAt = android.os.SystemClock.uptimeMillis()
+                val id = wechatProbeCalls.incrementAndGet()
+                synchronized(wechatProbePending) { wechatProbePending[param] = id to activity }
+                runCatching { logWechatProbe(id, "before", className, name, owner, param.args, activity) }
+            }, after = { param ->
+                val pending = synchronized(wechatProbePending) { wechatProbePending.remove(param) } ?: return@hookOnce
+                runCatching { logWechatProbe(pending.first, "after", className, name, param.thisObject ?: return@hookOnce, param.args, pending.second) }
+            })
+            HLog.i("$TAG WXPROBE install class=$className method=$name found=true hooked=$hooked")
+            installed = hooked || installed
+        }
+        return installed
+    }
+    private fun logWechatProbe(id: Int, phase: String, className: String, name: String, owner: Any, args: Array<out Any?>, activity: Activity) {
+        HLog.i("$TAG WXPROBE call=$id phase=$phase method=$className.$name owner=${System.identityHashCode(owner)} args=${args.filter { it is Number }} ${wechatProbeState(activity)}")
+        val nodes = ArrayList<Pair<String, View?>>()
+        when (name) {
+            "y" -> {
+                val host = wechatProbeField(owner, "f")
+                val hostClass = host?.javaClass
+                val list = KavaReflector.findMethodRecursive(hostClass, "a")?.let { runCatching { it.invoke(host) as? View }.getOrNull() }
+                HLog.i("$TAG WXPROBE call=$id phase=$phase scrollHost=${hostClass?.name} M=${wechatProbeField(owner, "M")} R=${wechatProbeField(owner, "R")}")
+                nodes += "scroll-list" to list
+                nodes += "controller-r" to (wechatProbeField(owner, "r") as? View)
+                nodes += "taskbar" to (wechatProbeField(owner, "g") as? View)
+                nodes += "dynamic-q" to (wechatProbeField(owner, "q") as? View)
+            }
+            "l", "z1" -> {
+                val container = if (name == "l") owner as? View else wechatProbeField(owner, "p2") as? View
+                nodes += "container" to container
+                nodes += "container-parent" to (container?.parent as? View)
+                listOf("f", "g", "h", "i").forEach { field -> nodes += "container-$field" to (wechatProbeField(container, field) as? View) }
+                val task = if (name == "z1") owner else wechatProbeField(owner, "e")
+                HLog.i("$TAG WXPROBE call=$id phase=$phase G2=${wechatProbeField(task, "G2")} P2=${wechatProbeField(task, "P2")} Q2=${wechatProbeField(task, "Q2")} Y2=${wechatProbeField(task, "Y2")}")
+            }
+            "onDraw" -> nodes += "gradient-draw" to (owner as? View)
+        }
+        nodes.forEach { (label, view) -> HLog.i("$TAG WXNODE call=$id phase=$phase label=$label ${wechatProbeView(view, activity)}") }
+    }
+
     private fun installSurfaceHooks(): Boolean {
         var installed = false
         val chatImageClass = KavaReflector.loadClass(CHATTING_IMAGE_BG_VIEW, context.hostClassLoader())
@@ -703,6 +797,12 @@ private class BackgroundBeautyRuntime(
             val windowClass = KavaReflector.loadClass("com.android.internal.policy.PhoneWindow", context.hostClassLoader())
             KavaReflector.findMethodRecursive(windowClass, name, Integer.TYPE)?.let { method ->
                 hookOnce(method, before = { param ->
+                    val probeWindow = param.thisObject as? android.view.Window
+                    val probeActivity = probeWindow?.let { findActivity(it.decorView) }
+                    if (probeActivity != null && probeActivity.javaClass.name == LAUNCHER_ACTIVITY &&
+                        diagnosticCounts.computeIfAbsent("wx-bar:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 24) {
+                        HLog.i("$TAG WXBAR phase=before method=$name requested=${param.args.firstOrNull()} ${wechatProbeState(probeActivity)}")
+                    }
                     if (surfaceMutationDepth != 0 || restoringBounce) return@hookOnce
                     val window = param.thisObject as? android.view.Window ?: return@hookOnce
                     val activity = findActivity(window.decorView) ?: return@hookOnce
@@ -714,6 +814,13 @@ private class BackgroundBeautyRuntime(
                             else states[activity]?.originalNavigationBarColor = hostColor
                         }
                         param.args[0] = Color.TRANSPARENT
+                    }
+                }, after = { param ->
+                    val window = param.thisObject as? android.view.Window ?: return@hookOnce
+                    val activity = findActivity(window.decorView) ?: return@hookOnce
+                    if (activity.javaClass.name == LAUNCHER_ACTIVITY &&
+                        diagnosticCounts.computeIfAbsent("wx-bar-after:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 24) {
+                        HLog.i("$TAG WXBAR phase=after method=$name effectiveArgument=${param.args.firstOrNull()} ${wechatProbeState(activity)}")
                     }
                 })
             }
@@ -1063,6 +1170,12 @@ private class BackgroundBeautyRuntime(
             val launchers = synchronized(observedActivities) { observedActivities.keys.filter { it.javaClass.name == LAUNCHER_ACTIVITY } }
             launchers.forEach { activity ->
                 HLog.i("$TAG DIAG chatTransition entered=$entered")
+                if (diagnosticCounts.computeIfAbsent("wx-chat-state") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
+                    HLog.i("$TAG WXRETURN phase=event entered=$entered ${wechatProbeState(activity)}")
+                    activity.window.decorView.postOnAnimation {
+                        if (!destroyed && !activity.isDestroyed) HLog.i("$TAG WXRETURN phase=next-frame entered=$entered ${wechatProbeState(activity)}")
+                    }
+                }
                 if (!entered) {
                     preparedRoots.entries.removeAll { it.value.first.activity === activity }
                     scheduleRefresh(activity, 1)
