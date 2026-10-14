@@ -369,6 +369,7 @@ private class BackgroundBeautyRuntime(
 
     fun destroy() {
         destroyed = true
+        decorUpdateDepth.clear()
         wechatTitleBackdrops.keys.toList().forEach { it.invalidate() }
         wechatTitleBackdrops.clear()
         wechatGlVisibility.keys.toList().forEach(::restoreWechatGl)
@@ -735,7 +736,7 @@ private class BackgroundBeautyRuntime(
                 val bg = view.background
                 val snapshot = state.surfaces[view]
                 val image = view as? ImageView
-                HLog.i("$TAG WXRENDER phase=$phase label=$label ${wechatProbeView(view, activity)} bgAlpha=${bg?.alpha} bgBounds=${bg?.bounds} callbackMatches=${bg?.callback === view} image=${image?.drawable?.javaClass?.name} imageAlpha=${image?.imageAlpha} tagView=${(view.tag as? View)?.javaClass?.name} bitmapMatch=${snapshot?.appliedBitmap === state.loadedBitmaps[BackgroundBeautySettings.Slot.WECHAT]?.bitmap}")
+                HLog.i("$TAG WXRENDER phase=$phase label=$label ${wechatProbeView(view, activity)} actualBg=${actualViewBackground(view)?.javaClass?.name} actualContains=${backgroundContains(actualViewBackground(view), bg)} bgAlpha=${bg?.alpha} bgBounds=${bg?.bounds} callbackMatches=${bg?.callback === view} image=${image?.drawable?.javaClass?.name} imageAlpha=${image?.imageAlpha} tagView=${(view.tag as? View)?.javaClass?.name} bitmapMatch=${snapshot?.appliedBitmap === state.loadedBitmaps[BackgroundBeautySettings.Slot.WECHAT]?.bitmap}")
             }
         }
         state.surfaces.entries.filter { (view, _) ->
@@ -1059,6 +1060,98 @@ private class BackgroundBeautyRuntime(
         } finally { restoringBounce = false }
     }
 
+    private val actualViewBackgroundField by lazy {
+        runCatching { View::class.java.getDeclaredField("mBackground").apply { isAccessible = true } }.getOrNull()
+    }
+    private fun actualViewBackground(view: View): Drawable? =
+        runCatching { actualViewBackgroundField?.get(view) as? Drawable }.getOrNull()
+    private fun backgroundContains(actual: Drawable?, expected: Drawable?, depth: Int = 0): Boolean {
+        if (expected == null || actual == null || depth > 4) return false
+        if (actual === expected) return true
+        if (actual is android.graphics.drawable.InsetDrawable) return backgroundContains(actual.drawable, expected, depth + 1)
+        if (actual is LayerDrawable) {
+            for (index in 0 until actual.numberOfLayers) {
+                if (backgroundContains(actual.getDrawable(index), expected, depth + 1)) return true
+            }
+        }
+        return false
+    }
+    private fun decorBackgroundApplied(view: View, expected: Drawable?): Boolean {
+        if (expected == null || view.background !== expected) return false
+        if (actualViewBackgroundField != null) return backgroundContains(actualViewBackground(view), expected)
+        // Some ROMs may disallow reading the field. Follow framework drawable wrappers as fallback.
+        var callback = expected.callback
+        repeat(6) {
+            if (callback === view) return true
+            callback = (callback as? Drawable)?.callback ?: return false
+        }
+        return false
+    }
+
+    private val decorUpdateDepth = WeakHashMap<View, Int>()
+    private fun installDecorBackgroundHook(): Boolean {
+        val clazz = KavaReflector.loadClass("com.android.internal.policy.DecorView", context.hostClassLoader()) ?: return false
+        var installed = false
+        // Both callbacks run after the framework commits its background cache fields.
+        listOf("setWindowBackground" to arrayOf(Drawable::class.java),
+            "updateBackgroundDrawable" to emptyArray<Class<*>>()).forEach { (name, types) ->
+            val method = KavaReflector.findMethodRecursive(clazz, name, *types)
+            if (method == null) {
+                HLog.i("$TAG WXDECOR install method=$name found=false")
+                return@forEach
+            }
+            val hooked = hookOnce(method, before = { param ->
+                val view = param.thisObject as? View ?: return@hookOnce
+                if (name == "setWindowBackground") decorUpdateDepth[view] = (decorUpdateDepth[view] ?: 0) + 1
+            }, after = { param ->
+                val decor = param.thisObject as? View ?: return@hookOnce
+                if (name == "setWindowBackground") {
+                    val depth = (decorUpdateDepth[decor] ?: 1) - 1
+                    if (depth == 0) decorUpdateDepth.remove(decor) else decorUpdateDepth[decor] = depth
+                }
+                if ((decorUpdateDepth[decor] ?: 0) != 0) return@hookOnce
+                if (surfaceMutationDepth != 0 || Looper.myLooper() != Looper.getMainLooper()) return@hookOnce
+                val view = param.thisObject as? View ?: return@hookOnce
+                val state = surfaceOwners[view] ?: return@hookOnce
+                if (view !== state.activity.window.decorView) return@hookOnce
+                val snapshot = state.surfaces[view] ?: return@hookOnce
+                val applied = snapshot.appliedBackground ?: return@hookOnce
+                val slot = snapshot.slot ?: return@hookOnce
+                if (slot == BackgroundBeautySettings.Slot.CHAT ||
+                    !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
+                    !BackgroundBeautyStore.hasImage(context.hostContext(), slot)) return@hookOnce
+                if (decorBackgroundApplied(view, applied)) return@hookOnce
+                val host = view.background
+                val actualBefore = actualViewBackground(view)
+                if (host !== applied) {
+                    snapshot.originalBackground = host
+                    snapshot.originalTintList = view.backgroundTintList
+                    snapshot.originalTintMode = view.backgroundTintMode
+                }
+                surfaceMutationDepth++
+                try {
+                    // A new identity also repairs a pre-existing split getter/actual state.
+                    val bitmap = snapshot.appliedBitmap
+                    val opacity = snapshot.appliedOpacity
+                    if (bitmap != null && !bitmap.isRecycled && opacity != null) {
+                        snapshot.appliedBackground = ScreenAlignedBitmapDrawable(bitmap, view, opacity,
+                            resolveThemeBackground(view.context) or (0xff shl 24))
+                    }
+                    view.backgroundTintList = null
+                    view.backgroundTintMode = null
+                    view.background = snapshot.appliedBackground
+                    restoreSurfaceGeometry(view, snapshot)
+                    view.invalidate()
+                } finally { surfaceMutationDepth-- }
+                if (diagnosticCounts.computeIfAbsent("decor-repair") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 10) {
+                    HLog.i("$TAG WXDECOR repaired method=$name getterBefore=${host?.javaClass?.name} actualBefore=${actualBefore?.javaClass?.name}:${(actualBefore as? ColorDrawable)?.color} actualAfter=${actualViewBackground(view)?.javaClass?.name} applied=${decorBackgroundApplied(view, snapshot.appliedBackground)}")
+                }
+            })
+            HLog.i("$TAG WXDECOR install method=$name hooked=$hooked")
+            installed = hooked || installed
+        }
+        return installed
+    }
     private fun installBackgroundWriteHook(): Boolean {
         var installed = false
         listOf("setBackgroundDrawable" to Drawable::class.java, "setBackgroundColor" to Integer.TYPE).forEach { (name, parameter) ->
@@ -1068,6 +1161,8 @@ private class BackgroundBeautyRuntime(
                     val view = param.thisObject as? View ?: return@hookOnce
                     val state = surfaceOwners[view] ?: return@hookOnce
                     val snapshot = state.surfaces[view] ?: return@hookOnce
+                    // DecorView.getBackground is not View.mBackground; never reenter its outer update here.
+                    if (view === state.activity.window.decorView) return@hookOnce
                     if (view.background !== snapshot.appliedBackground) {
                         if (diagnosticCounts.computeIfAbsent("write:${view.javaClass.name}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
                             HLog.i("$TAG DIAG rewrite class=${view.javaClass.name} setter=$name background=${view.background?.javaClass?.name}")
@@ -1102,6 +1197,7 @@ private class BackgroundBeautyRuntime(
                 }) || installed
             }
         }
+        installed = installDecorBackgroundHook() || installed
         listOf("setStatusBarColor", "setNavigationBarColor").forEach { name ->
             val windowClass = KavaReflector.loadClass("com.android.internal.policy.PhoneWindow", context.hostClassLoader())
             KavaReflector.findMethodRecursive(windowClass, name, Integer.TYPE)?.let { method ->
@@ -1925,7 +2021,8 @@ private class BackgroundBeautyRuntime(
             if (snapshot.slot == slot &&
                 snapshot.appliedBitmap === bitmap &&
                 snapshot.appliedOpacity == opacity &&
-                view.background === snapshot.appliedBackground
+                view.background === snapshot.appliedBackground &&
+                (view !== state.activity.window.decorView || decorBackgroundApplied(view, snapshot.appliedBackground))
             ) return
             val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity,
                 if (slot == BackgroundBeautySettings.Slot.CHAT) null else resolveThemeBackground(view.context) or (0xff shl 24))

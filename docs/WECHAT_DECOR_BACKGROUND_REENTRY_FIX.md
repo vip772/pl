@@ -1,0 +1,13 @@
+# DecorView背景重入定向修复
+
+依据9de49a2返回采样：截图层GONE且无drawable，主页/列表父链透明；DecorView getter是图片但callbackMatches=false，返回前后不变。Android14 AOSP DecorView.getBackground返回mOriginalBackgroundDrawable，实际View.mBackground可能不同。
+
+旧View.setBackgroundDrawable after回调在DecorView.updateBackgroundDrawable内部同步重挂旧图片，mLastOriginalBackgroundDrawable仍为旧图片使重入更新提前返回，外层将缓存记录为图片，实际View背景仍为原生色。setImageSurface getter身份缓存又跳过返回恢复；切页新Drawable身份触发更新。最小顺序模型复现该机制，尚非设备framework实测。
+
+改动：普通View after保护不处理DecorView；分别Hook DecorView.setWindowBackground/updateBackgroundDrawable完成阶段，外层setWindowBackground深度未归零则不修复；mutation守卫避免自身写入递归。宿主值保存到原背景快照，使用新的图片Drawable身份修复已经错位的背景。保留Insets/Layer包装，不写框架私有缓存。
+
+仅通过View.class字段反射读取真实mBackground；识别图片本体或最多4级InsetDrawable/LayerDrawable。若ROM不可读取字段，沿Drawable.callback包装链验证。setImageSurface仅在getter和实际绘制背景一致时跳过。
+
+日志WXDECOR记录方法安装和修复前后实际背景、applied判定；WXRENDER新增actualBg/actualContains。关闭功能/无图片/CHAT快照时不保护。主页位于LauncherUI内嵌聊天后方时，主页快照继续保留，与既有行为一致。不改变小程序透明化、聊天底图、列表反馈逻辑。
+
+检查：独立Kotlin类型检查、旧/新更新顺序模型、现有背景合成/波纹/手势回归、git diff --check。未本地Gradle构建或全量逆向。设备真实背景状态和最终画面仍待新包验证。
