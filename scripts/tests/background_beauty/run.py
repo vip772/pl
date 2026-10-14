@@ -19,6 +19,12 @@ object R { object attr { const val state_pressed=1; const val state_focused=2; c
     'Test.kt': '''import android.graphics.*
 import android.graphics.drawable.*
 import t.mma.hooks.items.homesidepanel.SidePanelEdgeGesture
+import java.lang.ref.WeakReference
+import android.view.View
+import kotlin.math.max
+object BackgroundBeautySettings { fun opacity(v:Float)=v.coerceIn(.1f,1f) }
+object HLog {fun i(s:String){} }
+
 class PaintDrawable:Drawable() {
  var draws=0
  override fun draw(c:Canvas){draws++}
@@ -27,6 +33,20 @@ class PaintDrawable:Drawable() {
  override fun getOpacity()=0
 }
 fun main(){
+ val renderCanvas=Canvas()
+ val render=ScreenAlignedBitmapDrawable(Bitmap(),View(),.5f,0xffeeeeee.toInt())
+ render.bounds=Rect()
+ render.onBoundsForTest()
+ render.draw(renderCanvas)
+ check(renderCanvas.operations=="base,image,")
+ check(renderCanvas.imageAlpha==127)
+ check(render.opacity==PixelFormat.OPAQUE)
+ renderCanvas.operations=""
+ render.draw(renderCanvas)
+ check(renderCanvas.operations=="base,image,")
+ val chatRender=ScreenAlignedBitmapDrawable(Bitmap(),View(),.5f)
+ chatRender.onBoundsForTest();renderCanvas.operations="";chatRender.draw(renderCanvas)
+ check(renderCanvas.operations=="image," && chatRender.opacity==PixelFormat.TRANSLUCENT)
  val g=SidePanelEdgeGesture(24f,8f)
  g.down(10f,200f,true);check(!g.move(12f,202f));g.reset()
  g.down(10f,200f,true);check(!g.move(12f,240f));check(!g.move(90f,241f));g.reset()
@@ -103,6 +123,16 @@ public abstract class Drawable {
 ''')
     for name in ['Canvas','ColorFilter','Rect']:
         p=work/('android/graphics/'+name+'.java');p.parent.mkdir(parents=True,exist_ok=True);p.write_text('package android.graphics; public class '+name+' {}')
+    render_stubs = {
+      'android/graphics/Canvas.java': 'package android.graphics; public class Canvas {public String operations="";public int imageAlpha; public void drawColor(int c){operations+="base,";}public void drawBitmap(Bitmap b,Rect src,RectF dst,Paint p){operations+="image,";imageAlpha=p.alpha;}public Rect getClipBounds(){return new Rect();}public boolean isHardwareAccelerated(){return true;}}',
+      'android/graphics/Bitmap.java': 'package android.graphics;public class Bitmap {public int getWidth(){return 100;}public int getHeight(){return 200;}public boolean isRecycled(){return false;}}',
+      'android/graphics/Rect.java': 'package android.graphics;public class Rect {public int width(){return 100;}public int height(){return 200;}}',
+      'android/graphics/RectF.java': 'package android.graphics;public class RectF {boolean empty=true;public void set(float l,float t,float r,float b){empty=false;}public boolean isEmpty(){return empty;}}',
+      'android/graphics/Paint.java': 'package android.graphics;public class Paint {public static final int ANTI_ALIAS_FLAG=1,FILTER_BITMAP_FLAG=2,DITHER_FLAG=4;public int alpha;public ColorFilter colorFilter;public Paint(int f){}public int getAlpha(){return alpha;}public void setAlpha(int a){alpha=a;}public ColorFilter getColorFilter(){return colorFilter;}public void setColorFilter(ColorFilter c){colorFilter=c;}}',
+      'android/view/View.java': 'package android.view;public class View {public int getWidth(){return 100;}public int getHeight(){return 200;}public View getRootView(){return this;}public void getLocationOnScreen(int[] a){a[0]=0;a[1]=0;}}'
+    }
+    for path, content in render_stubs.items():
+        target=work/path;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(content)
     # Production calls setters via Kotlin Java synthetic properties.
     j=java.read_text().replace('public abstract int getOpacity();','public abstract int getOpacity(); public int getAlpha(){return 255;}public android.graphics.ColorFilter getColorFilter(){return null;}')
     java.write_text(j)
@@ -117,8 +147,8 @@ public abstract class Drawable {
     subprocess.run(['javac','-d',str(work/'classes'),*map(str,work.rglob('*.java'))],check=True)
     files=[]
     for name in ['R.kt','Test.kt']:
-        p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end].replace('ColorStateList.valueOf', 'android.content.res.ColorStateList.valueOf') + chr(10) + harness if name == 'Test.kt' else ''));files.append(str(p))
-    (work/'PixelFormat.kt').write_text('package android.graphics\nobject PixelFormat { const val TRANSLUCENT=-3 }')
+        p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end].replace('ColorStateList.valueOf', 'android.content.res.ColorStateList.valueOf') + chr(10) + text[text.index('private class ScreenAlignedBitmapDrawable'):text.index('private class BackgroundBeautyRuntime')].replace('    override fun onBoundsChange(bounds: Rect) {', '    fun onBoundsForTest() { updateDestination() }\n    override fun onBoundsChange(bounds: Rect) {') + chr(10) + harness if name == 'Test.kt' else ''));files.append(str(p))
+    (work/'PixelFormat.kt').write_text('package android.graphics\nobject PixelFormat { const val TRANSLUCENT=-3;const val OPAQUE=-1 }')
 
     prod=repo/'app/src/main/java/t/mma/hooks/items/homesidepanel/SidePanelEdgeGesture.kt'
     compiler=['java','-Xmx256m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(stdlib)+':'+str(work/'classes'),'-d',str(work/'tests.jar')]

@@ -95,7 +95,7 @@ private class BackgroundBeautyTransparentDrawable : Drawable() {
 
 private class BackgroundBeautyFeedbackDrawable() : Drawable(), Drawable.Callback {
     private val ripple = android.graphics.drawable.RippleDrawable(
-            ColorStateList.valueOf(0x30ffffff), null, ColorDrawable(Color.WHITE)
+            ColorStateList.valueOf(0x40808080), null, ColorDrawable(Color.WHITE)
     ).apply { callback = this@BackgroundBeautyFeedbackDrawable }
     override fun draw(canvas: Canvas) { ripple.bounds = bounds; ripple.draw(canvas) }
     override fun isStateful(): Boolean = true
@@ -115,7 +115,8 @@ private class BackgroundBeautyFeedbackDrawable() : Drawable(), Drawable.Callback
 private class ScreenAlignedBitmapDrawable(
     bitmap: Bitmap,
     anchor: View,
-    opacity: Float
+    opacity: Float,
+    private val baseColor: Int? = null
 ) : Drawable() {
     private val bitmapRef = WeakReference(bitmap)
     private val anchorRef = WeakReference(anchor)
@@ -172,6 +173,7 @@ private class ScreenAlignedBitmapDrawable(
     override fun draw(canvas: Canvas) {
         val bitmap = bitmapRef.get()
         if (drawDiagnostics++ < 8) HLog.i("[Hchat:沉浸式背景] DIAG imageDraw bitmap=${bitmap != null} recycled=${bitmap?.isRecycled} alpha=${paint.alpha} destination=$destination clip=${canvas.clipBounds} hardware=${canvas.isHardwareAccelerated}")
+        baseColor?.let { canvas.drawColor(it) }
         if (bitmap == null || bitmap.isRecycled || destination.isEmpty) return
         canvas.drawBitmap(bitmap, null, destination, paint)
     }
@@ -187,7 +189,7 @@ private class ScreenAlignedBitmapDrawable(
     }
 
     @Deprecated("Drawable opacity is not used by the background renderer")
-    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    override fun getOpacity(): Int = if (baseColor != null) PixelFormat.OPAQUE else PixelFormat.TRANSLUCENT
 }
 
 private class BackgroundBeautyRuntime(
@@ -214,7 +216,7 @@ private class BackgroundBeautyRuntime(
         const val CHAT_BACKGROUND_COMPONENT_TAG = "MicroMsg.ChattingUI.ChattingBackgroundComponent"
         const val CHAT_BACKGROUND_COMPONENT_INIT = "initBackground:"
         const val MAX_INITIAL_REFRESHES = 2
-        const val MAX_LAUNCHER_BITMAPS = 2
+        const val MAX_LAUNCHER_BITMAPS = 4
         const val MAX_SCAN_NODES = 1200
         const val TAB_WECHAT = 0
         const val TAB_CONTACTS = 1
@@ -271,8 +273,8 @@ private class BackgroundBeautyRuntime(
         val nativeImages = IdentityHashMap<ImageView, NativeImageSnapshot>()
         val loadedBitmaps = LinkedHashMap<BackgroundBeautySettings.Slot, LoadedBitmap>(4, 0.75f, true)
         val originalSystemUiVisibility = activity.window.decorView.systemUiVisibility
-        val originalStatusBarColor = activity.window.statusBarColor
-        val originalNavigationBarColor = activity.window.navigationBarColor
+        var originalStatusBarColor = activity.window.statusBarColor
+        var originalNavigationBarColor = activity.window.navigationBarColor
         val originalNavigationBarDividerColor = if (android.os.Build.VERSION.SDK_INT >= 28) {
             activity.window.navigationBarDividerColor
         } else null
@@ -574,6 +576,15 @@ private class BackgroundBeautyRuntime(
         } else values[method] = argument
     }
     private fun restoreBounceColors(activity: Activity?) {
+        listSelectors.entries.filter { activity == null || findActivity(it.key) === activity }.toList().forEach { (list, selector) ->
+            if (list.selector is BackgroundBeautyFeedbackDrawable) list.selector = selector
+            listSelectors.remove(list)
+        }
+        listPreDraws.entries.filter { activity == null || findActivity(it.key) === activity }.toList().forEach { (list, listener) ->
+            val observer = list.viewTreeObserver
+            if (observer.isAlive) observer.removeOnPreDrawListener(listener)
+            listPreDraws.remove(list)
+        }
         frameDiagnostics.entries.filter { activity == null || it.key === activity }.toList().forEach { (owner, listener) ->
             val observer = owner.window.decorView.viewTreeObserver
             if (observer.isAlive) observer.removeOnPreDrawListener(listener)
@@ -604,24 +615,69 @@ private class BackgroundBeautyRuntime(
                         if (diagnosticCounts.computeIfAbsent("write:${view.javaClass.name}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
                             HLog.i("$TAG DIAG rewrite class=${view.javaClass.name} setter=$name background=${view.background?.javaClass?.name}")
                         }
+                        val applied = snapshot.appliedBackground
                         snapshot.originalBackground = view.background
                         snapshot.originalTintList = view.backgroundTintList
                         snapshot.originalTintMode = view.backgroundTintMode
-                        snapshot.appliedBackground = null
-                        snapshot.appliedBitmap = null
-                        snapshot.appliedOpacity = null
-                        // 保留诊断时间线，下一帧处理的时序问题先通过绘制前日志确认。
                         diagnoseTransient(state.activity, "rewrite:$name", view)
+                        if (applied != null && hasConfiguredBackground(state.activity)) {
+                            surfaceMutationDepth++
+                            try {
+                                view.backgroundTintList = null
+                                view.backgroundTintMode = null
+                                view.background = applied
+                                restoreSurfaceGeometry(view, snapshot)
+                            } finally { surfaceMutationDepth-- }
+                        }
                         scheduleRefresh(state.activity)
                     }
                 }) || installed
             }
         }
+        listOf("setStatusBarColor", "setNavigationBarColor").forEach { name ->
+            val windowClass = KavaReflector.loadClass("com.android.internal.policy.PhoneWindow", context.hostClassLoader())
+            KavaReflector.findMethodRecursive(windowClass, name, Integer.TYPE)?.let { method ->
+                hookOnce(method, before = { param ->
+                    if (surfaceMutationDepth != 0 || restoringBounce) return@hookOnce
+                    val window = param.thisObject as? android.view.Window ?: return@hookOnce
+                    val activity = findActivity(window.decorView) ?: return@hookOnce
+                    val slot = resolveTarget(activity) ?: return@hookOnce
+                    if (slot != BackgroundBeautySettings.Slot.CHAT && states[activity]?.systemBarsApplied == true && hasConfiguredBackground(activity)) {
+                        val hostColor = param.args[0] as? Int ?: return@hookOnce
+                        if (hostColor != Color.TRANSPARENT) {
+                            if (name == "setStatusBarColor") states[activity]?.originalStatusBarColor = hostColor
+                            else states[activity]?.originalNavigationBarColor = hostColor
+                        }
+                        param.args[0] = Color.TRANSPARENT
+                    }
+                })
+            }
+        }
         return installed
     }
-
+    private val dirtyBoundRows = WeakHashMap<View, Boolean>()
+    private val listSelectors = WeakHashMap<AbsListView, Drawable?>()
+    private val listPreDraws = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
     private fun installRecyclerBinding(view: View) {
+        if (view is ViewGroup && !listPreDraws.containsKey(view)) {
+            val listener = ViewTreeObserver.OnPreDrawListener {
+                if (!destroyed && view.isShown) {
+                    for (index in 0 until view.childCount) {
+                        val row = view.getChildAt(index)
+                        val owner = findActivity(view)?.let { states[it] }
+                        if (dirtyBoundRows.remove(row) == true || owner?.surfaces?.get(row) == null) applyBoundRow(view, row)
+                    }
+                }
+                true
+            }
+            listPreDraws[view] = listener
+            view.viewTreeObserver.addOnPreDrawListener(listener)
+        }
         if (view is AbsListView) {
+            if (!listSelectors.containsKey(view)) {
+                listSelectors[view] = view.selector
+                view.selector = BackgroundBeautyFeedbackDrawable()
+            }
             val adapter = view.adapter ?: return
             if (listAdapters[view] === adapter) return
             listAdapters[view] = adapter
@@ -667,6 +723,7 @@ private class BackgroundBeautyRuntime(
                 hookOnce(method, after = { param ->
                     val holder = param.args.firstOrNull() ?: return@hookOnce
                     val row = KavaReflector.readField(holder, "itemView") as? View ?: return@hookOnce
+                    dirtyBoundRows[row] = true
                     val list = row.parent as? View
                     val owner = list?.let(::findActivity) ?: findActivity(row)
                     if (owner != null) diagnoseTransient(owner, "bind:${method.name}:parent=${list?.javaClass?.name}", row)
@@ -681,7 +738,8 @@ private class BackgroundBeautyRuntime(
         if (Looper.myLooper() != Looper.getMainLooper()) return
         val slot = homeLists[list] ?: return
         val activity = findActivity(list) ?: return
-        if (resolveTarget(activity) != slot || !hasConfiguredBackground(activity)) return
+        if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
+            !BackgroundBeautyStore.hasImage(context.hostContext(), slot)) return
         val state = states[activity] ?: return
         applyHomeRow(state, row, slot)
     }
@@ -936,7 +994,6 @@ private class BackgroundBeautyRuntime(
                 it != current && it != BackgroundBeautySettings.Slot.CHAT
             } ?: return
             state.loadedBitmaps.remove(eldest)
-            restoreSlot(state, eldest)
         }
     }
 
@@ -1013,6 +1070,15 @@ private class BackgroundBeautyRuntime(
                 parent = parent.parent as? View
             }
             applyWhitelistedSurfaces(state, root, slot)
+        }
+        val neighbors = synchronized(fragmentRoots) { fragmentRoots.entries.map { it.key to it.value.get() } }
+        neighbors.forEach { (fragment, root) ->
+            val neighborSlot = slotForFragment(fragment) ?: return@forEach
+            if (neighborSlot != slot && root != null && root.isAttachedToWindow && findActivity(root) === state.activity &&
+                BackgroundBeautyStore.hasImage(context.hostContext(), neighborSlot)) {
+                setTransparentSurface(state, root, neighborSlot)
+                applyWhitelistedSurfaces(state, root, neighborSlot)
+            }
         }
     }
 
@@ -1297,7 +1363,8 @@ private class BackgroundBeautyRuntime(
                 snapshot.appliedOpacity == opacity &&
                 view.background === snapshot.appliedBackground
             ) return
-            val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity)
+            val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity,
+                if (slot == BackgroundBeautySettings.Slot.CHAT) null else resolveThemeBackground(view.context) or (0xff shl 24))
             val applied = if (slot == BackgroundBeautySettings.Slot.CHAT && opacity < 0.999f) {
                 LayerDrawable(
                     arrayOf(
@@ -1401,9 +1468,10 @@ private class BackgroundBeautyRuntime(
                 snapshot.appliedBitmap == null &&
                 snapshot.appliedBackground != null &&
                 view.background === snapshot.appliedBackground &&
+                (!preserveFeedback || snapshot.appliedBackground is BackgroundBeautyFeedbackDrawable) &&
                 (!clearForeground || view.foreground === snapshot.appliedForeground)
             ) return
-            val marker: Drawable = if (preserveFeedback && snapshot.originalBackground != null) {
+            val marker: Drawable = if (preserveFeedback) {
                 BackgroundBeautyFeedbackDrawable()
             } else BackgroundBeautyTransparentDrawable()
             view.backgroundTintList = null
@@ -1571,6 +1639,7 @@ private class BackgroundBeautyRuntime(
 
     private fun restoreSystemBars(state: HostState) {
         if (!state.systemBarsApplied) return
+        state.systemBarsApplied = false
         val window = state.activity.window
         window.decorView.systemUiVisibility =
             (window.decorView.systemUiVisibility and IMMERSIVE_FLAGS.inv()) or
