@@ -197,7 +197,11 @@ private class ScreenAlignedBitmapDrawable(
         canvas.drawBitmap(bitmap, null, destination, paint)
     }
 
+    private var alphaDiagnostics = 0
     override fun setAlpha(alpha: Int) {
+        if (alphaDiagnostics++ < 4 && alpha != paint.alpha) {
+            HLog.i("[Hchat:沉浸式背景] WXIMAGE alpha old=${paint.alpha} requested=$alpha trace=${Throwable().stackTrace.take(8).joinToString(" > ")}")
+        }
         paint.alpha = alpha.coerceIn(0, 255)
         invalidateSelf()
     }
@@ -720,11 +724,45 @@ private class BackgroundBeautyRuntime(
         wechatGradientControllers.keys.toList().filter { findActivity(it) === activity }.forEach { it.invalidate() }
         wechatTitleBackdrops.keys.toList().filter { findActivity(it) === activity }.forEach { it.invalidate() }
     }
+    private fun probeWechatReturnRender(activity: Activity, phase: String) {
+        val state = states[activity] ?: return
+        val decor = activity.window.decorView
+        val host = resolveBackgroundHost(activity)
+        listOf("decor" to decor, "host" to host,
+            "launcher" to decor.findViewById<View>(0x7f0a3e2d),
+            "snapshot" to decor.findViewById<View>(0x7f0a541c)).forEach { (label, view) ->
+            if (view != null) {
+                val bg = view.background
+                val snapshot = state.surfaces[view]
+                val image = view as? ImageView
+                HLog.i("$TAG WXRENDER phase=$phase label=$label ${wechatProbeView(view, activity)} bgAlpha=${bg?.alpha} bgBounds=${bg?.bounds} callbackMatches=${bg?.callback === view} image=${image?.drawable?.javaClass?.name} imageAlpha=${image?.imageAlpha} tagView=${(view.tag as? View)?.javaClass?.name} bitmapMatch=${snapshot?.appliedBitmap === state.loadedBitmaps[BackgroundBeautySettings.Slot.WECHAT]?.bitmap}")
+            }
+        }
+        state.surfaces.entries.filter { (view, _) ->
+            view.javaClass.name == "com.tencent.mm.ui.conversation.ConversationListView"
+        }.forEach { (list, _) ->
+            HLog.i("$TAG WXRENDER phase=$phase label=list ${wechatProbeView(list, activity)}")
+            var parent = list.parent as? View
+            repeat(6) {
+                val node = parent ?: return@repeat
+                HLog.i("$TAG WXRENDER phase=$phase label=list-parent ${wechatProbeView(node, activity)} layer=${node.layerType}")
+                parent = node.parent as? View
+            }
+        }
+    }
     private fun completeWechatReturn(activity: Activity, reason: String) {
         if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY || launcherChatActive == true || !hasConfiguredBackground(activity)) return
+        val probe = diagnosticCounts.computeIfAbsent("wx-return-render") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4
+        if (probe) probeWechatReturnRender(activity, "before:$reason")
         preparedRoots.entries.removeAll { it.value.first.activity === activity }
         applyForActivity(activity)
         invalidateWechatBackdrops(activity)
+        if (probe) {
+            probeWechatReturnRender(activity, "after:$reason")
+            activity.window.decorView.postOnAnimation {
+                if (!destroyed) probeWechatReturnRender(activity, "draw-frame:$reason")
+            }
+        }
         wechatTaskControllers.entries.toList().filter { findActivity(it.key) === activity }.forEach {
             protectWechatGl(it.value.get())
             applyWechatControllerChrome(it.value.get())
