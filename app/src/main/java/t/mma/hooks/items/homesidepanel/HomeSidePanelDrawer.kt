@@ -16,7 +16,6 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
-import android.view.ViewConfiguration
 import android.view.Window
 import android.view.animation.PathInterpolator
 import android.widget.EditText
@@ -39,10 +38,6 @@ internal class HomeSidePanelDrawer(
     private val root = FrameLayout(activity)
     private val scrim = View(activity)
     private val panel = LinearLayout(activity)
-    private val edgeGesture = SidePanelEdgeGesture(dp(72).toFloat(), ViewConfiguration.get(activity).scaledTouchSlop.toFloat())
-    private var dispatchingHostCancel = false
-    private var edgeDragging = false
-    private var edgeStartX = 0f
     private var host: ViewGroup? = null
     private var enabled = false
     private var opened = false
@@ -70,8 +65,6 @@ internal class HomeSidePanelDrawer(
         (root.parent as? ViewGroup)?.removeView(root)
         host = null
         opened = false
-        edgeDragging = false
-        edgeGesture.reset()
     }
 
     fun setAvatar(bitmap: Bitmap?) {
@@ -109,8 +102,6 @@ internal class HomeSidePanelDrawer(
 
     fun close(animated: Boolean) {
         opened = false
-        edgeDragging = false
-        edgeGesture.reset()
         if (!animated) {
             panel.animate().cancel(); scrim.animate().cancel()
             panel.translationX = -panelWidth.toFloat(); scrim.alpha = 0f; scrim.visibility = View.GONE
@@ -303,47 +294,6 @@ internal class HomeSidePanelDrawer(
         root.removeAllViews()
         panel.removeAllViews()
         host?.let { attachTo(it); setEnabled(enabled) }
-    }
-
-    fun interceptEdgeTouch(event: MotionEvent): Boolean {
-        if (dispatchingHostCancel) return false
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                edgeStartX = event.x
-                edgeDragging = false
-                edgeGesture.down(event.x, event.y, enabled && !opened)
-                return false
-            }
-            MotionEvent.ACTION_MOVE -> {
-                if (!edgeGesture.move(event.x, event.y)) return false
-                if (!edgeDragging) {
-                    edgeDragging = true
-                    val cancel = MotionEvent.obtain(event)
-                    cancel.action = MotionEvent.ACTION_CANCEL
-                    dispatchingHostCancel = true
-                    try { activity.window.decorView.dispatchTouchEvent(cancel) }
-                    finally { dispatchingHostCancel = false; cancel.recycle() }
-                    show(false)
-                }
-                panel.translationX = (-panelWidth + event.x - edgeStartX).coerceIn(-panelWidth.toFloat(), 0f)
-                scrim.alpha = .42f * (1f + panel.translationX / panelWidth)
-                return true
-            }
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                val consumed = edgeDragging
-                if (consumed) {
-                    if (event.actionMasked == MotionEvent.ACTION_UP && panel.translationX > -panelWidth * .55f) settleOpen()
-                    else close(true)
-                }
-                edgeDragging = false
-                edgeGesture.reset()
-                return consumed
-            }
-            MotionEvent.ACTION_POINTER_DOWN -> {
-                if (!edgeDragging) edgeGesture.reset()
-            }
-        }
-        return edgeDragging
     }
 
     private fun onPanelTouch(event: MotionEvent): Boolean {

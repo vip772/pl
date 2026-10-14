@@ -2381,6 +2381,8 @@ private class BackgroundBeautyRuntime(
 
     private fun applySystemBars(state: HostState) {
         val window = state.activity.window
+        surfaceMutationDepth++
+        try {
         window.decorView.systemUiVisibility =
             window.decorView.systemUiVisibility or IMMERSIVE_FLAGS
         window.statusBarColor = Color.TRANSPARENT
@@ -2392,6 +2394,14 @@ private class BackgroundBeautyRuntime(
             window.isNavigationBarContrastEnforced = false
         }
         state.systemBarsApplied = true
+        } finally { surfaceMutationDepth-- }
+        if (state.activity.javaClass.name == LAUNCHER_ACTIVITY &&
+            diagnosticCounts.computeIfAbsent("nav-state") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
+            val contrast = if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced else null
+            val navId = state.activity.resources.getIdentifier("navigationBarBackground", "id", "android")
+            val nav = if (navId != 0) window.decorView.findViewById<View>(navId) else null
+            HLog.i("$TAG WXNAV state color=${window.navigationBarColor} contrast=$contrast flags=${window.attributes.flags} ui=${window.decorView.systemUiVisibility} view=${wechatProbeView(nav, state.activity)}")
+        }
     }
 
     private fun restoreSystemBars(state: HostState) {

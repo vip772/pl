@@ -8,11 +8,9 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.Gravity
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -36,7 +34,6 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = Collections.synchronizedMap(WeakHashMap<Activity, Session>())
-    private var diagnosticDispatchCount = 0
     private val hooks = ArrayList<XC_MethodHook.Unhook>()
     private val prefs = HomeSidePanelSettings.preferences(context.hostContext())
     private val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
@@ -54,24 +51,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         hook(launcher, "onWindowFocusChanged", arrayOf(Boolean::class.javaPrimitiveType!!)) {
             if (it.args.firstOrNull() == true) (it.thisObject as? Activity)?.let(::attach)
         }
-        val dispatchMethod = KavaReflector.findMethodRecursive(launcher, "dispatchTouchEvent", MotionEvent::class.java)
-        HLog.i("[Hchat:HomeSidePanel] DIAG install dispatch=$dispatchMethod")
-        dispatchMethod?.let { method ->
-            hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val activity = param.thisObject as? Activity ?: return
-                    val event = param.args.firstOrNull() as? MotionEvent ?: return
-                    if (isLauncher(activity) && sessions[activity] == null) attachNow(activity)
-                    val session = sessions[activity]
-                    if (event.actionMasked == MotionEvent.ACTION_DOWN && event.x <= 100f && diagnosticDispatchCount++ < 12) {
-                        HLog.i("[Hchat:HomeSidePanel] DIAG dispatch down x=${event.x} y=${event.y} session=${session != null}")
-                    }
-                    if (session?.interceptTouch(event) == true) param.setResult(true)
-                }
-            })
-        }
     }
-
     private fun hook(owner: Class<*>, name: String, params: Array<Class<*>>, action: (XC_MethodHook.MethodHookParam) -> Unit) {
         KavaReflector.findMethodRecursive(owner, name, *params)?.let { method ->
             runCatching {
@@ -145,7 +125,6 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private val avatarLoading = AtomicBoolean(false)
         private var avatarUrl: String? = null
         private var lastHomeVisible: Boolean? = null
-        private val originalGestureExclusions = if (Build.VERSION.SDK_INT >= 29) decor.systemGestureExclusionRects.toList() else emptyList()
         private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener {
             if (attached) refresh()
         }
@@ -177,28 +156,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (name?.text?.toString() != currentName) name?.text = currentName
             if (status?.text?.toString() != "在线") status?.text = "在线"
             if (homeVisible) loadAvatar()
-            if (Build.VERSION.SDK_INT >= 29 && stateChanged) {
-                decor.setSystemGestureExclusionRects(
-                    if (homeVisible) originalGestureExclusions + Rect(0, 0, dp(24), decor.height.coerceAtLeast(1)) else originalGestureExclusions
-                )
-            }
             lastHomeVisible = homeVisible
-        }
-
-        private var diagnosticGestures = 0
-        private var diagnosticMoves = 0
-        private var diagnosticEdge = false
-        fun interceptTouch(event: MotionEvent): Boolean {
-            if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-                diagnosticEdge = event.x <= dp(72)
-                if (diagnosticEdge) diagnosticGestures++
-                diagnosticMoves = 0
-            }
-            val result = attached && !chatVisible && drawer.interceptEdgeTouch(event)
-            if (diagnosticEdge && diagnosticGestures <= 12 && (event.actionMasked != MotionEvent.ACTION_MOVE || diagnosticMoves++ < 3)) {
-                HLog.i("[Hchat:HomeSidePanel] DIAG gesture action=${event.actionMasked} x=${event.x} y=${event.y} attached=$attached chat=$chatVisible enabled=${HomeSidePanelSettings.enabled(activity)} density=${activity.resources.displayMetrics.density} edgePx=${dp(72)} consumed=$result")
-            }
-            return result
         }
 
         fun setChatVisible(visible: Boolean) {
@@ -213,7 +171,6 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 decor.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
             }
             drawer.detach()
-            if (Build.VERSION.SDK_INT >= 29) decor.systemGestureExclusionRects = originalGestureExclusions
             restoreTitles()
             (header?.parent as? ViewGroup)?.removeView(header)
             header = null
@@ -272,15 +229,11 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             root.addView(text, LinearLayout.LayoutParams(-2, -2))
             val lp: ViewGroup.LayoutParams = if (host is RelativeLayout) {
                 RelativeLayout.LayoutParams(-2, -2).apply {
-                    addRule(RelativeLayout.ALIGN_PARENT_START)
-                    addRule(RelativeLayout.CENTER_VERTICAL)
-                    leftMargin = dp(14)
-                    marginStart = dp(14)
+                    addRule(RelativeLayout.CENTER_IN_PARENT)
                 }
             } else {
                 LinearLayout.LayoutParams(-2, -2).apply {
-                    gravity = Gravity.CENTER_VERTICAL
-                    marginStart = dp(14)
+                    gravity = Gravity.CENTER
                 }
             }
             host.addView(root, lp)

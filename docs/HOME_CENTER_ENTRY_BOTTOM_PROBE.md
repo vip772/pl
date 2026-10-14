@@ -1,0 +1,9 @@
+# 微信标题居中入口与小程序底部诊断
+
+用户确认头像入口及静音层已修复。新要求：微信Tab头像昵称居中，沉浸背景开启/关闭均隐藏原微信标题；删除左缘右划打开侧边栏。
+
+入口使用hb RelativeLayout CENTER_IN_PARENT；原gp标题隐藏逻辑独立于背景设置保留。移除LauncherUI dispatchTouchEvent侧边栏拦截、Session边缘处理、Drawer打开拖动状态机和手势排除区；保留点击切换与已打开面板内关闭交互。更新功能说明。
+
+小程序底部紫色带：日志bars=0/0，主页底栏两层背景透明，无法确认截图中最终绘制对象。只新增WXNAV state：真实导航栏色、contrast、flags、ui与navigationBarBackground节点；不宣称底部问题已修复，不凭推断添加宿主contrast拦截。
+
+独立Kotlin类型检查和差异检查通过，未执行本地Gradle构建。需下拉完整展开时运行日志继续定位底部色带。
