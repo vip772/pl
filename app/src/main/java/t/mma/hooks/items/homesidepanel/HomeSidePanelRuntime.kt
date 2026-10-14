@@ -51,6 +51,9 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         hook(launcher, "onCreate", arrayOf(Bundle::class.java)) { (it.thisObject as? Activity)?.let(::attach) }
         hook(launcher, "onResume", emptyArray()) { (it.thisObject as? Activity)?.let(::attach) }
         hook(launcher, "onDestroy", emptyArray()) { (it.thisObject as? Activity)?.let(::detach) }
+        hook(launcher, "onWindowFocusChanged", arrayOf(Boolean::class.javaPrimitiveType!!)) {
+            if (it.args.firstOrNull() == true) (it.thisObject as? Activity)?.let(::attach)
+        }
         val dispatchMethod = KavaReflector.findMethodRecursive(launcher, "dispatchTouchEvent", MotionEvent::class.java)
         HLog.i("[Hchat:HomeSidePanel] DIAG install dispatch=$dispatchMethod")
         dispatchMethod?.let { method ->
@@ -119,6 +122,20 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private val decor = activity.window.decorView as ViewGroup
         private val drawer = HomeSidePanelDrawer(activity) { close() }
         private var header: ViewGroup? = null
+        private val replacedTitles = WeakHashMap<View, Int>()
+        private fun restoreTitles() {
+            replacedTitles.entries.toList().forEach { (view, visibility) -> view.visibility = visibility }
+            replacedTitles.clear()
+        }
+        private fun updateTitleSpace(visible: Boolean) {
+            if (!visible) { restoreTitles(); return }
+            val host = header?.parent as? ViewGroup ?: return
+            val titleId = activity.resources.getIdentifier("gp", "id", activity.packageName)
+            if (titleId == 0) return
+            val title = host.findViewById<View>(titleId) ?: return
+            if (!replacedTitles.containsKey(title)) replacedTitles[title] = title.visibility
+            if (title.visibility != View.INVISIBLE) title.visibility = View.INVISIBLE
+        }
         private var avatar: ImageView? = null
         private var name: TextView? = null
         private var status: TextView? = null
@@ -155,6 +172,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (headerVisible) ensureHeader()
             val targetVisibility = if (headerVisible) View.VISIBLE else View.GONE
             if (header?.visibility != targetVisibility) header?.visibility = targetVisibility
+            updateTitleSpace(headerVisible)
             val currentName = accountName()
             if (name?.text?.toString() != currentName) name?.text = currentName
             if (status?.text?.toString() != "在线") status?.text = "在线"
@@ -196,6 +214,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             drawer.detach()
             if (Build.VERSION.SDK_INT >= 29) decor.systemGestureExclusionRects = originalGestureExclusions
+            restoreTitles()
             (header?.parent as? ViewGroup)?.removeView(header)
             header = null
             lastHomeVisible = null
@@ -211,12 +230,14 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             headerAttempts = 0
             if (header?.parent === host) return
+            restoreTitles()
             (header?.parent as? ViewGroup)?.removeView(header)
             header = null
             val old = host.findViewWithTag<View>("hchat_home_avatar_header")
             if (old is ViewGroup) { header = old; collect(old); return }
             val root = LinearLayout(activity).apply {
                 tag = "hchat_home_avatar_header"
+                minimumHeight = dp(44)
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 isClickable = true
@@ -237,6 +258,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 textSize = 14f
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 maxLines = 1
+                maxWidth = dp(135)
+                ellipsize = android.text.TextUtils.TruncateAt.END
             }
             val st = TextView(activity).apply {
                 tag = "hchat_home_avatar_status"
@@ -263,6 +286,13 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             host.addView(root, lp)
             header = root; avatar = iv; name = nick; status = st
             HLog.i("[Hchat:HomeSidePanel] headerAttached tab=0 host=${host.javaClass.name} id=${host.id}")
+            root.post {
+                if (attached && header === root) {
+                    val rect = Rect()
+                    val visible = root.getGlobalVisibleRect(rect)
+                    HLog.i("[Hchat:HomeSidePanel] headerLayout shown=${root.isShown} visible=$visible rect=$rect size=${root.width}x${root.height}")
+                }
+            }
         }
 
         private fun collect(root: View) {
@@ -294,6 +324,12 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
         private fun findActionBarContent(root: ViewGroup): ViewGroup? {
             val pkg = root.context.packageName
+            // 8078运行树确认hb为Toolbar内全宽自定义标题，gp为文字标题，coz为右侧按钮。
+            val customId = root.context.resources.getIdentifier("hb", "id", pkg)
+            if (customId != 0) {
+                val custom = root.findViewById<View>(customId)
+                if (custom is RelativeLayout && custom.parent?.javaClass?.name?.contains("Toolbar") == true) return custom
+            }
             val id = root.context.resources.getIdentifier("ih", "id", pkg)
             if (id != 0) root.findViewById<ViewGroup>(id)?.let { return it }
             val toolbarId = root.context.resources.getIdentifier("ez", "id", pkg)

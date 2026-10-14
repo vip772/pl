@@ -1,0 +1,7 @@
+# 头像入口自定义标题宿主修复
+
+输入dcba237日志与匹配mapping。18:15:21.348 headerAttached host=Toolbar，随后sessionAttached，排除入口未创建。运行树Toolbar ef下为全宽RelativeLayout hb，内含标题gp、左侧actionbar_up_indicator和右侧coz。原查找ih/ez不匹配8078，回退到Toolbar，新增控件与现有全宽自定义子View争用Toolbar测量空间。缺少旧入口实际尺寸，不能把确切零宽或绘制遮挡作为已测事实。
+
+修改仅HomeSidePanelRuntime：优先选择日志验证的hb并验证其Toolbar父节点，使用RelativeLayout左对齐/垂直居中参数。微信Tab显示入口时隐藏gp文字标题，保留coz搜索和加号。其他Tab、聊天、关闭、detach及重挂恢复gp。昵称宽度上限135dp并省略。窗口获焦时补挂会话，不依赖首次触摸。新增headerLayout真实可见rect与尺寸日志。
+
+不修改静音层、DecorView或背景保护。独立Kotlin类型检查及差异审查；未本地Gradle构建。实际显示与点击需真机验证。
