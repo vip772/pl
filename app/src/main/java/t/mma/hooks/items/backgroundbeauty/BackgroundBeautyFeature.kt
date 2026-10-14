@@ -1770,7 +1770,10 @@ private class BackgroundBeautyRuntime(
         )
         val host = resolveBackgroundHost(activity) ?: return
         if (slot == BackgroundBeautySettings.Slot.CHAT) {
-            setImageSurface(state, host, slot, bitmap, opacity)
+            if (activity.javaClass.name != LAUNCHER_ACTIVITY) {
+                setImageSurface(state, activity.window.decorView, slot, bitmap, opacity)
+                if (host !== activity.window.decorView) setTransparentSurface(state, host, slot)
+            } else setImageSurface(state, host, slot, bitmap, opacity)
         } else {
             setImageSurface(state, activity.window.decorView, slot, bitmap, opacity)
             if (host !== activity.window.decorView) setTransparentSurface(state, host, slot)
