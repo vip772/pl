@@ -1906,25 +1906,44 @@ private class BackgroundBeautyRuntime(
             }
         }
     }
+    private fun findAncestor(start: View, className: String): View? {
+        var current: View? = start
+        while (current != null) {
+            if (current.javaClass.name == className) return current
+            current = current.parent as? View
+        }
+        return null
+    }
+    private fun findVisibleDescendant(root: View, className: String): View? {
+        val queue = ArrayDeque<View>()
+        queue.add(root)
+        var best: View? = null
+        var bestArea = 0
+        while (queue.isNotEmpty()) {
+            val view = queue.removeFirst()
+            if (view.javaClass.name == className && view.isAttachedToWindow && view.isShown) {
+                val rect = Rect()
+                val area = if (view.getGlobalVisibleRect(rect)) rect.width() * rect.height() else 0
+                if (area > bestArea) { best = view; bestArea = area }
+            }
+            if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
+        }
+        return best
+    }
     private fun applyChatChromeRoot(state: HostState, root: View) {
-        val layoutId = resourceId("bkb")
-        val layout = if (root.id == layoutId) root else root.rootView.findViewById<View>(layoutId)
-        if (layout != null && layout.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout") {
-            setTransparentSurface(state, layout, BackgroundBeautySettings.Slot.CHAT)
+        val layout = when {
+            root.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout" -> root
+            root.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooter" ->
+                findAncestor(root, "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout")
+            else -> findVisibleDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout")
+        }
+        if (layout != null) {
+            setTransparentSurface(state, layout, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
             var parent = layout.parent as? View
-            repeat(5) {
+            repeat(8) {
                 val view = parent ?: return@repeat
                 if (view.javaClass.name == "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout") {
-                    setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT)
-                    // Match floating header's explicit status-area API, saving values for restoration.
-                    listOf("setStatusBarBackgroundColor", "setStatusBarColor").forEach { name ->
-                        val setter = KavaReflector.findMethodRecursive(view.javaClass, name, Int::class.javaPrimitiveType!!) ?: return@forEach
-                        val getter = KavaReflector.findMethodRecursive(view.javaClass, name.replaceFirst("set", "get")) ?: return@forEach
-                        val values = bounceColors.getOrPut(view) { LinkedHashMap() }
-                        if (!values.containsKey(setter)) values[setter] = KavaReflector.invoke(getter, view)
-                        surfaceMutationDepth++
-                        try { KavaReflector.invoke(setter, view, Color.TRANSPARENT) } finally { surfaceMutationDepth-- }
-                    }
+                    setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
                 }
                 parent = view.parent as? View
             }
@@ -1932,10 +1951,10 @@ private class BackgroundBeautyRuntime(
         applyChatFooterTransparency(state, layout ?: root)
     }
     private fun applyChatFooterTransparency(state: HostState, root: View) {
-        val direct = root.rootView.findViewById<View>(resourceId("k52"))
-        val footer = (direct?.takeIf { hasClassName(it, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") }
-            ?: root.takeIf { hasClassName(it, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") }
-            ?: findDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter")) as? ViewGroup
+        val footer = when {
+            root.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooter" -> root
+            else -> findVisibleDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter")
+        } as? ViewGroup
         if (footer == null) {
             HLog.i("$TAG CHROMEINPUT footerMissing root=${root.javaClass.name}")
             return
@@ -1944,11 +1963,10 @@ private class BackgroundBeautyRuntime(
         val queue = ArrayDeque<View>()
         queue.add(footer)
         var visited = 0
-        while (queue.isNotEmpty() && visited++ < 160) {
+        while (queue.isNotEmpty() && visited++ < 240) {
             val view = queue.removeFirst()
             if (view is android.widget.EditText) {
                 val snapshot = surfaceSnapshot(state, view)
-                if (snapshot.appliedBackground is android.graphics.drawable.GradientDrawable && view.background === snapshot.appliedBackground) continue
                 synchronizeExternalBackground(snapshot, view)
                 val density = view.resources.displayMetrics.density
                 val outline = android.graphics.drawable.GradientDrawable().apply {
@@ -1968,7 +1986,7 @@ private class BackgroundBeautyRuntime(
                     HLog.i("$TAG CHROMEINPUT outlineApplied ${wechatProbeView(view, state.activity)}")
                 } finally { surfaceMutationDepth-- }
             } else if (view is ViewGroup) {
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT)
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
                 for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
             }
         }
@@ -2003,7 +2021,14 @@ private class BackgroundBeautyRuntime(
                 }
                 installRecyclerBinding(view)
                 if (view is ViewGroup) {
-                    for (index in 0 until view.childCount) applyHomeRow(state, view.getChildAt(index), slot)
+                    for (index in 0 until view.childCount) {
+                        val child = view.getChildAt(index)
+                        applyHomeRow(state, child, slot)
+                        if (slot == BackgroundBeautySettings.Slot.WECHAT && isOpenDesktopBottomClip(child)) {
+                            setTransparentSurface(state, child, slot, clearForeground = true)
+                            HLog.i("$TAG DESKTOPEDGE clippedRowTransparent ${wechatProbeView(child, state.activity)}")
+                        }
+                    }
                 }
             }
             if (slot == BackgroundBeautySettings.Slot.WECHAT && view is android.widget.TextView &&
@@ -2096,6 +2121,14 @@ private class BackgroundBeautyRuntime(
         return false
     }
 
+    private fun isOpenDesktopBottomClip(view: View): Boolean {
+        if (view.javaClass.name != "com.tencent.mm.ui.conversation.ConversationFolderItemView") return false
+        val activity = findActivity(view) ?: return false
+        val rect = Rect()
+        if (!view.getGlobalVisibleRect(rect) || rect.bottom < activity.window.decorView.height - 2) return false
+        val controller = wechatTaskControllers.entries.firstOrNull { findActivity(it.key) === activity }?.value?.get() ?: return false
+        return wechatProbeField(controller, "P") as? Boolean == true && rect.top > activity.window.decorView.height * 0.94f
+    }
     private fun isHomeContentList(view: View, slot: BackgroundBeautySettings.Slot): Boolean {
         if (slot == BackgroundBeautySettings.Slot.CHAT) return false
         return when (slot) {
