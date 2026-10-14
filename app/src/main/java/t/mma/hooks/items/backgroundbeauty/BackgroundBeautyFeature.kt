@@ -1771,10 +1771,8 @@ private class BackgroundBeautyRuntime(
         )
         val host = resolveBackgroundHost(activity) ?: return
         if (slot == BackgroundBeautySettings.Slot.CHAT) {
-            if (activity.javaClass.name != LAUNCHER_ACTIVITY) {
-                setImageSurface(state, activity.window.decorView, slot, bitmap, opacity)
-                if (host !== activity.window.decorView) setTransparentSurface(state, host, slot)
-            } else setImageSurface(state, host, slot, bitmap, opacity)
+            setImageSurface(state, activity.window.decorView, slot, bitmap, opacity)
+            if (host !== activity.window.decorView) setTransparentSurface(state, host, slot)
         } else {
             setImageSurface(state, activity.window.decorView, slot, bitmap, opacity)
             if (host !== activity.window.decorView) setTransparentSurface(state, host, slot)
@@ -1892,18 +1890,19 @@ private class BackgroundBeautyRuntime(
     private fun installChatChromeLifecycle() {
         listOf("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", "com.tencent.mm.pluginsdk.ui.chat.ChatFooter").forEach { className ->
             val clazz = KavaReflector.loadClass(className, context.hostClassLoader()) ?: return@forEach
-            KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let { method ->
-                hookOnce(method, after = { param ->
-                    val view = param.thisObject as? View ?: return@hookOnce
-                    if (!hasClassName(view, className)) return@hookOnce
+            val apply: (XC_MethodHook.MethodHookParam) -> Unit = { param ->
+                val view = param.thisObject as? View
+                if (view != null && hasClassName(view, className)) {
                     view.post {
                         val activity = findActivity(view) ?: return@post
                         val state = states[activity] ?: return@post
                         if (destroyed || resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return@post
                         applyChatChromeRoot(state, view)
                     }
-                })
+                }
             }
+            KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let { method -> hookOnce(method, after = apply) }
+            KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { method -> hookOnce(method, after = apply) }
         }
     }
     private fun findAncestor(start: View, className: String): View? {
@@ -2141,6 +2140,31 @@ private class BackgroundBeautyRuntime(
         }
     }
 
+    private fun applyDesktopBottomClip(state: HostState, decor: View) {
+        val height = decor.height
+        val queue = ArrayDeque<View>()
+        queue.add(decor)
+        var matched = 0
+        while (queue.isNotEmpty()) {
+            val view = queue.removeFirst()
+            if (view.javaClass.name == "com.tencent.mm.ui.conversation.ConversationFolderItemView") {
+                val rect = Rect()
+                if (view.getGlobalVisibleRect(rect) && rect.bottom >= height - 2 && rect.top > height * 0.85f) {
+                    matched++
+                    val subtree = ArrayDeque<View>()
+                    subtree.add(view)
+                    while (subtree.isNotEmpty()) {
+                        val node = subtree.removeFirst()
+                        setTransparentSurface(state, node, BackgroundBeautySettings.Slot.WECHAT, clearForeground = true)
+                        if (node is ViewGroup) for (i in 0 until node.childCount) subtree.add(node.getChildAt(i))
+                    }
+                    HLog.i("$TAG DESKTOPEDGE clippedRowTransparent ${wechatProbeView(view, state.activity)} descendants=processed")
+                }
+            }
+            if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
+        }
+        HLog.i("$TAG DESKTOPEDGE clippedRows=$matched")
+    }
     private fun probeVisibleChrome(activity: Activity, reason: String) {
         if (destroyed) return
         val decor = activity.window.decorView
@@ -2149,6 +2173,9 @@ private class BackgroundBeautyRuntime(
                 val owner = reference.get()
                 HLog.i("$TAG DESKTOPEDGE container=${wechatProbeView(container, activity)} fixed=${wechatProbeField(container, "F")} extra=${wechatProbeField(container, "I")} reserve=${wechatProbeField(container, "J")} measured=${wechatProbeField(container, "H")} open=${wechatProbeField(owner, "P")}")
             }
+        }
+        if (reason == "desktop-settled") {
+            states[activity]?.let { applyDesktopBottomClip(it, decor) }
         }
         HLog.i("$TAG CHROMEDRAW reason=$reason target=${resolveTarget(activity)} bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor}")
         val queue = ArrayDeque<View>()
@@ -2323,17 +2350,7 @@ private class BackgroundBeautyRuntime(
             ) return
             val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity,
                 if (slot == BackgroundBeautySettings.Slot.CHAT) null else resolveThemeBackground(view.context) or (0xff shl 24))
-            val applied = if (slot == BackgroundBeautySettings.Slot.CHAT && opacity < 0.999f) {
-                LayerDrawable(
-                    arrayOf(
-                        cloneDrawable(snapshot.originalBackground, view.context)
-                            ?: ColorDrawable(resolveThemeBackground(view.context)),
-                        image
-                    )
-                )
-            } else {
-                image
-            }
+            val applied = image
             view.backgroundTintList = null
             view.backgroundTintMode = null
             view.background = applied
