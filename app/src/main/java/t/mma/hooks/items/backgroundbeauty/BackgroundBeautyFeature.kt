@@ -65,6 +65,9 @@ class BackgroundBeautyFeature : BaseFeature() {
     override fun onFeatureInstall(context: FeatureContext) {
         runtime = BackgroundBeautyRuntime(context)
         runtime?.install()
+        WeChatApis.chatPage()?.let { api ->
+            trackSubscription(api.subscribe { event -> runtime?.onChatPageChanged(event.isEnter()) })
+        }
         subscribe(Events.DexReady::class.java) {
             DexInstallScheduler.schedule("$ID:chat_background", name()) {
                 runtime?.installChatBackgroundComponentHook(allowDexSearch = true) == true
@@ -592,6 +595,7 @@ private class BackgroundBeautyRuntime(
         } else values[method] = argument
     }
     private fun restoreBounceColors(activity: Activity?) {
+        pendingPageRoots.keys.removeAll { activity == null || findActivity(it) === activity }
         preparedRoots.entries.removeAll { activity == null || it.value.first.activity === activity }
         listSelectors.entries.filter { activity == null || findActivity(it.key) === activity }.toList().forEach { (list, selector) ->
             if (list.selector is BackgroundBeautyFeedbackDrawable) list.selector = selector
@@ -632,7 +636,8 @@ private class BackgroundBeautyRuntime(
                         snapshot.originalBackground = view.background
                         snapshot.originalTintList = view.backgroundTintList
                         snapshot.originalTintMode = view.backgroundTintMode
-                        if (applied != null && hasConfiguredBackground(state.activity)) {
+                        if (applied != null && prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
+                            snapshot.slot?.let { BackgroundBeautyStore.hasImage(context.hostContext(), it) } == true) {
                             surfaceMutationDepth++
                             try {
                                 view.backgroundTintList = null
@@ -721,6 +726,17 @@ private class BackgroundBeautyRuntime(
         if (view is ViewGroup && !listPreDraws.containsKey(view)) {
             val listener = ViewTreeObserver.OnPreDrawListener {
                 if (!destroyed && view.isShown) {
+                    if (view.childCount > 0) {
+                        val ready = pendingPageRoots.keys.firstOrNull { isDescendantOf(view, it) }
+                        if (ready != null) {
+                            pendingPageRoots.remove(ready)
+                            findActivity(view)?.let { activity ->
+                                val state = states[activity]
+                                val slot = homeLists[view]
+                                if (state != null && slot != null) preparePage(state, ready, slot)
+                            }
+                        }
+                    }
                     for (index in 0 until view.childCount) {
                         val row = view.getChildAt(index)
                         val owner = findActivity(view)?.let { states[it] }
@@ -992,6 +1008,20 @@ private class BackgroundBeautyRuntime(
         }
     }
 
+    private var launcherChatActive: Boolean? = null
+    fun onChatPageChanged(entered: Boolean) {
+        main.post {
+            launcherChatActive = entered
+            val launchers = synchronized(observedActivities) { observedActivities.keys.filter { it.javaClass.name == LAUNCHER_ACTIVITY } }
+            launchers.forEach { activity ->
+                HLog.i("$TAG DIAG chatTransition entered=$entered")
+                if (!entered) {
+                    preparedRoots.entries.removeAll { it.value.first.activity === activity }
+                    scheduleRefresh(activity, 1)
+                }
+            }
+        }
+    }
     private fun applyForActivity(activity: Activity) {
         if (destroyed || activity.isFinishing || activity.isDestroyed) return
         if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) {
@@ -1003,6 +1033,8 @@ private class BackgroundBeautyRuntime(
             return
         }
         if (!BackgroundBeautyStore.hasImage(context.hostContext(), slot)) {
+            // LauncherUI keeps homepage behind its embedded chatting Fragment. Do not restore it during navigation.
+            if (slot == BackgroundBeautySettings.Slot.CHAT && activity.javaClass.name == LAUNCHER_ACTIVITY) return
             restoreBounceColors(activity)
             synchronized(states) { states[activity] }?.let { state ->
                 restoreSlot(state, slot)
@@ -1102,6 +1134,15 @@ private class BackgroundBeautyRuntime(
         }
     }
 
+    private val pendingPageRoots = WeakHashMap<View, BackgroundBeautySettings.Slot>()
+    private fun isDescendantOf(view: View, root: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            if (current === root) return true
+            current = current.parent as? View
+        }
+        return false
+    }
     private val preparedRoots = WeakHashMap<View, Pair<HostState, Int>>()
     private fun preparePage(state: HostState, root: View, slot: BackgroundBeautySettings.Slot) {
         val revision = prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)
@@ -1109,7 +1150,13 @@ private class BackgroundBeautyRuntime(
         if (prepared?.first === state && prepared.second == revision) return
         val started = android.os.SystemClock.uptimeMillis()
         applyWhitelistedSurfaces(state, root, slot)
-        preparedRoots[root] = state to revision
+        val pendingList = homeLists.entries.any { (list, listSlot) ->
+            listSlot == slot && list is ViewGroup && list.childCount == 0 && isDescendantOf(list, root)
+        }
+        if (!pendingList) preparedRoots[root] = state to revision
+        else {
+            pendingPageRoots[root] = slot
+        }
         if (diagnosticCounts.computeIfAbsent("prepare:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
             HLog.i("$TAG DIAG prepare slot=${slot.key} elapsedMs=${android.os.SystemClock.uptimeMillis() - started}")
         }
@@ -1377,6 +1424,24 @@ private class BackgroundBeautyRuntime(
         if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW) ||
             view.javaClass.name == "com.tencent.mm.ui.FrostedContentView" || view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") initializedChrome[view] = true
         if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW)) {
+            KavaReflector.findMethodRecursive(view.javaClass, "a", View::class.java, Integer.TYPE)?.let { method ->
+                hookOnce(method, before = { param ->
+                    val bounce = param.thisObject as? View ?: return@hookOnce
+                    val owner = findActivity(bounce) ?: return@hookOnce
+                    val slotForBounce = surfaceOwners[bounce]?.surfaces?.get(bounce)?.slot ?: return@hookOnce
+                    if (restoringBounce || !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
+                        !BackgroundBeautyStore.hasImage(context.hostContext(), slotForBounce)) return@hookOnce
+                    if (diagnosticCounts.computeIfAbsent("bounce-offset") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
+                        val colors = listOf("MStart2EndBg", "MEnd2StartBg", "MStart2EndBgByActionBar", "MEnd2StartBgByNavigationBar").joinToString(",") { property ->
+                            val getter = KavaReflector.findMethodRecursive(bounce.javaClass, "get$property")
+                            val drawable = getter?.let { KavaReflector.invoke(it, bounce) } as? Drawable
+                            "$property=${drawable?.javaClass?.name}:${(drawable as? ColorDrawable)?.color}"
+                        }
+                        val backdrop = KavaReflector.readField(bounce, "G") as? View
+                        HLog.i("$TAG DIAG bounceOffset offset=${param.args.getOrNull(1)} colors=$colors backdrop=${backdrop?.background?.javaClass?.name} managed=${backdrop?.let { surfaceOwners.containsKey(it) }}")
+                    }
+                })
+            }
             val activity = findActivity(view)
             val state = activity?.let { states[it] }
             val backdrop = KavaReflector.readField(view, "G") as? View
@@ -1712,7 +1777,7 @@ private class BackgroundBeautyRuntime(
         }
         if (name != LAUNCHER_ACTIVITY && !name.endsWith("LauncherUI")) return null
         val fragment = currentFragment(activity)
-        if (fragment?.javaClass?.name?.contains("chatting", ignoreCase = true) == true) {
+        if (launcherChatActive == true || (launcherChatActive == null && fragment?.javaClass?.name?.contains("chatting", ignoreCase = true) == true)) {
             return BackgroundBeautySettings.Slot.CHAT
         }
         return currentLauncherSlot(activity)
