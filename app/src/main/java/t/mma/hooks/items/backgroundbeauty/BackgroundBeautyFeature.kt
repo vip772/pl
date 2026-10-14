@@ -224,6 +224,8 @@ private class BackgroundBeautyRuntime(
         const val TAG = "[Hchat:沉浸式背景]"
         const val CHAT_ACTIVITY = "com.tencent.mm.ui.chatting.ChattingUI"
         const val LAUNCHER_ACTIVITY = "com.tencent.mm.ui.LauncherUI"
+        const val BASE_CONVERSATION_ACTIVITY = "com.tencent.mm.ui.conversation.BaseConversationUI"
+        const val CHAT_CONTAINER = "com.tencent.mm.ui.tools.TestTimeForChatting"
         const val MAIN_TAB_CLASS = "com.tencent.mm.ui.MainTabUI"
         const val BOTTOM_TAB_CLASS = "com.tencent.mm.ui.LauncherUIBottomTabView"
         const val CHATTING_IMAGE_BG_VIEW = "com.tencent.mm.ui.chatting.ChattingImageBGView"
@@ -406,7 +408,7 @@ private class BackgroundBeautyRuntime(
 
     private fun installActivityHooks(): Boolean {
         var installed = false
-        listOf(CHAT_ACTIVITY, LAUNCHER_ACTIVITY).forEach { className ->
+        listOf(CHAT_ACTIVITY, LAUNCHER_ACTIVITY, BASE_CONVERSATION_ACTIVITY).forEach { className ->
             val clazz = KavaReflector.loadClass(className, context.hostClassLoader())
                 ?: return@forEach
             KavaReflector.findMethodRecursive(clazz, "onCreate", Bundle::class.java)?.let { method ->
@@ -611,7 +613,7 @@ private class BackgroundBeautyRuntime(
         return "${view.javaClass.name}@${System.identityHashCode(view)} id=${view.id} bg=${bg?.javaClass?.name}:${(bg as? ColorDrawable)?.color} managed=${snapshot != null} retained=${snapshot != null && bg === snapshot.appliedBackground} slot=${snapshot?.slot} visibility=${view.visibility} shown=${view.isShown} alpha=${view.alpha} xy=${location[0]},${location[1]} size=${view.width}x${view.height} translationY=${view.translationY} parents=$parents"
     }
     private fun wechatProbeState(activity: Activity): String =
-        "activity=${activity.javaClass.name}@${System.identityHashCode(activity)} target=${resolveTarget(activity)} tab=${launcherTabIndices[activity]} chat=$launcherChatActive bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} barsApplied=${states[activity]?.systemBarsApplied} configured=${hasConfiguredBackground(activity)} mutation=$surfaceMutationDepth restoring=$restoringBounce pending=${pendingRefreshes.containsKey(activity)}"
+        "activity=${activity.javaClass.name}@${System.identityHashCode(activity)} target=${resolveTarget(activity)} tab=${launcherTabIndices[activity]} chat=${resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT} bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} barsApplied=${states[activity]?.systemBarsApplied} configured=${hasConfiguredBackground(activity)} mutation=$surfaceMutationDepth restoring=$restoringBounce pending=${pendingRefreshes.containsKey(activity)}"
 
     private fun installWechatTargetDiagnostics(): Boolean {
         var installed = false
@@ -791,7 +793,7 @@ private class BackgroundBeautyRuntime(
         }
     }
     private fun completeWechatReturn(activity: Activity, reason: String) {
-        if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY || launcherChatActive == true || !hasConfiguredBackground(activity)) return
+        if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY || resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return
         val probe = diagnosticCounts.computeIfAbsent("wx-return-render") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4
         if (probe) probeWechatReturnRender(activity, "before:$reason")
         preparedRoots.entries.removeAll { it.value.first.activity === activity }
@@ -929,7 +931,10 @@ private class BackgroundBeautyRuntime(
                     if (view.javaClass.name != "com.tencent.mm.ui.tools.TestTimeForChatting" || view.visibility != View.GONE) return
                     findActivity(view)?.let { activity ->
                         activity.window.decorView.postOnAnimation {
-                            if (!destroyed && view.visibility == View.GONE) completeWechatReturn(activity, "chat-container-hidden")
+                            if (!destroyed && view.visibility == View.GONE) {
+                                if (activity.javaClass.name == LAUNCHER_ACTIVITY) completeWechatReturn(activity, "chat-container-hidden")
+                                else if (isConversationActivity(activity)) scheduleRefresh(activity, 1)
+                            }
                         }
                     }
                 }
@@ -985,7 +990,7 @@ private class BackgroundBeautyRuntime(
                 val chatView = wechatProbeField(chatUi, "c") as? View ?: return@hookOnce
                 if (chatView.visibility != View.GONE) return@hookOnce
                 val activity = findActivity(chatView) ?: return@hookOnce
-                if (activity.javaClass.name != LAUNCHER_ACTIVITY || launcherChatActive == true || !hasConfiguredBackground(activity)) return@hookOnce
+                if (activity.javaClass.name != LAUNCHER_ACTIVITY || resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return@hookOnce
                 preparedRoots.entries.removeAll { it.value.first.activity === activity }
                 applyForActivity(activity)
                 HLog.i("$TAG WXFIX chatAnimationEnd ${wechatProbeState(activity)}")
@@ -1654,13 +1659,12 @@ private class BackgroundBeautyRuntime(
         }
     }
 
-    private var launcherChatActive: Boolean? = null
     fun onChatPageChanged(entered: Boolean) {
         main.post {
-            launcherChatActive = entered
             val launchers = synchronized(observedActivities) { observedActivities.keys.filter { it.javaClass.name == LAUNCHER_ACTIVITY } }
             launchers.forEach { activity ->
                 HLog.i("$TAG DIAG chatTransition entered=$entered")
+                scheduleRefresh(activity, 1)
                 invalidateWechatBackdrops(activity)
                 if (diagnosticCounts.computeIfAbsent("wx-chat-state") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
                     HLog.i("$TAG WXRETURN phase=event entered=$entered ${wechatProbeState(activity)}")
@@ -1683,7 +1687,12 @@ private class BackgroundBeautyRuntime(
             return
         }
         val slot = resolveTarget(activity) ?: run {
-            clearActivity(activity)
+            val animating = states[activity]?.surfaces?.keys?.any(::hasRunningChatAnimation) == true
+            if (animating) {
+                // BaseConversationUI marks the container GONE before running its exit animation.
+                // Preserve its image until the last animation frame has been drawn.
+                scheduleRefresh(activity)
+            } else clearActivity(activity)
             return
         }
         if (!BackgroundBeautyStore.hasImage(context.hostContext(), slot)) {
@@ -1792,17 +1801,25 @@ private class BackgroundBeautyRuntime(
         )
         val host = resolveBackgroundHost(activity) ?: return
         if (slot == BackgroundBeautySettings.Slot.CHAT) {
-            setImageSurface(state, activity.window.decorView, slot, bitmap, opacity)
-            if (host !== activity.window.decorView) setTransparentSurface(state, host, slot)
-        } else {
-            setImageSurface(state, activity.window.decorView, slot, bitmap, opacity)
-            if (host !== activity.window.decorView) setTransparentSurface(state, host, slot)
-        }
-        val content = activity.findViewById<View>(android.R.id.content)
-        if (content != null && content !== host) setTransparentSurface(state, content, slot)
-        if (slot == BackgroundBeautySettings.Slot.CHAT) {
+            // Embedded chat animates over the conversation page in the same window.
+            // Its bitmap belongs to the moving chat container, never the shared decor.
+            val chatHost = chatBackgroundHost(activity) ?: return
+            setImageSurface(state, chatHost, slot, bitmap, opacity)
             applyChatBackground(state, bitmap, opacity)
         } else {
+            // Keep cached chat bitmaps, but release the closed chat's managed surfaces.
+            state.surfaces.entries.toList().filter { it.value.slot == BackgroundBeautySettings.Slot.CHAT && !hasRunningChatAnimation(it.key) }.forEach { (view, snapshot) ->
+                restoreSurface(view, snapshot)
+                state.surfaces.remove(view)
+            }
+            state.nativeImages.entries.toList().filter { !hasRunningChatAnimation(it.key) }.forEach { (view, snapshot) ->
+                restoreNativeImage(view, snapshot)
+                state.nativeImages.remove(view)
+            }
+            setImageSurface(state, activity.window.decorView, slot, bitmap, opacity)
+            if (host !== activity.window.decorView) setTransparentSurface(state, host, slot)
+            val content = activity.findViewById<View>(android.R.id.content)
+            if (content != null && content !== host) setTransparentSurface(state, content, slot)
             applyLauncherBackground(state, slot, bitmap, opacity)
         }
         applyChromeTransparency(state, slot)
@@ -1812,7 +1829,7 @@ private class BackgroundBeautyRuntime(
             if (slot == BackgroundBeautySettings.Slot.ME) probeMeMuteLayer(state.activity)
             state.lastLoggedSlot = slot
             // Full tree/frame diagnostics removed after capturing 66fe209 evidence.
-            HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size} singleWindowImage=true")
+            HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size} singleImageHost=${if (slot == BackgroundBeautySettings.Slot.CHAT) "chat-container" else "window"}")
         }
     }
 
@@ -1892,21 +1909,19 @@ private class BackgroundBeautyRuntime(
         opacity: Float
     ) {
         val activity = state.activity
+        val chatHost = chatBackgroundHost(activity) ?: return
         val image = synchronized(nativeChatImages) {
-            nativeChatImages[activity]?.get()?.takeIf { it.isAttachedToWindow }
-        } ?: findDescendant(
-            activity.findViewById(android.R.id.content),
-            CHATTING_IMAGE_BG_VIEW
-        ) as? ImageView
+            nativeChatImages[activity]?.get()?.takeIf { it.isAttachedToWindow && isDescendantOf(it, chatHost) }
+        } ?: findDescendant(chatHost, CHATTING_IMAGE_BG_VIEW) as? ImageView
         if (image != null) {
             setNativeImage(state, image, bitmap, opacity)
             var parent = image.parent as? View
-            while (parent != null && parent !== activity.window.decorView) {
+            while (parent != null && parent !== chatHost) {
                 setTransparentSurface(state, parent, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
                 parent = parent.parent as? View
             }
         }
-        activity.findViewById<View>(android.R.id.content)?.let { root ->
+        chatHost.let { root ->
             applyWhitelistedSurfaces(state, root, BackgroundBeautySettings.Slot.CHAT)
             applyChatChromeRoot(state, root)
             probeVisibleChrome(activity, "chat-applied")
@@ -1936,6 +1951,12 @@ private class BackgroundBeautyRuntime(
                 }
             })
         }
+        val baseConversation = KavaReflector.loadClass(BASE_CONVERSATION_ACTIVITY, context.hostClassLoader())
+        findWechatVerifiedMethod(baseConversation, "closeChatting", Boolean::class.javaPrimitiveType!!)?.let { method ->
+            hookOnce(method, after = { param ->
+                (param.thisObject as? Activity)?.let { scheduleRefresh(it, 1) }
+            })
+        }
         val folderClass = KavaReflector.loadClass("com.tencent.mm.ui.conversation.ConversationFolderItemView", context.hostClassLoader())
         KavaReflector.findMethodRecursive(folderClass, "draw", Canvas::class.java)?.let { method ->
             hookOnce(method, before = { param ->
@@ -1959,7 +1980,9 @@ private class BackgroundBeautyRuntime(
                 if (view != null && hasClassName(view, className)) {
                     view.post {
                         val activity = findActivity(view) ?: return@post
-                        val state = states[activity] ?: return@post
+                        val state = states[activity]
+                        if (state == null || state.lastLoggedSlot != BackgroundBeautySettings.Slot.CHAT) scheduleRefresh(activity)
+                        if (state == null) return@post
                         if (destroyed || resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return@post
                         applyChatChromeRoot(state, view)
                     }
@@ -2002,8 +2025,9 @@ private class BackgroundBeautyRuntime(
         }
         if (layout != null) {
             setTransparentSurface(state, layout, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+            val chatHost = chatBackgroundHost(state.activity)
             var parent = layout.parent as? View
-            while (parent != null && parent !== state.activity.window.decorView) {
+            while (parent != null && parent !== chatHost) {
                 setTransparentSurface(state, parent, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
                 parent = parent.parent as? View
             }
@@ -2027,6 +2051,8 @@ private class BackgroundBeautyRuntime(
             val view = queue.removeFirst()
             if (view is android.widget.EditText) {
                 val snapshot = surfaceSnapshot(state, view)
+                if (snapshot.slot == BackgroundBeautySettings.Slot.CHAT &&
+                    snapshot.appliedBackground is android.graphics.drawable.GradientDrawable && view.background === snapshot.appliedBackground) continue
                 synchronizeExternalBackground(snapshot, view)
                 val density = view.resources.displayMetrics.density
                 val outline = android.graphics.drawable.GradientDrawable().apply {
@@ -2048,6 +2074,9 @@ private class BackgroundBeautyRuntime(
             } else if (view is ViewGroup) {
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
                 for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
+            } else if (view is ImageView) {
+                // Footer icons retain their image drawable. Only their independent button surface is cleared.
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
             }
         }
     }
@@ -2057,6 +2086,7 @@ private class BackgroundBeautyRuntime(
         slot: BackgroundBeautySettings.Slot
     ) {
         val targetIds = targetResourceIds(slot)
+        val chatHost = if (slot == BackgroundBeautySettings.Slot.CHAT) chatBackgroundHost(state.activity) else null
         val queue = ArrayDeque<View>()
         queue.add(root)
         var visited = 0
@@ -2070,7 +2100,8 @@ private class BackgroundBeautyRuntime(
                 name == CHAT_FOOTER_CUSTOM ||
                 (view !== root && isMajorSurface(view))
             ) {
-                if (!hasClassName(view, CHATTING_IMAGE_BG_VIEW)) {
+                if (!hasClassName(view, CHATTING_IMAGE_BG_VIEW) &&
+                    view !== chatHost) {
                     setTransparentSurface(state, view, slot)
                 }
             }
@@ -2100,7 +2131,7 @@ private class BackgroundBeautyRuntime(
                     setTransparentSurface(state, container, slot)
                 }
             }
-            if (view.id in targetIds) {
+            if (view.id in targetIds && !(slot == BackgroundBeautySettings.Slot.CHAT && view === root)) {
                 setTransparentSurface(state, view, slot, clearForeground = true)
             }
             if (view is ViewGroup) {
@@ -2116,11 +2147,13 @@ private class BackgroundBeautyRuntime(
         slot: BackgroundBeautySettings.Slot
     ) {
         val host = resolveBackgroundHost(state.activity)
+        val chatHost = if (slot == BackgroundBeautySettings.Slot.CHAT) chatBackgroundHost(state.activity) ?: return else null
         val cached = state.surfaces.keys.filter { view ->
-            view !== host && view.isAttachedToWindow && isChromeSurface(view)
+            view !== host && view.isAttachedToWindow && isChromeSurface(view) &&
+                (chatHost == null || isDescendantOf(view, chatHost))
         }
         cached.forEach { view -> setTransparentSurface(state, view, slot) }
-        val decor = state.activity.window.decorView
+        val decor = chatHost ?: state.activity.window.decorView
         val queue = ArrayDeque<View>()
         queue.add(decor)
         var visited = 0
@@ -2289,7 +2322,7 @@ private class BackgroundBeautyRuntime(
         if (diagnosticCounts.computeIfAbsent(if (reason.startsWith("touch") || reason.startsWith("predraw")) "wechat-touch-snapshots" else "wechat-write-snapshots") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 14) return
         val state = states[activity] ?: return
         val slot = resolveTarget(activity)
-        HLog.i("$TAG WXFRAME reason=$reason slot=$slot bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} chat=$launcherChatActive pending=${pendingRefreshes.containsKey(activity)}")
+        HLog.i("$TAG WXFRAME reason=$reason slot=$slot bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} chat=${resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT} pending=${pendingRefreshes.containsKey(activity)}")
         val bottomQueue = ArrayDeque<View>()
         bottomQueue.add(activity.window.decorView)
         var bottomVisited = 0
@@ -2576,7 +2609,7 @@ private class BackgroundBeautyRuntime(
             snapshot.originalDrawable = view.drawable
             snapshot.originalTintList = view.imageTintList
         }
-        // The decor owns the only screen-aligned bitmap. Keep the native layer present but empty,
+        // The chat container owns the only screen-aligned bitmap. Keep the native layer present but empty,
         // so its smaller CENTER_CROP viewport cannot redraw a differently scaled copy.
         surfaceMutationDepth++
         try {
@@ -2765,19 +2798,43 @@ private class BackgroundBeautyRuntime(
         return content
     }
 
+    private fun hasRunningChatAnimation(view: View): Boolean {
+        var node: View? = view
+        while (node != null) {
+            val animation = node.animation
+            if (animation != null && !animation.hasEnded()) return true
+            if (node.javaClass.name == CHAT_CONTAINER) break
+            node = node.parent as? View
+        }
+        return false
+    }
+    private fun isConversationActivity(activity: Activity): Boolean {
+        var type: Class<*>? = activity.javaClass
+        while (type != null) {
+            if (type.name == BASE_CONVERSATION_ACTIVITY) return true
+            type = type.superclass
+        }
+        return false
+    }
+    private fun chatBackgroundHost(activity: Activity): View? {
+        val decor = activity.window.decorView
+        val known = if (isConversationActivity(activity)) KavaReflector.readField(activity, "chattingView") as? View else null
+        if (known != null && known.isAttachedToWindow && known.isShown) return known
+        val container = findVisibleDescendant(decor, CHAT_CONTAINER)
+        if (container != null) return container
+        if (hasClassName(activity, CHAT_ACTIVITY)) return decor
+        return null
+    }
     private fun resolveTarget(activity: Activity): BackgroundBeautySettings.Slot? {
         val name = activity.javaClass.name
-        if (name == CHAT_ACTIVITY || name.contains("ChattingUI")) {
+        if (hasClassName(activity, CHAT_ACTIVITY)) return BackgroundBeautySettings.Slot.CHAT
+        if (chatBackgroundHost(activity) != null &&
+            (name == LAUNCHER_ACTIVITY || isConversationActivity(activity))) {
             return BackgroundBeautySettings.Slot.CHAT
         }
-        if (name != LAUNCHER_ACTIVITY && !name.endsWith("LauncherUI")) return null
-        val fragment = currentFragment(activity)
-        if (launcherChatActive == true || (launcherChatActive == null && fragment?.javaClass?.name?.contains("chatting", ignoreCase = true) == true)) {
-            return BackgroundBeautySettings.Slot.CHAT
-        }
+        if (name != LAUNCHER_ACTIVITY) return null
         return currentLauncherSlot(activity)
     }
-
     private fun currentLauncherSlot(activity: Activity): BackgroundBeautySettings.Slot? {
         val index = KavaReflector.findMethodRecursive(activity.javaClass, "getCurrentTabIndex")
             ?.takeIf { it.parameterTypes.isEmpty() }
