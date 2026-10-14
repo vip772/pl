@@ -851,11 +851,22 @@ private class BackgroundBeautyRuntime(
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (destroyed) return
                     val view = param.thisObject as? View ?: return
-                    val owner = wechatControllerForGradient(view) ?: return
-                    protectWechatGl(owner)
+                    val owner = wechatControllerForGradient(view)
+                    var ancestor = view.parent as? View
+                    var desktopGradient = false
+                    repeat(6) {
+                        val parent = ancestor ?: return@repeat
+                        if (parent.javaClass.name == APP_BRAND_DESKTOP_CONTAINER) desktopGradient = true
+                        ancestor = parent.parent as? View
+                    }
+                    if (owner == null && !desktopGradient) return
+                    if (owner != null) protectWechatGl(owner)
                     val activity = findActivity(view) ?: return
-                    if (!wechatHomepageBackdropEnabled(activity)) return
+                    if (activity.javaClass.name != LAUNCHER_ACTIVITY || !wechatHomepageBackdropEnabled(activity)) return
                     param.result = null
+                    if (desktopGradient && diagnosticCounts.computeIfAbsent("wx-desktop-gradient") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
+                        HLog.i("$TAG WXFIX desktopGradientSkipped ${wechatProbeView(view, activity)}")
+                    }
                     if (diagnosticCounts.computeIfAbsent("wx-gradient-skip") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
                         HLog.i("$TAG WXFIX gradientSkipped controller=${System.identityHashCode(owner)} open=${wechatProbeField(owner, "P")} ${wechatProbeView(view, activity)}")
                     }

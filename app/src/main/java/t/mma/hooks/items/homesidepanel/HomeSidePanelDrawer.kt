@@ -139,16 +139,6 @@ internal class HomeSidePanelDrawer(
             Row("📍", "虚拟定位", "设置微信定位位置") { MiuixSettingsPage.showFeature(activity, "fake_location"); onNavigate() },
             Row("▢", "悬浮底栏", "底部导航栏样式") { MiuixSettingsPage.showFeature(activity, "custom_bottom_bar"); onNavigate() }
         ))
-        section(body, "其它", false)
-        menuCard(body, listOf(
-            Row("💬", "帮助与反馈", "Telegram 群") { openUrl("https://t.me/Hchat_Group") },
-            Row("ℹ", "关于", "Hchat 版本与开源信息") { MiuixSettingsPage.show(activity); onNavigate() }
-        ))
-        body.addView(TextView(activity).apply {
-            text = "长按无 · 左滑关闭侧栏"; gravity = Gravity.CENTER; textSize = 11f
-            setTextColor(themeSub()); setPadding(0, dp(14), 0, dp(6))
-            typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-        })
         scroll.addView(body)
         panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
         panel.addView(View(activity).apply { setBackgroundColor(themeAccent()); alpha = .85f }, LinearLayout.LayoutParams(-1, dp(3)))
