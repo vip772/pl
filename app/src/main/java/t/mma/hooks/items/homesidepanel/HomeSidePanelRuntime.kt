@@ -149,7 +149,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             fun walk(view: View, inTaskBar: Boolean, depth: Int) {
                 if (depth > 24) return
                 val task = inTaskBar || view.javaClass.name == "com.tencent.mm.plugin.taskbar.ui.TaskBarContainer"
-                if (task && view is TextView && view.text?.toString()?.trim()?.matches(Regex("微信(?:[（(]\\d+[）)])?")) == true) {
+                // 8078 cxw.xml：1620是重复文字及搜索/加号控件行，限定TaskBar子树。
+                if (task && view.id == 0x7f0a1620 && view is RelativeLayout) {
                     if (!scrollTitles.containsKey(view)) {
                         scrollTitles[view] = view.visibility
                         scrollTitleSessions[view] = this@Session
@@ -296,7 +297,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             val st = TextView(activity).apply {
                 tag = "hchat_home_avatar_status"
-                setTextColor(if (night()) Color.LTGRAY else Color.GRAY)
+                setTextColor(Color.rgb(7, 193, 96))
                 textSize = 11.5f
                 maxLines = 1
             }
