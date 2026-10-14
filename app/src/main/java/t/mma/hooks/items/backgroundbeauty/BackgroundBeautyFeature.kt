@@ -356,7 +356,7 @@ private class BackgroundBeautyRuntime(
         val installed = installActivityHooks() or
             installTabHooks() or
             installFragmentHooks() or
-            installSurfaceHooks() or installBackgroundWriteHook() or installWechatTargetDiagnostics()
+            installSurfaceHooks() or installBackgroundWriteHook() or installWechatTargetDiagnostics() or installWechatVerifiedPaths()
         installChatBackgroundComponentHook(allowDexSearch = false)
         if (!installed) HLog.e("$TAG 未安装任何页面 Hook")
         main.post(::refreshAll)
@@ -365,6 +365,9 @@ private class BackgroundBeautyRuntime(
 
     fun destroy() {
         destroyed = true
+        wechatGradientControllers.keys.toList().forEach { it.invalidate() }
+        wechatGradientControllers.clear()
+        wechatTaskControllers.clear()
         ownedHooks.toList().forEach { runCatching { HookRegistry.get().unhook(it) } }
         ownedHooks.clear()
         hookedMembers.clear()
@@ -631,6 +634,106 @@ private class BackgroundBeautyRuntime(
             "onDraw" -> nodes += "gradient-draw" to (owner as? View)
         }
         nodes.forEach { (label, view) -> HLog.i("$TAG WXNODE call=$id phase=$phase label=$label ${wechatProbeView(view, activity)}") }
+    }
+
+    private val wechatTaskControllers = WeakHashMap<View, WeakReference<Any>>()
+    private val wechatGradientControllers = WeakHashMap<View, WeakReference<Any>>()
+    private fun rememberWechatTaskController(owner: Any?) {
+        val container = wechatProbeField(owner, "g") as? View ?: return
+        if (owner != null) wechatTaskControllers[container] = WeakReference(owner)
+    }
+    private fun wechatControllerForGradient(view: View): Any? {
+        wechatGradientControllers[view]?.get()?.let { return it }
+        var node = view.parent as? View
+        repeat(3) {
+            val current = node ?: return null
+            if (current.javaClass.name == "com.tencent.mm.ui.conversation.MainUIView") {
+                return wechatTaskControllers.entries.firstOrNull { (container, reference) ->
+                    val controller = reference.get() ?: return@firstOrNull false
+                    val scrollHost = wechatProbeField(controller, "f") ?: return@firstOrNull false
+                    val list = KavaReflector.findMethodRecursive(scrollHost.javaClass, "a")?.let {
+                        runCatching { it.invoke(scrollHost) as? View }.getOrNull()
+                    }
+                    container.isAttachedToWindow && list?.parent === current
+                }?.value?.get()?.also { wechatGradientControllers[view] = WeakReference(it) }
+            }
+            // Only the verified MainUIView direct child and DynamicBgContainer child paths.
+            if (current.javaClass.name != "com.tencent.mm.plugin.multitask.ui.bg.DynamicBgContainer") return null
+            node = current.parent as? View
+        }
+        return null
+    }
+    private fun applyWechatControllerChrome(owner: Any?) {
+        val container = wechatProbeField(owner, "g") as? View ?: return
+        val activity = findActivity(container) ?: return
+        if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT || !hasConfiguredBackground(activity)) return
+        if (wechatProbeField(owner, "P") != false) return
+        val state = states[activity] ?: return
+        listOf("U1", "T1").forEach { field ->
+            (wechatProbeField(owner, field) as? View)?.takeIf { findActivity(it) === activity }?.let {
+                setTransparentSurface(state, it, BackgroundBeautySettings.Slot.WECHAT)
+                if (diagnosticCounts.computeIfAbsent("wx-title:$field") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+                    HLog.i("$TAG WXFIX title=$field ${wechatProbeView(it, activity)}")
+                }
+            }
+        }
+    }
+    private fun installWechatVerifiedPaths(): Boolean {
+        var installed = false
+        val controllerClass = KavaReflector.loadClass("com.tencent.mm.plugin.taskbar.ui.b0", context.hostClassLoader())
+        KavaReflector.declaredConstructors(controllerClass).forEach { constructor ->
+            installed = hookOnce(constructor, after = { param -> rememberWechatTaskController(param.thisObject) }) || installed
+        }
+        val ints = Int::class.javaPrimitiveType!!
+        val bools = Boolean::class.javaPrimitiveType!!
+        listOf("f" to arrayOf(ints, ints, ints), "m" to arrayOf(bools, bools, ints, ints), "n" to arrayOf(bools)).forEach { (name, types) ->
+            KavaReflector.findMethodRecursive(controllerClass, name, *types)?.let { method ->
+                installed = hookOnce(method, after = { param ->
+                    rememberWechatTaskController(param.thisObject)
+                    applyWechatControllerChrome(param.thisObject)
+                    if (name != "f") {
+                        val owner = param.thisObject
+                        listOf("u", "v", "q").forEach { field -> (wechatProbeField(owner, field) as? View)?.invalidate() }
+                    }
+                }) || installed
+            }
+        }
+        val gradientClass = KavaReflector.loadClass("com.tencent.mm.dynamicbackground.view.GradientColorBackgroundView", context.hostClassLoader())
+        KavaReflector.findMethodRecursive(gradientClass, "onDraw", android.graphics.Canvas::class.java)?.let { method ->
+            // This method also has a diagnostic hook; install the drawing guard separately.
+            ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
+                    val view = param.thisObject as? View ?: return
+                    val owner = wechatControllerForGradient(view) ?: return
+                    if (wechatProbeField(owner, "P") != false) return
+                    val activity = findActivity(view) ?: return
+                    if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT || !hasConfiguredBackground(activity)) return
+                    param.result = null
+                    if (diagnosticCounts.computeIfAbsent("wx-gradient-skip") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
+                        HLog.i("$TAG WXFIX gradientSkipped controller=${System.identityHashCode(owner)} open=false ${wechatProbeView(view, activity)}")
+                    }
+                }
+            })
+            installed = true
+        }
+        val endClass = KavaReflector.loadClass("com.tencent.mm.ui.uf", context.hostClassLoader())
+        KavaReflector.findMethodRecursive(endClass, "onAnimationEnd", android.view.animation.Animation::class.java)?.let { method ->
+            installed = hookOnce(method, after = { param ->
+                val chatUi = wechatProbeField(param.thisObject, "d")
+                val chatView = wechatProbeField(chatUi, "c") as? View ?: return@hookOnce
+                if (chatView.visibility != View.GONE) return@hookOnce
+                val activity = findActivity(chatView) ?: return@hookOnce
+                if (activity.javaClass.name != LAUNCHER_ACTIVITY || launcherChatActive == true || !hasConfiguredBackground(activity)) return@hookOnce
+                preparedRoots.entries.removeAll { it.value.first.activity === activity }
+                applyForActivity(activity)
+                HLog.i("$TAG WXFIX chatAnimationEnd ${wechatProbeState(activity)}")
+                if (diagnosticCounts.computeIfAbsent("wx-chat-end") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+                    main.post { if (!destroyed) armWechatDiagnostics(activity, "chat-animation-end") }
+                }
+            }) || installed
+        }
+        return installed
     }
 
     private fun installSurfaceHooks(): Boolean {
@@ -1151,6 +1254,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun refreshAll() {
+        wechatGradientControllers.keys.toList().forEach { it.invalidate() }
         if (destroyed) return
         runCatching { WeChatApis.currentActivity()?.currentActivity() }
             .getOrNull()
