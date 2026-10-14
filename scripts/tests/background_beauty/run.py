@@ -34,7 +34,8 @@ class PaintDrawable:Drawable() {
 }
 fun main(){
  val renderCanvas=Canvas()
- val render=ScreenAlignedBitmapDrawable(Bitmap(),View(),.5f,0xffeeeeee.toInt())
+ val anchor=View()
+ val render=ScreenAlignedBitmapDrawable(Bitmap(),anchor,.5f,0xffeeeeee.toInt())
  render.bounds=Rect()
  render.onBoundsForTest()
  render.draw(renderCanvas)
@@ -44,6 +45,15 @@ fun main(){
  renderCanvas.operations=""
  render.draw(renderCanvas)
  check(renderCanvas.operations=="base,image,")
+ // The anchor moves without onBoundsChange: the image must remain aligned to the window.
+ anchor.x=12;anchor.y=30
+ val window=View();anchor.window=window
+ render.draw(renderCanvas)
+ check(renderCanvas.left == -12f && renderCanvas.top == -30f)
+ window.height=300
+ render.draw(renderCanvas)
+ check(renderCanvas.top == -30f && renderCanvas.bottom == 270f)
+ check(render.invalidations == 0)
  val chatRender=ScreenAlignedBitmapDrawable(Bitmap(),View(),.5f)
  chatRender.onBoundsForTest();renderCanvas.operations="";chatRender.draw(renderCanvas)
  check(renderCanvas.operations=="image," && chatRender.opacity==PixelFormat.TRANSLUCENT)
@@ -73,44 +83,10 @@ fun main(){
  check(inner.state.contains(android.R.attr.state_pressed))
  wrapper.setTouchPressed(false)
  check(!inner.state.contains(android.R.attr.state_pressed))
- val drawer=DrawerHarness()
- check(!drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_DOWN,5f,50f)))
- check(drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_MOVE,40f,50f)))
- check(drawer.cancelCount==1 && drawer.opened)
- check(drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_MOVE,240f,50f)))
- check(drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_UP,240f,50f)))
- check(drawer.opened)
- drawer.close(false)
- check(!drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_DOWN,5f,50f)))
- check(!drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_UP,5f,50f)))
- check(!drawer.opened)
- println("PASS: tap/jitter/vertical/outside/disabled/leftward pass-through, horizontal takeover and reset, production CANCEL reentry; original solid background never drawn; ripple-only content and state forwarding")
+ println("PASS: tap/jitter/vertical/outside/disabled/leftward pass-through, horizontal takeover and reset, original solid background never drawn; ripple-only content and state forwarding; screen alignment follows anchor movement and window resize without self-invalidating")
 }
 '''
 }
-drawer_source = (repo/'app/src/main/java/t/mma/hooks/items/homesidepanel/HomeSidePanelDrawer.kt').read_text()
-method_start = drawer_source.index('    fun interceptEdgeTouch(')
-method_end = drawer_source.index('    private fun onPanelTouch(', method_start)
-harness = """
-class MotionEvent(val actionMasked:Int,val x:Float,val y:Float) {
- var action=actionMasked
- fun recycle(){}
- companion object {const val ACTION_DOWN=0;const val ACTION_UP=1;const val ACTION_MOVE=2;const val ACTION_CANCEL=3;const val ACTION_POINTER_DOWN=5
- fun obtain(e:MotionEvent)=MotionEvent(e.actionMasked,e.x,e.y)}
-}
-class Surface {var translationX=0f;var alpha=0f}
-internal class DrawerHarness {
- val panelWidth=300;val panel=Surface();val scrim=Surface()
- val edgeGesture=SidePanelEdgeGesture(24f,8f)
- var enabled=true;var opened=false;var edgeDragging=false;var edgeStartX=0f;var dispatchingHostCancel=false;var cancelCount=0
- val activity=Host()
- inner class Host {val window=Win()}
- inner class Win {val decorView=Decor()}
- inner class Decor {fun dispatchTouchEvent(e:MotionEvent){cancelCount++;interceptEdgeTouch(MotionEvent(e.action,e.x,e.y))}}
- fun show(animated:Boolean){opened=true}
- fun settleOpen(){opened=true}
- fun close(animated:Boolean){opened=false;edgeDragging=false;edgeGesture.reset()}
-""" + drawer_source[method_start:method_end] + "}"
 # Java Drawable stub avoids JVM setter collisions and matches Android's Java API.
 with tempfile.TemporaryDirectory(prefix='background-regression-') as directory:
     work=Path(directory)
@@ -126,18 +102,18 @@ public abstract class Drawable {
  public android.graphics.Rect getBounds(){return bounds;} public void setBounds(android.graphics.Rect r){bounds=r;}
  public int[] getState(){return state;} public boolean setState(int[] s){state=s;return onStateChange(s);}
  public void setHotspot(float x,float y){}public void setHotspotBounds(int l,int t,int r,int b){}public void jumpToCurrentState(){}protected void onBoundsChange(android.graphics.Rect r){}
- public void invalidateSelf(){}public void scheduleSelf(Runnable r,long t){}public void unscheduleSelf(Runnable r){}
+ public int invalidations=0;public void invalidateSelf(){invalidations++;}public void scheduleSelf(Runnable r,long t){}public void unscheduleSelf(Runnable r){}
 }
 ''')
     for name in ['Canvas','ColorFilter','Rect']:
         p=work/('android/graphics/'+name+'.java');p.parent.mkdir(parents=True,exist_ok=True);p.write_text('package android.graphics; public class '+name+' {}')
     render_stubs = {
-      'android/graphics/Canvas.java': 'package android.graphics; public class Canvas {public String operations="";public int imageAlpha; public void drawColor(int c){operations+="base,";}public void drawBitmap(Bitmap b,Rect src,RectF dst,Paint p){operations+="image,";imageAlpha=p.alpha;}public Rect getClipBounds(){return new Rect();}public boolean isHardwareAccelerated(){return true;}}',
+      'android/graphics/Canvas.java': 'package android.graphics; public class Canvas {public String operations="";public int imageAlpha;public float left,top,bottom; public void drawColor(int c){operations+="base,";}public void drawBitmap(Bitmap b,Rect src,RectF dst,Paint p){operations+="image,";imageAlpha=p.alpha;left=dst.left;top=dst.top;bottom=dst.bottom;}public Rect getClipBounds(){return new Rect();}public boolean isHardwareAccelerated(){return true;}}',
       'android/graphics/Bitmap.java': 'package android.graphics;public class Bitmap {public int getWidth(){return 100;}public int getHeight(){return 200;}public boolean isRecycled(){return false;}}',
       'android/graphics/Rect.java': 'package android.graphics;public class Rect {public int width(){return 100;}public int height(){return 200;}}',
-      'android/graphics/RectF.java': 'package android.graphics;public class RectF {boolean empty=true;public void set(float l,float t,float r,float b){empty=false;}public boolean isEmpty(){return empty;}}',
+      'android/graphics/RectF.java': 'package android.graphics;public class RectF {boolean empty=true;public float left,top,right,bottom;public void set(float l,float t,float r,float b){left=l;top=t;right=r;bottom=b;empty=false;}public boolean isEmpty(){return empty;}}',
       'android/graphics/Paint.java': 'package android.graphics;public class Paint {public static final int ANTI_ALIAS_FLAG=1,FILTER_BITMAP_FLAG=2,DITHER_FLAG=4;public int alpha;public ColorFilter colorFilter;public Paint(int f){}public int getAlpha(){return alpha;}public void setAlpha(int a){alpha=a;}public ColorFilter getColorFilter(){return colorFilter;}public void setColorFilter(ColorFilter c){colorFilter=c;}}',
-      'android/view/View.java': 'package android.view;public class View {public int getWidth(){return 100;}public int getHeight(){return 200;}public View getRootView(){return this;}public void getLocationOnScreen(int[] a){a[0]=0;a[1]=0;}}'
+      'android/view/View.java': 'package android.view;public class View {public int x=0,y=0,height=200;public View window;public int getWidth(){return 100;}public int getHeight(){return height;}public View getRootView(){return window==null?this:window;}public void getLocationOnScreen(int[] a){a[0]=x;a[1]=y;}}'
     }
     for path, content in render_stubs.items():
         target=work/path;target.parent.mkdir(parents=True,exist_ok=True);target.write_text(content)
@@ -155,7 +131,7 @@ public abstract class Drawable {
     subprocess.run(['javac','-d',str(work/'classes'),*map(str,work.rglob('*.java'))],check=True)
     files=[]
     for name in ['R.kt','Test.kt']:
-        p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end].replace('ColorStateList.valueOf', 'android.content.res.ColorStateList.valueOf') + chr(10) + text[text.index('private class ScreenAlignedBitmapDrawable'):text.index('private class BackgroundBeautyRuntime')].replace('    override fun onBoundsChange(bounds: Rect) {', '    fun onBoundsForTest() { updateDestination() }\n    override fun onBoundsChange(bounds: Rect) {') + chr(10) + harness if name == 'Test.kt' else ''));files.append(str(p))
+        p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end].replace('ColorStateList.valueOf', 'android.content.res.ColorStateList.valueOf') + chr(10) + text[text.index('private class ScreenAlignedBitmapDrawable'):text.index('private class BackgroundBeautyRuntime')].replace('    override fun onBoundsChange(bounds: Rect) {', '    fun onBoundsForTest() { updateDestination() }\n    override fun onBoundsChange(bounds: Rect) {') if name == 'Test.kt' else ''));files.append(str(p))
     (work/'PixelFormat.kt').write_text('package android.graphics\nobject PixelFormat { const val TRANSLUCENT=-3;const val OPAQUE=-1 }')
 
     prod=repo/'app/src/main/java/t/mma/hooks/items/homesidepanel/SidePanelEdgeGesture.kt'

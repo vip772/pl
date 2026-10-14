@@ -181,7 +181,6 @@ private class ScreenAlignedBitmapDrawable(
             (rootWidth + drawnWidth) / 2f - offsetX,
             (rootHeight + drawnHeight) / 2f - offsetY
         )
-        invalidateSelf()
     }
 
     override fun onBoundsChange(bounds: Rect) {
@@ -191,6 +190,8 @@ private class ScreenAlignedBitmapDrawable(
     fun coverageDescription(): String = "bounds=$bounds destination=$destination alpha=${paint.alpha} callback=${callback?.javaClass?.name}"
     private var drawDiagnostics = 0
     override fun draw(canvas: Canvas) {
+        // Insets, keyboard and page transitions can move the anchor without changing drawable bounds.
+        updateDestination()
         val bitmap = bitmapRef.get()
         if (drawDiagnostics++ < 8) HLog.i("[Hchat:沉浸式背景] DIAG imageDraw bitmap=${bitmap != null} recycled=${bitmap?.isRecycled} alpha=${paint.alpha} destination=$destination clip=${canvas.clipBounds} hardware=${canvas.isHardwareAccelerated}")
         baseColor?.let { canvas.drawColor(it) }
@@ -1004,6 +1005,27 @@ private class BackgroundBeautyRuntime(
                 (param.thisObject as? ImageView)?.let(::rememberNativeChatImage)
             }) || installed
         }
+        listOf("setImageDrawable" to Drawable::class.java, "setImageBitmap" to Bitmap::class.java).forEach { (name, type) ->
+            KavaReflector.findMethodRecursive(ImageView::class.java, name, type)?.let { method ->
+                installed = hookOnce(method, after = { param ->
+                    if (destroyed || surfaceMutationDepth != 0) return@hookOnce
+                    val image = param.thisObject as? ImageView ?: return@hookOnce
+                    if (!hasClassName(image, CHATTING_IMAGE_BG_VIEW)) return@hookOnce
+                    val activity = findActivity(image) ?: return@hookOnce
+                    val state = states[activity] ?: return@hookOnce
+                    val snapshot = state.nativeImages[image] ?: return@hookOnce
+                    if (resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return@hookOnce
+                    if (image.drawable === snapshot.appliedDrawable) return@hookOnce
+                    snapshot.originalDrawable = image.drawable
+                    snapshot.originalTintList = image.imageTintList
+                    surfaceMutationDepth++
+                    try {
+                        image.imageTintList = null
+                        image.setImageDrawable(snapshot.appliedDrawable)
+                    } finally { surfaceMutationDepth-- }
+                }) || installed
+            }
+        }
         listOf(APP_BRAND_DESKTOP_CONTAINER, CHAT_FOOTER_CUSTOM).forEach { className ->
             val clazz = KavaReflector.loadClass(className, context.hostClassLoader())
             KavaReflector.declaredConstructors(clazz).forEach { constructor ->
@@ -1170,8 +1192,7 @@ private class BackgroundBeautyRuntime(
                 val snapshot = state.surfaces[view] ?: return@hookOnce
                 val applied = snapshot.appliedBackground ?: return@hookOnce
                 val slot = snapshot.slot ?: return@hookOnce
-                if (slot == BackgroundBeautySettings.Slot.CHAT ||
-                    !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
+                if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
                     !BackgroundBeautyStore.hasImage(context.hostContext(), slot)) return@hookOnce
                 if (decorBackgroundApplied(view, applied)) return@hookOnce
                 val host = view.background
@@ -1791,7 +1812,7 @@ private class BackgroundBeautyRuntime(
             if (slot == BackgroundBeautySettings.Slot.ME) probeMeMuteLayer(state.activity)
             state.lastLoggedSlot = slot
             // Full tree/frame diagnostics removed after capturing 66fe209 evidence.
-            HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size} singleWindowImage=${slot != BackgroundBeautySettings.Slot.CHAT}")
+            HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size} singleWindowImage=true")
         }
     }
 
@@ -1877,7 +1898,14 @@ private class BackgroundBeautyRuntime(
             activity.findViewById(android.R.id.content),
             CHATTING_IMAGE_BG_VIEW
         ) as? ImageView
-        if (image != null) setNativeImage(state, image, bitmap, opacity)
+        if (image != null) {
+            setNativeImage(state, image, bitmap, opacity)
+            var parent = image.parent as? View
+            while (parent != null && parent !== activity.window.decorView) {
+                setTransparentSurface(state, parent, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                parent = parent.parent as? View
+            }
+        }
         activity.findViewById<View>(android.R.id.content)?.let { root ->
             applyWhitelistedSurfaces(state, root, BackgroundBeautySettings.Slot.CHAT)
             applyChatChromeRoot(state, root)
@@ -1888,6 +1916,42 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun installChatChromeLifecycle() {
+        val layoutClass = KavaReflector.loadClass("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", context.hostClassLoader())
+        findWechatVerifiedMethod(layoutClass, "dispatchDraw", Canvas::class.java)?.let { method ->
+            ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
+                    val view = param.thisObject as? View ?: return
+                    val activity = findActivity(view) ?: return
+                    if (resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return
+                    // 8.0.78: dispatchDraw paints the navigation inset with q after drawing children.
+                    val paint = KavaReflector.readField(view, "q") as? Paint ?: return
+                    param.setObjectExtra("Hchat:chatInsetPaint", paint to paint.alpha)
+                    paint.alpha = 0
+                }
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    @Suppress("UNCHECKED_CAST")
+                    val saved = param.getObjectExtra("Hchat:chatInsetPaint") as? Pair<Paint, Int> ?: return
+                    saved.first.alpha = saved.second
+                }
+            })
+        }
+        val folderClass = KavaReflector.loadClass("com.tencent.mm.ui.conversation.ConversationFolderItemView", context.hostClassLoader())
+        KavaReflector.findMethodRecursive(folderClass, "draw", Canvas::class.java)?.let { method ->
+            hookOnce(method, before = { param ->
+                if (destroyed) return@hookOnce
+                val view = param.thisObject as? View ?: return@hookOnce
+                if (view.javaClass.name != "com.tencent.mm.ui.conversation.ConversationFolderItemView") return@hookOnce
+                val activity = findActivity(view) ?: return@hookOnce
+                if (!wechatHomepageBackdropEnabled(activity) || !isOpenDesktopBottomClip(view)) return@hookOnce
+                // TaskBarContainer reserves 52 px; the next conversation row remains clipped at the bottom.
+                // Skip that row's entire drawing (including text/foreground), without changing layout or touch.
+                param.result = null
+                if (diagnosticCounts.computeIfAbsent("desktop-row-draw-skip") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+                    HLog.i("$TAG DESKTOPEDGE clippedRowDrawSkipped ${wechatProbeView(view, activity)}")
+                }
+            })
+        }
         listOf("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", "com.tencent.mm.pluginsdk.ui.chat.ChatFooter").forEach { className ->
             val clazz = KavaReflector.loadClass(className, context.hostClassLoader()) ?: return@forEach
             val apply: (XC_MethodHook.MethodHookParam) -> Unit = { param ->
@@ -1939,12 +2003,9 @@ private class BackgroundBeautyRuntime(
         if (layout != null) {
             setTransparentSurface(state, layout, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
             var parent = layout.parent as? View
-            repeat(8) {
-                val view = parent ?: return@repeat
-                if (view.javaClass.name == "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout") {
-                    setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
-                }
-                parent = view.parent as? View
+            while (parent != null && parent !== state.activity.window.decorView) {
+                setTransparentSurface(state, parent, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                parent = parent.parent as? View
             }
         }
         applyChatFooterTransparency(state, layout ?: root)
@@ -2023,10 +2084,6 @@ private class BackgroundBeautyRuntime(
                     for (index in 0 until view.childCount) {
                         val child = view.getChildAt(index)
                         applyHomeRow(state, child, slot)
-                        if (slot == BackgroundBeautySettings.Slot.WECHAT && isOpenDesktopBottomClip(child)) {
-                            setTransparentSurface(state, child, slot, clearForeground = true)
-                            HLog.i("$TAG DESKTOPEDGE clippedRowTransparent ${wechatProbeView(child, state.activity)}")
-                        }
                     }
                 }
             }
@@ -2090,7 +2147,7 @@ private class BackgroundBeautyRuntime(
             }
             if (view !== decor && isComposeSurface(view)) continue
             if (view !== host && (isChromeSurface(view) || isSystemBarBackground(view))) {
-                setTransparentSurface(state, view, slot)
+                setTransparentSurface(state, view, slot, clearForeground = true)
             }
             // 页面内部已由 preparePage 和列表绑定处理，公共栏扫描不重复进入四页条目树。
             if (hasClassName(view, "com.tencent.mm.ui.base.CustomViewPager")) continue
@@ -2140,31 +2197,6 @@ private class BackgroundBeautyRuntime(
         }
     }
 
-    private fun applyDesktopBottomClip(state: HostState, decor: View) {
-        val height = decor.height
-        val queue = ArrayDeque<View>()
-        queue.add(decor)
-        var matched = 0
-        while (queue.isNotEmpty()) {
-            val view = queue.removeFirst()
-            if (view.javaClass.name == "com.tencent.mm.ui.conversation.ConversationFolderItemView") {
-                val rect = Rect()
-                if (view.getGlobalVisibleRect(rect) && rect.bottom >= height - 2 && rect.top > height * 0.85f) {
-                    matched++
-                    val subtree = ArrayDeque<View>()
-                    subtree.add(view)
-                    while (subtree.isNotEmpty()) {
-                        val node = subtree.removeFirst()
-                        setTransparentSurface(state, node, BackgroundBeautySettings.Slot.WECHAT, clearForeground = true)
-                        if (node is ViewGroup) for (i in 0 until node.childCount) subtree.add(node.getChildAt(i))
-                    }
-                    HLog.i("$TAG DESKTOPEDGE clippedRowTransparent ${wechatProbeView(view, state.activity)} descendants=processed")
-                }
-            }
-            if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
-        }
-        HLog.i("$TAG DESKTOPEDGE clippedRows=$matched")
-    }
     private fun probeVisibleChrome(activity: Activity, reason: String) {
         if (destroyed) return
         val decor = activity.window.decorView
@@ -2173,9 +2205,6 @@ private class BackgroundBeautyRuntime(
                 val owner = reference.get()
                 HLog.i("$TAG DESKTOPEDGE container=${wechatProbeView(container, activity)} fixed=${wechatProbeField(container, "F")} extra=${wechatProbeField(container, "I")} reserve=${wechatProbeField(container, "J")} measured=${wechatProbeField(container, "H")} open=${wechatProbeField(owner, "P")}")
             }
-        }
-        if (reason == "desktop-settled") {
-            states[activity]?.let { applyDesktopBottomClip(it, decor) }
         }
         HLog.i("$TAG CHROMEDRAW reason=$reason target=${resolveTarget(activity)} bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor}")
         val queue = ArrayDeque<View>()
@@ -2349,7 +2378,7 @@ private class BackgroundBeautyRuntime(
                 (view !== state.activity.window.decorView || decorBackgroundApplied(view, snapshot.appliedBackground))
             ) return
             val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity,
-                if (slot == BackgroundBeautySettings.Slot.CHAT) null else resolveThemeBackground(view.context) or (0xff shl 24))
+                resolveThemeBackground(view.context) or (0xff shl 24))
             val applied = image
             view.backgroundTintList = null
             view.backgroundTintMode = null
@@ -2365,7 +2394,9 @@ private class BackgroundBeautyRuntime(
 
     private val initializedChrome = WeakHashMap<View, Boolean>()
     private fun applyNativeChrome(view: View, slot: BackgroundBeautySettings.Slot) {
-        if (slot == BackgroundBeautySettings.Slot.CHAT || restoringBounce || initializedChrome[view] == true) return
+        if (restoringBounce || initializedChrome[view] == true) return
+        // ActionBarContainer draws primary/stacked/split layers independently of View.background.
+        if (slot == BackgroundBeautySettings.Slot.CHAT && view.javaClass.name != "androidx.appcompat.widget.ActionBarContainer") return
         if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW) ||
             view.javaClass.name == "com.tencent.mm.ui.FrostedContentView" || view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") initializedChrome[view] = true
         if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW)) {
@@ -2545,13 +2576,15 @@ private class BackgroundBeautyRuntime(
             snapshot.originalDrawable = view.drawable
             snapshot.originalTintList = view.imageTintList
         }
-        view.imageTintList = null
-        view.scaleType = ImageView.ScaleType.CENTER_CROP
-        view.setImageBitmap(bitmap)
-        view.alpha = opacity
+        // The decor owns the only screen-aligned bitmap. Keep the native layer present but empty,
+        // so its smaller CENTER_CROP viewport cannot redraw a differently scaled copy.
+        surfaceMutationDepth++
+        try {
+            view.imageTintList = null
+            view.setImageDrawable(BackgroundBeautyTransparentDrawable())
+        } finally { surfaceMutationDepth-- }
+        setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
         snapshot.appliedDrawable = view.drawable
-        snapshot.appliedAlpha = opacity
-        snapshot.appliedScaleType = ImageView.ScaleType.CENTER_CROP
         snapshot.appliedBitmap = bitmap
         snapshot.appliedOpacity = opacity
         snapshot.slot = BackgroundBeautySettings.Slot.CHAT
