@@ -1668,6 +1668,31 @@ private class BackgroundBeautyRuntime(
         }
     }
 
+    private fun probeMeMuteLayer(activity: Activity) {
+        if (diagnosticCounts.computeIfAbsent("me-mute") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 3) return
+        val root = activity.window.decorView
+        root.post {
+            if (destroyed || resolveTarget(activity) != BackgroundBeautySettings.Slot.ME) return@post
+            val queue = ArrayDeque<View>()
+            queue.add(root)
+            var visited = 0
+            while (queue.isNotEmpty() && visited++ < 450) {
+                val view = queue.removeFirst()
+                val text = (view as? android.widget.TextView)?.text?.toString().orEmpty()
+                val description = view.contentDescription?.toString().orEmpty()
+                if (text.contains("静音") || description.contains("静音")) {
+                    HLog.i("$TAG MEMUTE match text=$text description=$description ${wechatProbeView(view, activity)}")
+                    var node = view.parent as? View
+                    repeat(4) {
+                        val parent = node ?: return@repeat
+                        HLog.i("$TAG MEMUTE parent ${wechatProbeView(parent, activity)}")
+                        node = parent.parent as? View
+                    }
+                }
+                if (view is ViewGroup) for (index in 0 until view.childCount) queue.add(view.getChildAt(index))
+            }
+        }
+    }
     private fun applyBitmap(
         state: HostState,
         slot: BackgroundBeautySettings.Slot,
@@ -1705,6 +1730,7 @@ private class BackgroundBeautyRuntime(
         applySystemBars(state)
         if (state.activity.javaClass.name == LAUNCHER_ACTIVITY) invalidateWechatBackdrops(state.activity)
         if (state.lastLoggedSlot != slot) {
+            if (slot == BackgroundBeautySettings.Slot.ME) probeMeMuteLayer(state.activity)
             state.lastLoggedSlot = slot
             // Full tree/frame diagnostics removed after capturing 66fe209 evidence.
             HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size} singleWindowImage=${slot != BackgroundBeautySettings.Slot.CHAT}")

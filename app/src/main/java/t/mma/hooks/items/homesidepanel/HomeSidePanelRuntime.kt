@@ -144,8 +144,10 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
             val stateChanged = lastHomeVisible != homeVisible
             if (stateChanged) drawer.setEnabled(homeVisible)
-            if (homeVisible && header == null) ensureHeader()
-            val targetVisibility = if (homeVisible) View.VISIBLE else View.GONE
+            if (header != null && header?.parent == null) header = null
+            val headerVisible = homeVisible && isWechatTab()
+            if (headerVisible) ensureHeader()
+            val targetVisibility = if (headerVisible) View.VISIBLE else View.GONE
             if (header?.visibility != targetVisibility) header?.visibility = targetVisibility
             val currentName = accountName()
             if (name?.text?.toString() != currentName) name?.text = currentName
@@ -197,11 +199,14 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
         private fun ensureHeader() {
             val host = findActionBarContent(decor)
-            if (host == null || !isHomeTab(host)) {
+            if (host == null || !isWechatTab()) {
                 if (headerAttempts++ < 8) handler.postDelayed({ if (attached) ensureHeader() }, 300L)
                 return
             }
             headerAttempts = 0
+            if (header?.parent === host) return
+            (header?.parent as? ViewGroup)?.removeView(header)
+            header = null
             val old = host.findViewWithTag<View>("hchat_home_avatar_header")
             if (old is ViewGroup) { header = old; collect(old); return }
             val root = LinearLayout(activity).apply {
@@ -234,9 +239,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 maxLines = 1
             }
             text.addView(nick); text.addView(st)
-            text.setOnClickListener {
-                if (!HomeSidePanelPageLauncher.openStatus(activity)) drawer.toggle()
-            }
+            text.setOnClickListener { drawer.toggle() }
             root.addView(text, LinearLayout.LayoutParams(-2, -2))
             val lp: ViewGroup.LayoutParams = if (host is RelativeLayout) {
                 RelativeLayout.LayoutParams(-2, -2).apply {
@@ -253,6 +256,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             host.addView(root, lp)
             header = root; avatar = iv; name = nick; status = st
+            HLog.i("[Hchat:HomeSidePanel] headerAttached tab=0 host=${host.javaClass.name} id=${host.id}")
         }
 
         private fun collect(root: View) {
@@ -300,23 +304,11 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             walk(root, 0); return found
         }
 
-        private fun isHomeTab(): Boolean = findActionBarContent(decor)?.let(::isHomeTab) == true
-
-        private fun isHomeTab(host: ViewGroup): Boolean {
-            fun walk(view: View): Boolean {
-                if (view is TextView && view.visibility == View.VISIBLE && view.text?.toString()?.trim() == "微信") {
-                    return true
-                }
-                if (view is ViewGroup) {
-                    for (index in 0 until view.childCount) {
-                        if (walk(view.getChildAt(index))) return true
-                    }
-                }
-                return false
-            }
-            return walk(host)
+        private fun isWechatTab(): Boolean {
+            val home = KavaReflector.readField(activity, "i") ?: return false
+            val tabs = KavaReflector.readField(home, "t") ?: return false
+            return (KavaReflector.readField(tabs, "e") as? Int) == 0
         }
-
         private fun dp(value: Int): Int = (value * activity.resources.displayMetrics.density + .5f).toInt()
         private fun night(): Boolean = (activity.resources.configuration.uiMode and 0x30) == 0x20
     }
