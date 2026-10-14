@@ -188,6 +188,7 @@ private class ScreenAlignedBitmapDrawable(
         updateDestination()
     }
 
+    fun coverageDescription(): String = "bounds=$bounds destination=$destination alpha=${paint.alpha} callback=${callback?.javaClass?.name}"
     private var drawDiagnostics = 0
     override fun draw(canvas: Canvas) {
         val bitmap = bitmapRef.get()
@@ -419,12 +420,19 @@ private class BackgroundBeautyRuntime(
                         if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT) return@hookOnce
                         if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
                             wechatTouchStart[activity] = event.y
+                            probeWindowCoverage(activity, "touch-down")
                         } else if (event.actionMasked == android.view.MotionEvent.ACTION_MOVE &&
                             event.y - (wechatTouchStart[activity] ?: event.y) > 100) {
+                            if (wechatCoveragePulls.put(activity, true) != true) probeWindowCoverage(activity, "pull-start")
                             armWechatDiagnostics(activity, "touch-pull")
                         } else if (event.actionMasked == android.view.MotionEvent.ACTION_UP) {
                             armWechatDiagnostics(activity, "touch-up")
                             wechatTouchStart.remove(activity)
+                            if (wechatCoveragePulls.remove(activity) == true) {
+                                probeWindowCoverage(activity, "pull-release")
+                                activity.window.decorView.postOnAnimation { probeWindowCoverage(activity, "pull-next-frame") }
+                                activity.window.decorView.postDelayed({ if (!destroyed) probeWindowCoverage(activity, "pull-settled") }, 450L)
+                            }
                         }
                     }) || installed
                 }
@@ -2008,6 +2016,37 @@ private class BackgroundBeautyRuntime(
         }
     }
 
+    private val wechatCoveragePulls = WeakHashMap<Activity, Boolean>()
+    private fun probeWindowCoverage(activity: Activity, reason: String) {
+        if (destroyed || !hasConfiguredBackground(activity)) return
+        val window = activity.window
+        val decor = window.decorView
+        fun describe(drawable: Drawable?, depth: Int = 0): String {
+            if (drawable == null || depth > 5) return "null"
+            val head = "${drawable.javaClass.name}@${System.identityHashCode(drawable)} bounds=${drawable.bounds}"
+            return when (drawable) {
+                is ScreenAlignedBitmapDrawable -> "$head ${drawable.coverageDescription()}"
+                is android.graphics.drawable.InsetDrawable -> "$head insetChild=[${describe(drawable.drawable, depth + 1)}]"
+                is LayerDrawable -> "$head layers=[${(0 until drawable.numberOfLayers).joinToString { describe(drawable.getDrawable(it), depth + 1) }}]"
+                is ColorDrawable -> "$head color=${drawable.color}"
+                else -> head
+            }
+        }
+        val insets = decor.rootWindowInsets
+        val contrast = if (android.os.Build.VERSION.SDK_INT >= 29) "${window.isStatusBarContrastEnforced}/${window.isNavigationBarContrastEnforced}" else "n/a"
+        HLog.i("$TAG WXCOVER reason=$reason bars=${window.statusBarColor}/${window.navigationBarColor} contrast=$contrast flags=${window.attributes.flags} ui=${decor.systemUiVisibility} size=${decor.width}x${decor.height} insets=$insets getter=[${describe(decor.background)}] actual=[${describe(actualViewBackground(decor))}]")
+        listOf("mBackgroundInsets", "mLastBackgroundInsets", "mFrameOffsets", "mLastTopInset", "mLastBottomInset").forEach { field ->
+            HLog.i("$TAG WXCOVER reason=$reason field=$field value=${wechatProbeField(decor, field)}")
+        }
+        listOf("statusBarBackground", "navigationBarBackground").forEach { name ->
+            val id = activity.resources.getIdentifier(name, "id", "android")
+            val view = if (id != 0) decor.findViewById<View>(id) else null
+            HLog.i("$TAG WXCOVER reason=$reason node=$name ${wechatProbeView(view, activity)}")
+        }
+        activity.findViewById<View>(android.R.id.content)?.let {
+            HLog.i("$TAG WXCOVER reason=$reason content=${wechatProbeView(it, activity)} padding=${it.paddingLeft},${it.paddingTop},${it.paddingRight},${it.paddingBottom}")
+        }
+    }
     private val wechatTouchStart = WeakHashMap<Activity, Float>()
     private val wechatDiagnosticFrames = WeakHashMap<Activity, Int>()
     private val wechatDiagnosticListeners = WeakHashMap<Activity, ViewTreeObserver.OnPreDrawListener>()
