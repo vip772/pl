@@ -362,6 +362,7 @@ private class BackgroundBeautyRuntime(
             installTabHooks() or
             installFragmentHooks() or
             installSurfaceHooks() or installBackgroundWriteHook() or installWechatTargetDiagnostics() or installWechatVerifiedPaths()
+        installChatChromeLifecycle()
         installChatBackgroundComponentHook(allowDexSearch = false)
         if (!installed) HLog.e("$TAG 未安装任何页面 Hook")
         main.post(::refreshAll)
@@ -1881,15 +1882,60 @@ private class BackgroundBeautyRuntime(
         if (image != null) setNativeImage(state, image, bitmap, opacity)
         activity.findViewById<View>(android.R.id.content)?.let { root ->
             applyWhitelistedSurfaces(state, root, BackgroundBeautySettings.Slot.CHAT)
-            applyChatFooterTransparency(state, root)
+            applyChatChromeRoot(state, root)
             probeVisibleChrome(activity, "chat-applied")
             root.postOnAnimation { if (!destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT) probeVisibleChrome(activity, "chat-next-frame") }
             root.postDelayed({ if (!destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT) probeVisibleChrome(activity, "chat-settled") }, 500L)
         }
     }
 
+    private fun installChatChromeLifecycle() {
+        listOf("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", "com.tencent.mm.pluginsdk.ui.chat.ChatFooter").forEach { className ->
+            val clazz = KavaReflector.loadClass(className, context.hostClassLoader()) ?: return@forEach
+            KavaReflector.findMethodRecursive(clazz, "onAttachedToWindow")?.let { method ->
+                hookOnce(method, after = { param ->
+                    val view = param.thisObject as? View ?: return@hookOnce
+                    if (!hasClassName(view, className)) return@hookOnce
+                    view.post {
+                        val activity = findActivity(view) ?: return@post
+                        val state = states[activity] ?: return@post
+                        if (destroyed || resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return@post
+                        applyChatChromeRoot(state, view)
+                    }
+                })
+            }
+        }
+    }
+    private fun applyChatChromeRoot(state: HostState, root: View) {
+        val layoutId = resourceId("bkb")
+        val layout = if (root.id == layoutId) root else root.rootView.findViewById<View>(layoutId)
+        if (layout != null && layout.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout") {
+            setTransparentSurface(state, layout, BackgroundBeautySettings.Slot.CHAT)
+            var parent = layout.parent as? View
+            repeat(5) {
+                val view = parent ?: return@repeat
+                if (view.javaClass.name == "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout") {
+                    setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT)
+                    // Match floating header's explicit status-area API, saving values for restoration.
+                    listOf("setStatusBarBackgroundColor", "setStatusBarColor").forEach { name ->
+                        val setter = KavaReflector.findMethodRecursive(view.javaClass, name, Int::class.javaPrimitiveType!!) ?: return@forEach
+                        val getter = KavaReflector.findMethodRecursive(view.javaClass, name.replaceFirst("set", "get")) ?: return@forEach
+                        val values = bounceColors.getOrPut(view) { LinkedHashMap() }
+                        if (!values.containsKey(setter)) values[setter] = KavaReflector.invoke(getter, view)
+                        surfaceMutationDepth++
+                        try { KavaReflector.invoke(setter, view, Color.TRANSPARENT) } finally { surfaceMutationDepth-- }
+                    }
+                }
+                parent = view.parent as? View
+            }
+        }
+        applyChatFooterTransparency(state, layout ?: root)
+    }
     private fun applyChatFooterTransparency(state: HostState, root: View) {
-        val footer = findDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") as? ViewGroup
+        val direct = root.rootView.findViewById<View>(resourceId("k52"))
+        val footer = (direct?.takeIf { hasClassName(it, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") }
+            ?: root.takeIf { hasClassName(it, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") }
+            ?: findDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter")) as? ViewGroup
         if (footer == null) {
             HLog.i("$TAG CHROMEINPUT footerMissing root=${root.javaClass.name}")
             return
@@ -2065,6 +2111,12 @@ private class BackgroundBeautyRuntime(
     private fun probeVisibleChrome(activity: Activity, reason: String) {
         if (destroyed) return
         val decor = activity.window.decorView
+        if (reason == "desktop-settled") {
+            wechatTaskControllers.entries.toList().filter { findActivity(it.key) === activity }.forEach { (container, reference) ->
+                val owner = reference.get()
+                HLog.i("$TAG DESKTOPEDGE container=${wechatProbeView(container, activity)} fixed=${wechatProbeField(container, "F")} extra=${wechatProbeField(container, "I")} reserve=${wechatProbeField(container, "J")} measured=${wechatProbeField(container, "H")} open=${wechatProbeField(owner, "P")}")
+            }
+        }
         HLog.i("$TAG CHROMEDRAW reason=$reason target=${resolveTarget(activity)} bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor}")
         val queue = ArrayDeque<View>()
         queue.add(decor)
