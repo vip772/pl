@@ -399,6 +399,24 @@ private class BackgroundBeautyRuntime(
                     (param.thisObject as? Activity)?.let { scheduleRefresh(it, MAX_INITIAL_REFRESHES) }
                 }) || installed
             }
+            if (className == LAUNCHER_ACTIVITY) {
+                KavaReflector.findMethodRecursive(clazz, "dispatchTouchEvent", android.view.MotionEvent::class.java)?.let { method ->
+                    installed = hookOnce(method, after = { param ->
+                        val activity = param.thisObject as? Activity ?: return@hookOnce
+                        val event = param.args.firstOrNull() as? android.view.MotionEvent ?: return@hookOnce
+                        if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT) return@hookOnce
+                        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                            wechatTouchStart[activity] = event.y
+                        } else if (event.actionMasked == android.view.MotionEvent.ACTION_MOVE &&
+                            event.y - (wechatTouchStart[activity] ?: event.y) > 100) {
+                            armWechatDiagnostics(activity, "touch-pull")
+                        } else if (event.actionMasked == android.view.MotionEvent.ACTION_UP) {
+                            armWechatDiagnostics(activity, "touch-up")
+                            wechatTouchStart.remove(activity)
+                        }
+                    }) || installed
+                }
+            }
             KavaReflector.findMethodRecursive(clazz, "onResume")?.let { method ->
                 installed = hookOnce(method, after = { param ->
                     (param.thisObject as? Activity)?.let { scheduleRefresh(it, MAX_INITIAL_REFRESHES) }
@@ -426,6 +444,19 @@ private class BackgroundBeautyRuntime(
 
     private fun installTabHooks(): Boolean {
         var installed = false
+        val homeClass = KavaReflector.loadClass("com.tencent.mm.ui.HomeUI", context.hostClassLoader())
+        KavaReflector.declaredMethods(homeClass).filter { it.name in setOf("q", "w") && it.returnType == Void.TYPE }.forEach { method ->
+            installed = hookOnce(method, after = { param ->
+                val activity = findActivity(param.thisObject) ?: return@hookOnce
+                val state = states[activity] ?: return@hookOnce
+                val slot = currentLauncherSlot(activity) ?: return@hookOnce
+                if (slot != BackgroundBeautySettings.Slot.CHAT && hasConfiguredBackground(activity)) {
+                    applyChromeTransparency(state, slot)
+                    applySystemBars(state)
+                    armWechatDiagnostics(activity, "home-complete:${method.name}")
+                }
+            }) || installed
+        }
         val bottomTab = KavaReflector.loadClass(BOTTOM_TAB_CLASS, context.hostClassLoader())
         KavaReflector.findMethodRecursive(
             bottomTab,
@@ -659,6 +690,9 @@ private class BackgroundBeautyRuntime(
                                 view.background = applied
                                 restoreSurfaceGeometry(view, snapshot)
                             } finally { surfaceMutationDepth-- }
+                        }
+                        if (diagnosticCounts.computeIfAbsent("write-result:${view.javaClass.name}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+                            HLog.i("$TAG WXRESULT class=${view.javaClass.name} slot=${snapshot.slot} applied=${applied != null} retained=${view.background === applied} active=${resolveTarget(state.activity)}")
                         }
                         if (applied == null) scheduleRefresh(state.activity)
                     }
@@ -1032,6 +1066,7 @@ private class BackgroundBeautyRuntime(
                 if (!entered) {
                     preparedRoots.entries.removeAll { it.value.first.activity === activity }
                     scheduleRefresh(activity, 1)
+                    main.post { armWechatDiagnostics(activity, "chat-exit") }
                 }
             }
         }
@@ -1371,6 +1406,7 @@ private class BackgroundBeautyRuntime(
         }
     }
 
+    private val wechatTouchStart = WeakHashMap<Activity, Float>()
     private val wechatDiagnosticFrames = WeakHashMap<Activity, Int>()
     private val wechatDiagnosticListeners = WeakHashMap<Activity, ViewTreeObserver.OnPreDrawListener>()
     private fun armWechatDiagnostics(activity: Activity, reason: String) {
@@ -1392,7 +1428,7 @@ private class BackgroundBeautyRuntime(
         activity.window.decorView.viewTreeObserver.addOnPreDrawListener(listener)
     }
     private fun snapshotWechatLayers(activity: Activity, reason: String) {
-        if (diagnosticCounts.computeIfAbsent("wechat-snapshot-total") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 14) return
+        if (diagnosticCounts.computeIfAbsent(if (reason.startsWith("touch") || reason.startsWith("predraw")) "wechat-touch-snapshots" else "wechat-write-snapshots") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 14) return
         val state = states[activity] ?: return
         val slot = resolveTarget(activity)
         HLog.i("$TAG WXFRAME reason=$reason slot=$slot bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} chat=$launcherChatActive pending=${pendingRefreshes.containsKey(activity)}")
@@ -1792,6 +1828,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun clearActivity(activity: Activity) {
+        HLog.i("$TAG WXRESTORE activity=${activity.javaClass.name} target=${resolveTarget(activity)} enabled=${prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)}")
         restoreBounceColors(activity)
         synchronized(pendingLoads) { pendingLoads.remove(activity) }
         synchronized(pendingRefreshes) { pendingRefreshes.remove(activity) }
