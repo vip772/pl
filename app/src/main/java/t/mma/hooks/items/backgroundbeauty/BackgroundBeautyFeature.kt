@@ -1881,9 +1881,43 @@ private class BackgroundBeautyRuntime(
         if (image != null) setNativeImage(state, image, bitmap, opacity)
         activity.findViewById<View>(android.R.id.content)?.let { root ->
             applyWhitelistedSurfaces(state, root, BackgroundBeautySettings.Slot.CHAT)
+            applyChatFooterTransparency(state, root)
         }
     }
 
+    private fun applyChatFooterTransparency(state: HostState, root: View) {
+        val footer = findDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") as? ViewGroup ?: return
+        val queue = ArrayDeque<View>()
+        queue.add(footer)
+        var visited = 0
+        while (queue.isNotEmpty() && visited++ < 160) {
+            val view = queue.removeFirst()
+            if (view is android.widget.EditText) {
+                val snapshot = surfaceSnapshot(state, view)
+                if (snapshot.appliedBackground is android.graphics.drawable.GradientDrawable && view.background === snapshot.appliedBackground) continue
+                synchronizeExternalBackground(snapshot, view)
+                val density = view.resources.displayMetrics.density
+                val outline = android.graphics.drawable.GradientDrawable().apply {
+                    setColor(Color.TRANSPARENT)
+                    setStroke((density * 1.2f).toInt().coerceAtLeast(1), Color.WHITE)
+                    cornerRadius = density * 10f
+                }
+                surfaceMutationDepth++
+                try {
+                    view.backgroundTintList = null
+                    view.backgroundTintMode = null
+                    view.background = outline
+                    restoreSurfaceGeometry(view, snapshot)
+                    snapshot.appliedBackground = outline
+                    snapshot.appliedBitmap = null
+                    snapshot.slot = BackgroundBeautySettings.Slot.CHAT
+                } finally { surfaceMutationDepth-- }
+            } else if (view is ViewGroup) {
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT)
+                for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
+            }
+        }
+    }
     private fun applyWhitelistedSurfaces(
         state: HostState,
         root: View,
