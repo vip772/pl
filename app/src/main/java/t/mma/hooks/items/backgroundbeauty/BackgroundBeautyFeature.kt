@@ -431,7 +431,7 @@ private class BackgroundBeautyRuntime(
                             if (wechatCoveragePulls.remove(activity) == true) {
                                 probeWindowCoverage(activity, "pull-release")
                                 activity.window.decorView.postOnAnimation { probeWindowCoverage(activity, "pull-next-frame") }
-                                activity.window.decorView.postDelayed({ if (!destroyed) probeWindowCoverage(activity, "pull-settled") }, 450L)
+                                activity.window.decorView.postDelayed({ if (!destroyed) { probeWindowCoverage(activity, "pull-settled"); probeVisibleChrome(activity, "desktop-settled") } }, 450L)
                             }
                         }
                     }) || installed
@@ -1264,7 +1264,7 @@ private class BackgroundBeautyRuntime(
                     val window = param.thisObject as? android.view.Window ?: return@hookOnce
                     val activity = findActivity(window.decorView) ?: return@hookOnce
                     val slot = resolveTarget(activity) ?: return@hookOnce
-                    if (slot != BackgroundBeautySettings.Slot.CHAT && states[activity]?.systemBarsApplied == true && hasConfiguredBackground(activity)) {
+                    if (states[activity]?.systemBarsApplied == true && hasConfiguredBackground(activity)) {
                         val hostColor = param.args[0] as? Int ?: return@hookOnce
                         if (hostColor != Color.TRANSPARENT) {
                             if (name == "setStatusBarColor") states[activity]?.originalStatusBarColor = hostColor
@@ -1882,11 +1882,19 @@ private class BackgroundBeautyRuntime(
         activity.findViewById<View>(android.R.id.content)?.let { root ->
             applyWhitelistedSurfaces(state, root, BackgroundBeautySettings.Slot.CHAT)
             applyChatFooterTransparency(state, root)
+            probeVisibleChrome(activity, "chat-applied")
+            root.postOnAnimation { if (!destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT) probeVisibleChrome(activity, "chat-next-frame") }
+            root.postDelayed({ if (!destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT) probeVisibleChrome(activity, "chat-settled") }, 500L)
         }
     }
 
     private fun applyChatFooterTransparency(state: HostState, root: View) {
-        val footer = findDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") as? ViewGroup ?: return
+        val footer = findDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") as? ViewGroup
+        if (footer == null) {
+            HLog.i("$TAG CHROMEINPUT footerMissing root=${root.javaClass.name}")
+            return
+        }
+        HLog.i("$TAG CHROMEINPUT footerFound ${wechatProbeView(footer, state.activity)}")
         val queue = ArrayDeque<View>()
         queue.add(footer)
         var visited = 0
@@ -1911,6 +1919,7 @@ private class BackgroundBeautyRuntime(
                     snapshot.appliedBackground = outline
                     snapshot.appliedBitmap = null
                     snapshot.slot = BackgroundBeautySettings.Slot.CHAT
+                    HLog.i("$TAG CHROMEINPUT outlineApplied ${wechatProbeView(view, state.activity)}")
                 } finally { surfaceMutationDepth-- }
             } else if (view is ViewGroup) {
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT)
@@ -2053,6 +2062,36 @@ private class BackgroundBeautyRuntime(
         }
     }
 
+    private fun probeVisibleChrome(activity: Activity, reason: String) {
+        if (destroyed) return
+        val decor = activity.window.decorView
+        HLog.i("$TAG CHROMEDRAW reason=$reason target=${resolveTarget(activity)} bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor}")
+        val queue = ArrayDeque<View>()
+        queue.add(decor)
+        var visited = 0
+        var emitted = 0
+        var footerCount = 0
+        var inputCount = 0
+        while (queue.isNotEmpty() && visited++ < 1800) {
+            val view = queue.removeFirst()
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            val rect = Rect()
+            val visible = view.getGlobalVisibleRect(rect) && view.isShown && view.alpha > 0f
+            val name = view.javaClass.name
+            if (name.contains("ChatFooter")) footerCount++
+            if (view is android.widget.EditText) inputCount++
+            val topOrBottom = rect.top < decor.height * 0.13f || rect.bottom > decor.height * 0.88f
+            val drawing = view.background != null || view.foreground != null || name.contains("Background") || name.contains("Surface") || name.contains("Footer") || isChromeSurface(view)
+            if (visible && topOrBottom && drawing && emitted++ < 80) {
+                val idName = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("none")
+                val methods = KavaReflector.declaredMethods(view.javaClass).filter { it.name in setOf("draw", "onDraw", "dispatchDraw") }.joinToString { it.name }
+                HLog.i("$TAG CHROMEDRAW reason=$reason node=${wechatProbeView(view, activity)} idName=$idName rect=$rect fg=${view.foreground?.javaClass?.name} draw=$methods")
+            }
+            if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
+        }
+        HLog.i("$TAG CHROMEDRAW reason=$reason visited=$visited emitted=$emitted footers=$footerCount inputs=$inputCount")
+    }
     private val wechatCoveragePulls = WeakHashMap<Activity, Boolean>()
     private fun probeWindowCoverage(activity: Activity, reason: String) {
         if (destroyed || !hasConfiguredBackground(activity)) return
