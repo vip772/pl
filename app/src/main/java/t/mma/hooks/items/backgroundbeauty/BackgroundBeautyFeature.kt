@@ -99,7 +99,23 @@ private class BackgroundBeautyFeedbackDrawable() : Drawable(), Drawable.Callback
     ).apply { callback = this@BackgroundBeautyFeedbackDrawable }
     override fun draw(canvas: Canvas) { ripple.bounds = bounds; ripple.draw(canvas) }
     override fun isStateful(): Boolean = true
-    override fun onStateChange(state: IntArray): Boolean { ripple.state = state; invalidateSelf(); return true }
+    private var touchPressed = false
+    private var hostState = intArrayOf()
+    fun setTouchPressed(pressed: Boolean) {
+        touchPressed = pressed
+        applyRippleState()
+    }
+    private fun applyRippleState() {
+        ripple.state = if (touchPressed) hostState.filter { it != android.R.attr.state_pressed }.toIntArray() + intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed)
+            else hostState.filter { it != android.R.attr.state_pressed }.toIntArray()
+        invalidateSelf()
+    }
+    override fun onStateChange(state: IntArray): Boolean {
+        hostState = state
+        ripple.state = if (touchPressed) state + intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed) else state
+        invalidateSelf()
+        return true
+    }
     override fun onBoundsChange(bounds: Rect) { ripple.bounds = bounds }
     override fun setHotspot(x: Float, y: Float) { ripple.setHotspot(x, y) }
     override fun setHotspotBounds(left: Int, top: Int, right: Int, bottom: Int) { ripple.setHotspotBounds(left, top, right, bottom) }
@@ -417,7 +433,7 @@ private class BackgroundBeautyRuntime(
                 val index = param.args.firstOrNull() as? Int ?: return@hookOnce
                 findActivity(param.thisObject)?.let { activity ->
                     synchronized(launcherTabIndices) { launcherTabIndices[activity] = index }
-                    scheduleRefresh(activity, MAX_INITIAL_REFRESHES)
+                    scheduleRefresh(activity)
                 }
             }) || installed
         }
@@ -433,7 +449,7 @@ private class BackgroundBeautyRuntime(
                     val index = param.args.firstOrNull() as? Int ?: return@hookOnce
                     findActivity(param.thisObject)?.let { activity ->
                         synchronized(launcherTabIndices) { launcherTabIndices[activity] = index }
-                        scheduleRefresh(activity, MAX_INITIAL_REFRESHES)
+                        scheduleRefresh(activity)
                     }
                 }) || installed
             }
@@ -450,7 +466,7 @@ private class BackgroundBeautyRuntime(
                 val index = param.args.firstOrNull() as? Int ?: return@hookOnce
                 findActivity(param.thisObject)?.let { activity ->
                     synchronized(launcherTabIndices) { launcherTabIndices[activity] = index }
-                    scheduleRefresh(activity, MAX_INITIAL_REFRESHES)
+                    scheduleRefresh(activity)
                 }
             }) || installed
         }
@@ -531,7 +547,7 @@ private class BackgroundBeautyRuntime(
                     if (!restoringBounce && surfaceMutationDepth == 0 && hasConfiguredBackground(activity)) {
                         if (diagnosticCounts.computeIfAbsent("bounce:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
                             HLog.i("$TAG DIAG bounce class=${view.javaClass.name} method=$name input=${param.args[0]}")
-                            main.postDelayed({ diagnosticTree(activity, "bounce") }, 120L)
+                            // No delayed tree traversal in a bounce animation.
                         }
                         recordBounceArgument(view, method, param.args[0])
                         param.args[0] = Color.TRANSPARENT
@@ -576,6 +592,7 @@ private class BackgroundBeautyRuntime(
         } else values[method] = argument
     }
     private fun restoreBounceColors(activity: Activity?) {
+        preparedRoots.entries.removeAll { activity == null || it.value.first.activity === activity }
         listSelectors.entries.filter { activity == null || findActivity(it.key) === activity }.toList().forEach { (list, selector) ->
             if (list.selector is BackgroundBeautyFeedbackDrawable) list.selector = selector
             listSelectors.remove(list)
@@ -584,12 +601,7 @@ private class BackgroundBeautyRuntime(
             val observer = list.viewTreeObserver
             if (observer.isAlive) observer.removeOnPreDrawListener(listener)
             listPreDraws.remove(list)
-        }
-        frameDiagnostics.entries.filter { activity == null || it.key === activity }.toList().forEach { (owner, listener) ->
-            val observer = owner.window.decorView.viewTreeObserver
-            if (observer.isAlive) observer.removeOnPreDrawListener(listener)
-            scrollDiagnostics.remove(owner)?.let { if (observer.isAlive) observer.removeOnScrollChangedListener(it) }
-            frameDiagnostics.remove(owner)
+            clearListRipple(list)
         }
         val entries = bounceColors.entries.filter { activity == null || findActivity(it.key) === activity }
             .map { it.key to it.value.toMap() }
@@ -598,6 +610,7 @@ private class BackgroundBeautyRuntime(
             entries.forEach { (view, colors) ->
                 colors.forEach { (method, color) -> KavaReflector.invoke(method, view, color) }
                 bounceColors.remove(view)
+                initializedChrome.remove(view)
             }
         } finally { restoringBounce = false }
     }
@@ -619,7 +632,6 @@ private class BackgroundBeautyRuntime(
                         snapshot.originalBackground = view.background
                         snapshot.originalTintList = view.backgroundTintList
                         snapshot.originalTintMode = view.backgroundTintMode
-                        diagnoseTransient(state.activity, "rewrite:$name", view)
                         if (applied != null && hasConfiguredBackground(state.activity)) {
                             surfaceMutationDepth++
                             try {
@@ -629,7 +641,7 @@ private class BackgroundBeautyRuntime(
                                 restoreSurfaceGeometry(view, snapshot)
                             } finally { surfaceMutationDepth-- }
                         }
-                        scheduleRefresh(state.activity)
+                        if (applied == null) scheduleRefresh(state.activity)
                     }
                 }) || installed
             }
@@ -658,7 +670,54 @@ private class BackgroundBeautyRuntime(
     private val dirtyBoundRows = WeakHashMap<View, Boolean>()
     private val listSelectors = WeakHashMap<AbsListView, Drawable?>()
     private val listPreDraws = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
+    private val touchFeedbackRows = WeakHashMap<View, View>()
+    private val touchFeedbackOrigins = WeakHashMap<View, Pair<Float, Float>>()
+    private fun updateListRipple(list: ViewGroup, event: android.view.MotionEvent) {
+        val slot = homeLists[list] ?: return
+        val activity = findActivity(list) ?: return
+        if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) || states[activity] == null ||
+            !BackgroundBeautyStore.hasImage(context.hostContext(), slot)) return
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                for (index in list.childCount - 1 downTo 0) {
+                    val row = list.getChildAt(index)
+                    val x = event.x + list.scrollX - row.left - row.translationX
+                    val y = event.y + list.scrollY - row.top - row.translationY
+                    if (row.visibility == View.VISIBLE && x >= 0 && y >= 0 && x < row.width && y < row.height) {
+                        applyBoundRow(list, row)
+                        (row.background as? BackgroundBeautyFeedbackDrawable)?.let { ripple ->
+                            ripple.setHotspot(x, y)
+                            ripple.setTouchPressed(true)
+                            if (diagnosticCounts.computeIfAbsent("ripple:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+                                HLog.i("$TAG DIAG ripple slot=${slot.key} row=${row.javaClass.name} hotspot=$x/$y")
+                            }
+                            touchFeedbackRows[list] = row
+                            touchFeedbackOrigins[list] = event.x to event.y
+                        }
+                        break
+                    }
+                }
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val origin = touchFeedbackOrigins[list] ?: return
+                val slop = android.view.ViewConfiguration.get(list.context).scaledTouchSlop
+                if (kotlin.math.abs(event.x - origin.first) > slop || kotlin.math.abs(event.y - origin.second) > slop) clearListRipple(list)
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> clearListRipple(list)
+        }
+    }
+    private fun clearListRipple(list: View) {
+        (touchFeedbackRows.remove(list)?.background as? BackgroundBeautyFeedbackDrawable)?.setTouchPressed(false)
+        touchFeedbackOrigins.remove(list)
+    }
     private fun installRecyclerBinding(view: View) {
+        KavaReflector.findMethodRecursive(view.javaClass, "dispatchTouchEvent", android.view.MotionEvent::class.java)?.let { method ->
+            hookOnce(method, before = { param ->
+                val list = param.thisObject as? ViewGroup ?: return@hookOnce
+                val event = param.args.firstOrNull() as? android.view.MotionEvent ?: return@hookOnce
+                updateListRipple(list, event)
+            })
+        }
         if (view is ViewGroup && !listPreDraws.containsKey(view)) {
             val listener = ViewTreeObserver.OnPreDrawListener {
                 if (!destroyed && view.isShown) {
@@ -725,8 +784,6 @@ private class BackgroundBeautyRuntime(
                     val row = KavaReflector.readField(holder, "itemView") as? View ?: return@hookOnce
                     dirtyBoundRows[row] = true
                     val list = row.parent as? View
-                    val owner = list?.let(::findActivity) ?: findActivity(row)
-                    if (owner != null) diagnoseTransient(owner, "bind:${method.name}:parent=${list?.javaClass?.name}", row)
                     if (list != null) applyBoundRow(list, row)
                 })
             }
@@ -856,6 +913,7 @@ private class BackgroundBeautyRuntime(
         if (fragment == null || slotForFragment(fragment) == null) return
         val root = supplied ?: fragmentView(fragment) ?: return
         synchronized(fragmentRoots) { fragmentRoots[fragment] = WeakReference(root) }
+        preparedRoots.remove(root)
         observeLayout(root)
         val activity = findActivity(fragment) ?: findActivity(root) ?: return
         scheduleRefresh(activity, MAX_INITIAL_REFRESHES)
@@ -907,7 +965,12 @@ private class BackgroundBeautyRuntime(
             if (pendingRefreshes.containsKey(activity)) return@synchronized null
             Runnable {
                 synchronized(pendingRefreshes) { pendingRefreshes.remove(activity) }
+                val started = android.os.SystemClock.uptimeMillis()
                 applyForActivity(activity)
+                val elapsed = android.os.SystemClock.uptimeMillis() - started
+                if (elapsed >= 16 && diagnosticCounts.computeIfAbsent("slow-refresh") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
+                    HLog.i("$TAG DIAG slowRefresh elapsedMs=$elapsed")
+                }
                 if (retries > 0 && !destroyed) {
                     main.postDelayed({ scheduleRefresh(activity, retries - 1) }, 120L)
                 }
@@ -1034,11 +1097,23 @@ private class BackgroundBeautyRuntime(
         applySystemBars(state)
         if (state.lastLoggedSlot != slot) {
             state.lastLoggedSlot = slot
-            main.postDelayed({ diagnosticTree(activity, "after_apply") }, 600L)
+            // Full tree/frame diagnostics removed after capturing 66fe209 evidence.
             HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size} singleWindowImage=${slot != BackgroundBeautySettings.Slot.CHAT}")
         }
     }
 
+    private val preparedRoots = WeakHashMap<View, Pair<HostState, Int>>()
+    private fun preparePage(state: HostState, root: View, slot: BackgroundBeautySettings.Slot) {
+        val revision = prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)
+        val prepared = preparedRoots[root]
+        if (prepared?.first === state && prepared.second == revision) return
+        val started = android.os.SystemClock.uptimeMillis()
+        applyWhitelistedSurfaces(state, root, slot)
+        preparedRoots[root] = state to revision
+        if (diagnosticCounts.computeIfAbsent("prepare:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+            HLog.i("$TAG DIAG prepare slot=${slot.key} elapsedMs=${android.os.SystemClock.uptimeMillis() - started}")
+        }
+    }
     private fun applyLauncherBackground(
         state: HostState,
         slot: BackgroundBeautySettings.Slot,
@@ -1069,7 +1144,7 @@ private class BackgroundBeautyRuntime(
                 setTransparentSurface(state, parent, slot)
                 parent = parent.parent as? View
             }
-            applyWhitelistedSurfaces(state, root, slot)
+            preparePage(state, root, slot)
         }
         val neighbors = synchronized(fragmentRoots) { fragmentRoots.entries.map { it.key to it.value.get() } }
         neighbors.forEach { (fragment, root) ->
@@ -1077,7 +1152,7 @@ private class BackgroundBeautyRuntime(
             if (neighborSlot != slot && root != null && root.isAttachedToWindow && findActivity(root) === state.activity &&
                 BackgroundBeautyStore.hasImage(context.hostContext(), neighborSlot)) {
                 setTransparentSurface(state, root, neighborSlot)
-                applyWhitelistedSurfaces(state, root, neighborSlot)
+                preparePage(state, root, neighborSlot)
             }
         }
     }
@@ -1115,7 +1190,7 @@ private class BackgroundBeautyRuntime(
             if (view !== root && isBottomBar(view)) continue
             if (view !== root && isComposeSurface(view)) continue
             if (name == "com.tencent.mm.ui.FrostedContentView" || name == APP_BRAND_DESKTOP_CONTAINER ||
-                name == BOUNCE_VIEW || name == NESTED_BOUNCE_VIEW ||
+                hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW) ||
                 name == CHAT_FOOTER_CUSTOM ||
                 (view !== root && isMajorSurface(view))
             ) {
@@ -1195,6 +1270,8 @@ private class BackgroundBeautyRuntime(
             if (view !== host && (isChromeSurface(view) || isSystemBarBackground(view))) {
                 setTransparentSurface(state, view, slot)
             }
+            // 页面内部已由 preparePage 和列表绑定处理，公共栏扫描不重复进入四页条目树。
+            if (hasClassName(view, "com.tencent.mm.ui.base.CustomViewPager")) continue
             if (view is ViewGroup) {
                 for (index in 0 until view.childCount) queue.addLast(view.getChildAt(index))
             }
@@ -1231,100 +1308,6 @@ private class BackgroundBeautyRuntime(
                 hasClassName(view, "com.tencent.mm.ui.widget.listview.PullDownListView")
             else -> false
         }
-    }
-
-    private val frameDiagnostics = WeakHashMap<Activity, ViewTreeObserver.OnPreDrawListener>()
-    private val scrollDiagnostics = WeakHashMap<Activity, ViewTreeObserver.OnScrollChangedListener>()
-    private fun diagnoseTransient(activity: Activity, reason: String, target: View? = null) {
-        if (destroyed || restoringBounce) return
-        val slot = resolveTarget(activity) ?: return
-        if (slot == BackgroundBeautySettings.Slot.CHAT) return
-        val key = "transient:${slot.key}:$reason"
-        if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 8) return
-        if (reason.startsWith("rewrite:") || reason.startsWith("bind:") || reason == "scroll") {
-            diagnosticCounts["frames:${slot.key}"]?.set(0)
-            diagnosticCounts["transient:${slot.key}:predraw"]?.set(0)
-        }
-        val view = target ?: activity.window.decorView
-        val state = states[activity]
-        val bg = view.background
-        val id = runCatching { view.resources.getResourceName(view.id) }.getOrDefault("none")
-        val path = generateSequence(view as View?) { it.parent as? View }.take(7).joinToString("<") { it.javaClass.name }
-        val image = state?.loadedBitmaps?.get(slot)?.bitmap
-        val imageInfo = image?.let { "${it.width}x${it.height},recycled=${it.isRecycled},alpha=${it.hasAlpha()}" }
-        val extras = if (view.javaClass.name == "com.tencent.mm.ui.FrostedContentView") {
-            listOf("getFrostedEnabled", "getFrostedColor", "getTopBlurAreaHeight", "getBottomBlurAreaHeight").joinToString(",") { name ->
-                "$name=${KavaReflector.findMethodRecursive(view.javaClass, name)?.let { KavaReflector.invoke(it, view) }}"
-            }
-        } else if (view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") {
-            listOf("h", "i", "m").joinToString(",") { field ->
-                val drawable = KavaReflector.readField(view, field) as? Drawable
-                "$field=${drawable?.javaClass?.name}:${(drawable as? ColorDrawable)?.color}"
-            }
-        } else "-"
-        HLog.i("$TAG DIAG transient slot=${slot.key} reason=$reason id=$id class=${view.javaClass.name} bg=${bg?.javaClass?.name} color=${(bg as? ColorDrawable)?.color} opacity=${bg?.opacity} layer=${view.layerType} scroll=${view.scrollX}/${view.scrollY} translation=${view.translationX}/${view.translationY} bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} pending=${pendingRefreshes.containsKey(activity)} image=$imageInfo extras=$extras path=$path")
-    }
-    private fun installFrameDiagnostics(activity: Activity) {
-        if (frameDiagnostics.containsKey(activity)) return
-        val listener = ViewTreeObserver.OnPreDrawListener {
-            val slot = resolveTarget(activity)
-            if (slot != null && slot != BackgroundBeautySettings.Slot.CHAT) {
-                val key = "frames:${slot.key}"
-                if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
-                    diagnoseTransient(activity, "predraw")
-                    val state = states[activity]
-                    state?.surfaces?.keys?.filter { it.isShown && (isChromeSurface(it) || it.javaClass.name == "com.tencent.mm.ui.FrostedContentView" || homeLists.containsKey(it) || it.id in targetResourceIds(slot)) }?.take(18)?.forEach { diagnoseTransient(activity, "predraw:${it.javaClass.name}", it) }
-                }
-            }
-            true
-        }
-        var scrollSamples = 0
-        val scrollListener = ViewTreeObserver.OnScrollChangedListener {
-            if (++scrollSamples > 48) return@OnScrollChangedListener
-            diagnoseTransient(activity, "scroll")
-            states[activity]?.surfaces?.keys?.filter { it.isShown && homeLists.containsKey(it) }?.forEach { list ->
-                diagnoseTransient(activity, "scroll-list", list)
-                if (list is ViewGroup) {
-                    for (index in 0 until minOf(list.childCount, 3)) diagnoseTransient(activity, "scroll-row:$index", list.getChildAt(index))
-                }
-            }
-        }
-        scrollDiagnostics[activity] = scrollListener
-        activity.window.decorView.viewTreeObserver.addOnScrollChangedListener(scrollListener)
-        frameDiagnostics[activity] = listener
-        activity.window.decorView.viewTreeObserver.addOnPreDrawListener(listener)
-    }
-    private fun diagnosticTree(activity: Activity, reason: String) {
-        if (destroyed || activity.isDestroyed || activity.isFinishing) return
-        val slot = resolveTarget(activity) ?: return
-        if (slot == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return
-        installFrameDiagnostics(activity)
-        val key = "${slot.key}:$reason"
-        if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 1) return
-        val state = states[activity]
-        val window = activity.window
-        HLog.i("$TAG DIAG begin slot=${slot.key} reason=$reason bars=${window.statusBarColor}/${window.navigationBarColor} flags=${window.decorView.systemUiVisibility}")
-        val queue = ArrayDeque<Pair<View, Int>>()
-        queue.add(window.decorView to 0)
-        var count = 0
-        while (queue.isNotEmpty() && count++ < 220) {
-            val (view, depth) = queue.removeFirst()
-            val rect = android.graphics.Rect()
-            if (!view.getGlobalVisibleRect(rect)) continue
-            val id = runCatching { view.resources.getResourceName(view.id) }.getOrDefault("none")
-            val bg = view.background
-            val fg = view.foreground
-            val managed = state?.surfaces?.get(view)
-            val color = (bg as? ColorDrawable)?.color?.toUInt()?.toString(16) ?: "-"
-            val overrides = listOf("onDraw", "dispatchDraw", "draw").filter { name ->
-                KavaReflector.declaredMethods(view.javaClass).any { it.name == name }
-            }.joinToString(",")
-            HLog.i("$TAG DIAG node depth=$depth class=${view.javaClass.name} id=$id bounds=$rect alpha=${view.alpha} bg=${bg?.javaClass?.name} color=$color fg=${fg?.javaClass?.name} tint=${view.backgroundTintList} managed=${managed != null} owned=${bg === managed?.appliedBackground} draw=$overrides")
-            if (view is ViewGroup && !isComposeSurface(view)) {
-                for (i in 0 until view.childCount) queue.add(view.getChildAt(i) to depth + 1)
-            }
-        }
-        HLog.i("$TAG DIAG end slot=${slot.key} nodes=$count truncated=${queue.isNotEmpty()}")
     }
 
     private fun isSystemBarBackground(view: View): Boolean {
@@ -1388,9 +1371,17 @@ private class BackgroundBeautyRuntime(
         } finally { surfaceMutationDepth-- }
     }
 
+    private val initializedChrome = WeakHashMap<View, Boolean>()
     private fun applyNativeChrome(view: View, slot: BackgroundBeautySettings.Slot) {
-        if (slot == BackgroundBeautySettings.Slot.CHAT || restoringBounce) return
-        if (view.javaClass.name == BOUNCE_VIEW || view.javaClass.name == NESTED_BOUNCE_VIEW) {
+        if (slot == BackgroundBeautySettings.Slot.CHAT || restoringBounce || initializedChrome[view] == true) return
+        if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW) ||
+            view.javaClass.name == "com.tencent.mm.ui.FrostedContentView" || view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") initializedChrome[view] = true
+        if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW)) {
+            val activity = findActivity(view)
+            val state = activity?.let { states[it] }
+            val backdrop = KavaReflector.readField(view, "G") as? View
+            if (state != null && backdrop != null) setTransparentSurface(state, backdrop, slot)
+            HLog.i("$TAG DIAG bouncePrepared class=${view.javaClass.name} backdrop=${backdrop?.javaClass?.name}")
             listOf("MStart2EndBg", "MEnd2StartBg", "MStart2EndBgByActionBar", "MEnd2StartBgByNavigationBar").forEach { property ->
                 val getter = KavaReflector.findMethodRecursive(view.javaClass, "get$property") ?: return@forEach
                 val setter = KavaReflector.findMethodRecursive(view.javaClass, "set$property", Drawable::class.java) ?: return@forEach
@@ -1416,7 +1407,7 @@ private class BackgroundBeautyRuntime(
                 hookOnce(draw, before = { param ->
                     val target = param.thisObject as? View ?: return@hookOnce
                     val owner = findActivity(target) ?: return@hookOnce
-                    if (!restoringBounce && hasConfiguredBackground(owner) && bounceColors[target]?.containsKey(setter) == true) {
+                    if (!restoringBounce && states[owner] != null && bounceColors[target]?.containsKey(setter) == true) {
                         if (KavaReflector.invoke(getter, target) == true) {
                             bounceColors[target]!![setter] = true
                             surfaceMutationDepth++
@@ -1551,6 +1542,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun restoreSlot(state: HostState, slot: BackgroundBeautySettings.Slot) {
+        preparedRoots.entries.removeAll { it.value.first === state }
         state.loadedBitmaps.remove(slot)
         state.surfaces.entries.toList().forEach { (view, snapshot) ->
             if (snapshot.slot == slot) {
@@ -1690,6 +1682,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun restoreState(state: HostState) {
+        preparedRoots.entries.removeAll { it.value.first === state }
         state.surfaces.entries.toList().forEach { (view, snapshot) ->
             restoreSurface(view, snapshot)
         }

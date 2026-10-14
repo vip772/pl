@@ -14,7 +14,7 @@ start = text.index('private class BackgroundBeautyFeedbackDrawable')
 end = text.index('private class ScreenAlignedBitmapDrawable', start)
 stubs = {
     'R.kt': '''package android
-object R { object attr { const val state_pressed=1; const val state_focused=2; const val state_selected=3 } }
+object R { object attr { const val state_enabled=4; const val state_pressed=1; const val state_focused=2; const val state_selected=3 } }
 ''',
     'Test.kt': '''import android.graphics.*
 import android.graphics.drawable.*
@@ -65,6 +65,14 @@ fun main(){
  wrapper.state=intArrayOf(android.R.attr.state_focused,android.R.attr.state_selected);wrapper.draw(canvas);check(native.draws==0)
  wrapper.state=intArrayOf();wrapper.draw(canvas);check(native.draws==0)
  check(wrapper.isStateful())
+ wrapper.setTouchPressed(true)
+ val field=wrapper.javaClass.getDeclaredField("ripple");field.isAccessible=true
+ val inner=field.get(wrapper) as Drawable
+ check(inner.state.contains(android.R.attr.state_pressed) && inner.state.contains(android.R.attr.state_enabled))
+ wrapper.state=intArrayOf(android.R.attr.state_enabled)
+ check(inner.state.contains(android.R.attr.state_pressed))
+ wrapper.setTouchPressed(false)
+ check(!inner.state.contains(android.R.attr.state_pressed))
  val drawer=DrawerHarness()
  check(!drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_DOWN,5f,50f)))
  check(drawer.interceptEdgeTouch(MotionEvent(MotionEvent.ACTION_MOVE,40f,50f)))
