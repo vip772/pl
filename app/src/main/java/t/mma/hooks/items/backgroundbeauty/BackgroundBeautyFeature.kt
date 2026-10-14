@@ -2023,6 +2023,24 @@ private class BackgroundBeautyRuntime(
         val state = states[activity] ?: return
         val slot = resolveTarget(activity)
         HLog.i("$TAG WXFRAME reason=$reason slot=$slot bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} chat=$launcherChatActive pending=${pendingRefreshes.containsKey(activity)}")
+        val bottomQueue = ArrayDeque<View>()
+        bottomQueue.add(activity.window.decorView)
+        var bottomVisited = 0
+        var bottomEmitted = 0
+        while (bottomQueue.isNotEmpty() && bottomVisited++ < MAX_SCAN_NODES) {
+            val view = bottomQueue.removeFirst()
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            val bg = view.background
+            if (view.isShown && location[1] >= activity.window.decorView.height * 0.8f &&
+                bg != null && bottomEmitted++ < 16) {
+                HLog.i("$TAG WXBOTTOM ${wechatProbeView(view, activity)}")
+            }
+            if (view is ViewGroup) for (i in 0 until view.childCount) bottomQueue.add(view.getChildAt(i))
+        }
+        val window = activity.window
+        val contrast = if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced else null
+        HLog.i("$TAG WXBOTTOM window contrast=$contrast flags=${window.attributes.flags} ui=${window.decorView.systemUiVisibility}")
         val queue = ArrayDeque<Pair<View, Int>>()
         queue.add(activity.window.decorView to 0)
         var visited = 0

@@ -116,6 +116,45 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (!replacedTitles.containsKey(title)) replacedTitles[title] = title.visibility
             if (title.visibility != View.INVISIBLE) title.visibility = View.INVISIBLE
         }
+        private fun updateScrollableTitle(visible: Boolean) {
+            if (!visible) return
+            fun walk(view: View, inTaskBar: Boolean, depth: Int) {
+                if (depth > 24) return
+                val task = inTaskBar || view.javaClass.name == "com.tencent.mm.plugin.taskbar.ui.TaskBarContainer"
+                if (task && view is TextView && view.text?.toString()?.trim()?.matches(Regex("微信(?:[（(]\\d+[）)])?")) == true) {
+                    if (!replacedTitles.containsKey(view)) replacedTitles[view] = view.visibility
+                    if (view.visibility != View.GONE) view.visibility = View.GONE
+                }
+                if (view is ViewGroup) for (i in 0 until view.childCount) walk(view.getChildAt(i), task, depth + 1)
+            }
+            walk(decor, false, 0)
+        }
+        private fun sizeHeader() {
+            val root = header ?: return
+            val host = root.parent as? ViewGroup ?: return
+            val nick = name ?: return
+            if (host.width <= 0) return
+            val buttonsId = activity.resources.getIdentifier("coz", "id", activity.packageName)
+            val buttons = if (buttonsId != 0) host.findViewById<View>(buttonsId) else null
+            val right = if (buttons != null && buttons.visibility == View.VISIBLE && buttons.width > 0) buttons.left - dp(8) else host.width - dp(14)
+            val available = (right - dp(14)).coerceAtLeast(dp(48))
+            val textWidth = kotlin.math.ceil(nick.paint.measureText(nick.text.toString()).toDouble()).toInt()
+            val statusWidth = status?.let { kotlin.math.ceil(it.paint.measureText(it.text.toString()).toDouble()).toInt() } ?: 0
+            val desired = dp(48) + maxOf(textWidth, statusWidth) + dp(2)
+            val width = minOf(desired, available)
+            val lp = root.layoutParams
+            if (lp is RelativeLayout.LayoutParams) {
+                lp.removeRule(RelativeLayout.CENTER_IN_PARENT)
+                lp.addRule(RelativeLayout.CENTER_VERTICAL)
+                lp.addRule(RelativeLayout.ALIGN_PARENT_START)
+                val left = ((host.width - width) / 2).coerceIn(dp(14), maxOf(dp(14), right - width))
+                if (lp.width != width || lp.marginStart != left) {
+                    lp.width = width
+                    lp.marginStart = left
+                    root.layoutParams = lp
+                }
+            }
+        }
         private var avatar: ImageView? = null
         private var name: TextView? = null
         private var status: TextView? = null
@@ -155,6 +194,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val currentName = accountName()
             if (name?.text?.toString() != currentName) name?.text = currentName
             if (status?.text?.toString() != "在线") status?.text = "在线"
+            updateScrollableTitle(headerVisible)
+            if (headerVisible) sizeHeader()
             if (homeVisible) loadAvatar()
             lastHomeVisible = homeVisible
         }
@@ -215,7 +256,6 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 textSize = 14f
                 typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
                 maxLines = 1
-                maxWidth = dp(135)
                 ellipsize = android.text.TextUtils.TruncateAt.END
             }
             val st = TextView(activity).apply {
@@ -226,7 +266,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             text.addView(nick); text.addView(st)
             text.setOnClickListener { drawer.toggle() }
-            root.addView(text, LinearLayout.LayoutParams(-2, -2))
+            root.addView(text, LinearLayout.LayoutParams(0, -2, 1f))
             val lp: ViewGroup.LayoutParams = if (host is RelativeLayout) {
                 RelativeLayout.LayoutParams(-2, -2).apply {
                     addRule(RelativeLayout.CENTER_IN_PARENT)
