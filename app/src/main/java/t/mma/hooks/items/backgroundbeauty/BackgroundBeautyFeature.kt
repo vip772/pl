@@ -459,6 +459,7 @@ private class BackgroundBeautyRuntime(
                 if (slot != BackgroundBeautySettings.Slot.CHAT && hasConfiguredBackground(activity)) {
                     applyChromeTransparency(state, slot)
                     applySystemBars(state)
+                    invalidateWechatBackdrops(activity)
                     armWechatDiagnostics(activity, "home-complete:${method.name}")
                 }
             }) || installed
@@ -644,6 +645,10 @@ private class BackgroundBeautyRuntime(
         nodes.forEach { (label, view) -> HLog.i("$TAG WXNODE call=$id phase=$phase label=$label ${wechatProbeView(view, activity)}") }
     }
 
+    private fun wechatHomepageBackdropEnabled(activity: Activity): Boolean =
+        activity.javaClass.name == LAUNCHER_ACTIVITY &&
+            prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
+            BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.WECHAT)
     private val wechatTaskControllers = WeakHashMap<View, WeakReference<Any>>()
     private val wechatGradientControllers = WeakHashMap<View, WeakReference<Any>>()
     private fun rememberWechatTaskController(owner: Any?) {
@@ -675,7 +680,6 @@ private class BackgroundBeautyRuntime(
         val container = wechatProbeField(owner, "g") as? View ?: return
         val activity = findActivity(container) ?: return
         if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT || !hasConfiguredBackground(activity)) return
-        if (wechatProbeField(owner, "P") != false) return
         val state = states[activity] ?: return
         listOf("U1", "T1").forEach { field ->
             (wechatProbeField(owner, field) as? View)?.takeIf { findActivity(it) === activity }?.let {
@@ -697,12 +701,11 @@ private class BackgroundBeautyRuntime(
     private fun protectWechatGl(owner: Any?) {
         val dynamic = wechatProbeField(owner, "q") as? ViewGroup ?: return
         val activity = findActivity(dynamic) ?: return
-        val closed = wechatProbeField(owner, "P") == false &&
-            resolveTarget(activity) == BackgroundBeautySettings.Slot.WECHAT && hasConfiguredBackground(activity)
+        val protected = wechatHomepageBackdropEnabled(activity)
         for (index in 0 until dynamic.childCount) {
             val view = dynamic.getChildAt(index)
             if (view.javaClass.name != "com.tencent.mm.dynamicbackground.view.DynamicBackgroundGLSurfaceView") continue
-            if (!closed) { restoreWechatGl(view); continue }
+            if (!protected) { restoreWechatGl(view); continue }
             if (!wechatGlVisibility.containsKey(view)) wechatGlVisibility[view] = view.visibility
             if (view.visibility != View.INVISIBLE) {
                 wechatGlMutation = true
@@ -713,10 +716,15 @@ private class BackgroundBeautyRuntime(
             }
         }
     }
+    private fun invalidateWechatBackdrops(activity: Activity) {
+        wechatGradientControllers.keys.toList().filter { findActivity(it) === activity }.forEach { it.invalidate() }
+        wechatTitleBackdrops.keys.toList().filter { findActivity(it) === activity }.forEach { it.invalidate() }
+    }
     private fun completeWechatReturn(activity: Activity, reason: String) {
         if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY || launcherChatActive == true || !hasConfiguredBackground(activity)) return
         preparedRoots.entries.removeAll { it.value.first.activity === activity }
         applyForActivity(activity)
+        invalidateWechatBackdrops(activity)
         wechatTaskControllers.entries.toList().filter { findActivity(it.key) === activity }.forEach {
             protectWechatGl(it.value.get())
             applyWechatControllerChrome(it.value.get())
@@ -777,12 +785,11 @@ private class BackgroundBeautyRuntime(
                     val view = param.thisObject as? View ?: return
                     val owner = wechatControllerForGradient(view) ?: return
                     protectWechatGl(owner)
-                    if (wechatProbeField(owner, "P") != false) return
                     val activity = findActivity(view) ?: return
-                    if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT || !hasConfiguredBackground(activity)) return
+                    if (!wechatHomepageBackdropEnabled(activity)) return
                     param.result = null
                     if (diagnosticCounts.computeIfAbsent("wx-gradient-skip") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
-                        HLog.i("$TAG WXFIX gradientSkipped controller=${System.identityHashCode(owner)} open=false ${wechatProbeView(view, activity)}")
+                        HLog.i("$TAG WXFIX gradientSkipped controller=${System.identityHashCode(owner)} open=${wechatProbeField(owner, "P")} ${wechatProbeView(view, activity)}")
                     }
                 }
             })
@@ -817,8 +824,8 @@ private class BackgroundBeautyRuntime(
                     val requested = param.args.firstOrNull() as? Int ?: return
                     val owner = wechatControllerForGradient(view)
                     val activity = findActivity(view)
-                    if (owner != null && activity != null && wechatProbeField(owner, "P") == false &&
-                        resolveTarget(activity) == BackgroundBeautySettings.Slot.WECHAT && hasConfiguredBackground(activity)) {
+                    if (owner != null && activity != null && activity.javaClass.name == LAUNCHER_ACTIVITY &&
+                        wechatHomepageBackdropEnabled(activity)) {
                         wechatGlVisibility[view] = requested
                         param.args[0] = View.INVISIBLE
                     } else wechatGlVisibility.remove(view)
@@ -849,7 +856,7 @@ private class BackgroundBeautyRuntime(
                 }
                 val controller = owner ?: return@hookOnce
                 val activity = findActivity(view) ?: return@hookOnce
-                if (wechatProbeField(controller, "P") != false || resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT || !hasConfiguredBackground(activity)) return@hookOnce
+                if (activity.javaClass.name != LAUNCHER_ACTIVITY || !wechatHomepageBackdropEnabled(activity)) return@hookOnce
                 wechatTitleBackdrops[view] = true
                 param.result = null
                 if (diagnosticCounts.computeIfAbsent("wx-bottom-skip") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
@@ -1419,8 +1426,7 @@ private class BackgroundBeautyRuntime(
         wechatGlVisibility.keys.toList().forEach { view ->
             val owner = wechatControllerForGradient(view)
             val activity = findActivity(view)
-            if (owner == null || activity == null || wechatProbeField(owner, "P") != false ||
-                resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT || !hasConfiguredBackground(activity)) restoreWechatGl(view)
+            if (owner == null || activity == null || !wechatHomepageBackdropEnabled(activity)) restoreWechatGl(view)
         }
         wechatGradientControllers.keys.toList().forEach { it.invalidate() }
         wechatTaskControllers.values.toList().forEach { protectWechatGl(it.get()) }
@@ -1443,6 +1449,7 @@ private class BackgroundBeautyRuntime(
             val launchers = synchronized(observedActivities) { observedActivities.keys.filter { it.javaClass.name == LAUNCHER_ACTIVITY } }
             launchers.forEach { activity ->
                 HLog.i("$TAG DIAG chatTransition entered=$entered")
+                invalidateWechatBackdrops(activity)
                 if (diagnosticCounts.computeIfAbsent("wx-chat-state") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
                     HLog.i("$TAG WXRETURN phase=event entered=$entered ${wechatProbeState(activity)}")
                     activity.window.decorView.postOnAnimation {
@@ -1562,6 +1569,7 @@ private class BackgroundBeautyRuntime(
         }
         applyChromeTransparency(state, slot)
         applySystemBars(state)
+        if (state.activity.javaClass.name == LAUNCHER_ACTIVITY) invalidateWechatBackdrops(state.activity)
         if (state.lastLoggedSlot != slot) {
             state.lastLoggedSlot = slot
             // Full tree/frame diagnostics removed after capturing 66fe209 evidence.
