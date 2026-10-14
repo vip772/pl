@@ -365,6 +365,9 @@ private class BackgroundBeautyRuntime(
 
     fun destroy() {
         destroyed = true
+        wechatTitleBackdrops.keys.toList().forEach { it.invalidate() }
+        wechatTitleBackdrops.clear()
+        wechatGlVisibility.keys.toList().forEach(::restoreWechatGl)
         wechatGradientControllers.keys.toList().forEach { it.invalidate() }
         wechatGradientControllers.clear()
         wechatTaskControllers.clear()
@@ -601,6 +604,11 @@ private class BackgroundBeautyRuntime(
                 synchronized(wechatProbePending) { wechatProbePending[param] = id to activity }
                 runCatching { logWechatProbe(id, "before", className, name, owner, param.args, activity) }
             }, after = { param ->
+                if (name == "y") {
+                    rememberWechatTaskController(param.thisObject)
+                    protectWechatGl(param.thisObject)
+                    applyWechatControllerChrome(param.thisObject)
+                }
                 val pending = synchronized(wechatProbePending) { wechatProbePending.remove(param) } ?: return@hookOnce
                 runCatching { logWechatProbe(pending.first, "after", className, name, param.thisObject ?: return@hookOnce, param.args, pending.second) }
             })
@@ -678,6 +686,54 @@ private class BackgroundBeautyRuntime(
             }
         }
     }
+    private val wechatTitleBackdrops = WeakHashMap<View, Boolean>()
+    private val wechatGlVisibility = WeakHashMap<View, Int>()
+    private var wechatGlMutation = false
+    private fun restoreWechatGl(view: View) {
+        val visibility = wechatGlVisibility.remove(view) ?: return
+        wechatGlMutation = true
+        try { view.visibility = visibility } finally { wechatGlMutation = false }
+    }
+    private fun protectWechatGl(owner: Any?) {
+        val dynamic = wechatProbeField(owner, "q") as? ViewGroup ?: return
+        val activity = findActivity(dynamic) ?: return
+        val closed = wechatProbeField(owner, "P") == false &&
+            resolveTarget(activity) == BackgroundBeautySettings.Slot.WECHAT && hasConfiguredBackground(activity)
+        for (index in 0 until dynamic.childCount) {
+            val view = dynamic.getChildAt(index)
+            if (view.javaClass.name != "com.tencent.mm.dynamicbackground.view.DynamicBackgroundGLSurfaceView") continue
+            if (!closed) { restoreWechatGl(view); continue }
+            if (!wechatGlVisibility.containsKey(view)) wechatGlVisibility[view] = view.visibility
+            if (view.visibility != View.INVISIBLE) {
+                wechatGlMutation = true
+                try { view.visibility = View.INVISIBLE } finally { wechatGlMutation = false }
+                if (diagnosticCounts.computeIfAbsent("wx-gl-hidden") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
+                    HLog.i("$TAG WXFIX glHidden controller=${System.identityHashCode(owner)} ${wechatProbeView(view, activity)}")
+                }
+            }
+        }
+    }
+    private fun completeWechatReturn(activity: Activity, reason: String) {
+        if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY || launcherChatActive == true || !hasConfiguredBackground(activity)) return
+        preparedRoots.entries.removeAll { it.value.first.activity === activity }
+        applyForActivity(activity)
+        wechatTaskControllers.entries.toList().filter { findActivity(it.key) === activity }.forEach {
+            protectWechatGl(it.value.get())
+            applyWechatControllerChrome(it.value.get())
+        }
+        if (diagnosticCounts.computeIfAbsent("wx-return-complete:$reason") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
+            HLog.i("$TAG WXFIX returnComplete reason=$reason ${wechatProbeState(activity)}")
+            activity.window.decorView.postOnAnimation {
+                if (!destroyed) armWechatDiagnostics(activity, "return-complete:$reason")
+            }
+        }
+    }
+
+    private fun findWechatVerifiedMethod(clazz: Class<*>?, name: String, vararg types: Class<*>): java.lang.reflect.Method? {
+        val method = KavaReflector.findMethodRecursive(clazz, name, *types)
+        HLog.i("$TAG WXINSTALL class=${clazz?.name} method=$name types=${types.joinToString { it.name }} found=${method != null} alreadyHooked=${method != null && hookedMembers.contains(method)}")
+        return method
+    }
     private fun installWechatVerifiedPaths(): Boolean {
         var installed = false
         val controllerClass = KavaReflector.loadClass("com.tencent.mm.plugin.taskbar.ui.b0", context.hostClassLoader())
@@ -687,25 +743,40 @@ private class BackgroundBeautyRuntime(
         val ints = Int::class.javaPrimitiveType!!
         val bools = Boolean::class.javaPrimitiveType!!
         listOf("f" to arrayOf(ints, ints, ints), "m" to arrayOf(bools, bools, ints, ints), "n" to arrayOf(bools)).forEach { (name, types) ->
-            KavaReflector.findMethodRecursive(controllerClass, name, *types)?.let { method ->
+            findWechatVerifiedMethod(controllerClass, name, *types)?.let { method ->
                 installed = hookOnce(method, after = { param ->
                     rememberWechatTaskController(param.thisObject)
+                    protectWechatGl(param.thisObject)
                     applyWechatControllerChrome(param.thisObject)
                     if (name != "f") {
                         val owner = param.thisObject
                         listOf("u", "v", "q").forEach { field -> (wechatProbeField(owner, field) as? View)?.invalidate() }
+                        val container = wechatProbeField(owner, "g") as? View
+                        (wechatProbeField(container, "o") as? View)?.let { title ->
+                            title.invalidate()
+                            wechatTitleBackdrops.keys.toList().filter { backdrop ->
+                                var parent = backdrop.parent as? View
+                                var belongs = false
+                                repeat(4) {
+                                    if (parent === title) belongs = true
+                                    parent = parent?.parent as? View
+                                }
+                                belongs
+                            }.forEach { it.invalidate() }
+                        }
                     }
                 }) || installed
             }
         }
         val gradientClass = KavaReflector.loadClass("com.tencent.mm.dynamicbackground.view.GradientColorBackgroundView", context.hostClassLoader())
-        KavaReflector.findMethodRecursive(gradientClass, "onDraw", android.graphics.Canvas::class.java)?.let { method ->
+        findWechatVerifiedMethod(gradientClass, "onDraw", android.graphics.Canvas::class.java)?.let { method ->
             // This method also has a diagnostic hook; install the drawing guard separately.
             ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (destroyed) return
                     val view = param.thisObject as? View ?: return
                     val owner = wechatControllerForGradient(view) ?: return
+                    protectWechatGl(owner)
                     if (wechatProbeField(owner, "P") != false) return
                     val activity = findActivity(view) ?: return
                     if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT || !hasConfiguredBackground(activity)) return
@@ -717,8 +788,98 @@ private class BackgroundBeautyRuntime(
             })
             installed = true
         }
+        val conversationClass = KavaReflector.loadClass("com.tencent.mm.ui.conversation.ConversationListView", context.hostClassLoader())
+        findWechatVerifiedMethod(conversationClass, "y")?.let { method ->
+            installed = hookOnce(method, after = { param ->
+                val list = param.thisObject as? View ?: return@hookOnce
+                val owner = wechatProbeField(list, "m") ?: return@hookOnce
+                rememberWechatTaskController(owner)
+                val activity = findActivity(list) ?: return@hookOnce
+                if (resolveTarget(activity) == BackgroundBeautySettings.Slot.WECHAT && hasConfiguredBackground(activity)) {
+                    val state = states[activity] ?: return@hookOnce
+                    (wechatProbeField(list, "C") as? View)?.let {
+                        setTransparentSurface(state, it, BackgroundBeautySettings.Slot.WECHAT)
+                        if (diagnosticCounts.computeIfAbsent("wx-bound-title") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
+                            HLog.i("$TAG WXFIX boundTitle ${wechatProbeView(it, activity)}")
+                        }
+                    }
+                }
+                protectWechatGl(owner)
+            }) || installed
+        }
+        findWechatVerifiedMethod(View::class.java, "setVisibility", Int::class.javaPrimitiveType!!)?.let { method ->
+            // Independent callback: visibility is not covered by the background setter hooks.
+            ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed || wechatGlMutation) return
+                    val view = param.thisObject as? View ?: return
+                    if (view.javaClass.name != "com.tencent.mm.dynamicbackground.view.DynamicBackgroundGLSurfaceView") return
+                    val requested = param.args.firstOrNull() as? Int ?: return
+                    val owner = wechatControllerForGradient(view)
+                    val activity = findActivity(view)
+                    if (owner != null && activity != null && wechatProbeField(owner, "P") == false &&
+                        resolveTarget(activity) == BackgroundBeautySettings.Slot.WECHAT && hasConfiguredBackground(activity)) {
+                        wechatGlVisibility[view] = requested
+                        param.args[0] = View.INVISIBLE
+                    } else wechatGlVisibility.remove(view)
+                }
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (destroyed || wechatGlMutation) return
+                    val view = param.thisObject as? View ?: return
+                    if (view.javaClass.name != "com.tencent.mm.ui.tools.TestTimeForChatting" || view.visibility != View.GONE) return
+                    findActivity(view)?.let { activity ->
+                        activity.window.decorView.postOnAnimation {
+                            if (!destroyed && view.visibility == View.GONE) completeWechatReturn(activity, "chat-container-hidden")
+                        }
+                    }
+                }
+            })
+            installed = true
+        }
+        val bottomClass = KavaReflector.loadClass("com.tencent.mm.plugin.taskbar.ui.TaskBarBottomView", context.hostClassLoader())
+        findWechatVerifiedMethod(bottomClass, "onDraw", android.graphics.Canvas::class.java)?.let { method ->
+            installed = hookOnce(method, before = { param ->
+                val view = param.thisObject as? View ?: return@hookOnce
+                var parent = view.parent as? View
+                var owner: Any? = null
+                repeat(4) {
+                    val node = parent ?: return@repeat
+                    if (node.javaClass.name == "com.tencent.mm.plugin.taskbar.ui.TaskBarContainer") owner = wechatProbeField(node, "d")
+                    parent = node.parent as? View
+                }
+                val controller = owner ?: return@hookOnce
+                val activity = findActivity(view) ?: return@hookOnce
+                if (wechatProbeField(controller, "P") != false || resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT || !hasConfiguredBackground(activity)) return@hookOnce
+                wechatTitleBackdrops[view] = true
+                param.result = null
+                if (diagnosticCounts.computeIfAbsent("wx-bottom-skip") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
+                    HLog.i("$TAG WXFIX titleBackdropSkipped ${wechatProbeView(view, activity)}")
+                }
+            }) || installed
+        }
+        val chatTabClass = KavaReflector.loadClass("com.tencent.mm.ui.NewChattingTabUI", context.hostClassLoader())
+        listOf("u" to emptyArray<Class<*>>(), "s" to arrayOf(Int::class.javaPrimitiveType!!)).forEach { (name, types) ->
+            val method = findWechatVerifiedMethod(chatTabClass, name, *types)
+            if (method == null) {
+                HLog.i("$TAG WXINSTALL class=NewChattingTabUI method=$name found=false")
+            } else {
+                val hooked = hookOnce(method, after = { param ->
+                    val owner = param.thisObject
+                    val activity = wechatProbeField(owner, "a") as? Activity ?: return@hookOnce
+                    val chatting = wechatProbeField(owner, "c") as? View ?: return@hookOnce
+                    if (name == "s" && param.args.firstOrNull() != View.VISIBLE) return@hookOnce
+                    if (chatting.visibility == View.GONE) {
+                        activity.window.decorView.postOnAnimation {
+                            if (chatting.visibility == View.GONE) completeWechatReturn(activity, "chat-tab-$name")
+                        }
+                    }
+                })
+                HLog.i("$TAG WXINSTALL class=NewChattingTabUI method=$name found=true hooked=$hooked")
+                installed = hooked || installed
+            }
+        }
         val endClass = KavaReflector.loadClass("com.tencent.mm.ui.uf", context.hostClassLoader())
-        KavaReflector.findMethodRecursive(endClass, "onAnimationEnd", android.view.animation.Animation::class.java)?.let { method ->
+        findWechatVerifiedMethod(endClass, "onAnimationEnd", android.view.animation.Animation::class.java)?.let { method ->
             installed = hookOnce(method, after = { param ->
                 val chatUi = wechatProbeField(param.thisObject, "d")
                 val chatView = wechatProbeField(chatUi, "c") as? View ?: return@hookOnce
@@ -1254,7 +1415,15 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun refreshAll() {
+        wechatTitleBackdrops.keys.toList().forEach { it.invalidate() }
+        wechatGlVisibility.keys.toList().forEach { view ->
+            val owner = wechatControllerForGradient(view)
+            val activity = findActivity(view)
+            if (owner == null || activity == null || wechatProbeField(owner, "P") != false ||
+                resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT || !hasConfiguredBackground(activity)) restoreWechatGl(view)
+        }
         wechatGradientControllers.keys.toList().forEach { it.invalidate() }
+        wechatTaskControllers.values.toList().forEach { protectWechatGl(it.get()) }
         if (destroyed) return
         runCatching { WeChatApis.currentActivity()?.currentActivity() }
             .getOrNull()
