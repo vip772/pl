@@ -372,6 +372,7 @@ private class BackgroundBeautyRuntime(
         decorUpdateDepth.clear()
         wechatTitleBackdrops.keys.toList().forEach { it.invalidate() }
         wechatTitleBackdrops.clear()
+        restoreInitialStoryMuteViews()
         wechatGlVisibility.keys.toList().forEach(::restoreWechatGl)
         wechatGradientControllers.keys.toList().forEach { it.invalidate() }
         wechatGradientControllers.clear()
@@ -519,8 +520,36 @@ private class BackgroundBeautyRuntime(
         return installed
     }
 
+    private val initialStoryMuteVisibility = WeakHashMap<View, Int>()
+    private fun restoreInitialStoryMuteViews() {
+        initialStoryMuteVisibility.entries.toList().forEach { (view, original) ->
+            // Restore only the initialization change; respect later host visibility writes.
+            if (view.visibility == View.GONE) view.visibility = original
+        }
+        initialStoryMuteVisibility.clear()
+    }
+
     private fun installFragmentHooks(): Boolean {
         var installed = false
+        KavaReflector.loadClass(ME_FRAGMENT, context.hostClassLoader())?.let { clazz ->
+            findWechatVerifiedMethod(clazz, "C0", Bundle::class.java)?.let { method ->
+                installed = hookOnce(method, after = { param ->
+                    if (destroyed) return@hookOnce
+                    val mute = wechatProbeField(param.thisObject, "v") as? View ?: return@hookOnce
+                    if (mute.javaClass.name != "com.tencent.mm.plugin.story.ui.view.StoryMuteView") return@hookOnce
+                    val activity = findActivity(mute) ?: return@hookOnce
+                    if (activity.javaClass.name != LAUNCHER_ACTIVITY ||
+                        !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
+                        !BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.ME)) return@hookOnce
+                    if (mute.visibility == View.VISIBLE) {
+                        val original = mute.visibility
+                        mute.visibility = View.GONE
+                        initialStoryMuteVisibility[mute] = original
+                        HLog.i("$TAG MEMUTE initializedHidden ${wechatProbeView(mute, activity)}")
+                    }
+                }) || installed
+            }
+        }
         listOf(MAIN_FRAGMENT, CONTACTS_FRAGMENT, DISCOVER_FRAGMENT, ME_FRAGMENT).forEach { className ->
             val clazz = KavaReflector.loadClass(className, context.hostClassLoader())
                 ?: return@forEach
@@ -859,6 +888,10 @@ private class BackgroundBeautyRuntime(
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (destroyed || wechatGlMutation) return
                     val view = param.thisObject as? View ?: return
+                    if (view.javaClass.name == "com.tencent.mm.plugin.story.ui.view.StoryMuteView") {
+                        initialStoryMuteVisibility.remove(view)
+                        return
+                    }
                     if (view.javaClass.name != "com.tencent.mm.dynamicbackground.view.DynamicBackgroundGLSurfaceView") return
                     val requested = param.args.firstOrNull() as? Int ?: return
                     val owner = wechatControllerForGradient(view)
@@ -1556,6 +1589,10 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun refreshAll() {
+        if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
+            !BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.ME)) {
+            restoreInitialStoryMuteViews()
+        }
         wechatTitleBackdrops.keys.toList().forEach { it.invalidate() }
         wechatGlVisibility.keys.toList().forEach { view ->
             val owner = wechatControllerForGradient(view)

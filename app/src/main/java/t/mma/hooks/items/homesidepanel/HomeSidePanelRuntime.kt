@@ -58,6 +58,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val activity = param.thisObject as? Activity ?: return
                     val event = param.args.firstOrNull() as? MotionEvent ?: return
+                    if (isLauncher(activity) && sessions[activity] == null) attachNow(activity)
                     val session = sessions[activity]
                     if (event.actionMasked == MotionEvent.ACTION_DOWN && event.x <= 100f && diagnosticDispatchCount++ < 12) {
                         HLog.i("[Hchat:HomeSidePanel] DIAG dispatch down x=${event.x} y=${event.y} session=${session != null}")
@@ -69,7 +70,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     }
 
     private fun hook(owner: Class<*>, name: String, params: Array<Class<*>>, action: (XC_MethodHook.MethodHookParam) -> Unit) {
-        KavaReflector.findMethod(owner, name, *params)?.let { method ->
+        KavaReflector.findMethodRecursive(owner, name, *params)?.let { method ->
             runCatching {
                 hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) = action(param)
@@ -90,12 +91,17 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
     fun attach(activity: Activity) {
         if (!isLauncher(activity)) return
-        handler.post {
-            if (sessions[activity] == null) {
-                runCatching { Session(activity).also { sessions[activity] = it; it.attach() } }
-                    .onFailure { HLog.e("[Hchat:HomeSidePanel] attach failed", it) }
-            }
-        }
+        handler.post { attachNow(activity) }
+    }
+
+    private fun attachNow(activity: Activity) {
+        if (!isLauncher(activity) || activity.isFinishing || activity.isDestroyed || sessions[activity] != null) return
+        runCatching {
+            val session = Session(activity)
+            session.attach()
+            sessions[activity] = session
+            HLog.i("[Hchat:HomeSidePanel] sessionAttached activity=${activity.javaClass.name}")
+        }.onFailure { HLog.e("[Hchat:HomeSidePanel] attach failed", it) }
     }
 
     private fun detach(activity: Activity) { handler.post { sessions.remove(activity)?.detach() } }
@@ -309,7 +315,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val tabs = KavaReflector.readField(home, "t") ?: return false
             return (KavaReflector.readField(tabs, "e") as? Int) == 0
         }
-        private fun dp(value: Int): Int = (value * activity.resources.displayMetrics.density + .5f).toInt()
+                private fun dp(value: Int): Int = (value * activity.resources.displayMetrics.density + .5f).toInt()
         private fun night(): Boolean = (activity.resources.configuration.uiMode and 0x30) == 0x20
     }
 }
