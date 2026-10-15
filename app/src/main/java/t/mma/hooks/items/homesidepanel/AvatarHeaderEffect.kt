@@ -8,23 +8,26 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.PathMeasure
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.SweepGradient
 import android.graphics.drawable.Drawable
 import android.os.SystemClock
 import android.view.View
+import android.view.ViewGroup
 import android.widget.TextView
 import t.mma.hooks.items.antirecall.DynamicRecallGradient
 import t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings
 
 /** Local foreground only: no layout changes, smoke, bitmap allocations or global redraws. */
-internal class AvatarHeaderEffect(private val host: View) : Drawable() {
+internal class AvatarHeaderEffect(private val host: View, private val content: View? = null) : Drawable() {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.STROKE
         strokeCap = Paint.Cap.ROUND
     }
     private val rect = RectF()
     private val contentRect = RectF()
+    private val contentLocation = Rect()
     private val previousContentRect = RectF()
     private val outline = Path()
     private val trail = Path()
@@ -65,10 +68,12 @@ internal class AvatarHeaderEffect(private val host: View) : Drawable() {
         }
         period = speed.coerceIn(DynamicBadgeSettings.MIN_SPEED, DynamicBadgeSettings.MAX_SPEED)
         contentRect.set(0f, 0f, host.width.toFloat(), host.height.toFloat())
-        // 原生标题 TextView 的布局宽度可能撑满工具栏，按实际文本行定位。
-        if (host is TextView) {
-            val layout = host.layout
+        val text = content as? TextView
+        if (text != null && host is ViewGroup) {
+            val layout = text.layout
             if (layout != null && layout.lineCount > 0) {
+                contentLocation.set(0, 0, text.width, text.height)
+                host.offsetDescendantRectToMyCoords(text, contentLocation)
                 var left = Float.MAX_VALUE
                 var right = 0f
                 for (line in 0 until layout.lineCount) {
@@ -76,14 +81,19 @@ internal class AvatarHeaderEffect(private val host: View) : Drawable() {
                     right = maxOf(right, layout.getLineRight(line))
                 }
                 val density = host.resources.displayMetrics.density
-                val extra = (if (lightning) 10f else 5f) * density
-                val top = host.totalPaddingTop.toFloat() - host.scrollY
+                // 路径在真实字形外侧；闪电的抖动空间由父容器提供，不再被文字 View 裁切。
+                val gap = (if (lightning) 6f else 4f) * density
+                val metrics = text.paint.fontMetrics
+                val baseline = contentLocation.top + text.baseline.toFloat()
                 contentRect.set(
-                    (host.totalPaddingLeft + left - host.scrollX - extra).coerceAtLeast(0f),
-                    (top + layout.getLineTop(0) - extra).coerceAtLeast(0f),
-                    (host.totalPaddingLeft + right - host.scrollX + extra).coerceAtMost(host.width.toFloat()),
-                    (top + layout.getLineBottom(layout.lineCount - 1) + extra).coerceAtMost(host.height.toFloat())
+                    contentLocation.left + text.totalPaddingLeft + left - text.scrollX - gap,
+                    baseline + metrics.ascent - gap,
+                    contentLocation.left + text.totalPaddingLeft + right - text.scrollX + gap,
+                    baseline + layout.getLineBaseline(layout.lineCount - 1) - layout.getLineBaseline(0) + metrics.descent + gap
                 )
+                if (!contentRect.intersect(2f * density, 2f * density, host.width - 2f * density, host.height - 2f * density)) {
+                    contentRect.setEmpty()
+                }
             }
         }
         if (colors != value || width != host.width || height != host.height || contentRect != previousContentRect) {
@@ -94,7 +104,7 @@ internal class AvatarHeaderEffect(private val host: View) : Drawable() {
             val density = host.resources.displayMetrics.density
             val inset = (if (lightning) 9f else strokeDp / 2f + 2f) * density
             rect.set(contentRect)
-            rect.inset(inset, inset)
+            if (text == null) rect.inset(inset, inset)
             outline.reset()
             if (rect.width() > 0 && rect.height() > 0) outline.addRoundRect(rect, rect.height() / 2f, rect.height() / 2f, Path.Direction.CW)
             measure.setPath(outline, true)

@@ -14,7 +14,7 @@ import java.lang.reflect.Proxy
 
 /** 微信原生媒体下载入口；描述符由源码锚点定位并按微信运行时缓存。 */
 internal class NativeMediaCache(private val context: FeatureContext) {
-    private val cache = DexMethodCache.prefs(context.hostContext(), "Hchat_native_media_cache_v2")
+    private val cache = DexMethodCache.prefs(context.hostContext(), "Hchat_native_media_cache_v3")
     @Volatile private var imageConstructor: Constructor<*>? = null
     @Volatile private var fileConstructor: Constructor<*>? = null
     @Volatile private var initAttach: Method? = null
@@ -48,10 +48,18 @@ internal class NativeMediaCache(private val context: FeatureContext) {
         }
         val runtime = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         initAttach = DexMethodCache.load(cache, runtime, context.hostClassLoader(), "attach_init")
-            ?: methods("summerbig initDownloadAttach msgLocalId[%d], msgXml[%s], downloadPath[%s]")
-                .singleOrNull { Modifier.isStatic(it.modifiers) && it.parameterTypes.toList() ==
-                    listOf(long, String::class.java, String::class.java, String::class.java) }
-                ?.also { DexMethodCache.save(cache, runtime, "attach_init", it) }
+            ?: run {
+                // 8.0.78 AppMsgLogic 同时包含已封装的文件发送方法与附件初始化。
+                // 从已确认的 owner 枚举精确签名，避免依赖单条日志的 DexKit 命中。
+                val direct = methods("summerbig initDownloadAttach msgLocalId[%d], msgXml[%s], downloadPath[%s]")
+                val owner = context.dexFinder().sendFileMethod?.declaringClass
+                val candidates = (direct + KavaReflector.declaredMethods(owner))
+                    .distinctBy { it.toGenericString() }
+                    .filter { Modifier.isStatic(it.modifiers) && it.returnType == String::class.java &&
+                        it.parameterTypes.toList() == listOf(long, String::class.java, String::class.java, String::class.java) }
+                t.mma.utils.HLog.i("[Hchat:AutoCache] 附件初始化定位 direct=${direct.size} owner=${owner?.name} candidates=${candidates.map { it.toGenericString() }}")
+                candidates.singleOrNull()?.also { DexMethodCache.save(cache, runtime, "attach_init", it) }
+            }
         downloadVideo = DexMethodCache.load(cache, runtime, context.hostClassLoader(), "video_offline")
             ?: run {
                 val online = methods("start complete online video, but can not stream video now!").toSet()
@@ -120,7 +128,6 @@ internal class NativeMediaCache(private val context: FeatureContext) {
             if (info.totalLength > 0 && info.currentLength >= info.totalLength) return true
             return (KavaReflector.invokeOrThrow(downloadVideo, null, message.imagePath) as? Int) == 0
         }
-        if (!WeChatApis.network().isReady()) return false
         if (message.isImage()) {
             // 8.0.78 ImgInfoStorage 的持久化结构和接收查询均已确认：
             // 入站按 msgSvrId 取 ImgInfo2，reserved1 是高清父图 id。
@@ -150,14 +157,17 @@ internal class NativeMediaCache(private val context: FeatureContext) {
         ) ?: return false
         val status = existing.use { if (it.moveToFirst()) it.getLong(0) else null }
         if (status == 199L) return true
+        var mediaId = file.attachId.ifBlank { file.url }
         if (status == null) {
             val initialized = KavaReflector.invokeOrThrow(initAttach, null,
                 message.msgId, message.talker, message.content, null) as? String
             if (initialized.isNullOrBlank()) return false
+            mediaId = initialized
+            t.mma.utils.HLog.i("[Hchat:AutoCache] 附件原生记录已初始化 msgId=${message.msgId}")
         }
         val ctor = fileConstructor ?: return false
         val scene = KavaReflector.newInstance(ctor, message.msgId, message.talker,
-            file.attachId.ifBlank { file.url }, callback(ctor.parameterTypes[3])) ?: return false
+            mediaId, callback(ctor.parameterTypes[3])) ?: return false
         return WeChatApis.network().sendRequest(scene)
     }
 }

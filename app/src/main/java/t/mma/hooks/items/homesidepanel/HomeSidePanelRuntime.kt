@@ -141,6 +141,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private var header: ViewGroup? = null
         private var avatarEffect: AvatarHeaderEffect? = null
         private var effectTarget: View? = null
+        private var effectContent: View? = null
         private val nativeTitles = WeakHashMap<View, NativeTitleState>()
         private fun showProfile(): Boolean = prefs.getBoolean(HomeSidePanelSettings.KEY_SHOW_PROFILE, true)
         private fun restoreNativeTitle() {
@@ -165,7 +166,9 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 }
                 return null
             }
-            val title = findTitleText(titleRoot) ?: titleRoot
+            val text = findTitleText(titleRoot)
+            val title = if (titleRoot is TextView) (titleRoot.parent as? ViewGroup ?: titleRoot) else titleRoot
+            effectContent = text ?: titleRoot
             if (!nativeTitles.containsKey(title)) {
                 val info = KavaReflector.readField(title, "mListenerInfo")
                 val listener = info?.let { KavaReflector.readField(it, "mOnLongClickListener") } as? View.OnLongClickListener
@@ -193,7 +196,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 if (root.foreground === avatarEffect) root.foreground = null
                 return
             }
-            val effect = avatarEffect ?: AvatarHeaderEffect(root).also { avatarEffect = it }
+            val effect = avatarEffect ?: AvatarHeaderEffect(root, if (showProfile()) null else effectContent).also { avatarEffect = it }
             if (root.foreground !== effect) root.foreground = effect
             effect.update(effectPrefs.getString(keys.KEY_AVATAR_COLOR,
                 t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),
@@ -357,6 +360,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             drawer.detach()
             effectTarget = null
+            effectContent = null
             restoreScrollTitles()
             restoreTitles()
             (header?.parent as? ViewGroup)?.removeView(header)
