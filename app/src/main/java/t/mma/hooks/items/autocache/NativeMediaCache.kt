@@ -14,11 +14,11 @@ import java.lang.reflect.Proxy
 
 /** 微信原生媒体下载入口；描述符由源码锚点定位并按微信运行时缓存。 */
 internal class NativeMediaCache(private val context: FeatureContext) {
-    private val cache = DexMethodCache.prefs(context.hostContext(), "Hchat_native_media_cache_v1")
-    private var imageConstructor: Constructor<*>? = null
-    private var fileConstructor: Constructor<*>? = null
-    private var initAttach: Method? = null
-    private var downloadVideo: Method? = null
+    private val cache = DexMethodCache.prefs(context.hostContext(), "Hchat_native_media_cache_v2")
+    @Volatile private var imageConstructor: Constructor<*>? = null
+    @Volatile private var fileConstructor: Constructor<*>? = null
+    @Volatile private var initAttach: Method? = null
+    @Volatile private var downloadVideo: Method? = null
 
     private fun methods(vararg strings: String): List<Method> = context.dexKitBridge().findMethod(
         FindMethod().apply { matcher(MethodMatcher().apply { usingEqStrings(*strings) }) }
@@ -55,11 +55,18 @@ internal class NativeMediaCache(private val context: FeatureContext) {
         downloadVideo = DexMethodCache.load(cache, runtime, context.hostClassLoader(), "video_offline")
             ?: run {
                 val online = methods("start complete online video, but can not stream video now!").toSet()
-                methods("MicroMsg.VideoLogic", "ERR:", " getinfo failed: ", " get status failed: ", " update failed: ")
+                context.dexKitBridge().findMethod(
+                    FindMethod().apply { matcher(MethodMatcher().apply {
+                        usingEqStrings("MicroMsg.VideoLogic", "ERR:", " getinfo failed: ", " get status failed: ", " update failed: ")
+                        // 接收状态 112、更新掩码 3328；排除暂停接收和发送入口。
+                        usingNumbers(112, 3328)
+                    }) }
+                ).map { it.getMethodInstance(context.hostClassLoader()) }
                     .filter { it !in online && Modifier.isStatic(it.modifiers) && it.returnType == int &&
                         it.parameterTypes.toList() == listOf(String::class.java) }.singleOrNull()
                     ?.also { DexMethodCache.save(cache, runtime, "video_offline", it) }
             }
+        t.mma.utils.HLog.i("[Hchat:AutoCache] 原生入口 image=${imageConstructor?.toGenericString()} file=${fileConstructor?.toGenericString()} init=${initAttach?.toGenericString()} video=${downloadVideo?.toGenericString()}")
         return imageConstructor != null && fileConstructor != null && initAttach != null && downloadVideo != null
     }
 
@@ -133,7 +140,7 @@ internal class NativeMediaCache(private val context: FeatureContext) {
                 if (original) 1 else 0, callback(ctor.parameterTypes[4]), 0) ?: return false
             return WeChatApis.network().sendRequest(scene)
         }
-        if (!message.isFile()) return false
+        if (!message.isFile() || fileConstructor == null || initAttach == null) return false
         val file = message.getFileMsg() ?: return false
         // 上传占位消息没有有效 CDN 信息时保留队列，等最新消息写入后再下载。
         if (file.url.isBlank() || file.key.isBlank()) return false

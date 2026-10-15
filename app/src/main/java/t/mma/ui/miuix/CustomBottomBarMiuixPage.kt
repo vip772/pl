@@ -396,7 +396,7 @@ internal fun FloatingBottomBarMiuixPage(
                                 },
                                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
                             )
-                            Text(text = "仅调节背景外壳，图标、文字和角标保持不透明", color = MiuixTheme.colorScheme.onSurface)
+                            Text(text = "调节底栏外壳与选中背景圈，图标内部颜色、文字和角标保持不透明", color = MiuixTheme.colorScheme.onSurface)
                         }
 
                         InsetDivider()

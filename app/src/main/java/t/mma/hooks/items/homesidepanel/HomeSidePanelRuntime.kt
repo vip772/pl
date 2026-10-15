@@ -157,7 +157,15 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (!visible || showProfile()) { restoreNativeTitle(); return }
             val host = header?.parent as? ViewGroup ?: findActionBarContent(decor) ?: return
             val titleId = activity.resources.getIdentifier("gp", "id", activity.packageName)
-            val title = host.findViewById<View>(titleId) ?: return
+            val titleRoot = host.findViewById<View>(titleId) ?: return
+            fun findTitleText(view: View): TextView? {
+                if (view is TextView && view.text.toString().trim().startsWith("微信")) return view
+                if (view is ViewGroup) for (i in 0 until view.childCount) {
+                    findTitleText(view.getChildAt(i))?.let { return it }
+                }
+                return null
+            }
+            val title = findTitleText(titleRoot) ?: titleRoot
             if (!nativeTitles.containsKey(title)) {
                 val info = KavaReflector.readField(title, "mListenerInfo")
                 val listener = info?.let { KavaReflector.readField(it, "mOnLongClickListener") } as? View.OnLongClickListener
@@ -195,7 +203,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         }
         private val replacedTitles = WeakHashMap<View, Int>()
         private val scrollTitles = WeakHashMap<View, Int>()
-        fun hideScrollTitle(): Boolean = showProfile() && attached && !chatVisible && isWechatTab() && HomeSidePanelSettings.enabled(activity)
+        fun hideScrollTitle(): Boolean = attached && !chatVisible && isWechatTab() && HomeSidePanelSettings.enabled(activity)
         fun recordScrollTitleVisibility(view: View, requested: Int) { scrollTitles[view] = requested }
         private fun restoreScrollTitles() {
             restoringScrollTitles = true
@@ -221,7 +229,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (title.visibility != View.INVISIBLE) title.visibility = View.INVISIBLE
         }
         private fun updateScrollableTitle(visible: Boolean) {
-            if (!HomeSidePanelSettings.enabled(activity) || !showProfile()) { restoreScrollTitles(); return }
+            if (!HomeSidePanelSettings.enabled(activity)) { restoreScrollTitles(); return }
             if (!visible) return
             fun walk(view: View, inTaskBar: Boolean, depth: Int) {
                 if (depth > 24) return

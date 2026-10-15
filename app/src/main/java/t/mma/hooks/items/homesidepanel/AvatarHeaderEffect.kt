@@ -13,6 +13,7 @@ import android.graphics.SweepGradient
 import android.graphics.drawable.Drawable
 import android.os.SystemClock
 import android.view.View
+import android.widget.TextView
 import t.mma.hooks.items.antirecall.DynamicRecallGradient
 import t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings
 
@@ -23,6 +24,8 @@ internal class AvatarHeaderEffect(private val host: View) : Drawable() {
         strokeCap = Paint.Cap.ROUND
     }
     private val rect = RectF()
+    private val contentRect = RectF()
+    private val previousContentRect = RectF()
     private val outline = Path()
     private val trail = Path()
     private val measure = PathMeasure()
@@ -61,13 +64,37 @@ internal class AvatarHeaderEffect(private val host: View) : Drawable() {
             boltTick = -1L
         }
         period = speed.coerceIn(DynamicBadgeSettings.MIN_SPEED, DynamicBadgeSettings.MAX_SPEED)
-        if (colors != value || width != host.width || height != host.height) {
+        contentRect.set(0f, 0f, host.width.toFloat(), host.height.toFloat())
+        // 原生标题 TextView 的布局宽度可能撑满工具栏，按实际文本行定位。
+        if (host is TextView) {
+            val layout = host.layout
+            if (layout != null && layout.lineCount > 0) {
+                var left = Float.MAX_VALUE
+                var right = 0f
+                for (line in 0 until layout.lineCount) {
+                    left = minOf(left, layout.getLineLeft(line))
+                    right = maxOf(right, layout.getLineRight(line))
+                }
+                val density = host.resources.displayMetrics.density
+                val extra = (if (lightning) 10f else 5f) * density
+                val top = host.totalPaddingTop.toFloat() - host.scrollY
+                contentRect.set(
+                    (host.totalPaddingLeft + left - host.scrollX - extra).coerceAtLeast(0f),
+                    (top + layout.getLineTop(0) - extra).coerceAtLeast(0f),
+                    (host.totalPaddingLeft + right - host.scrollX + extra).coerceAtMost(host.width.toFloat()),
+                    (top + layout.getLineBottom(layout.lineCount - 1) + extra).coerceAtMost(host.height.toFloat())
+                )
+            }
+        }
+        if (colors != value || width != host.width || height != host.height || contentRect != previousContentRect) {
+            previousContentRect.set(contentRect)
             colors = value
             width = host.width
             height = host.height
             val density = host.resources.displayMetrics.density
             val inset = (if (lightning) 9f else strokeDp / 2f + 2f) * density
-            rect.set(inset, inset, width - inset, height - inset)
+            rect.set(contentRect)
+            rect.inset(inset, inset)
             outline.reset()
             if (rect.width() > 0 && rect.height() > 0) outline.addRoundRect(rect, rect.height() / 2f, rect.height() / 2f, Path.Direction.CW)
             measure.setPath(outline, true)

@@ -481,6 +481,7 @@ fun FloatingBottomBar(
                         .graphicsLayer {
                             val progressOffset = dampedDragAnimation.value * tabWidthPx
                             translationX = if (isLtr) progressOffset + panelOffset else -progressOffset + panelOffset
+                            alpha = backgroundOpacity.coerceIn(0f, 1f)
                         }
                         .then(interactiveHighlight?.gestureModifier ?: Modifier)
                         .then(dampedDragAnimation.modifier)
@@ -530,6 +531,7 @@ fun FloatingBottomBar(
                         .graphicsLayer {
                             val progressOffset = dampedDragAnimation.value * tabWidthPx
                             translationX = if (isLtr) progressOffset + panelOffset else -progressOffset + panelOffset
+                            alpha = backgroundOpacity.coerceIn(0f, 1f)
                         }
                         .then(dampedDragAnimation.modifier)
                         .clip(pillShape)

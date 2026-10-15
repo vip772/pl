@@ -26,7 +26,8 @@ class AutoCacheFeature : BaseFeature() {
     private val pending = ConcurrentHashMap.newKeySet<String>()
     private val stopped = AtomicBoolean(false)
     private val lastSubmitted = ConcurrentHashMap<String, Long>()
-    private var native: NativeMediaCache? = null
+    @Volatile private var native: NativeMediaCache? = null
+    private val observing = AtomicBoolean(false)
     override fun featureId(): String = ID
     override fun name(): String = "自动缓存"
     override fun onFeatureInit(context: FeatureContext) {
@@ -39,26 +40,35 @@ class AutoCacheFeature : BaseFeature() {
             val observer = WeChatApis.message().observe() ?: return@schedule false
             if (!observer.isAvailable) return@schedule false
             val downloader = native ?: NativeMediaCache(context).also { native = it }
-            if (!downloader.install()) {
-                HLog.e("[Hchat:AutoCache] 原生下载入口未全部就绪，等待调度补装")
-                return@schedule false
+            val ready = try {
+                downloader.install()
+            } catch (error: Throwable) {
+                HLog.e("[Hchat:AutoCache] 定位原生入口失败，保留消息监听等待补装", error)
+                false
             }
+            if (!ready) HLog.e("[Hchat:AutoCache] 部分原生入口未就绪，已就绪媒体继续处理，等待补装")
             observer.install()
-            trackSubscription(observer.subscribe { event ->
-                if (stopped.get() || event.outgoing || !prefs.getBoolean(AutoCacheSettings.KEY_ENABLE, false)) return@subscribe
-                val message = event.storedMessage ?: event.message ?: return@subscribe
-                if (!message.isIncoming() || (!message.isImage() && !message.isVideo() && !message.isFile())) return@subscribe
-                val id = when {
-                    message.msgSvrId > 0 -> "s${message.msgSvrId}"
-                    message.msgId > 0 -> "l${message.msgId}"
-                    else -> return@subscribe
-                }
-                val account = WeChatApis.account()?.selfWxId().orEmpty()
-                if (account.isBlank()) return@subscribe
-                val key = "$account:${message.talker}:$id"
-                if (pending.add(key)) enqueue(context, message, account, key, 0)
-            })
-            true
+            if (observing.compareAndSet(false, true)) {
+                HLog.i("[Hchat:AutoCache] 新消息监听已接入 enabled=${prefs.getBoolean(AutoCacheSettings.KEY_ENABLE, false)}")
+                trackSubscription(observer.subscribe { event ->
+                    if (stopped.get() || event.outgoing || !prefs.getBoolean(AutoCacheSettings.KEY_ENABLE, false)) return@subscribe
+                    val message = event.storedMessage ?: event.message ?: return@subscribe
+                    if (!message.isIncoming() || (!message.isImage() && !message.isVideo() && !message.isFile())) return@subscribe
+                    val id = when {
+                        message.msgSvrId > 0 -> "s${message.msgSvrId}"
+                        message.msgId > 0 -> "l${message.msgId}"
+                        else -> return@subscribe
+                    }
+                    val account = WeChatApis.account()?.selfWxId().orEmpty()
+                    if (account.isBlank()) return@subscribe
+                    val key = "$account:${message.talker}:$id"
+                    if (pending.add(key)) {
+                        HLog.i("[Hchat:AutoCache] 收到媒体 type=${message.type} local=${message.msgId} server=${message.msgSvrId}")
+                        enqueue(context, message, account, key, 0)
+                    }
+                })
+            }
+            ready
         }
     }
 
@@ -78,6 +88,7 @@ class AutoCacheFeature : BaseFeature() {
                     ?: initial.msgSvrId.takeIf { it > 0 }?.let { store?.getMessageBySvrId(initial.talker, it) }
                     ?: initial
                 if (native?.complete(message) == true) {
+                    HLog.i("[Hchat:AutoCache] 下载完成 msgId=${message.msgId} type=${message.type}")
                     pending.remove(key)
                     lastSubmitted.remove(key)
                     return@schedule
@@ -85,7 +96,11 @@ class AutoCacheFeature : BaseFeature() {
                 val now = android.os.SystemClock.elapsedRealtime()
                 val last = lastSubmitted[key]
                 if (last == null || now - last >= 60_000L) {
-                    if (native?.submit(message) == true) lastSubmitted[key] = now
+                    val submitted = native?.submit(message) == true
+                    if (submitted) lastSubmitted[key] = now
+                    if (submitted || attempt == 0 || attempt % 60 == 0) {
+                        HLog.i("[Hchat:AutoCache] 下载提交=$submitted msgId=${message.msgId} type=${message.type} attempt=$attempt")
+                    }
                 }
                 if (attempt < 720) {
                     // 上传占位、元数据未落库和网络未就绪时持续补查，最多一小时。
