@@ -7,6 +7,8 @@ import android.graphics.PixelFormat
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
 import android.view.View
+import android.widget.TextView
+
 import java.lang.ref.WeakReference
 
 /** Align the visible border with the smiley ink, without resizing the editor or its hit area. */
@@ -30,7 +32,13 @@ internal class ChatInputOutline(
         val half = stroke / 2f
         var top = bounds.top.toFloat()
         var bottom = bounds.bottom.toFloat()
-        if (icon != null && icon.isShown && inkBottom > inkTop) {
+        // The smiley only defines the compact, single-line border. WeChat already
+        // measures and scrolls the multiline editor; its full bounds must enclose
+        // that text viewport, including after the editor reaches its height limit.
+        val multiline = (editor as? TextView)?.let {
+            maxOf(it.lineCount, it.layout?.lineCount ?: 0) > 1
+        } ?: false
+        if (!multiline && icon != null && icon.isShown && inkBottom > inkTop) {
             editor.getLocationInWindow(editorPosition)
             icon.getLocationInWindow(iconPosition)
             val offset = iconPosition[1] - editorPosition[1]
