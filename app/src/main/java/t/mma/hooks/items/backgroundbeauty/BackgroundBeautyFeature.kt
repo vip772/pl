@@ -562,6 +562,25 @@ private class BackgroundBeautyRuntime(
                 }) || installed
             }
         }
+        // 8.0.78 MainUI.B0 creates/recolors controller.g's og9 status mask.
+        // It is a sibling of the fragment content, so preparePage cannot discover it.
+        KavaReflector.loadClass(MAIN_FRAGMENT, context.hostClassLoader())?.let { clazz ->
+            findWechatVerifiedMethod(clazz, "B0")?.let { method ->
+                installed = hookOnce(method, after = { param ->
+                    val activity = findActivity(param.thisObject) ?: return@hookOnce
+                    applyWechatStatusMasks(activity, "main-tab-resume")
+                }) || installed
+            }
+            findWechatVerifiedMethod(clazz, "onConfigurationChanged", android.content.res.Configuration::class.java)?.let { method ->
+                installed = hookOnce(method, after = { param ->
+                    val activity = findActivity(param.thisObject) ?: return@hookOnce
+                    applyWechatStatusMasks(activity, "main-configuration")
+                    activity.window.decorView.postOnAnimation {
+                        if (!destroyed) applyWechatStatusMasks(activity, "main-configuration-frame")
+                    }
+                }) || installed
+            }
+        }
         listOf(MAIN_FRAGMENT, CONTACTS_FRAGMENT, DISCOVER_FRAGMENT, ME_FRAGMENT).forEach { className ->
             val clazz = KavaReflector.loadClass(className, context.hostClassLoader())
                 ?: return@forEach
@@ -2891,7 +2910,26 @@ private class BackgroundBeautyRuntime(
         view.minimumHeight = snapshot.originalMinimumHeight
     }
 
+    private fun applyWechatStatusMasks(activity: Activity, phase: String) {
+        if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY ||
+            !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
+            !BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.WECHAT)) return
+        val state = states[activity] ?: return
+        // og9 belongs to MainUI's controller; nhm is MainUIView's own inset mask.
+        // Find from decor rather than the fragment root or the current tab's scan.
+        listOf("og9", "nhm").forEach { name ->
+            val id = resourceId(name)
+            if (id == 0) return@forEach
+            val mask = activity.window.decorView.findViewById<View>(id) ?: return@forEach
+            val before = mask.background
+            setTransparentSurface(state, mask, BackgroundBeautySettings.Slot.WECHAT, clearForeground = true)
+            if (diagnosticCounts.computeIfAbsent("wx-status-mask:$phase:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+                HLog.i("$TAG WXSTATUSMASK phase=$phase name=$name before=${before?.javaClass?.name}:${(before as? ColorDrawable)?.color} after=${mask.background?.javaClass?.name} size=${mask.width}x${mask.height} active=${resolveTarget(activity)}")
+            }
+        }
+    }
     private fun applySystemBars(state: HostState) {
+        applyWechatStatusMasks(state.activity, "apply-bars")
         val window = state.activity.window
         surfaceMutationDepth++
         try {
