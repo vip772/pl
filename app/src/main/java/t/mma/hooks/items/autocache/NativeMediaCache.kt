@@ -8,6 +8,7 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.model.WeChatMessage
 import t.mma.hooks.core.FeatureContext
 import t.mma.utils.KavaReflector
+import java.io.File
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
@@ -20,6 +21,7 @@ internal class NativeMediaCache(private val context: FeatureContext) {
     @Volatile private var fileConstructor: Constructor<*>? = null
     @Volatile private var initAttach: Method? = null
     @Volatile private var downloadVideo: Method? = null
+    @Volatile private var attachmentFileLength: Method? = null
 
     private fun methods(vararg strings: String): List<Method> = context.dexKitBridge().findMethod(
         FindMethod().apply { matcher(MethodMatcher().apply { usingEqStrings(*strings) }) }
@@ -92,6 +94,14 @@ internal class NativeMediaCache(private val context: FeatureContext) {
                         it.parameterTypes.toList() == listOf(String::class.java) }.singleOrNull()
                     ?.also { DexMethodCache.save(cache, runtime, "video_offline", it) }
             }
+        // 8.0.78 原生 VFS 长度读取支持 attachment 虚拟路径，不能只用 java.io.File。
+        if (WeChatApis.version()?.versionName() == "8.0.78") {
+            attachmentFileLength = DexMethodCache.load(cache, runtime, context.hostClassLoader(), "attach_file_length")
+                ?: DexMethod("Lcom/tencent/mm/vfs/z6;->l(Ljava/lang/String;)J")
+                    .getMethodInstance(context.hostClassLoader()).also {
+                        DexMethodCache.save(cache, runtime, "attach_file_length", it)
+                    }
+        }
         report("原生入口 image=${imageConstructor?.toGenericString()} file=${fileConstructor?.toGenericString()} init=${initAttach?.toGenericString()} video=${downloadVideo?.toGenericString()}")
         return imageConstructor != null && fileConstructor != null && initAttach != null && downloadVideo != null
     }
@@ -130,6 +140,28 @@ internal class NativeMediaCache(private val context: FeatureContext) {
         check(fields.size == 1) { "附件实体字段不唯一: ${fields.size}" }
         return KavaReflector.readField(fields.single(), scene)
     }
+    private fun ownsAttachment(record: Any, message: WeChatMessage): Boolean =
+        (KavaReflector.readField(record, "field_msgInfoId") as? Number)?.toLong() == message.msgId &&
+            KavaReflector.readField(record, "field_msgInfoTalker") == message.talker
+
+    private fun attachmentStatus(record: Any): Long? =
+        (KavaReflector.readField(record, "field_status") as? Number)?.toLong()
+
+    private fun attachmentReady(record: Any, message: WeChatMessage): Boolean {
+        if (!ownsAttachment(record, message) || attachmentStatus(record) != 199L) return false
+        val total = (KavaReflector.readField(record, "field_totalLen") as? Number)?.toLong() ?: return false
+        val offset = (KavaReflector.readField(record, "field_offset") as? Number)?.toLong() ?: return false
+        val path = KavaReflector.readField(record, "field_fileFullPath") as? String ?: return false
+        if (total <= 0 || offset != total || path.isBlank()) return false
+        val lengthMethod = attachmentFileLength
+        val size = if (lengthMethod != null) {
+            (KavaReflector.invokeOrThrow(lengthMethod, null, path) as? Number)?.toLong() ?: return false
+        } else {
+            val file = File(path)
+            if (file.isFile) file.length() else -1L
+        }
+        return size == total
+    }
     fun complete(message: WeChatMessage): Boolean {
         if (message.msgId <= 0 || message.msgSvrId <= 0) return false
         val db = WeChatApis.database() ?: return false
@@ -143,7 +175,7 @@ internal class NativeMediaCache(private val context: FeatureContext) {
                 WeChatMessage.xmlTag(message.content, "attachid"), callback(ctor.parameterTypes[3]))
                 ?: return waiting(message, "完成状态场景构造失败")
             val record = attachment(scene) ?: return false
-            return (KavaReflector.readField(record, "field_status") as? Number)?.toLong() == 199L
+            return attachmentReady(record, message)
         }
         if (message.isImage()) {
             val cursor = db.rawQuery("SELECT id, reserved1, offset, totalLen FROM ImgInfo2 WHERE msgSvrId=?",
@@ -199,7 +231,14 @@ internal class NativeMediaCache(private val context: FeatureContext) {
             ?: error("微信附件下载场景构造失败: ${ctor.toGenericString()}")
         var scene = createScene()
         var record = attachment(scene)
-        if (record == null) {
+        // 原生构造器查不到当前消息时会按媒体标识回退，可能拿到另一会话的记录。
+        // 不能把它的完成状态当成当前消息完成，也不能修改那条已有记录。
+        val previous = record
+        val needsInitialization = previous == null || !ownsAttachment(previous, message)
+        if (needsInitialization) {
+            if (previous != null) {
+                report("附件需重新关联 msgId=${message.msgId} recordMsgId=${KavaReflector.readField(previous, "field_msgInfoId")} matched=${ownsAttachment(previous, message)} status=${attachmentStatus(previous)} chat=${if (message.talker.endsWith("@chatroom")) "群聊" else "私聊"}")
+            }
             if (initAttach == null) return waiting(message, "附件初始化接口未定位")
             val initialized = KavaReflector.invokeOrThrow(initAttach, null,
                 message.msgId, message.talker, message.content, null) as? String
@@ -207,10 +246,13 @@ internal class NativeMediaCache(private val context: FeatureContext) {
             mediaId = initialized
             scene = createScene()
             record = attachment(scene) ?: return waiting(message, "初始化后原生附件记录仍为空")
+            if (!ownsAttachment(record, message)) return waiting(message, "初始化后附件记录仍不属于当前消息")
             report("附件记录已初始化 msgId=${message.msgId}")
         }
-        val status = (KavaReflector.readField(record, "field_status") as? Number)?.toLong()
-        if (status == 199L) return true
+        val current = record ?: return waiting(message, "原生附件记录为空")
+        if (!ownsAttachment(current, message)) return waiting(message, "附件记录不属于当前消息")
+        val status = attachmentStatus(current)
+        if (attachmentReady(current, message)) return true
         val accepted = WeChatApis.network().sendRequest(scene)
         report("附件请求 accepted=$accepted msgId=${message.msgId} status=$status init=${initAttach != null}")
         return accepted

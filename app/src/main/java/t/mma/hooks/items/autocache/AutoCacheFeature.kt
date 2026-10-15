@@ -63,7 +63,7 @@ class AutoCacheFeature : BaseFeature() {
                     if (account.isBlank()) return@subscribe
                     val key = "$account:${message.talker}:$id"
                     if (pending.add(key)) {
-                        AutoCacheDiagnostics.record(context.hostContext(), "收到媒体 type=${message.type} local=${message.msgId} server=${message.msgSvrId}")
+                        AutoCacheDiagnostics.record(context.hostContext(), "收到媒体 type=${message.type} local=${message.msgId} server=${message.msgSvrId} chat=${if (message.talker.endsWith("@chatroom")) "群聊" else "私聊"}")
                         HLog.i("[Hchat:AutoCache] 收到媒体 type=${message.type} local=${message.msgId} server=${message.msgSvrId}")
                         enqueue(context, message, account, key, 0)
                     }
