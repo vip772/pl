@@ -1,5 +1,6 @@
 package t.mma.hooks.items.autocache
 
+import org.luckypray.dexkit.wrap.DexMethod
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import t.mma.dexkit.DexMethodCache
@@ -14,7 +15,7 @@ import java.lang.reflect.Proxy
 
 /** 微信原生媒体下载入口；描述符由源码锚点定位并按微信运行时缓存。 */
 internal class NativeMediaCache(private val context: FeatureContext) {
-    private val cache = DexMethodCache.prefs(context.hostContext(), "Hchat_native_media_cache_v3")
+    private val cache = DexMethodCache.prefs(context.hostContext(), "Hchat_native_media_cache_v4")
     @Volatile private var imageConstructor: Constructor<*>? = null
     @Volatile private var fileConstructor: Constructor<*>? = null
     @Volatile private var initAttach: Method? = null
@@ -49,16 +50,33 @@ internal class NativeMediaCache(private val context: FeatureContext) {
         val runtime = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         initAttach = DexMethodCache.load(cache, runtime, context.hostClassLoader(), "attach_init")
             ?: run {
-                // 8.0.78 AppMsgLogic 同时包含已封装的文件发送方法与附件初始化。
-                // 从已确认的 owner 枚举精确签名，避免依赖单条日志的 DexKit 命中。
-                val direct = methods("summerbig initDownloadAttach msgLocalId[%d], msgXml[%s], downloadPath[%s]")
-                val owner = context.dexFinder().sendFileMethod?.declaringClass
-                val candidates = (direct + KavaReflector.declaredMethods(owner))
-                    .distinctBy { it.toGenericString() }
-                    .filter { Modifier.isStatic(it.modifiers) && it.returnType == String::class.java &&
-                        it.parameterTypes.toList() == listOf(long, String::class.java, String::class.java, String::class.java) }
-                t.mma.utils.HLog.i("[Hchat:AutoCache] 附件初始化定位 direct=${direct.size} owner=${owner?.name} candidates=${candidates.map { it.toGenericString() }}")
-                candidates.singleOrNull()?.also { DexMethodCache.save(cache, runtime, "attach_init", it) }
+                val version = WeChatApis.version()?.versionName().orEmpty()
+                if (version == "8.0.78") {
+                    // 已核对用户 APK classes12.dex 与持久化结果一致：
+                    // AppAttachNewDownloadUI.Y7 -> AppMsgLogic.s(J,String,String,String):String。
+                    // 用精确 DEX 描述符解析，绕过日志查询和无条件方法枚举。
+                    val descriptor = "Lcom/tencent/mm/pluginsdk/model/app/k0;->s(JLjava/lang/String;Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;"
+                    try {
+                        val method = DexMethod(descriptor).getMethodInstance(context.hostClassLoader())
+                        check(Modifier.isStatic(method.modifiers) && method.returnType == String::class.java &&
+                            method.parameterTypes.toList() == listOf(long, String::class.java, String::class.java, String::class.java)) {
+                            "附件初始化描述符签名不符: ${method.toGenericString()}"
+                        }
+                        DexMethodCache.save(cache, runtime, "attach_init", method)
+                        report("8.0.78 精确初始化入口已解析: ${method.toGenericString()}")
+                        method
+                    } catch (error: Throwable) {
+                        report("8.0.78 精确初始化解析失败: ${error.javaClass.name}: ${error.message}")
+                        t.mma.utils.HLog.e("[Hchat:AutoCache] 精确初始化入口解析失败 version=$version descriptor=$descriptor", error)
+                        null
+                    }
+                } else {
+                    val candidates = methods("summerbig initDownloadAttach msgLocalId[%d], msgXml[%s], downloadPath[%s]")
+                        .filter { Modifier.isStatic(it.modifiers) && it.returnType == String::class.java &&
+                            it.parameterTypes.toList() == listOf(long, String::class.java, String::class.java, String::class.java) }
+                    report("附件初始化定位 version=$version candidates=${candidates.map { it.toGenericString() }}")
+                    candidates.singleOrNull()?.also { DexMethodCache.save(cache, runtime, "attach_init", it) }
+                }
             }
         downloadVideo = DexMethodCache.load(cache, runtime, context.hostClassLoader(), "video_offline")
             ?: run {
