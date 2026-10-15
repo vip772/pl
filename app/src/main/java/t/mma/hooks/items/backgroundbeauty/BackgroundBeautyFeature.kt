@@ -373,6 +373,7 @@ private class BackgroundBeautyRuntime(
     }
 
     fun destroy() {
+        chatExitFrames.keys.toList().forEach(::releaseChatExit)
         destroyed = true
         decorUpdateDepth.clear()
         wechatTitleBackdrops.keys.toList().forEach { it.invalidate() }
@@ -792,6 +793,41 @@ private class BackgroundBeautyRuntime(
             }
         }
     }
+    private data class ChatExitFrame(val bitmap: Bitmap, val drawable: Drawable, val originalForeground: Drawable?, val createdAt: Long)
+    private val chatExitFrames = WeakHashMap<View, ChatExitFrame>()
+    private fun captureChatExit(chat: View) {
+        if (chatExitFrames.containsKey(chat)) return
+        if (!chat.isShown || chat.width <= 0 || chat.height <= 0) return
+        var bitmap: Bitmap? = null
+        try {
+            val captured = Bitmap.createBitmap(chat.width, chat.height, Bitmap.Config.ARGB_8888)
+            bitmap = captured
+            chat.draw(Canvas(captured))
+            val drawable = android.graphics.drawable.BitmapDrawable(chat.resources, captured).apply { gravity = android.view.Gravity.FILL }
+            chatExitFrames[chat] = ChatExitFrame(captured, drawable, chat.foreground, android.os.SystemClock.uptimeMillis())
+            chat.foreground = drawable
+            HLog.i("$TAG CHATRETURN captured id=${chat.id} size=${captured.width}x${captured.height} children=${(chat as? ViewGroup)?.childCount}")
+            chat.postOnAnimation { observeChatExit(chat) }
+        } catch (error: Throwable) {
+            bitmap?.recycle()
+            HLog.e("$TAG 聊天退出画面捕获失败", error)
+        }
+    }
+    private fun observeChatExit(chat: View) {
+        val frame = chatExitFrames[chat] ?: return
+        val animation = chat.animation
+        val expired = android.os.SystemClock.uptimeMillis() - frame.createdAt > 1500L
+        if (expired || destroyed || !chat.isAttachedToWindow || (chat.visibility != View.VISIBLE && (animation == null || animation.hasEnded()))) {
+            releaseChatExit(chat)
+        } else chat.postOnAnimation { observeChatExit(chat) }
+    }
+    private fun releaseChatExit(chat: View) {
+        val frame = chatExitFrames.remove(chat) ?: return
+        if (chat.foreground === frame.drawable) chat.foreground = frame.originalForeground
+        // Never recycle a bitmap still referenced by a hardware display list. Removing the drawable
+        // releases ownership; Android reclaims the bitmap after the render thread is finished.
+        HLog.i("$TAG CHATRETURN released id=${chat.id} visibility=${chat.visibility} ended=${chat.animation?.hasEnded()}")
+    }
     private fun logChatReturn(activity: Activity, owner: Any, phase: String) {
         if (diagnosticCounts.computeIfAbsent("chat-return:$phase") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 8) return
         val chat = wechatProbeField(owner, "c") as? View
@@ -973,17 +1009,25 @@ private class BackgroundBeautyRuntime(
         }
         val chatTabClass = KavaReflector.loadClass("com.tencent.mm.ui.NewChattingTabUI", context.hostClassLoader())
         findWechatVerifiedMethod(chatTabClass, "f", Boolean::class.javaPrimitiveType!!)?.let { method ->
-            hookOnce(method, before = { param ->
-                val activity = wechatProbeField(param.thisObject, "a") as? Activity ?: return@hookOnce
-                logChatReturn(activity, param.thisObject, "close-before")
-            }, after = { param ->
-                val owner = param.thisObject
-                val activity = wechatProbeField(owner, "a") as? Activity ?: return@hookOnce
-                logChatReturn(activity, owner, "close-after")
-                activity.window.decorView.postOnAnimation { if (!destroyed) logChatReturn(activity, owner, "close-frame") }
+            // Separate callback registration: a previously registered observer must not suppress
+            // this lifecycle hook through hookOnce's member deduplication.
+            ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
+                    val owner = param.thisObject
+                    val activity = wechatProbeField(owner, "a") as? Activity ?: return
+                    val chat = activity.findViewById<View>(resourceId("bks")) ?: return
+                    logChatReturn(activity, owner, "capture-before-close")
+                    if (param.args.firstOrNull() == true && hasConfiguredBackground(activity)) captureChatExit(chat)
+                }
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val owner = param.thisObject
+                    val activity = wechatProbeField(owner, "a") as? Activity ?: return
+                    logChatReturn(activity, owner, "capture-after-close")
+                    activity.window.decorView.postOnAnimation { if (!destroyed) logChatReturn(activity, owner, "capture-close-frame") }
+                }
             })
         }
-
         listOf("u" to emptyArray<Class<*>>(), "s" to arrayOf(Int::class.javaPrimitiveType!!)).forEach { (name, types) ->
             val method = findWechatVerifiedMethod(chatTabClass, name, *types)
             if (method == null) {
@@ -994,14 +1038,6 @@ private class BackgroundBeautyRuntime(
                     val activity = wechatProbeField(owner, "a") as? Activity ?: return@hookOnce
                     val chatting = wechatProbeField(owner, "c") as? View ?: return@hookOnce
                     if (name == "s" && param.args.firstOrNull() != View.VISIBLE) return@hookOnce
-                    if (name == "s" && wechatProbeField(owner, "k") == true && hasConfiguredBackground(activity)) {
-                        val state = states[activity]
-                        val snapshot = state?.surfaces?.get(chatting)
-                        if (state != null && snapshot?.slot == BackgroundBeautySettings.Slot.CHAT) {
-                            setTransparentSurface(state, chatting, BackgroundBeautySettings.Slot.CHAT)
-                        }
-                        logChatReturn(activity, owner, "launcher-visible")
-                    }
                     if (chatting.visibility == View.GONE) {
                         activity.window.decorView.postOnAnimation {
                             if (chatting.visibility == View.GONE) completeWechatReturn(activity, "chat-tab-$name")
@@ -1018,6 +1054,7 @@ private class BackgroundBeautyRuntime(
                 val chatUi = wechatProbeField(param.thisObject, "d")
                 val chatView = wechatProbeField(chatUi, "c") as? View ?: return@hookOnce
                 if (chatView.visibility != View.GONE) return@hookOnce
+                releaseChatExit(chatView)
                 val activity = findActivity(chatView) ?: return@hookOnce
                 if (activity.javaClass.name != LAUNCHER_ACTIVITY || resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return@hookOnce
                 preparedRoots.entries.removeAll { it.value.first.activity === activity }
@@ -1833,10 +1870,7 @@ private class BackgroundBeautyRuntime(
             // Embedded chat animates over the conversation page in the same window.
             // Its bitmap belongs to the moving chat container, never the shared decor.
             val chatHost = chatBackgroundHost(activity) ?: return
-            val controller = if (activity.javaClass.name == LAUNCHER_ACTIVITY) KavaReflector.readField(activity, "chattingTabUI") else null
-            if (controller != null && wechatProbeField(controller, "k") == true) {
-                setTransparentSurface(state, chatHost, slot)
-            } else setImageSurface(state, chatHost, slot, bitmap, opacity)
+            setImageSurface(state, chatHost, slot, bitmap, opacity)
             applyChatBackground(state, bitmap, opacity)
         } else {
             // Keep cached chat bitmaps, but release the closed chat's managed surfaces.
@@ -1969,49 +2003,65 @@ private class BackgroundBeautyRuntime(
         return (method?.let { KavaReflector.invoke(it, null) } as? Boolean)
             ?: ((view.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
     }
-    private val measuredIconStrokes = WeakHashMap<Drawable, Pair<Float, Int>>()
+    private data class IconStroke(val drawable: Drawable, val width: Int, val height: Int, val scale: Float, val pixels: Int)
+    private val measuredIconStrokes = WeakHashMap<View, IconStroke>()
     private fun chatInputStrokeWidth(footer: View): Int {
-        val icon = KavaReflector.readField(footer, "C") as? ImageView
-        val drawable = icon?.drawable ?: return (footer.resources.displayMetrics.density * 1.2f).toInt().coerceAtLeast(1)
-        val currentScale = icon.imageMatrix.valuesForChatStroke()
-        measuredIconStrokes[drawable]?.takeIf { it.first == currentScale }?.let { return it.second }
-        val width = drawable.intrinsicWidth.coerceIn(1, 256)
-        val height = drawable.intrinsicHeight.coerceIn(1, 256)
-        // Measure the top centre of the actual smile drawable's circular outline.
-        // This also works with the SVG paths baked into the APK instead of assuming an SVG stroke width.
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val saved = Rect(drawable.bounds)
-        var started = false
-        var thickness = 0
+        // 8.0.78 ChatFooter.B0(): smile button = id/bqr (0x7f0a10a3).
+        val icon = footer.findViewById<ImageView>(resourceId("bqr"))
+        val drawable = icon?.drawable
+        if (icon == null || drawable == null || icon.width <= 0 || icon.height <= 0) {
+            if (diagnosticCounts.computeIfAbsent("stroke-missing") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
+                HLog.i("$TAG CHATSTROKE missing button=${icon != null} drawable=${drawable?.javaClass?.name} size=${icon?.width}x${icon?.height}")
+            }
+            return (footer.resources.displayMetrics.density * 1.2f).toInt().coerceAtLeast(1)
+        }
+        val matrix = FloatArray(9).also { icon.imageMatrix.getValues(it) }
+        val scale = matrix[android.graphics.Matrix.MSCALE_Y]
+        measuredIconStrokes[icon]?.takeIf { it.drawable === drawable && it.width == icon.width && it.height == icon.height && it.scale == scale }?.let { return it.pixels }
+        // Rasterize the actual ImageView viewport with its padding and matrix: no intrinsic-size
+        // assumption and no alpha threshold that discards antialiased ring edge pixels.
+        val bitmap = Bitmap.createBitmap(icon.width, icon.height, Bitmap.Config.ARGB_8888)
+        var weighted = 0f
         try {
-            drawable.setBounds(0, 0, width, height)
-            drawable.draw(Canvas(bitmap))
-            for (y in 0 until height / 2) {
-                val opaque = Color.alpha(bitmap.getPixel(width / 2, y)) >= 128
-                if (opaque) { started = true; thickness++ } else if (started) break
+            val canvas = Canvas(bitmap)
+            canvas.translate(icon.paddingLeft.toFloat(), icon.paddingTop.toFloat())
+            canvas.concat(icon.imageMatrix)
+            drawable.draw(canvas)
+            val x = (icon.paddingLeft + (icon.width - icon.paddingLeft - icon.paddingRight) / 2).coerceIn(0, icon.width - 1)
+            val samples = IntArray(icon.height / 2) { y -> Color.alpha(bitmap.getPixel(x, y)) }
+            val peak = samples.maxOrNull() ?: 0
+            if (peak > 0) {
+                var started = false
+                for (alpha in samples) {
+                    if (alpha > 0) { started = true; weighted += alpha.toFloat() / peak }
+                    else if (started) break
+                }
             }
         } catch (error: Throwable) {
-            if (diagnosticCounts.computeIfAbsent("chat-stroke-error") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 2) {
-                HLog.e("$TAG 表情图标描边测量失败: drawable=${drawable.javaClass.name}", error)
-            }
-            thickness = 0
-        } finally {
-            drawable.bounds = saved
-            bitmap.recycle()
-        }
-        val scaleY = icon.imageMatrix.valuesForChatStroke()
-        val measured = kotlin.math.round(thickness * scaleY).toInt().coerceAtLeast(1)
-        if (diagnosticCounts.computeIfAbsent("chat-stroke-measure") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-            HLog.i("$TAG CHATSTROKE drawable=${drawable.javaClass.name} intrinsic=${width}x$height ringPx=$thickness scaleY=$scaleY widthPx=$measured")
-        }
-        return (if (thickness > 0) measured else (footer.resources.displayMetrics.density * 1.2f).toInt().coerceAtLeast(1)).also {
-            measuredIconStrokes[drawable] = currentScale to it
-        }
+            HLog.e("$TAG 表情按钮实际线宽采样失败: ${drawable.javaClass.name}", error)
+        } finally { bitmap.recycle() }
+        val pixels = if (weighted > 0) kotlin.math.ceil(weighted).toInt() else (footer.resources.displayMetrics.density * 1.2f).toInt().coerceAtLeast(1)
+        HLog.i("$TAG CHATSTROKE actual button=${icon.id} drawable=${drawable.javaClass.name} bounds=${drawable.bounds} viewport=${icon.width}x${icon.height} scale=$scale weightedPx=$weighted widthPx=$pixels")
+        if (weighted > 0) measuredIconStrokes[icon] = IconStroke(drawable, icon.width, icon.height, scale, pixels)
+        return pixels
     }
-    private fun android.graphics.Matrix.valuesForChatStroke(): Float {
-        val values = FloatArray(9)
-        getValues(values)
-        return kotlin.math.abs(values[android.graphics.Matrix.MSCALE_Y]).takeIf { it > 0f } ?: 1f
+    private fun applySpeechSurfaces(state: HostState, footer: View) {
+        // SpeechInputLayout constructor and ew_.xml verified in 8.0.78.
+        val speech = findDescendant(footer, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") ?: return
+        val queue = ArrayDeque<View>()
+        queue.add(speech)
+        var count = 0
+        while (queue.isNotEmpty() && count++ < 80) {
+            val node = queue.removeFirst()
+            logChatSurface(node, "speech-direct-before")
+            if (node.javaClass == View::class.java || node is ViewGroup || node is ImageView) {
+                // A passive microphone is not a separate touch target. Its parent's host ripple
+                // must not be duplicated by another module ripple on the image itself.
+                setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+            }
+            logChatSurface(node, "speech-direct-after")
+            if (node is ViewGroup) for (i in 0 until node.childCount) queue.add(node.getChildAt(i))
+        }
     }
     private fun logChatSurface(view: View, phase: String) {
         val key = "chat-surface:$phase:${view.id}:${view.javaClass.name}"
@@ -2052,6 +2102,19 @@ private class BackgroundBeautyRuntime(
             }
         }
 
+        val proxyClass = KavaReflector.loadClass("com.tencent.mm.ui.chatting.ChattingUIProxy", context.hostClassLoader())
+        KavaReflector.findMethodRecursive(proxyClass, "onExitBegin")?.let { method ->
+            ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
+                    val activity = findActivity(param.thisObject) ?: return
+                    if (activity.javaClass.name != LAUNCHER_ACTIVITY || !hasConfiguredBackground(activity)) return
+                    val chat = activity.findViewById<View>(resourceId("bks")) ?: return
+                    HLog.i("$TAG CHATRETURN proxyExitBegin visibility=${chat.visibility} shown=${chat.isShown}")
+                    captureChatExit(chat)
+                }
+            })
+        }
         val layoutClass = KavaReflector.loadClass("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", context.hostClassLoader())
         findWechatVerifiedMethod(layoutClass, "dispatchDraw", Canvas::class.java)?.let { method ->
             ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
@@ -2164,6 +2227,7 @@ private class BackgroundBeautyRuntime(
             HLog.i("$TAG CHROMEINPUT footerMissing root=${root.javaClass.name}")
             return
         }
+        applySpeechSurfaces(state, footer)
         HLog.i("$TAG CHROMEINPUT footerFound ${wechatProbeView(footer, state.activity)}")
         val queue = ArrayDeque<View>()
         queue.add(footer)
@@ -2208,8 +2272,9 @@ private class BackgroundBeautyRuntime(
                 logChatSurface(view, "speech-after")
             } else if (view is ImageView) {
                 // Footer icons retain their image drawable. Only their independent button surface is cleared.
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
-                if (findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null) logChatSurface(view, "speech-icon")
+                val inSpeech = findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = !inSpeech)
+                if (inSpeech) logChatSurface(view, "speech-icon")
             }
         }
     }
@@ -2664,6 +2729,7 @@ private class BackgroundBeautyRuntime(
         clearForeground: Boolean = false,
         preserveFeedback: Boolean = false
     ) {
+        if (chatExitFrames.containsKey(view)) return
         applyNativeChrome(view, slot)
         surfaceMutationDepth++
         try {
@@ -2673,7 +2739,7 @@ private class BackgroundBeautyRuntime(
                 snapshot.appliedBitmap == null &&
                 snapshot.appliedBackground != null &&
                 view.background === snapshot.appliedBackground &&
-                (!preserveFeedback || snapshot.appliedBackground is BackgroundBeautyFeedbackDrawable) &&
+                (if (preserveFeedback) snapshot.appliedBackground is BackgroundBeautyFeedbackDrawable else snapshot.appliedBackground !is BackgroundBeautyFeedbackDrawable) &&
                 (!clearForeground || view.foreground === snapshot.appliedForeground)
             ) return
             val marker: Drawable = if (preserveFeedback) {
@@ -2881,6 +2947,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun clearActivity(activity: Activity) {
+        chatExitFrames.keys.toList().filter { findActivity(it) === activity }.forEach(::releaseChatExit)
         HLog.i("$TAG WXRESTORE activity=${activity.javaClass.name} target=${resolveTarget(activity)} enabled=${prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)}")
         restoreBounceColors(activity)
         synchronized(pendingLoads) { pendingLoads.remove(activity) }
