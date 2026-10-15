@@ -2014,3 +2014,7 @@ NativeLibraryLoader 只记录同一模块 ClassLoader 下已经成功加载的�
 新增公共发包器的只读完成诊断：在真实 dispatcher 实例缓存后，仅扫描其实际类的具体 onSceneEnd(int,int,String,Scene) 方法，after Hook 仅处理同一 dispatcher 实例，不阻断或改写宿主返回/异常。记录 errType、errCode、CGI、Scene 类、是否经公共 API 由模块提交及耗时，不记录响应正文或错误文本，普通失败按错误码限频。此入口与已删除的全局签名搜索/完成拦截不同，不扫描所有业务回调。8.0.78 r1.g(Scene) 调用 r1.h(Scene,0)，本轮日志缓存 r1.h 确为入队入口。
 
 另修复公共发包器可确认的错误：旧 KavaReflector.invoke 会吞异常返回 null，而 normalizeSendResult(null) 当作成功，导致真实入队异常被报成功。改为 invokeOrThrow，异常记录原始原因并返回失败，删除异常后的重复提交兜底，避免原调用已部分执行时重发。此修复不等于已修复 (1,-7)。未执行本地编译/构建，静态审查与 diff 检查通过；需新包发生弹窗后的完整运行日志核对 NetworkTrace。
+
+## 自动缓存与首页入口调整
+
+自动缓存、首页侧边栏入口及悬浮底栏透明度的行为、保存路径和逆向验证范围见 [AUTO_CACHE.md](AUTO_CACHE.md)。

@@ -35,6 +35,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -57,6 +58,7 @@ import top.yukonga.miuix.kmp.theme.darkColorScheme
 import top.yukonga.miuix.kmp.theme.lightColorScheme
 
 internal data class CustomBottomBarConfig(
+    val opacity: Int,
     val glass: Boolean,
     val blurRadius: Int,
     val hideLabels: Boolean,
@@ -151,6 +153,7 @@ private fun FloatingNavigationBar(
     ) {
         FloatingBottomBar(
             modifier = Modifier
+                .graphicsLayer { alpha = config.opacity / 100f }
                 .widthIn(max = 420.dp)
                 .onGloballyPositioned { coordinates ->
                     val position = coordinates.positionInWindow()

@@ -2167,6 +2167,8 @@ internal fun matchedFeatureSubTerms(query: String, provider: FeatureSettingsProv
 
 internal fun featureSubSearchTerms(featureId: String): List<String> {
     return when (featureId) {
+        "auto_cache" -> listOf("自动缓存", "自动下载", "图片", "视频", "文件", "文档", "防过期")
+        "home_side_panel" -> listOf("首页侧边栏", "快捷面板", "首页头像", "侧边抽屉")
         AntiRecallFeature.ID -> listOf(
             "动态撤回", "撤回信息颜色", "颜色覆盖强度", "渐变颜色", "描边旋转周期", "描边宽度", "私聊防撤回", "群聊防撤回", "公众号防撤回", "撤回提示", "自定义撤回提示", "发送时间", "撤回时间", "时间格式", "语音防撤回", "图片防撤回", "视频防撤回"
         )
@@ -2293,7 +2295,7 @@ internal fun featureSubSearchTerms(featureId: String): List<String> {
             "自定义底栏", "底部导航", "微信首页", "修改图标", "修改标题", "隐藏标题", "隐藏底栏"
         )
         FloatingBottomBarSettings.FEATURE_ID -> listOf(
-            "悬浮底栏", "底部导航", "微信首页", "液态玻璃", "模糊半径", "隐藏标签", "显示角标", "振动反馈", "振动强度"
+            "悬浮底栏", "底部导航", "微信首页", "液态玻璃", "模糊半径", "透明度", "不透明度", "隐藏标签", "显示角标", "振动反馈", "振动强度"
         )
         RoundAvatarFeature.ID -> listOf("圆角头像", "圆形头像", "头像圆角", "头像弧度", "朋友圈头像", "公众号头像", "通知头像")
         SettingsFeature.ID -> listOf(

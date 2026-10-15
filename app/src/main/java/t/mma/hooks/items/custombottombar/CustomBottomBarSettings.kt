@@ -6,6 +6,9 @@ object FloatingBottomBarSettings {
 
     const val KEY_ENABLE = "custom_bottom_bar_enable"
     const val KEY_STYLE = "custom_bottom_bar_style"
+    const val KEY_OPACITY = "custom_bottom_bar_opacity"
+    const val DEFAULT_OPACITY = 100
+    fun normalizeOpacity(value: Int): Int = value.coerceIn(0, 100)
     const val KEY_GLASS = "custom_bottom_bar_glass"
     const val KEY_BLUR_RADIUS = "custom_bottom_bar_blur_radius"
     const val KEY_HIDE_LABELS = "custom_bottom_bar_hide_labels"

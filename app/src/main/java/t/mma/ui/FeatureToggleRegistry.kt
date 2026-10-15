@@ -19,6 +19,8 @@ object FeatureToggleRegistry {
     private data class Toggle(val prefs: String, val key: String, val defaultValue: Boolean = false)
 
     private val toggles = mapOf(
+        "auto_cache" to Toggle("Hchat_auto_cache_config", "enable"),
+        "home_side_panel" to Toggle("Hchat_home_side_panel", "enable"),
         "anti_recall" to Toggle("Hchat_anti_recall_config", "anti_recall_enable"),
         "block_at_all_notification" to Toggle("Hchat_block_at_all_notification_config", "block_at_all_notification_enable"),
         "auto_message_forward" to Toggle("Hchat_auto_message_forward_config", "enabled"),

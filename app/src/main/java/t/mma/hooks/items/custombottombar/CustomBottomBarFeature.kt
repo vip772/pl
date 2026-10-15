@@ -886,6 +886,9 @@ private class CustomBottomBarRuntime(
 
     private fun readFloatingConfig(): CustomBottomBarConfig {
         return CustomBottomBarConfig(
+            opacity = FloatingBottomBarSettings.normalizeOpacity(
+                floatingPrefs.getInt(FloatingBottomBarSettings.KEY_OPACITY, FloatingBottomBarSettings.DEFAULT_OPACITY)
+            ),
             glass = floatingPrefs.getBoolean(
                 FloatingBottomBarSettings.KEY_GLASS,
                 FloatingBottomBarSettings.DEFAULT_GLASS
@@ -994,6 +997,7 @@ private class CustomBottomBarRuntime(
             FloatingBottomBarSettings.KEY_ENABLE,
             FloatingBottomBarSettings.KEY_STYLE,
             FloatingBottomBarSettings.KEY_GLASS,
+            FloatingBottomBarSettings.KEY_OPACITY,
             FloatingBottomBarSettings.KEY_BLUR_RADIUS,
             FloatingBottomBarSettings.KEY_HIDE_LABELS,
             FloatingBottomBarSettings.KEY_SHOW_BADGES,

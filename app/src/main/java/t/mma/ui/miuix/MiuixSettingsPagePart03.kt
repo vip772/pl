@@ -1181,6 +1181,7 @@ internal fun FeatureSettingsPage(
         HomeTextColorFeature.ID -> HomeTextColorMiuixPage(context, provider, onBack)
         ChatTimeStyleFeature.ID -> ChatTimeStyleMiuixPage(context, provider, onBack)
         ChatToolbarFeature.ID -> ChatToolbarMiuixPage(context, provider, onBack)
+        t.mma.hooks.items.autocache.AutoCacheFeature.ID -> AutoCacheMiuixPage(context, provider, onBack)
         HomeSidePanelFeature.ID -> HomeSidePanelMiuixPage(context, provider, onBack)
         MonetModuleGeneratorFeature.ID -> MonetModuleGeneratorMiuixPage(context, provider, onBack)
         SecureMessageSettings.SEND_ID,

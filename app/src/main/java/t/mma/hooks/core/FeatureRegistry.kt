@@ -97,6 +97,7 @@ import t.mma.hooks.items.shortvideo.FinderMediaDownloadFeature
 import t.mma.hooks.items.statuslimit.StatusTextLimitFeature
 import t.mma.hooks.items.swipequote.SwipeQuoteFeature
 import t.mma.hooks.items.tablet.WeChatTabletFeature
+import t.mma.hooks.items.autocache.AutoCacheFeature
 import t.mma.hooks.items.textspeech.TextSpeechFeature
 import t.mma.hooks.items.textvoice.TextVoiceFeature
 import t.mma.hooks.items.typingreport.TypingReportBlockFeature
@@ -116,6 +117,7 @@ object FeatureRegistry {
             .register(WechatApiFeature())
             .register(ChatToolbarFeature())
             .register(HomeSidePanelFeature())
+            .register(AutoCacheFeature())
             .register(BackgroundBeautyFeature())
             .register(MonetModuleGeneratorFeature())
             .register(AntiSecureMessageFeature())

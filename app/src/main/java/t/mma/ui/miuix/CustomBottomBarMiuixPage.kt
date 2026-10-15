@@ -300,6 +300,11 @@ internal fun FloatingBottomBarMiuixPage(
                 FloatingBottomBarSettings.LEGACY_STYLE_FLOATING
         )
     }
+    var opacity by remember {
+        mutableStateOf(FloatingBottomBarSettings.normalizeOpacity(
+            sp.getInt(FloatingBottomBarSettings.KEY_OPACITY, FloatingBottomBarSettings.DEFAULT_OPACITY)
+        ))
+    }
     var glassEnabled by remember {
         mutableStateOf(sp.getBoolean(FloatingBottomBarSettings.KEY_GLASS, FloatingBottomBarSettings.DEFAULT_GLASS))
     }
@@ -378,6 +383,22 @@ internal fun FloatingBottomBarMiuixPage(
                         }
                     )
                     if (enabled) {
+                        InsetDivider()
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+                            Text(text = "底栏不透明度 ${opacity}%", color = MiuixTheme.colorScheme.onSurface)
+                            Slider(
+                                value = opacity.toFloat(),
+                                onValueChange = { opacity = FloatingBottomBarSettings.normalizeOpacity(it.toInt()) },
+                                valueRange = 0f..100f,
+                                steps = 99,
+                                onValueChangeFinished = {
+                                    sp.edit().putInt(FloatingBottomBarSettings.KEY_OPACITY, opacity).apply()
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                            )
+                            Text(text = "0% 完全透明，100% 保持原有显示效果", color = MiuixTheme.colorScheme.onSurface)
+                        }
+
                         InsetDivider()
                         SwitchRow(
                             checked = glassEnabled,
