@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
+import t.mma.hooks.items.autocache.AutoCacheDiagnostics
 import t.mma.hooks.items.autocache.AutoCacheSettings
 import t.mma.preferences.HchatStorage
 import t.mma.ui.FeatureSettingsProvider
@@ -53,6 +54,15 @@ internal fun AutoCacheMiuixPage(context: Context, provider: FeatureSettingsProvi
                             prefs.edit().putBoolean(AutoCacheSettings.KEY_ENABLE, it).apply()
                         }
                     )
+                }
+            }
+            item {
+                SettingsCard {
+                    ActionRow("复制下载诊断", "保留最近 80 条接收、初始化、提交和完成记录") {
+                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("自动缓存诊断", AutoCacheDiagnostics.recent(context)))
+                        android.widget.Toast.makeText(context, "下载诊断已复制", android.widget.Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
             item {

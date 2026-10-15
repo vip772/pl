@@ -640,7 +640,7 @@ class WeChatMessage(
         @JvmStatic
         fun xmlTag(xml: String?, tag: String): String {
             if (xml.isNullOrBlank() || tag.isBlank()) return ""
-            val cdata = Regex("<$tag><!\\[CDATA\\[(.*?)]]></$tag>", RegexOption.IGNORE_CASE)
+            val cdata = Regex("<$tag>\\s*<!\\[CDATA\\[(.*?)]]>\\s*</$tag>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
                 .find(xml)
             if (cdata != null) return cdata.groupValues[1]
             val plain = Regex("<$tag>(.*?)</$tag>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))

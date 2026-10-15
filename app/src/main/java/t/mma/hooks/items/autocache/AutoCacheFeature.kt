@@ -63,6 +63,7 @@ class AutoCacheFeature : BaseFeature() {
                     if (account.isBlank()) return@subscribe
                     val key = "$account:${message.talker}:$id"
                     if (pending.add(key)) {
+                        AutoCacheDiagnostics.record(context.hostContext(), "收到媒体 type=${message.type} local=${message.msgId} server=${message.msgSvrId}")
                         HLog.i("[Hchat:AutoCache] 收到媒体 type=${message.type} local=${message.msgId} server=${message.msgSvrId}")
                         enqueue(context, message, account, key, 0)
                     }
@@ -88,6 +89,7 @@ class AutoCacheFeature : BaseFeature() {
                     ?: initial.msgSvrId.takeIf { it > 0 }?.let { store?.getMessageBySvrId(initial.talker, it) }
                     ?: initial
                 if (native?.complete(message) == true) {
+                    AutoCacheDiagnostics.record(context.hostContext(), "下载完成 msgId=${message.msgId} type=${message.type}")
                     HLog.i("[Hchat:AutoCache] 下载完成 msgId=${message.msgId} type=${message.type}")
                     pending.remove(key)
                     lastSubmitted.remove(key)
@@ -98,6 +100,8 @@ class AutoCacheFeature : BaseFeature() {
                 if (last == null || now - last >= 60_000L) {
                     val submitted = native?.submit(message) == true
                     if (submitted) lastSubmitted[key] = now
+                    if (attempt % 12 == 0) AutoCacheDiagnostics.record(context.hostContext(),
+                        "队列仍待完成 local=${message.msgId} server=${message.msgSvrId} type=${message.type} submitted=$submitted attempt=$attempt")
                     if (submitted || attempt == 0 || attempt % 60 == 0) {
                         HLog.i("[Hchat:AutoCache] 下载提交=$submitted msgId=${message.msgId} type=${message.type} attempt=$attempt")
                     }
@@ -111,6 +115,7 @@ class AutoCacheFeature : BaseFeature() {
                     HLog.e("[Hchat:AutoCache] 等待原生下载超时 msgId=${message.msgId} type=${message.type}")
                 }
             } catch (error: Throwable) {
+                if (attempt == 0 || attempt % 60 == 0) AutoCacheDiagnostics.record(context.hostContext(), "异常 msgId=${initial.msgId} ${error.javaClass.name}: ${error.message}")
                 if (attempt == 0 || attempt % 60 == 0) HLog.e("[Hchat:AutoCache] 原生下载异常 msgId=${initial.msgId}", error)
                 if (attempt < 720) enqueue(context, initial, account, key, attempt + 1)
                 else {
