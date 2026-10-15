@@ -34,6 +34,13 @@ internal class AvatarHeaderEffect(private val host: View) : Drawable() {
     private var width = -1
     private var height = -1
     private var running = false
+    private var strokeDp = 1.4f
+    private var lightning = false
+    private val bolt = Path()
+    private val branches = Path()
+    private val point = FloatArray(2)
+    private val tangent = FloatArray(2)
+    private var boltTick = -1L
     private val frame = object : Runnable {
         override fun run() {
             if (!running) return
@@ -45,19 +52,27 @@ internal class AvatarHeaderEffect(private val host: View) : Drawable() {
             host.postOnAnimation(this)
         }
     }
-    fun update(value: String, speed: Int) {
+    fun update(value: String, speed: Int, strokeWidth: Float, electric: Boolean) {
+        val nextWidth = strokeWidth.coerceIn(0.5f, 4f)
+        if (strokeDp != nextWidth || lightning != electric) {
+            width = -1
+            strokeDp = nextWidth
+            lightning = electric
+            boltTick = -1L
+        }
         period = speed.coerceIn(DynamicBadgeSettings.MIN_SPEED, DynamicBadgeSettings.MAX_SPEED)
         if (colors != value || width != host.width || height != host.height) {
             colors = value
             width = host.width
             height = host.height
             val density = host.resources.displayMetrics.density
-            val inset = 3f * density
+            val inset = (if (lightning) 9f else strokeDp / 2f + 2f) * density
             rect.set(inset, inset, width - inset, height - inset)
             outline.reset()
             if (rect.width() > 0 && rect.height() > 0) outline.addRoundRect(rect, rect.height() / 2f, rect.height() / 2f, Path.Direction.CW)
             measure.setPath(outline, true)
             perimeter = measure.length
+            boltTick = -1L
             val c = DynamicRecallGradient.parts(value).map(Color::parseColor)
             shader = SweepGradient(rect.centerX(), rect.centerY(),
                 intArrayOf(c[0], c[1], c[2], c[0]), floatArrayOf(0f, 1f / 3f, 2f / 3f, 1f))
@@ -79,25 +94,76 @@ internal class AvatarHeaderEffect(private val host: View) : Drawable() {
         matrix.setRotate(phase * 360f, rect.centerX(), rect.centerY())
         shader?.setLocalMatrix(matrix)
         paint.shader = shader
-        // Faint complete capsule, then a bright moving arc with a soft layered halo.
-        paint.strokeWidth = 1.2f * density
-        paint.alpha = 85
+        if (lightning) {
+            drawLightning(canvas, density)
+            paint.shader = null
+            return
+        }
+        // The entire perimeter stays visible while the gradient and highlight move.
+        paint.strokeWidth = strokeDp * density
+        paint.alpha = 220
         canvas.drawPath(outline, paint)
         trail.reset()
         val start = phase * perimeter
         val end = start + perimeter * .38f
         measure.getSegment(start, minOf(end, perimeter), trail, true)
         if (end > perimeter) measure.getSegment(0f, end - perimeter, trail, true)
-        paint.strokeWidth = 5f * density
+        paint.strokeWidth = (strokeDp + 3f) * density
         paint.alpha = 25
         canvas.drawPath(trail, paint)
-        paint.strokeWidth = 3f * density
+        paint.strokeWidth = (strokeDp + 1.5f) * density
         paint.alpha = 65
         canvas.drawPath(trail, paint)
-        paint.strokeWidth = 1.4f * density
+        paint.strokeWidth = strokeDp * density
         paint.alpha = 255
         canvas.drawPath(trail, paint)
         paint.shader = null
+    }
+    private fun noise(index: Int, tick: Long): Float {
+        var n = index * 374761393 + tick.toInt() * 668265263
+        n = (n xor (n ushr 13)) * 1274126177
+        return ((n xor (n ushr 16)) and 65535) / 32767.5f - 1f
+    }
+    private fun drawLightning(canvas: Canvas, density: Float) {
+        // Rebuild only at the electrical flicker cadence; paths and sample arrays are reused.
+        val tick = SystemClock.uptimeMillis() / (period / 32L).coerceAtLeast(18L)
+        if (tick != boltTick) {
+            boltTick = tick
+            bolt.reset()
+            branches.reset()
+            val count = (perimeter / (5f * density)).toInt().coerceIn(48, 256)
+            for (i in 0 until count) {
+                measure.getPosTan(perimeter * i / count, point, tangent)
+                val displacement = noise(i, tick) * 2.4f * density
+                val x = point[0] - tangent[1] * displacement
+                val y = point[1] + tangent[0] * displacement
+                if (i == 0) bolt.moveTo(x, y) else bolt.lineTo(x, y)
+                if (i % 9 == 0) {
+                    val reach = (2f + kotlin.math.abs(noise(i + 7, tick)) * 1.8f) * density
+                    branches.moveTo(x, y)
+                    branches.lineTo(x - tangent[1] * reach + tangent[0] * density,
+                        y + tangent[0] * reach + tangent[1] * density)
+                }
+            }
+            bolt.close()
+        }
+        paint.strokeWidth = 4f * density
+        paint.alpha = 35
+        canvas.drawPath(bolt, paint)
+        paint.strokeWidth = 2.2f * density
+        paint.alpha = 100
+        canvas.drawPath(bolt, paint)
+        paint.strokeWidth = 1f * density
+        paint.alpha = 255
+        canvas.drawPath(bolt, paint)
+        paint.strokeWidth = 0.65f * density
+        paint.alpha = 200
+        canvas.drawPath(branches, paint)
+        paint.shader = null
+        paint.color = Color.WHITE
+        paint.alpha = 210
+        paint.strokeWidth = 0.4f * density
+        canvas.drawPath(bolt, paint)
     }
     override fun setAlpha(alpha: Int) = Unit
     override fun setColorFilter(colorFilter: ColorFilter?) { paint.colorFilter = colorFilter }

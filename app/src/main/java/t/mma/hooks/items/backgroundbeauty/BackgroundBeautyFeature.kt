@@ -2018,7 +2018,7 @@ private class BackgroundBeautyRuntime(
         return (method?.let { KavaReflector.invoke(it, null) } as? Boolean)
             ?: ((view.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
     }
-    private data class IconStroke(val drawable: Drawable, val width: Int, val height: Int, val scale: Float, val pixels: Int)
+    private data class IconStroke(val drawable: Drawable, val width: Int, val height: Int, val scale: Float, val pixels: Int, val top: Int, val bottom: Int)
     private val measuredIconStrokes = WeakHashMap<View, IconStroke>()
     private fun chatInputStrokeWidth(footer: View): Int {
         // 8.0.78 ChatFooter.B0(): smile button = id/bqr (0x7f0a10a3).
@@ -2037,11 +2037,22 @@ private class BackgroundBeautyRuntime(
         // assumption and no alpha threshold that discards antialiased ring edge pixels.
         val bitmap = Bitmap.createBitmap(icon.width, icon.height, Bitmap.Config.ARGB_8888)
         var weighted = 0f
+        var inkTop = icon.height
+        var inkBottom = 0
         try {
             val canvas = Canvas(bitmap)
             canvas.translate(icon.paddingLeft.toFloat(), icon.paddingTop.toFloat())
             canvas.concat(icon.imageMatrix)
             drawable.draw(canvas)
+            for (y in 0 until icon.height) {
+                for (column in 0 until icon.width) {
+                    if (Color.alpha(bitmap.getPixel(column, y)) > 0) {
+                        inkTop = minOf(inkTop, y)
+                        inkBottom = y + 1
+                        break
+                    }
+                }
+            }
             val x = (icon.paddingLeft + (icon.width - icon.paddingLeft - icon.paddingRight) / 2).coerceIn(0, icon.width - 1)
             val samples = IntArray(icon.height / 2) { y -> Color.alpha(bitmap.getPixel(x, y)) }
             val peak = samples.maxOrNull() ?: 0
@@ -2057,7 +2068,7 @@ private class BackgroundBeautyRuntime(
         } finally { bitmap.recycle() }
         val pixels = if (weighted > 0) kotlin.math.ceil(weighted).toInt() else (footer.resources.displayMetrics.density * 1.2f).toInt().coerceAtLeast(1)
         HLog.i("$TAG CHATSTROKE actual button=${icon.id} drawable=${drawable.javaClass.name} bounds=${drawable.bounds} viewport=${icon.width}x${icon.height} scale=$scale weightedPx=$weighted widthPx=$pixels")
-        if (weighted > 0) measuredIconStrokes[icon] = IconStroke(drawable, icon.width, icon.height, scale, pixels)
+        if (weighted > 0) measuredIconStrokes[icon] = IconStroke(drawable, icon.width, icon.height, scale, pixels, inkTop, inkBottom)
         return pixels
     }
     private fun applySpeechSurfaces(state: HostState, footer: View) {
@@ -2384,16 +2395,15 @@ private class BackgroundBeautyRuntime(
                 val dark = isWechatDark(view)
                 val strokeColor = if (dark) Color.WHITE else Color.BLACK
                 val strokeWidth = chatInputStrokeWidth(footer)
-                val style = strokeColor to strokeWidth
+                val icon = footer.findViewById<ImageView>(resourceId("bqr"))
+                val ink = icon?.let { measuredIconStrokes[it] }
+                val style = listOf(strokeColor, strokeWidth, icon, icon?.drawable, ink?.top, ink?.bottom)
                 if (snapshot.slot == BackgroundBeautySettings.Slot.CHAT && inputOutlineStyles[view] == style &&
-                    snapshot.appliedBackground is android.graphics.drawable.GradientDrawable && view.background === snapshot.appliedBackground) continue
+                    snapshot.appliedBackground is ChatInputOutline && view.background === snapshot.appliedBackground) continue
                 synchronizeExternalBackground(snapshot, view)
                 val density = view.resources.displayMetrics.density
-                val outline = android.graphics.drawable.GradientDrawable().apply {
-                    setColor(Color.TRANSPARENT)
-                    setStroke(strokeWidth, strokeColor)
-                    cornerRadius = density * 10f
-                }
+                val outline = ChatInputOutline(view, icon, ink?.top ?: 0, ink?.bottom ?: 0,
+                    strokeWidth.toFloat(), strokeColor, density * 10f)
                 surfaceMutationDepth++
                 try {
                     view.backgroundTintList = null
@@ -2769,7 +2779,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private val initializedChrome = WeakHashMap<View, Boolean>()
-    private val inputOutlineStyles = WeakHashMap<View, Pair<Int, Int>>()
+    private val inputOutlineStyles = WeakHashMap<View, List<Any?>>()
     private fun applyNativeChrome(view: View, slot: BackgroundBeautySettings.Slot) {
         if (restoringBounce || initializedChrome[view] == true) return
         // ActionBarContainer draws primary/stacked/split layers independently of View.background.

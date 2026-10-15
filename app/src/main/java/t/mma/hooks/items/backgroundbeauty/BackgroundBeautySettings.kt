@@ -6,6 +6,8 @@ object BackgroundBeautySettings {
     const val KEY_ENABLE = "enable"
     const val KEY_AVATAR_EFFECT = "avatar_effect_enable"
     const val KEY_AVATAR_COLOR = "avatar_effect_color"
+    const val KEY_AVATAR_WIDTH = "avatar_effect_width"
+    const val KEY_AVATAR_LIGHTNING = "avatar_effect_lightning"
     const val KEY_AVATAR_SPEED = "avatar_effect_speed"
     const val KEY_REVISION = "revision"
     const val DEFAULT_ENABLE = false

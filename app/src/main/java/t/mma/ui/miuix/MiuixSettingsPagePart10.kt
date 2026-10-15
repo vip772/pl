@@ -836,6 +836,8 @@ internal fun BackgroundBeautyMiuixPage(
         )
     }
     var avatarEffect by remember { mutableStateOf(sp.getBoolean(BackgroundBeautySettings.KEY_AVATAR_EFFECT, false)) }
+    var avatarLightning by remember { mutableStateOf(sp.getBoolean(BackgroundBeautySettings.KEY_AVATAR_LIGHTNING, false)) }
+    var avatarWidth by remember { mutableStateOf(sp.getFloat(BackgroundBeautySettings.KEY_AVATAR_WIDTH, 1.4f).coerceIn(0.5f, 4f)) }
     var avatarColor by remember { mutableStateOf(sp.getString(BackgroundBeautySettings.KEY_AVATAR_COLOR,
         t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty()) }
     var avatarSpeed by remember { mutableStateOf(sp.getInt(BackgroundBeautySettings.KEY_AVATAR_SPEED, 2400)) }
@@ -873,14 +875,27 @@ internal fun BackgroundBeautyMiuixPage(
             }
             item {
                 SettingsCard {
-                    SwitchRow(avatarEffect, "头像特效", "为微信首页标题栏头像昵称添加动态渐变光环，需开启首页侧边栏",
+                    SwitchRow(avatarEffect, "头像特效", "为头像昵称添加完整动态光环，需开启首页侧边栏",
                         onCheckedChange = {
                             avatarEffect = it
-                            sp.edit().putBoolean(BackgroundBeautySettings.KEY_AVATAR_EFFECT, it).apply()
+                            if (it) avatarLightning = false
+                            sp.edit().putBoolean(BackgroundBeautySettings.KEY_AVATAR_EFFECT, it)
+                                .putBoolean(BackgroundBeautySettings.KEY_AVATAR_LIGHTNING, avatarLightning).apply()
                         })
                 }
             }
-            if (avatarEffect) {
+            item {
+                SettingsCard {
+                    SwitchRow(avatarLightning, "闪电特效", "持续环绕头像昵称的撕裂电弧；开启后关闭光环描边",
+                        onCheckedChange = {
+                            avatarLightning = it
+                            if (it) avatarEffect = false
+                            sp.edit().putBoolean(BackgroundBeautySettings.KEY_AVATAR_LIGHTNING, it)
+                                .putBoolean(BackgroundBeautySettings.KEY_AVATAR_EFFECT, avatarEffect).apply()
+                        })
+                }
+            }
+            if (avatarEffect || avatarLightning) {
                 item {
                     ColorPickerRow("渐变颜色", "头像特效三色渐变", avatarColor, threeColorGradient = true,
                         onReset = {
@@ -891,7 +906,19 @@ internal fun BackgroundBeautyMiuixPage(
                         sp.edit().putString(BackgroundBeautySettings.KEY_AVATAR_COLOR, avatarColor).apply()
                     }
                 }
-                item { speedControl("光环旋转周期", avatarSpeed) {
+                if (avatarEffect) item {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+                        Text(text = "描边宽度 ${String.format(java.util.Locale.ROOT, "%.1f", avatarWidth)} dp",
+                            color = MiuixTheme.colorScheme.onSurface)
+                        Slider(value = avatarWidth, onValueChange = { avatarWidth = it },
+                            valueRange = 0.5f..4f, steps = 34,
+                            modifier = Modifier.fillMaxWidth(),
+                            onValueChangeFinished = {
+                                sp.edit().putFloat(BackgroundBeautySettings.KEY_AVATAR_WIDTH, avatarWidth).apply()
+                            })
+                    }
+                }
+                item { speedControl("动画周期", avatarSpeed) {
                     avatarSpeed = it
                     sp.edit().putInt(BackgroundBeautySettings.KEY_AVATAR_SPEED, it).apply()
                 } }

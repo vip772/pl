@@ -142,7 +142,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val root = header ?: return
             val keys = t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings
             val show = attached && !effectPaused && root.isShown && root.hasWindowFocus() && !chatVisible && isWechatTab() &&
-                HomeSidePanelSettings.enabled(activity) && effectPrefs.getBoolean(keys.KEY_AVATAR_EFFECT, false)
+                HomeSidePanelSettings.enabled(activity) && (effectPrefs.getBoolean(keys.KEY_AVATAR_EFFECT, false) ||
+                    effectPrefs.getBoolean(keys.KEY_AVATAR_LIGHTNING, false))
             if (!show) {
                 avatarEffect?.stop()
                 if (root.foreground === avatarEffect) root.foreground = null
@@ -152,7 +153,9 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (root.foreground !== effect) root.foreground = effect
             effect.update(effectPrefs.getString(keys.KEY_AVATAR_COLOR,
                 t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),
-                effectPrefs.getInt(keys.KEY_AVATAR_SPEED, 2400))
+                effectPrefs.getInt(keys.KEY_AVATAR_SPEED, 2400),
+                effectPrefs.getFloat(keys.KEY_AVATAR_WIDTH, 1.4f),
+                effectPrefs.getBoolean(keys.KEY_AVATAR_LIGHTNING, false))
         }
         private val replacedTitles = WeakHashMap<View, Int>()
         private val scrollTitles = WeakHashMap<View, Int>()
@@ -334,7 +337,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (old is ViewGroup) { header = old; collect(old); return }
             val root = LinearLayout(activity).apply {
                 tag = "hchat_home_avatar_header"
-                minimumHeight = dp(44)
+                minimumHeight = dp(56)
+                setPadding(dp(13), dp(9), dp(18), dp(9))
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 isClickable = true
