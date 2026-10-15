@@ -28,10 +28,16 @@ import t.mma.hooks.core.HookRegistry
 import t.mma.utils.KavaReflector
 import java.util.Collections
 import java.util.WeakHashMap
+import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
+import java.util.concurrent.Executors
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal class HomeSidePanelRuntime(private val context: FeatureContext) {
+    private val profileLoader = Executors.newSingleThreadExecutor { task -> Thread(task, "Hchat-HomeProfile").apply { isDaemon = true } }
+    private val installedAt = android.os.SystemClock.uptimeMillis()
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = Collections.synchronizedMap(WeakHashMap<Activity, Session>())
     private val hooks = ArrayList<XC_MethodHook.Unhook>()
@@ -88,7 +94,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
     fun attach(activity: Activity) {
         if (!isLauncher(activity)) return
-        handler.post { attachNow(activity) }
+        if (Looper.myLooper() == Looper.getMainLooper()) attachNow(activity)
+        else handler.post { attachNow(activity) }
     }
 
     private fun attachNow(activity: Activity) {
@@ -199,6 +206,9 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private var headerAttempts = 0
         private val avatarLoading = AtomicBoolean(false)
         private var avatarUrl: String? = null
+        private var loadedAvatarAccount: String? = null
+        private var nextAvatarAttemptAt = 0L
+        private var headerRetryPending = false
         private var lastHomeVisible: Boolean? = null
         private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener {
             if (attached) refresh()
@@ -260,7 +270,13 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private fun ensureHeader() {
             val host = findActionBarContent(decor)
             if (host == null || !isWechatTab()) {
-                if (headerAttempts++ < 8) handler.postDelayed({ if (attached) ensureHeader() }, 300L)
+                if (!headerRetryPending && headerAttempts++ < 8) {
+                    headerRetryPending = true
+                    decor.postOnAnimation {
+                        headerRetryPending = false
+                        if (attached) refresh()
+                    }
+                }
                 return
             }
             headerAttempts = 0
@@ -315,7 +331,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             host.addView(root, lp)
             header = root; avatar = iv; name = nick; status = st
-            HLog.i("[Hchat:HomeSidePanel] headerAttached tab=0 host=${host.javaClass.name} id=${host.id}")
+            HLog.i("[Hchat:HomeSidePanel] headerAttached tab=0 host=${host.javaClass.name} id=${host.id} startupMs=${android.os.SystemClock.uptimeMillis() - installedAt}")
             root.post {
                 if (attached && header === root) {
                     val rect = Rect()
@@ -331,27 +347,79 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             status = root.findViewWithTag("hchat_home_avatar_status")
         }
 
-        private fun accountName(): String = WeChatApis.account()?.selfName()?.takeIf { it.isNotBlank() } ?: "我"
-
+        private fun accountName(): String {
+            val account = WeChatApis.account()
+            val wxid = account?.selfWxId().orEmpty()
+            val current = account?.selfName()?.takeIf { it.isNotBlank() }
+            if (wxid.isBlank()) return current ?: "我"
+            val key = "profile-name:$wxid"
+            if (current != null) {
+                if (prefs.getString(key, null) != current) prefs.edit().putString(key, current).apply()
+                return current
+            }
+            return prefs.getString(key, null)?.takeIf { it.isNotBlank() } ?: "我"
+        }
         private fun loadAvatar() {
-            if (!avatarLoading.compareAndSet(false, true)) return
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now < nextAvatarAttemptAt || !avatarLoading.compareAndSet(false, true)) return
             val wxid = WeChatApis.account()?.selfWxId().orEmpty()
+            if (wxid.isBlank()) { avatarLoading.set(false); return }
             val url = runCatching { WeChatApis.contacts()?.getContact(wxid)?.avatarUrl.orEmpty() }.getOrDefault("")
-            if (url.isBlank()) { avatarLoading.set(false); return }
-            if (avatarUrl == url) { avatarLoading.set(false); return }
-            avatarUrl = url
-            Thread {
-                val bitmap = runCatching { URL(url).openStream().use { BitmapFactory.decodeStream(it) } }.getOrNull()
-                handler.post {
-                    avatarLoading.set(false)
-                    if (bitmap != null && !bitmap.isRecycled) {
-                        avatar?.setImageBitmap(bitmap)
-                        drawer.setAvatar(bitmap)
+            if (loadedAvatarAccount == wxid && (url.isBlank() || avatarUrl == url)) {
+                avatarLoading.set(false)
+                return
+            }
+            nextAvatarAttemptAt = now + 1500L
+            val started = now
+            profileLoader.execute {
+                val digest = MessageDigest.getInstance("SHA-256").digest(wxid.toByteArray()).joinToString("") { "%02x".format(it) }
+                val directory = File(t.mma.preferences.HchatStorage.storageDir(activity), "home_profile")
+                val file = File(directory, "$digest.png")
+                val cached = runCatching { if (file.isFile) BitmapFactory.decodeFile(file.absolutePath) else null }.getOrNull()
+                if (cached != null) handler.post {
+                    if (attached && WeChatApis.account()?.selfWxId() == wxid) {
+                        avatar?.setImageBitmap(cached)
+                        drawer.setAvatar(cached)
+                        loadedAvatarAccount = wxid
+                        HLog.i("[Hchat:HomeSidePanel] avatarCacheMs=${android.os.SystemClock.uptimeMillis() - started}")
                     }
                 }
-            }.start()
+                val savedUrl = prefs.getString("profile-url:$wxid", null)
+                val checkedAt = prefs.getLong("profile-checked:$wxid", 0L)
+                val stale = System.currentTimeMillis() - checkedAt > 6L * 60L * 60L * 1000L
+                var refreshed = false
+                if (url.isNotBlank() && (cached == null || savedUrl != url || stale)) {
+                    try {
+                        val connection = URL(url).openConnection().apply { connectTimeout = 4000; readTimeout = 4000 }
+                        val bitmap = connection.getInputStream().use { BitmapFactory.decodeStream(it) }
+                        if (bitmap != null) {
+                            directory.mkdirs()
+                            val temporary = File(directory, "$digest.tmp")
+                            FileOutputStream(temporary).use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+                            java.nio.file.Files.move(temporary.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                            prefs.edit().putString("profile-url:$wxid", url)
+                                .putLong("profile-checked:$wxid", System.currentTimeMillis()).apply()
+                            refreshed = true
+                            handler.post {
+                                if (attached && WeChatApis.account()?.selfWxId() == wxid) {
+                                    avatar?.setImageBitmap(bitmap)
+                                    drawer.setAvatar(bitmap)
+                                    loadedAvatarAccount = wxid
+                                    avatarUrl = url
+                                }
+                            }
+                        }
+                    } catch (error: Throwable) {
+                        HLog.e("[Hchat:HomeSidePanel] 头像刷新失败，保留本地缓存", error)
+                    }
+                }
+                val complete = (cached != null && savedUrl == url) || refreshed
+                handler.post {
+                    avatarLoading.set(false)
+                    if (complete && attached && WeChatApis.account()?.selfWxId() == wxid) avatarUrl = url
+                }
+            }
         }
-
         private fun findActionBarContent(root: ViewGroup): ViewGroup? {
             val pkg = root.context.packageName
             // 8078运行树确认hb为Toolbar内全宽自定义标题，gp为文字标题，coz为右侧按钮。

@@ -357,9 +357,24 @@ private class BackgroundBeautyRuntime(
     }
 
     @Volatile
+    private var preloadedHome: LoadedBitmap? = null
+    @Volatile
     private var destroyed = false
 
     fun install(): Boolean {
+        val started = android.os.SystemClock.uptimeMillis()
+        // Decode concurrently with hook installation, before the first page refresh.
+        if (prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) {
+            loader.execute {
+                val revision = prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)
+                val bitmap = BackgroundBeautyStore.loadBitmap(context.hostContext(), BackgroundBeautySettings.Slot.WECHAT)
+                if (bitmap != null && !destroyed && revision == prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)) {
+                    preloadedHome = LoadedBitmap(revision, bitmap)
+                }
+                HLog.i("$TAG STARTUP homePreloadMs=${android.os.SystemClock.uptimeMillis() - started} ready=${bitmap != null}")
+                main.post { if (!destroyed) refreshAll() }
+            }
+        }
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
         val installed = installActivityHooks() or
             installTabHooks() or
@@ -374,6 +389,7 @@ private class BackgroundBeautyRuntime(
 
     fun destroy() {
         destroyed = true
+        preloadedHome = null
         decorUpdateDepth.clear()
         wechatTitleBackdrops.keys.toList().forEach { it.invalidate() }
         wechatTitleBackdrops.clear()
@@ -1757,6 +1773,14 @@ private class BackgroundBeautyRuntime(
         state.loadedBitmaps[slot]?.takeIf { it.revision == revision }?.let { loaded ->
             applyBitmap(state, slot, loaded.bitmap)
             return
+        }
+        if (slot == BackgroundBeautySettings.Slot.WECHAT) {
+            preloadedHome?.takeIf { it.revision == revision && !it.bitmap.isRecycled }?.let { loaded ->
+                preloadedHome = null
+                state.loadedBitmaps[slot] = loaded
+                applyBitmap(state, slot, loaded.bitmap)
+                return
+            }
         }
         val request = LoadRequest(slot, revision)
         if (synchronized(pendingLoads) { pendingLoads[activity] } == request) return
