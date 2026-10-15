@@ -328,6 +328,8 @@ private class BackgroundBeautyRuntime(
     private val fragmentRoots = Collections.synchronizedMap(
         WeakHashMap<Any, WeakReference<View>>()
     )
+    private val warmingPages = ConcurrentHashMap.newKeySet<BackgroundBeautySettings.Slot>()
+    private val warmedPages = ConcurrentHashMap<BackgroundBeautySettings.Slot, LoadedBitmap>()
     private val nativeChatImages = Collections.synchronizedMap(
         WeakHashMap<Activity, WeakReference<ImageView>>()
     )
@@ -346,6 +348,10 @@ private class BackgroundBeautyRuntime(
     private var restoringBounce = false
     private val homeLists = WeakHashMap<View, BackgroundBeautySettings.Slot>()
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == BackgroundBeautySettings.KEY_REVISION || key == BackgroundBeautySettings.KEY_ENABLE) {
+            warmedPages.clear()
+            preloadedHome = null
+        }
         if (key == BackgroundBeautySettings.KEY_ENABLE ||
             key == BackgroundBeautySettings.KEY_REVISION ||
             BackgroundBeautySettings.Slot.values().any { slot ->
@@ -373,6 +379,13 @@ private class BackgroundBeautyRuntime(
                 }
                 HLog.i("$TAG STARTUP homePreloadMs=${android.os.SystemClock.uptimeMillis() - started} ready=${bitmap != null}")
                 main.post { if (!destroyed) refreshAll() }
+                BackgroundBeautySettings.Slot.values().filter { it != BackgroundBeautySettings.Slot.CHAT && it != BackgroundBeautySettings.Slot.WECHAT }.forEach { slot ->
+                    if (!destroyed && revision == prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)) {
+                        BackgroundBeautyStore.loadBitmap(context.hostContext(), slot)?.let { image ->
+                            warmedPages[slot] = LoadedBitmap(revision, image)
+                        }
+                    }
+                }
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
@@ -390,6 +403,7 @@ private class BackgroundBeautyRuntime(
     fun destroy() {
         destroyed = true
         preloadedHome = null
+        warmedPages.clear()
         decorUpdateDepth.clear()
         wechatTitleBackdrops.keys.toList().forEach { it.invalidate() }
         wechatTitleBackdrops.clear()
@@ -1438,9 +1452,9 @@ private class BackgroundBeautyRuntime(
                             }
                         }
                     }
+                    val owner = findActivity(view)?.let { states[it] }
                     for (index in 0 until view.childCount) {
                         val row = view.getChildAt(index)
-                        val owner = findActivity(view)?.let { states[it] }
                         if (dirtyBoundRows.remove(row) == true || owner?.surfaces?.get(row) == null) applyBoundRow(view, row)
                     }
                 }
@@ -1633,6 +1647,30 @@ private class BackgroundBeautyRuntime(
         preparedRoots.remove(root)
         observeLayout(root)
         val activity = findActivity(fragment) ?: findActivity(root) ?: return
+        val slot = slotForFragment(fragment) ?: return
+        val revision = prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)
+        if (prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
+            warmedPages[slot]?.revision != revision &&
+            BackgroundBeautyStore.hasImage(context.hostContext(), slot) && warmingPages.add(slot)) {
+            loader.execute {
+                try {
+                    val bitmap = BackgroundBeautyStore.loadBitmap(context.hostContext(), slot)
+                    if (bitmap != null && revision == prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)) {
+                        warmedPages[slot] = LoadedBitmap(revision, bitmap)
+                        main.post {
+                            if (!destroyed && root.isAttachedToWindow &&
+                                prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
+                                revision == prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)) {
+                                val state = ensureState(activity)
+                                state.loadedBitmaps[slot] = LoadedBitmap(revision, bitmap)
+                                setImageSurface(state, root, slot, bitmap, BackgroundBeautySettings.opacity(prefs.getFloat(BackgroundBeautySettings.opacityKey(slot), BackgroundBeautySettings.DEFAULT_OPACITY)))
+                                preparePage(state, root, slot)
+                            }
+                        }
+                    }
+                } finally { warmingPages.remove(slot) }
+            }
+        }
         scheduleRefresh(activity, MAX_INITIAL_REFRESHES)
     }
 
@@ -1770,7 +1808,7 @@ private class BackgroundBeautyRuntime(
         }
         val revision = prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)
         val state = ensureState(activity)
-        state.loadedBitmaps[slot]?.takeIf { it.revision == revision }?.let { loaded ->
+        (state.loadedBitmaps[slot] ?: warmedPages[slot])?.takeIf { it.revision == revision }?.let { loaded ->
             applyBitmap(state, slot, loaded.bitmap)
             return
         }
@@ -1964,7 +2002,7 @@ private class BackgroundBeautyRuntime(
         }
         roots.filter { it.isAttachedToWindow }.forEach { root ->
             observeLayout(root)
-            setTransparentSurface(state, root, slot)
+            setImageSurface(state, root, slot, bitmap, opacity)
             var parent = root.parent as? View
             val host = resolveBackgroundHost(state.activity)
             while (parent != null && parent !== host && parent !== state.activity.window.decorView) {
@@ -1978,8 +2016,12 @@ private class BackgroundBeautyRuntime(
             val neighborSlot = slotForFragment(fragment) ?: return@forEach
             if (neighborSlot != slot && root != null && root.isAttachedToWindow && findActivity(root) === state.activity &&
                 BackgroundBeautyStore.hasImage(context.hostContext(), neighborSlot)) {
-                setTransparentSurface(state, root, neighborSlot)
-                preparePage(state, root, neighborSlot)
+                val ready = (state.loadedBitmaps[neighborSlot] ?: warmedPages[neighborSlot])
+                    ?.takeIf { it.revision == prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0) }
+                if (ready != null) {
+                    setImageSurface(state, root, neighborSlot, ready.bitmap, BackgroundBeautySettings.opacity(prefs.getFloat(BackgroundBeautySettings.opacityKey(neighborSlot), BackgroundBeautySettings.DEFAULT_OPACITY)))
+                    preparePage(state, root, neighborSlot)
+                }
             }
         }
     }
@@ -2166,6 +2208,55 @@ private class BackgroundBeautyRuntime(
         }
     }
     private fun installChatChromeLifecycle() {
+        // 8.0.78 AppGrid adapter c.getView binds each page's icon surfaces.
+        val appAdapter = KavaReflector.loadClass("com.tencent.mm.pluginsdk.ui.chat.c", context.hostClassLoader())
+        findWechatVerifiedMethod(appAdapter, "getView", Integer.TYPE, View::class.java, ViewGroup::class.java)?.let { method ->
+            hookOnce(method, after = { param ->
+                val grid = param.args.getOrNull(2) as? View ?: return@hookOnce
+                if (!hasClassName(grid, "com.tencent.mm.pluginsdk.ui.chat.AppGrid")) return@hookOnce
+                val row = param.result as? View ?: return@hookOnce
+                val activity = findActivity(grid) ?: return@hookOnce
+                val state = states[activity] ?: return@hookOnce
+                if (!hasConfiguredBackground(activity) || resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT) return@hookOnce
+                val holder = row.tag
+                val key = holder?.let { KavaReflector.readField(it, "p") as? String }
+                val iconName = when (key) {
+                    "favorite" -> "icons_filled_favorites"
+                    "contact_card" -> "icons_filled_contacts"
+                    "file" -> "icons_filled_folder"
+                    "card" -> "icons_filled_cards_offers"
+                    "music" -> "icons_filled_music"
+                    "voice_input" -> "icons_outlined_mic_on"
+                    "transfer" -> "icons_outlined_transfer"
+                    else -> null
+                }
+                val icon = row.findViewById<ImageView>(resourceId("a10"))
+                if (icon != null && iconName == null) {
+                    state.nativeImages.remove(icon)?.let { restoreNativeImage(icon, it) }
+                }
+                if (icon != null && iconName != null) {
+                    val id = icon.resources.getIdentifier(iconName, "raw", activity.packageName)
+                    if (id != 0) {
+                        val snapshot = state.nativeImages[icon] ?: NativeImageSnapshot(icon).also { state.nativeImages[icon] = it }
+                        if (icon.drawable !== snapshot.appliedDrawable) snapshot.originalDrawable = icon.drawable
+                        icon.setImageResource(id)
+                        snapshot.appliedDrawable = icon.drawable
+                        snapshot.slot = BackgroundBeautySettings.Slot.CHAT
+                        logChatSurface(icon, "app-grid:$key")
+                    }
+                }
+                val queue = ArrayDeque<View>()
+                queue.add(row)
+                while (queue.isNotEmpty()) {
+                    val view = queue.removeFirst()
+                    if (view is ViewGroup || view is ImageView || view.javaClass == View::class.java) {
+                        setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                    }
+                    if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
+                }
+            })
+        }
+
         val noticeClass = KavaReflector.loadClass("com.tencent.mm.ui.tipsbar.ChatTipsBarGroup", context.hostClassLoader())
         listOf("onAttachedToWindow", "c", "d", "onLayout").forEach { name ->
             val types = if (name == "onLayout") arrayOf(Boolean::class.javaPrimitiveType!!,
@@ -2525,6 +2616,7 @@ private class BackgroundBeautyRuntime(
 
     private fun probeVisibleChrome(activity: Activity, reason: String) {
         if (destroyed) return
+        if (diagnosticCounts.computeIfAbsent("chrome-probe:$reason") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 1) return
         val decor = activity.window.decorView
         if (reason == "desktop-settled") {
             wechatTaskControllers.entries.toList().filter { findActivity(it.key) === activity }.forEach { (container, reference) ->
@@ -2824,7 +2916,7 @@ private class BackgroundBeautyRuntime(
         clearForeground: Boolean = false,
         preserveFeedback: Boolean = false
     ) {
-        if (slot == BackgroundBeautySettings.Slot.CHAT && state.surfaces[view]?.let {
+        if (state.surfaces[view]?.let {
                 it.slot == slot && it.appliedBitmap != null && view.background === it.appliedBackground
             } == true) return
         applyNativeChrome(view, slot)

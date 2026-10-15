@@ -210,6 +210,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private var nextAvatarAttemptAt = 0L
         private var headerRetryPending = false
         private var lastHomeVisible: Boolean? = null
+        private var profileRefreshAt = 0L
+        private var titleScanAt = 0L
         private val layoutListener = ViewTreeObserver.OnGlobalLayoutListener {
             if (attached) refresh()
         }
@@ -237,12 +239,19 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val targetVisibility = if (headerVisible) View.VISIBLE else View.GONE
             if (header?.visibility != targetVisibility) header?.visibility = targetVisibility
             updateTitleSpace(headerVisible)
-            val currentName = accountName()
-            if (name?.text?.toString() != currentName) name?.text = currentName
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now >= profileRefreshAt) {
+                profileRefreshAt = now + 1500L
+                val currentName = accountName()
+                if (name?.text?.toString() != currentName) name?.text = currentName
+                if (homeVisible) loadAvatar()
+            }
             if (status?.text?.toString() != "在线") status?.text = "在线"
-            updateScrollableTitle(headerVisible)
+            if (stateChanged || now >= titleScanAt) {
+                titleScanAt = now + 1000L
+                updateScrollableTitle(headerVisible)
+            }
             if (headerVisible) sizeHeader()
-            if (homeVisible) loadAvatar()
             lastHomeVisible = homeVisible
         }
 
@@ -268,6 +277,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private fun close() { drawer.close(true) }
 
         private fun ensureHeader() {
+            if (header?.isAttachedToWindow == true) return
             val host = findActionBarContent(decor)
             if (host == null || !isWechatTab()) {
                 if (!headerRetryPending && headerAttempts++ < 8) {
