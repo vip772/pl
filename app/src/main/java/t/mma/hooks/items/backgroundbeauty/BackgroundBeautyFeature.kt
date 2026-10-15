@@ -2054,6 +2054,41 @@ private class BackgroundBeautyRuntime(
             if (node is ViewGroup) for (i in 0 until node.childCount) queue.add(node.getChildAt(i))
         }
     }
+    private fun applyChatNoticeSurfaces(state: HostState, root: View) {
+        val queue = ArrayDeque<View>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val node = queue.removeFirst()
+            if (hasClassName(node, "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup")) {
+                // 8.0.78 s3.xml: hyi card body; ow1/ovv scrims; ovt shadow.
+                // Preserve all image/text content, adapter binding and notice clicks.
+                val surfaces = listOfNotNull(node,
+                    node.findViewById<View>(resourceId("hyi")),
+                    node.findViewById<View>(resourceId("ow1")),
+                    node.findViewById<View>(resourceId("ovv")),
+                    node.findViewById<View>(resourceId("ovt")),
+                    node.findViewById<View>(resourceId("m98")))
+                // s4.xml notice rows also have their own bce background. Recycler
+                // children are created after the group attaches; cover their containers.
+                val rows = node.findViewById<ViewGroup>(resourceId("m98"))
+                val rowNodes = ArrayDeque<View>()
+                if (rows != null) for (i in 0 until rows.childCount) rowNodes.add(rows.getChildAt(i))
+                while (rowNodes.isNotEmpty()) {
+                    val row = rowNodes.removeFirst()
+                    if (row is ViewGroup || row.javaClass == View::class.java) {
+                        setTransparentSurface(state, row, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                    }
+                    if (row is ViewGroup) for (i in 0 until row.childCount) rowNodes.add(row.getChildAt(i))
+                }
+                surfaces.forEach { surface ->
+                    logChatSurface(surface, "notice-before")
+                    setTransparentSurface(state, surface, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                    logChatSurface(surface, "notice-after")
+                }
+            }
+            if (node is ViewGroup) for (i in 0 until node.childCount) queue.add(node.getChildAt(i))
+        }
+    }
     private fun applyChatVoiceSurfaces(state: HostState, root: View) {
         // Both legacy and modern input trees may coexist. Do not assume the visible
         // microphone and its shadow belong to the first ChatFooter in the hierarchy.
@@ -2107,6 +2142,23 @@ private class BackgroundBeautyRuntime(
         }
     }
     private fun installChatChromeLifecycle() {
+        val noticeClass = KavaReflector.loadClass("com.tencent.mm.ui.tipsbar.ChatTipsBarGroup", context.hostClassLoader())
+        listOf("onAttachedToWindow", "c", "d", "onLayout").forEach { name ->
+            val types = if (name == "onLayout") arrayOf(Boolean::class.javaPrimitiveType!!,
+                Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
+                Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!) else emptyArray()
+            KavaReflector.findMethodRecursive(noticeClass, name, *types)?.let { method ->
+                hookOnce(method, after = { param ->
+                    val group = param.thisObject as? View ?: return@hookOnce
+                    if (!hasClassName(group, "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup")) return@hookOnce
+                    val activity = findActivity(group) ?: return@hookOnce
+                    if (destroyed || resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return@hookOnce
+                    val state = states[activity] ?: return@hookOnce
+                    applyChatNoticeSurfaces(state, group)
+                })
+            }
+        }
+
         val emojiClass = KavaReflector.loadClass("com.tencent.mm.view.SmileyPanelImpl", context.hostClassLoader())
         listOf("onAttachedToWindow" to emptyArray<Class<*>>(),
             "onLayout" to arrayOf(Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!),
@@ -2147,7 +2199,13 @@ private class BackgroundBeautyRuntime(
         val baseConversation = KavaReflector.loadClass(BASE_CONVERSATION_ACTIVITY, context.hostClassLoader())
         findWechatVerifiedMethod(baseConversation, "closeChatting", Boolean::class.javaPrimitiveType!!)?.let { method ->
             hookOnce(method, after = { param ->
-                (param.thisObject as? Activity)?.let { scheduleRefresh(it, 1) }
+                (param.thisObject as? Activity)?.let { activity ->
+                    logGroupReturnLayout(activity, "close")
+                    scheduleRefresh(activity, 1)
+                    activity.window.decorView.postOnAnimation {
+                        if (!destroyed) logGroupReturnLayout(activity, "close-frame")
+                    }
+                }
             })
         }
         val folderClass = KavaReflector.loadClass("com.tencent.mm.ui.conversation.ConversationFolderItemView", context.hostClassLoader())
@@ -2225,6 +2283,7 @@ private class BackgroundBeautyRuntime(
                 parent = parent.parent as? View
             }
         }
+        applyChatNoticeSurfaces(state, layout ?: root)
         applySpeechSurfaces(state, layout ?: root)
         applyChatVoiceSurfaces(state, layout ?: root)
         applyChatFooterTransparency(state, layout ?: root)
@@ -2933,8 +2992,13 @@ private class BackgroundBeautyRuntime(
         val window = state.activity.window
         surfaceMutationDepth++
         try {
-        window.decorView.systemUiVisibility =
-            window.decorView.systemUiVisibility or IMMERSIVE_FLAGS
+        // BaseConversationUI reparents its native action bar/content into a
+        // FitSystemWindowLayoutView on first chat. Keep its original inset policy
+        // throughout chat/return rather than toggling full-window layout flags.
+        if (!isConversationActivity(state.activity)) {
+            window.decorView.systemUiVisibility =
+                window.decorView.systemUiVisibility or IMMERSIVE_FLAGS
+        }
         window.statusBarColor = Color.TRANSPARENT
         window.navigationBarColor = Color.TRANSPARENT
         if (android.os.Build.VERSION.SDK_INT >= 28) {
@@ -2958,9 +3022,11 @@ private class BackgroundBeautyRuntime(
         if (!state.systemBarsApplied) return
         state.systemBarsApplied = false
         val window = state.activity.window
-        window.decorView.systemUiVisibility =
-            (window.decorView.systemUiVisibility and IMMERSIVE_FLAGS.inv()) or
-            (state.originalSystemUiVisibility and IMMERSIVE_FLAGS)
+        if (!isConversationActivity(state.activity)) {
+            window.decorView.systemUiVisibility =
+                (window.decorView.systemUiVisibility and IMMERSIVE_FLAGS.inv()) or
+                (state.originalSystemUiVisibility and IMMERSIVE_FLAGS)
+        }
         if (window.statusBarColor == Color.TRANSPARENT) {
             window.statusBarColor = state.originalStatusBarColor
         }
@@ -3040,6 +3106,15 @@ private class BackgroundBeautyRuntime(
             node = node.parent as? View
         }
         return false
+    }
+    private fun logGroupReturnLayout(activity: Activity, phase: String) {
+        if (diagnosticCounts.computeIfAbsent("group-return:$phase") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 6) return
+        val decor = activity.window.decorView
+        val root = findDescendant(decor, "com.tencent.mm.ui.HomeUI\$FitSystemWindowLayoutView")
+        val content = activity.findViewById<View>(android.R.id.content)
+        val location = IntArray(2)
+        content?.getLocationOnScreen(location)
+        HLog.i("$TAG GROUPRETURN phase=$phase ui=${decor.systemUiVisibility} wrapperPadding=${root?.paddingTop}/${root?.paddingBottom} contentY=${location[1]} contentPadding=${content?.paddingTop} active=${resolveTarget(activity)}")
     }
     private fun isConversationActivity(activity: Activity): Boolean {
         var type: Class<*>? = activity.javaClass
