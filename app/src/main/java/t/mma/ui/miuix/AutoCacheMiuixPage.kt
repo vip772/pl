@@ -57,7 +57,7 @@ internal fun AutoCacheMiuixPage(context: Context, provider: FeatureSettingsProvi
             }
             item {
                 Text(
-                    text = "开启后处理新收到的消息，需要微信进程运行并保持联网；会使用网络流量和存储空间。\n\n文件保存到微信外部媒体目录下 Hchat/AutoCache，按 Image、Video、File 分类，可用系统文件管理器查看。缓存独立保存，不修改聊天消息的下载状态；原消息过期后请从缓存目录打开。关闭后停止接收新任务，已提交给微信的下载可能继续完成。",
+                    text = "开启后监听所有私聊、群聊新收到的图片、视频及任意扩展名的文件文档，自动触发微信内部下载，无需点击消息。文件仍在上传时等待上传完成后下载；由微信保存到原生缓存并维护下载状态，之后直接从聊天消息打开。\n\n需要微信进程运行并联网，会消耗网络流量和存储空间。失败或元数据未就绪时持续补查，最长一小时；关闭后停止排队任务，已提交的原生下载可能继续完成。不能恢复开启前已过期的内容。",
                     modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
                 )
             }

@@ -8,6 +8,7 @@ import t.mma.preferences.HchatStorage
 object HomeSidePanelSettings {
     const val PREFS_NAME = "Hchat_home_side_panel"
     const val KEY_ENABLE = "enable"
+    const val KEY_SHOW_PROFILE = "show_profile"
     const val KEY_SIGNATURE = "signature"
     const val KEY_SHORTCUTS = "shortcuts"
     const val KEY_SIGNATURE_TIP_SHOWN = "signature_tip_shown"

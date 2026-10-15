@@ -973,3 +973,7 @@ sh ./gradlew :app:assembleRelease --no-daemon --no-watch-fs \
 ```text
 dist/Hchat-release-signed.apk
 ```
+
+## 自动缓存使用的原生下载链路
+
+自动缓存内部实现已改为微信原生图片场景、视频完整接收及附件下载场景，不使用独立 CDN 副本。当前逆向依据、定位缓存与兼容边界详见 [AUTO_CACHE.md](AUTO_CACHE.md)。此内部实现不新增脚本接口。

@@ -45,7 +45,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     private var restoringScrollTitles = false
     private val prefs = HomeSidePanelSettings.preferences(context.hostContext())
     private val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == HomeSidePanelSettings.KEY_ENABLE || key == HomeSidePanelSettings.KEY_SIGNATURE || key == HomeSidePanelSettings.KEY_SHORTCUTS) {
+        if (key == HomeSidePanelSettings.KEY_SHOW_PROFILE || key == HomeSidePanelSettings.KEY_ENABLE || key == HomeSidePanelSettings.KEY_SIGNATURE || key == HomeSidePanelSettings.KEY_SHORTCUTS) {
             handler.post { sessions.values.toList().forEach { it.refresh() } }
         }
     }
@@ -130,16 +130,52 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
     private fun isLauncher(activity: Activity): Boolean = activity.javaClass.name.endsWith(".LauncherUI") || activity.javaClass.name == "com.tencent.mm.ui.LauncherUI"
 
+    private data class NativeTitleState(
+        val foreground: android.graphics.drawable.Drawable?,
+        val longClickable: Boolean,
+        val listener: View.OnLongClickListener?
+    )
     private inner class Session(private val activity: Activity) {
         private val decor = activity.window.decorView as ViewGroup
         private val drawer = HomeSidePanelDrawer(activity) { close() }
         private var header: ViewGroup? = null
         private var avatarEffect: AvatarHeaderEffect? = null
+        private var effectTarget: View? = null
+        private val nativeTitles = WeakHashMap<View, NativeTitleState>()
+        private fun showProfile(): Boolean = prefs.getBoolean(HomeSidePanelSettings.KEY_SHOW_PROFILE, true)
+        private fun restoreNativeTitle() {
+            if (nativeTitles.isEmpty()) return
+            avatarEffect?.stop()
+            nativeTitles.entries.toList().forEach { (view, original) ->
+                if (view.foreground === avatarEffect) view.foreground = original.foreground
+                view.setOnLongClickListener(original.listener)
+                view.isLongClickable = original.longClickable
+            }
+            nativeTitles.clear()
+        }
+        private fun bindNativeTitle(visible: Boolean) {
+            if (!visible || showProfile()) { restoreNativeTitle(); return }
+            val host = header?.parent as? ViewGroup ?: findActionBarContent(decor) ?: return
+            val titleId = activity.resources.getIdentifier("gp", "id", activity.packageName)
+            val title = host.findViewById<View>(titleId) ?: return
+            if (!nativeTitles.containsKey(title)) {
+                val info = KavaReflector.readField(title, "mListenerInfo")
+                val listener = info?.let { KavaReflector.readField(it, "mOnLongClickListener") } as? View.OnLongClickListener
+                nativeTitles[title] = NativeTitleState(title.foreground, title.isLongClickable, listener)
+                title.setOnLongClickListener { drawer.toggle(); true }
+            }
+            if (effectTarget !== title) {
+                avatarEffect?.stop()
+                avatarEffect = null
+                effectTarget = title
+            }
+        }
         private var effectPaused = false
         fun pauseEffect() { effectPaused = true; avatarEffect?.stop() }
         fun resumeEffect() { effectPaused = false; refreshEffect() }
         fun refreshEffect() {
-            val root = header ?: return
+            val root = if (showProfile()) header else effectTarget
+            root ?: return
             val keys = t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings
             val show = attached && !effectPaused && root.isShown && root.hasWindowFocus() && !chatVisible && isWechatTab() &&
                 HomeSidePanelSettings.enabled(activity) && (effectPrefs.getBoolean(keys.KEY_AVATAR_EFFECT, false) ||
@@ -159,7 +195,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         }
         private val replacedTitles = WeakHashMap<View, Int>()
         private val scrollTitles = WeakHashMap<View, Int>()
-        fun hideScrollTitle(): Boolean = attached && !chatVisible && isWechatTab() && HomeSidePanelSettings.enabled(activity)
+        fun hideScrollTitle(): Boolean = showProfile() && attached && !chatVisible && isWechatTab() && HomeSidePanelSettings.enabled(activity)
         fun recordScrollTitleVisibility(view: View, requested: Int) { scrollTitles[view] = requested }
         private fun restoreScrollTitles() {
             restoringScrollTitles = true
@@ -185,7 +221,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (title.visibility != View.INVISIBLE) title.visibility = View.INVISIBLE
         }
         private fun updateScrollableTitle(visible: Boolean) {
-            if (!HomeSidePanelSettings.enabled(activity)) { restoreScrollTitles(); return }
+            if (!HomeSidePanelSettings.enabled(activity) || !showProfile()) { restoreScrollTitles(); return }
             if (!visible) return
             fun walk(view: View, inTaskBar: Boolean, depth: Int) {
                 if (depth > 24) return
@@ -270,9 +306,16 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (header != null && header?.parent == null) header = null
             val headerVisible = homeVisible && isWechatTab()
             if (headerVisible) ensureHeader()
-            val targetVisibility = if (headerVisible) View.VISIBLE else View.GONE
+            val profileVisible = headerVisible && showProfile()
+            val targetVisibility = if (profileVisible) View.VISIBLE else View.GONE
             if (header?.visibility != targetVisibility) header?.visibility = targetVisibility
-            updateTitleSpace(headerVisible)
+            updateTitleSpace(profileVisible)
+            bindNativeTitle(headerVisible)
+            if (profileVisible && effectTarget !== header) {
+                avatarEffect?.stop()
+                avatarEffect = null
+                effectTarget = header
+            }
             val now = android.os.SystemClock.uptimeMillis()
             if (now >= profileRefreshAt) {
                 profileRefreshAt = now + 1500L
@@ -298,12 +341,14 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
         fun detach() {
             attached = false
+            restoreNativeTitle()
             avatarEffect?.stop()
             avatarEffect = null
             if (decor.viewTreeObserver.isAlive) {
                 decor.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
             }
             drawer.detach()
+            effectTarget = null
             restoreScrollTitles()
             restoreTitles()
             (header?.parent as? ViewGroup)?.removeView(header)

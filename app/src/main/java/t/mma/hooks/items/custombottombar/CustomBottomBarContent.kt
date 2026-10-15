@@ -35,7 +35,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
@@ -153,7 +152,6 @@ private fun FloatingNavigationBar(
     ) {
         FloatingBottomBar(
             modifier = Modifier
-                .graphicsLayer { alpha = config.opacity / 100f }
                 .widthIn(max = 420.dp)
                 .onGloballyPositioned { coordinates ->
                     val position = coordinates.positionInWindow()
@@ -169,6 +167,7 @@ private fun FloatingNavigationBar(
             backdrop = backdrop,
             tabsCount = NAV_ITEMS.size,
             isBlurEnabled = config.glass,
+            backgroundOpacity = config.opacity / 100f,
             blurRadius = config.blurRadius.dp,
             floating = true,
             overlayContent = {

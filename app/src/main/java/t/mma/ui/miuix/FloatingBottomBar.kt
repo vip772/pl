@@ -242,6 +242,7 @@ fun FloatingBottomBar(
     tabsCount: Int,
     isBlurEnabled: Boolean = true,
     blurRadius: Dp = 4.dp,
+    backgroundOpacity: Float = 1f,
     floating: Boolean = true,
     overlayContent: (@Composable RowScope.() -> Unit)? = null,
     content: @Composable RowScope.((Int) -> Unit) -> Unit
@@ -377,14 +378,12 @@ fun FloatingBottomBar(
         modifier = if (floating) modifier.width(IntrinsicSize.Min) else modifier.fillMaxWidth(),
         contentAlignment = Alignment.CenterStart
     ) {
-        Row(
-            Modifier
-                .onGloballyPositioned { coords ->
-                    totalWidthPx = coords.size.width.toFloat()
-                    val contentWidthPx = totalWidthPx - with(density) { 8.dp.toPx() }
-                    tabWidthPx = (contentWidthPx / tabsCount).coerceAtLeast(0f)
+        Box(
+            Modifier.matchParentSize()
+                .graphicsLayer {
+                    translationX = panelOffset
+                    alpha = backgroundOpacity.coerceIn(0f, 1f)
                 }
-                .graphicsLayer { translationX = panelOffset }
                 .dropShadow(
                     shape = pillShape,
                     shadow = Shadow(
@@ -420,6 +419,15 @@ fun FloatingBottomBar(
                     }
                 )
                 .then(interactiveHighlight?.modifier ?: Modifier)
+        )
+        Row(
+            Modifier
+                .onGloballyPositioned { coords ->
+                    totalWidthPx = coords.size.width.toFloat()
+                    val contentWidthPx = totalWidthPx - with(density) { 8.dp.toPx() }
+                    tabWidthPx = (contentWidthPx / tabsCount).coerceAtLeast(0f)
+                }
+                .graphicsLayer { translationX = panelOffset }
                 .height(64.dp)
                 .padding(4.dp),
             verticalAlignment = Alignment.CenterVertically,

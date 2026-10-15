@@ -31,6 +31,7 @@ internal fun HomeSidePanelMiuixPage(
 ) {
     val sp = remember { HomeSidePanelSettings.preferences(context) }
     var enabled by remember { mutableStateOf(sp.getBoolean(HomeSidePanelSettings.KEY_ENABLE, HomeSidePanelSettings.DEFAULT_ENABLE)) }
+    var showProfile by remember { mutableStateOf(sp.getBoolean(HomeSidePanelSettings.KEY_SHOW_PROFILE, true)) }
     var signature by remember { mutableStateOf(sp.getString(HomeSidePanelSettings.KEY_SIGNATURE, HomeSidePanelSettings.DEFAULT_SIGNATURE).orEmpty()) }
     var selected by remember { mutableStateOf(HomeSidePanelSettings.shortcuts(context)) }
     val listState = rememberLazyListState()
@@ -41,6 +42,7 @@ internal fun HomeSidePanelMiuixPage(
         signature = normalizedSignature
         sp.edit()
             .putBoolean(HomeSidePanelSettings.KEY_ENABLE, enabled)
+            .putBoolean(HomeSidePanelSettings.KEY_SHOW_PROFILE, showProfile)
             .putString(HomeSidePanelSettings.KEY_SIGNATURE, normalizedSignature)
             .putString(
                 HomeSidePanelSettings.KEY_SHORTCUTS,
@@ -80,6 +82,15 @@ internal fun HomeSidePanelMiuixPage(
                         summary = "在微信首页左缘右滑，或点击首页顶栏头像打开快捷面板",
                         onCheckedChange = { enabled = it }
                     )
+                    if (enabled) {
+                        InsetDivider()
+                        SwitchRow(
+                            checked = showProfile,
+                            title = "昵称头像",
+                            summary = "关闭后恢复微信原生标题和未读数，保留特效，长按微信标题打开侧边栏",
+                            onCheckedChange = { showProfile = it }
+                        )
+                    }
                     InsetDivider()
                     InputRow(
                         title = "面板签名",
