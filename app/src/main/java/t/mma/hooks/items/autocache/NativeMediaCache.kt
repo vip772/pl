@@ -122,7 +122,6 @@ internal class NativeMediaCache(private val context: FeatureContext) {
 
     private val waitReasons = java.util.concurrent.ConcurrentHashMap<Long, String>()
     private fun report(message: String) {
-        AutoCacheDiagnostics.record(context.hostContext(), message)
         t.mma.utils.HLog.i("[Hchat:AutoCache] $message")
     }
     private fun waiting(message: WeChatMessage, reason: String): Boolean {

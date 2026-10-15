@@ -138,8 +138,6 @@ object RuntimeLogStore {
             appendLine()
             appendLine("===== Hchat 运行日志 =====")
             appendLine(runtimeLog.ifBlank { "暂无运行日志" })
-            appendLine("===== 自动缓存独立诊断 =====")
-            appendLine(t.mma.hooks.items.autocache.AutoCacheDiagnostics.recent(appContext))
             appendLine("===== 最近异常日志 =====")
             appendLine(crashLog.ifBlank { "暂无异常日志" })
         }

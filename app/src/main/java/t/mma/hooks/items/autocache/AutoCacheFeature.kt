@@ -17,6 +17,26 @@ import java.util.concurrent.atomic.AtomicBoolean
 object AutoCacheSettings {
     const val PREFS_NAME = "Hchat_auto_cache_config"
     const val KEY_ENABLE = "enable"
+    const val KEY_CACHE_TYPE = "cache_type"
+    const val TYPE_MEDIA = "media"
+    const val TYPE_MEDIA_PDF = "media_pdf"
+    const val TYPE_ALL = "all"
+
+    fun normalizeType(value: String?): String = when (value) {
+        TYPE_MEDIA -> TYPE_MEDIA
+        TYPE_MEDIA_PDF -> TYPE_MEDIA_PDF
+        else -> TYPE_ALL
+    }
+
+    fun accepts(message: WeChatMessage, type: String?): Boolean {
+        if (message.isImage() || message.isVideo()) return true
+        if (!message.isFile()) return false
+        return when (normalizeType(type)) {
+            TYPE_MEDIA -> false
+            TYPE_MEDIA_PDF -> message.getFileMsg()?.ext?.trim()?.removePrefix(".")?.equals("pdf", ignoreCase = true) == true
+            else -> true
+        }
+    }
 }
 
 class AutoCacheFeature : BaseFeature() {
@@ -53,7 +73,8 @@ class AutoCacheFeature : BaseFeature() {
                 trackSubscription(observer.subscribe { event ->
                     if (stopped.get() || event.outgoing || !prefs.getBoolean(AutoCacheSettings.KEY_ENABLE, false)) return@subscribe
                     val message = event.storedMessage ?: event.message ?: return@subscribe
-                    if (!message.isIncoming() || (!message.isImage() && !message.isVideo() && !message.isFile())) return@subscribe
+                    if (!message.isIncoming() || !AutoCacheSettings.accepts(message,
+                            prefs.getString(AutoCacheSettings.KEY_CACHE_TYPE, AutoCacheSettings.TYPE_ALL))) return@subscribe
                     val id = when {
                         message.msgSvrId > 0 -> "s${message.msgSvrId}"
                         message.msgId > 0 -> "l${message.msgId}"
@@ -63,7 +84,6 @@ class AutoCacheFeature : BaseFeature() {
                     if (account.isBlank()) return@subscribe
                     val key = "$account:${message.talker}:$id"
                     if (pending.add(key)) {
-                        AutoCacheDiagnostics.record(context.hostContext(), "收到媒体 type=${message.type} local=${message.msgId} server=${message.msgSvrId} chat=${if (message.talker.endsWith("@chatroom")) "群聊" else "私聊"}")
                         HLog.i("[Hchat:AutoCache] 收到媒体 type=${message.type} local=${message.msgId} server=${message.msgSvrId}")
                         enqueue(context, message, account, key, 0)
                     }
@@ -88,8 +108,14 @@ class AutoCacheFeature : BaseFeature() {
                 val message = initial.msgId.takeIf { it > 0 }?.let { store?.getMessageById(it) }
                     ?: initial.msgSvrId.takeIf { it > 0 }?.let { store?.getMessageBySvrId(initial.talker, it) }
                     ?: initial
+                val cacheType = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
+                    .getString(AutoCacheSettings.KEY_CACHE_TYPE, AutoCacheSettings.TYPE_ALL)
+                if (!AutoCacheSettings.accepts(message, cacheType)) {
+                    pending.remove(key)
+                    lastSubmitted.remove(key)
+                    return@schedule
+                }
                 if (native?.complete(message) == true) {
-                    AutoCacheDiagnostics.record(context.hostContext(), "下载完成 msgId=${message.msgId} type=${message.type}")
                     HLog.i("[Hchat:AutoCache] 下载完成 msgId=${message.msgId} type=${message.type}")
                     pending.remove(key)
                     lastSubmitted.remove(key)
@@ -100,8 +126,6 @@ class AutoCacheFeature : BaseFeature() {
                 if (last == null || now - last >= 60_000L) {
                     val submitted = native?.submit(message) == true
                     if (submitted) lastSubmitted[key] = now
-                    if (attempt % 12 == 0) AutoCacheDiagnostics.record(context.hostContext(),
-                        "队列仍待完成 local=${message.msgId} server=${message.msgSvrId} type=${message.type} submitted=$submitted attempt=$attempt")
                     if (submitted || attempt == 0 || attempt % 60 == 0) {
                         HLog.i("[Hchat:AutoCache] 下载提交=$submitted msgId=${message.msgId} type=${message.type} attempt=$attempt")
                     }
@@ -115,7 +139,6 @@ class AutoCacheFeature : BaseFeature() {
                     HLog.e("[Hchat:AutoCache] 等待原生下载超时 msgId=${message.msgId} type=${message.type}")
                 }
             } catch (error: Throwable) {
-                if (attempt == 0 || attempt % 60 == 0) AutoCacheDiagnostics.record(context.hostContext(), "异常 msgId=${initial.msgId} ${error.javaClass.name}: ${error.message}")
                 if (attempt == 0 || attempt % 60 == 0) HLog.e("[Hchat:AutoCache] 原生下载异常 msgId=${initial.msgId}", error)
                 if (attempt < 720) enqueue(context, initial, account, key, attempt + 1)
                 else {
