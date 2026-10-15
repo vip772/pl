@@ -50,7 +50,13 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         }
     }
 
+    private val effectPrefs = t.mma.preferences.HchatStorage.preferences(context.hostContext(),
+        t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings.PREFS_NAME)
+    private val effectListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key?.startsWith("avatar_effect_") == true) handler.post { sessions.values.toList().forEach { it.refreshEffect() } }
+    }
     fun install() {
+        effectPrefs.registerOnSharedPreferenceChangeListener(effectListener)
         prefs.registerOnSharedPreferenceChangeListener(listener)
         val launcher = KavaReflector.loadClass("com.tencent.mm.ui.LauncherUI", context.hostClassLoader()) ?: return
         KavaReflector.findMethodRecursive(View::class.java, "setVisibility", Int::class.javaPrimitiveType!!)?.let { method ->
@@ -66,10 +72,14 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             })
         }
         hook(launcher, "onCreate", arrayOf(Bundle::class.java)) { (it.thisObject as? Activity)?.let(::attach) }
-        hook(launcher, "onResume", emptyArray()) { (it.thisObject as? Activity)?.let(::attach) }
+        hook(launcher, "onPause", emptyArray()) { (it.thisObject as? Activity)?.let { activity -> sessions[activity]?.pauseEffect() } }
+        hook(launcher, "onResume", emptyArray()) { (it.thisObject as? Activity)?.let { activity -> attach(activity); sessions[activity]?.resumeEffect() } }
         hook(launcher, "onDestroy", emptyArray()) { (it.thisObject as? Activity)?.let(::detach) }
         hook(launcher, "onWindowFocusChanged", arrayOf(Boolean::class.javaPrimitiveType!!)) {
-            if (it.args.firstOrNull() == true) (it.thisObject as? Activity)?.let(::attach)
+            (it.thisObject as? Activity)?.let { activity ->
+                if (it.args.firstOrNull() == true) { attach(activity); sessions[activity]?.resumeEffect() }
+                else sessions[activity]?.pauseEffect()
+            }
         }
     }
     private fun hook(owner: Class<*>, name: String, params: Array<Class<*>>, action: (XC_MethodHook.MethodHookParam) -> Unit) {
@@ -111,6 +121,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     private fun detach(activity: Activity) { handler.post { sessions.remove(activity)?.detach() } }
 
     fun destroy() {
+        effectPrefs.unregisterOnSharedPreferenceChangeListener(effectListener)
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
         handler.post { sessions.values.toList().forEach { it.detach() }; sessions.clear() }
         hooks.forEach { runCatching { HookRegistry.get().unhook(it) } }
@@ -123,6 +134,26 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private val decor = activity.window.decorView as ViewGroup
         private val drawer = HomeSidePanelDrawer(activity) { close() }
         private var header: ViewGroup? = null
+        private var avatarEffect: AvatarHeaderEffect? = null
+        private var effectPaused = false
+        fun pauseEffect() { effectPaused = true; avatarEffect?.stop() }
+        fun resumeEffect() { effectPaused = false; refreshEffect() }
+        fun refreshEffect() {
+            val root = header ?: return
+            val keys = t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings
+            val show = attached && !effectPaused && root.isShown && root.hasWindowFocus() && !chatVisible && isWechatTab() &&
+                HomeSidePanelSettings.enabled(activity) && effectPrefs.getBoolean(keys.KEY_AVATAR_EFFECT, false)
+            if (!show) {
+                avatarEffect?.stop()
+                if (root.foreground === avatarEffect) root.foreground = null
+                return
+            }
+            val effect = avatarEffect ?: AvatarHeaderEffect(root).also { avatarEffect = it }
+            if (root.foreground !== effect) root.foreground = effect
+            effect.update(effectPrefs.getString(keys.KEY_AVATAR_COLOR,
+                t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),
+                effectPrefs.getInt(keys.KEY_AVATAR_SPEED, 2400))
+        }
         private val replacedTitles = WeakHashMap<View, Int>()
         private val scrollTitles = WeakHashMap<View, Int>()
         fun hideScrollTitle(): Boolean = attached && !chatVisible && isWechatTab() && HomeSidePanelSettings.enabled(activity)
@@ -253,6 +284,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             if (headerVisible) sizeHeader()
             lastHomeVisible = homeVisible
+            refreshEffect()
         }
 
         fun setChatVisible(visible: Boolean) {
@@ -263,6 +295,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
         fun detach() {
             attached = false
+            avatarEffect?.stop()
+            avatarEffect = null
             if (decor.viewTreeObserver.isAlive) {
                 decor.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
             }
@@ -294,6 +328,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             restoreTitles()
             (header?.parent as? ViewGroup)?.removeView(header)
             header = null
+            avatarEffect?.stop()
+            avatarEffect = null
             val old = host.findViewWithTag<View>("hchat_home_avatar_header")
             if (old is ViewGroup) { header = old; collect(old); return }
             val root = LinearLayout(activity).apply {

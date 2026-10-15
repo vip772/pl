@@ -4,6 +4,9 @@ object BackgroundBeautySettings {
     const val PREFS_NAME = "Hchat_background_beauty_config"
 
     const val KEY_ENABLE = "enable"
+    const val KEY_AVATAR_EFFECT = "avatar_effect_enable"
+    const val KEY_AVATAR_COLOR = "avatar_effect_color"
+    const val KEY_AVATAR_SPEED = "avatar_effect_speed"
     const val KEY_REVISION = "revision"
     const val DEFAULT_ENABLE = false
     const val DEFAULT_OPACITY = 0.72f

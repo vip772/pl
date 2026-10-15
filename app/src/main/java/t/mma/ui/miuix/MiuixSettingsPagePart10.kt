@@ -835,6 +835,10 @@ internal fun BackgroundBeautyMiuixPage(
             )
         )
     }
+    var avatarEffect by remember { mutableStateOf(sp.getBoolean(BackgroundBeautySettings.KEY_AVATAR_EFFECT, false)) }
+    var avatarColor by remember { mutableStateOf(sp.getString(BackgroundBeautySettings.KEY_AVATAR_COLOR,
+        t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty()) }
+    var avatarSpeed by remember { mutableStateOf(sp.getInt(BackgroundBeautySettings.KEY_AVATAR_SPEED, 2400)) }
     var revision by remember { mutableStateOf(sp.getInt(BackgroundBeautySettings.KEY_REVISION, 0)) }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
@@ -866,6 +870,31 @@ internal fun BackgroundBeautyMiuixPage(
                         }
                     )
                 }
+            }
+            item {
+                SettingsCard {
+                    SwitchRow(avatarEffect, "头像特效", "为微信首页标题栏头像昵称添加动态渐变光环，需开启首页侧边栏",
+                        onCheckedChange = {
+                            avatarEffect = it
+                            sp.edit().putBoolean(BackgroundBeautySettings.KEY_AVATAR_EFFECT, it).apply()
+                        })
+                }
+            }
+            if (avatarEffect) {
+                item {
+                    ColorPickerRow("渐变颜色", "头像特效三色渐变", avatarColor, threeColorGradient = true,
+                        onReset = {
+                            avatarColor = t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT
+                            sp.edit().putString(BackgroundBeautySettings.KEY_AVATAR_COLOR, avatarColor).apply()
+                        }) {
+                        avatarColor = it.take(29)
+                        sp.edit().putString(BackgroundBeautySettings.KEY_AVATAR_COLOR, avatarColor).apply()
+                    }
+                }
+                item { speedControl("光环旋转周期", avatarSpeed) {
+                    avatarSpeed = it
+                    sp.edit().putInt(BackgroundBeautySettings.KEY_AVATAR_SPEED, it).apply()
+                } }
             }
             if (enabled) {
                 item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "聊天") }
