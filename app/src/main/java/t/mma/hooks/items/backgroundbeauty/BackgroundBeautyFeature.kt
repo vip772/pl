@@ -792,6 +792,15 @@ private class BackgroundBeautyRuntime(
             }
         }
     }
+    private fun logChatReturn(activity: Activity, owner: Any, phase: String) {
+        if (diagnosticCounts.computeIfAbsent("chat-return:$phase") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 8) return
+        val chat = wechatProbeField(owner, "c") as? View
+        val home = activity.findViewById<View>(2131377709)
+        val snapshot = activity.findViewById<View>(2131383324)
+        HLog.i("$TAG CHATRETURN phase=$phase closed=${wechatProbeField(owner, "k")} animating=${wechatProbeField(owner, "l")} home=${wechatProbeView(home, activity)} chat=${wechatProbeView(chat, activity)} snapshot=${wechatProbeView(snapshot, activity)} animation=${chat?.animation?.javaClass?.name} ended=${chat?.animation?.hasEnded()}")
+        val root = chat as? ViewGroup ?: return
+        for (i in 0 until minOf(root.childCount, 6)) HLog.i("$TAG CHATRETURN child phase=$phase ${wechatProbeView(root.getChildAt(i), activity)}")
+    }
     private fun completeWechatReturn(activity: Activity, reason: String) {
         if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY || resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return
         val probe = diagnosticCounts.computeIfAbsent("wx-return-render") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4
@@ -963,6 +972,18 @@ private class BackgroundBeautyRuntime(
             }) || installed
         }
         val chatTabClass = KavaReflector.loadClass("com.tencent.mm.ui.NewChattingTabUI", context.hostClassLoader())
+        findWechatVerifiedMethod(chatTabClass, "f", Boolean::class.javaPrimitiveType!!)?.let { method ->
+            hookOnce(method, before = { param ->
+                val activity = wechatProbeField(param.thisObject, "a") as? Activity ?: return@hookOnce
+                logChatReturn(activity, param.thisObject, "close-before")
+            }, after = { param ->
+                val owner = param.thisObject
+                val activity = wechatProbeField(owner, "a") as? Activity ?: return@hookOnce
+                logChatReturn(activity, owner, "close-after")
+                activity.window.decorView.postOnAnimation { if (!destroyed) logChatReturn(activity, owner, "close-frame") }
+            })
+        }
+
         listOf("u" to emptyArray<Class<*>>(), "s" to arrayOf(Int::class.javaPrimitiveType!!)).forEach { (name, types) ->
             val method = findWechatVerifiedMethod(chatTabClass, name, *types)
             if (method == null) {
@@ -973,6 +994,14 @@ private class BackgroundBeautyRuntime(
                     val activity = wechatProbeField(owner, "a") as? Activity ?: return@hookOnce
                     val chatting = wechatProbeField(owner, "c") as? View ?: return@hookOnce
                     if (name == "s" && param.args.firstOrNull() != View.VISIBLE) return@hookOnce
+                    if (name == "s" && wechatProbeField(owner, "k") == true && hasConfiguredBackground(activity)) {
+                        val state = states[activity]
+                        val snapshot = state?.surfaces?.get(chatting)
+                        if (state != null && snapshot?.slot == BackgroundBeautySettings.Slot.CHAT) {
+                            setTransparentSurface(state, chatting, BackgroundBeautySettings.Slot.CHAT)
+                        }
+                        logChatReturn(activity, owner, "launcher-visible")
+                    }
                     if (chatting.visibility == View.GONE) {
                         activity.window.decorView.postOnAnimation {
                             if (chatting.visibility == View.GONE) completeWechatReturn(activity, "chat-tab-$name")
@@ -1804,7 +1833,10 @@ private class BackgroundBeautyRuntime(
             // Embedded chat animates over the conversation page in the same window.
             // Its bitmap belongs to the moving chat container, never the shared decor.
             val chatHost = chatBackgroundHost(activity) ?: return
-            setImageSurface(state, chatHost, slot, bitmap, opacity)
+            val controller = if (activity.javaClass.name == LAUNCHER_ACTIVITY) KavaReflector.readField(activity, "chattingTabUI") else null
+            if (controller != null && wechatProbeField(controller, "k") == true) {
+                setTransparentSurface(state, chatHost, slot)
+            } else setImageSurface(state, chatHost, slot, bitmap, opacity)
             applyChatBackground(state, bitmap, opacity)
         } else {
             // Keep cached chat bitmaps, but release the closed chat's managed surfaces.
@@ -1924,13 +1956,102 @@ private class BackgroundBeautyRuntime(
         chatHost.let { root ->
             applyWhitelistedSurfaces(state, root, BackgroundBeautySettings.Slot.CHAT)
             applyChatChromeRoot(state, root)
+            findDescendant(root, "com.tencent.mm.view.SmileyPanelImpl")?.let(::applyEmojiPanelSurfaces)
             probeVisibleChrome(activity, "chat-applied")
             root.postOnAnimation { if (!destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT) probeVisibleChrome(activity, "chat-next-frame") }
             root.postDelayed({ if (!destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT) probeVisibleChrome(activity, "chat-settled") }, 500L)
         }
     }
 
+    private fun isWechatDark(view: View): Boolean {
+        val clazz = KavaReflector.loadClass("com.tencent.mm.ui.gk", context.hostClassLoader())
+        val method = KavaReflector.findMethodRecursive(clazz, "D")
+        return (method?.let { KavaReflector.invoke(it, null) } as? Boolean)
+            ?: ((view.resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK) == android.content.res.Configuration.UI_MODE_NIGHT_YES)
+    }
+    private val measuredIconStrokes = WeakHashMap<Drawable, Pair<Float, Int>>()
+    private fun chatInputStrokeWidth(footer: View): Int {
+        val icon = KavaReflector.readField(footer, "C") as? ImageView
+        val drawable = icon?.drawable ?: return (footer.resources.displayMetrics.density * 1.2f).toInt().coerceAtLeast(1)
+        val currentScale = icon.imageMatrix.valuesForChatStroke()
+        measuredIconStrokes[drawable]?.takeIf { it.first == currentScale }?.let { return it.second }
+        val width = drawable.intrinsicWidth.coerceIn(1, 256)
+        val height = drawable.intrinsicHeight.coerceIn(1, 256)
+        // Measure the top centre of the actual smile drawable's circular outline.
+        // This also works with the SVG paths baked into the APK instead of assuming an SVG stroke width.
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val saved = Rect(drawable.bounds)
+        var started = false
+        var thickness = 0
+        try {
+            drawable.setBounds(0, 0, width, height)
+            drawable.draw(Canvas(bitmap))
+            for (y in 0 until height / 2) {
+                val opaque = Color.alpha(bitmap.getPixel(width / 2, y)) >= 128
+                if (opaque) { started = true; thickness++ } else if (started) break
+            }
+        } catch (error: Throwable) {
+            if (diagnosticCounts.computeIfAbsent("chat-stroke-error") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 2) {
+                HLog.e("$TAG 表情图标描边测量失败: drawable=${drawable.javaClass.name}", error)
+            }
+            thickness = 0
+        } finally {
+            drawable.bounds = saved
+            bitmap.recycle()
+        }
+        val scaleY = icon.imageMatrix.valuesForChatStroke()
+        val measured = kotlin.math.round(thickness * scaleY).toInt().coerceAtLeast(1)
+        if (diagnosticCounts.computeIfAbsent("chat-stroke-measure") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+            HLog.i("$TAG CHATSTROKE drawable=${drawable.javaClass.name} intrinsic=${width}x$height ringPx=$thickness scaleY=$scaleY widthPx=$measured")
+        }
+        return (if (thickness > 0) measured else (footer.resources.displayMetrics.density * 1.2f).toInt().coerceAtLeast(1)).also {
+            measuredIconStrokes[drawable] = currentScale to it
+        }
+    }
+    private fun android.graphics.Matrix.valuesForChatStroke(): Float {
+        val values = FloatArray(9)
+        getValues(values)
+        return kotlin.math.abs(values[android.graphics.Matrix.MSCALE_Y]).takeIf { it > 0f } ?: 1f
+    }
+    private fun logChatSurface(view: View, phase: String) {
+        val key = "chat-surface:$phase:${view.id}:${view.javaClass.name}"
+        if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 3) return
+        val activity = findActivity(view) ?: return
+        val image = view as? ImageView
+        HLog.i("$TAG CHATPART phase=$phase ${wechatProbeView(view, activity)} image=${image?.drawable?.javaClass?.name} imageBounds=${image?.drawable?.bounds} elevation=${view.elevation} translationZ=${view.translationZ} fg=${view.foreground?.javaClass?.name}")
+    }
+    private fun applyEmojiPanelSurfaces(panel: View) {
+        val activity = findActivity(panel) ?: return
+        if (destroyed || resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return
+        val state = states[activity] ?: return
+        val manager = KavaReflector.readField(panel, "f") ?: return
+        // a77.xml tab background (m), nested panel (p), tab wrapper (l).
+        listOf("m", "p", "l").forEach { field ->
+            (KavaReflector.readField(manager, field) as? View)?.let { view ->
+                logChatSurface(view, "emoji-before:$field")
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                logChatSurface(view, "emoji-after:$field")
+            }
+        }
+    }
     private fun installChatChromeLifecycle() {
+        val emojiClass = KavaReflector.loadClass("com.tencent.mm.view.SmileyPanelImpl", context.hostClassLoader())
+        listOf("onAttachedToWindow" to emptyArray<Class<*>>(),
+            "onLayout" to arrayOf(Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!),
+            "setTabBackgroundColor" to arrayOf(Int::class.javaPrimitiveType!!),
+            "setTabBackgroundResource" to arrayOf(Int::class.javaPrimitiveType!!),
+            "setPanelBackgroundColor" to arrayOf(Int::class.javaPrimitiveType!!),
+            "setEmojiPanelBackground" to arrayOf(Int::class.javaPrimitiveType!!),
+            "setShowClose" to arrayOf(Boolean::class.javaPrimitiveType!!)).forEach { (name, types) ->
+            KavaReflector.findMethodRecursive(emojiClass, name, *types)?.let { method ->
+                hookOnce(method, after = { param ->
+                    val panel = param.thisObject as? View ?: return@hookOnce
+                    if (!hasClassName(panel, "com.tencent.mm.view.SmileyPanelImpl")) return@hookOnce
+                    applyEmojiPanelSurfaces(panel)
+                })
+            }
+        }
+
         val layoutClass = KavaReflector.loadClass("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", context.hostClassLoader())
         findWechatVerifiedMethod(layoutClass, "dispatchDraw", Canvas::class.java)?.let { method ->
             ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
@@ -2051,13 +2172,17 @@ private class BackgroundBeautyRuntime(
             val view = queue.removeFirst()
             if (view is android.widget.EditText) {
                 val snapshot = surfaceSnapshot(state, view)
-                if (snapshot.slot == BackgroundBeautySettings.Slot.CHAT &&
+                val dark = isWechatDark(view)
+                val strokeColor = if (dark) Color.WHITE else Color.BLACK
+                val strokeWidth = chatInputStrokeWidth(footer)
+                val style = strokeColor to strokeWidth
+                if (snapshot.slot == BackgroundBeautySettings.Slot.CHAT && inputOutlineStyles[view] == style &&
                     snapshot.appliedBackground is android.graphics.drawable.GradientDrawable && view.background === snapshot.appliedBackground) continue
                 synchronizeExternalBackground(snapshot, view)
                 val density = view.resources.displayMetrics.density
                 val outline = android.graphics.drawable.GradientDrawable().apply {
                     setColor(Color.TRANSPARENT)
-                    setStroke((density * 1.2f).toInt().coerceAtLeast(1), Color.WHITE)
+                    setStroke(strokeWidth, strokeColor)
                     cornerRadius = density * 10f
                 }
                 surfaceMutationDepth++
@@ -2069,14 +2194,22 @@ private class BackgroundBeautyRuntime(
                     snapshot.appliedBackground = outline
                     snapshot.appliedBitmap = null
                     snapshot.slot = BackgroundBeautySettings.Slot.CHAT
+                    inputOutlineStyles[view] = style
+                    HLog.i("$TAG CHROMEINPUT outlineStyle dark=$dark color=$strokeColor widthPx=$strokeWidth")
                     HLog.i("$TAG CHROMEINPUT outlineApplied ${wechatProbeView(view, state.activity)}")
                 } finally { surfaceMutationDepth-- }
             } else if (view is ViewGroup) {
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
                 for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
+            } else if (view.javaClass == View::class.java && findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null) {
+                // ew_.xml: SpeechInputLayout.m and .o are independent solid View backgrounds.
+                logChatSurface(view, "speech-before")
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                logChatSurface(view, "speech-after")
             } else if (view is ImageView) {
                 // Footer icons retain their image drawable. Only their independent button surface is cleared.
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
+                if (findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null) logChatSurface(view, "speech-icon")
             }
         }
     }
@@ -2426,6 +2559,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private val initializedChrome = WeakHashMap<View, Boolean>()
+    private val inputOutlineStyles = WeakHashMap<View, Pair<Int, Int>>()
     private fun applyNativeChrome(view: View, slot: BackgroundBeautySettings.Slot) {
         if (restoringBounce || initializedChrome[view] == true) return
         // ActionBarContainer draws primary/stacked/split layers independently of View.background.
