@@ -2031,3 +2031,8 @@ Release 附件中的 APK 保持 Hchat-release-signed.apk / Hchat-alt-entry-relea
 ### 第二轮实机反馈与调整
 4be8c1d 实机日志：09:55:34.244 slowRefresh=65ms，随后多次19–41ms，09:56:24.188=93ms；截图顶部灰色标题栏，持续滚动仍明显卡顿。日志不能直接量化持续滚动的 CPU/GPU 瓶颈。AbsListView getView 改为仅标脏，统一在 preDraw 按最终绑定结果处理，RecyclerView onBind 也不再立即递归；触摸已处理行不重复遍历。空的相邻页面只准备一次，等其列表实际出现行后使准备缓存失效并补处理，避免每次刷新重扫隐藏空列表。
 微信8.0.78持久化 smali_classes14/androidx/appcompat/widget/ActionBarContainer.smali 核验：h/i/m 分别对应 primary/stacked/split Drawable，setPrimaryBackground/setStackedBackground/setSplitBackground 更新这些字段。即便外层透明 marker 未变，仍重新校验三层实际背景并清理；保留原始值及恢复逻辑。此为修正可确认的检查缺口，截图灰色是否完全来自该层仍需实机确认。增加每类最多8条、耗时>=8ms才记录的 PERF row，帮助后续区分列表递归成本；不做逐帧树诊断或本地 Gradle 构建。
+
+### 删除水波纹并阻断首页动态背景激活
+按用户要求删除沉浸式背景的 RippleDrawable 包装、列表触摸 Hook、热点/按压状态维护；使用无绘制透明 Drawable，AbsListView selector 备份后置为透明，关闭功能时恢复原 selector。
+8.0.78 持久化 DynamicBgContainer.a():void 为激活入口，创建 DynamicBackgroundGLSurfaceView，addView 后调用 c() 向渲染线程发送恢复消息。b(boolean):void 为原生停止入口：暂停、释放、removeView 并清空 e。仅当容器直接属于 MainUIView、LauncherUI 启用且存在微信页背景时，拦截 a()；若已有 GL，先调用原生 b(false)，确认 e 清空后跳过激活。关闭/删除微信页背景及模块销毁时恢复被抑制且仍附着的容器激活。不使用全局 GL 禁用，也不改小程序桌面自己的容器生命周期。范围限定依赖已核验的类与方法形状，其他版本兼容性未验证。
+普通列表行及页面扫描在 TaskBarContainer/AppBrandDesktopContainer 边界停止，保留外层透明处理，内部由任务栏专用 Hook 管理。ConversationListView.y 完成绑定后 post 一次标题栏及页面修复，避免仅依赖滑动回调；首次透明结果仍需实机验证。回归脚本更新为验证透明 Drawable 无绘制，继续检查手势和背景对齐，不运行本地 Gradle。

@@ -96,41 +96,6 @@ private class BackgroundBeautyTransparentDrawable : Drawable() {
     override fun getOpacity(): Int = PixelFormat.TRANSPARENT
 }
 
-private class BackgroundBeautyFeedbackDrawable() : Drawable(), Drawable.Callback {
-    private val ripple = android.graphics.drawable.RippleDrawable(
-            ColorStateList.valueOf(0x40808080), null, ColorDrawable(Color.WHITE)
-    ).apply { callback = this@BackgroundBeautyFeedbackDrawable }
-    override fun draw(canvas: Canvas) { ripple.bounds = bounds; ripple.draw(canvas) }
-    override fun isStateful(): Boolean = true
-    private var touchPressed = false
-    private var hostState = intArrayOf()
-    fun setTouchPressed(pressed: Boolean) {
-        touchPressed = pressed
-        applyRippleState()
-    }
-    private fun applyRippleState() {
-        ripple.state = if (touchPressed) hostState.filter { it != android.R.attr.state_pressed }.toIntArray() + intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed)
-            else hostState.filter { it != android.R.attr.state_pressed }.toIntArray()
-        invalidateSelf()
-    }
-    override fun onStateChange(state: IntArray): Boolean {
-        hostState = state
-        ripple.state = if (touchPressed) state + intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed) else state
-        invalidateSelf()
-        return true
-    }
-    override fun onBoundsChange(bounds: Rect) { ripple.bounds = bounds }
-    override fun setHotspot(x: Float, y: Float) { ripple.setHotspot(x, y) }
-    override fun setHotspotBounds(left: Int, top: Int, right: Int, bottom: Int) { ripple.setHotspotBounds(left, top, right, bottom) }
-    override fun jumpToCurrentState() { ripple.jumpToCurrentState() }
-    override fun setAlpha(alpha: Int) { ripple.alpha = alpha }
-    override fun setColorFilter(colorFilter: ColorFilter?) { ripple.colorFilter = colorFilter }
-    @Deprecated("Drawable opacity is not used by the background renderer")
-    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
-    override fun invalidateDrawable(who: Drawable) = invalidateSelf()
-    override fun scheduleDrawable(who: Drawable, what: Runnable, `when`: Long) = scheduleSelf(what, `when`)
-    override fun unscheduleDrawable(who: Drawable, what: Runnable) = unscheduleSelf(what)
-}
 private class ScreenAlignedBitmapDrawable(
     bitmap: Bitmap,
     anchor: View,
@@ -402,6 +367,12 @@ private class BackgroundBeautyRuntime(
         ownedHooks.toList().forEach { runCatching { HookRegistry.get().unhook(it) } }
         ownedHooks.clear()
         hookedMembers.clear()
+        suppressedDynamicContainers.keys.toList().forEach { view ->
+            if (view.isAttachedToWindow) {
+                KavaReflector.findMethodRecursive(view.javaClass, "a")?.let { KavaReflector.invoke(it, view) }
+            }
+        }
+        suppressedDynamicContainers.clear()
         restoreBounceColors(null)
         homeLists.clear()
         listAdapters.clear()
@@ -845,8 +816,44 @@ private class BackgroundBeautyRuntime(
         HLog.i("$TAG WXINSTALL class=${clazz?.name} method=$name types=${types.joinToString { it.name }} found=${method != null} alreadyHooked=${method != null && hookedMembers.contains(method)}")
         return method
     }
+    private val suppressedDynamicContainers = WeakHashMap<View, Boolean>()
+    private fun suppressHomepageDynamicBackground(view: View): Boolean {
+        if ((view.parent as? View)?.javaClass?.name != "com.tencent.mm.ui.conversation.MainUIView") return false
+        val activity = findActivity(view) ?: return false
+        return activity.javaClass.name == LAUNCHER_ACTIVITY &&
+            prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
+            BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.WECHAT)
+    }
+    private fun installHomepageDynamicLifecycle(): Boolean {
+        val clazz = KavaReflector.loadClass("com.tencent.mm.plugin.multitask.ui.bg.DynamicBgContainer", context.hostClassLoader())
+        val activate = findWechatVerifiedMethod(clazz, "a") ?: return false
+        val stop = findWechatVerifiedMethod(clazz, "b", Boolean::class.javaPrimitiveType!!) ?: return false
+        if (activate.returnType != Void.TYPE || stop.returnType != Void.TYPE) return false
+        return hookOnce(activate, before = { param ->
+            val container = param.thisObject as? View ?: return@hookOnce
+            if (!suppressHomepageDynamicBackground(container)) return@hookOnce
+            // b(false) pauses/releases an existing GL view and removes it using WeChat's lifecycle.
+            // In the common case e is null: skip activation before allocation or render-thread resume.
+            if (wechatProbeField(container, "e") != null) {
+                KavaReflector.invoke(stop, container, false)
+                if (wechatProbeField(container, "e") != null) return@hookOnce
+            }
+            suppressedDynamicContainers[container] = true
+            param.result = null
+        })
+    }
+    private fun restoreHomepageDynamicBackgrounds() {
+        suppressedDynamicContainers.keys.toList().forEach { view ->
+            if (!suppressHomepageDynamicBackground(view)) {
+                suppressedDynamicContainers.remove(view)
+                if (view.isAttachedToWindow) {
+                    KavaReflector.findMethodRecursive(view.javaClass, "a")?.let { KavaReflector.invoke(it, view) }
+                }
+            }
+        }
+    }
     private fun installWechatVerifiedPaths(): Boolean {
-        var installed = false
+        var installed = installHomepageDynamicLifecycle()
         val controllerClass = KavaReflector.loadClass("com.tencent.mm.plugin.taskbar.ui.b0", context.hostClassLoader())
         KavaReflector.declaredConstructors(controllerClass).forEach { constructor ->
             installed = hookOnce(constructor, after = { param -> rememberWechatTaskController(param.thisObject) }) || installed
@@ -916,6 +923,13 @@ private class BackgroundBeautyRuntime(
                 val owner = wechatProbeField(list, "m") ?: return@hookOnce
                 rememberWechatTaskController(owner)
                 val activity = findActivity(list) ?: return@hookOnce
+                // Binding may precede HomeUI's final background writes; repair after this UI transaction.
+                list.post {
+                    if (!destroyed && list.isAttachedToWindow && hasConfiguredBackground(activity)) {
+                        applyWechatControllerChrome(owner)
+                        scheduleRefresh(activity)
+                    }
+                }
                 if (resolveTarget(activity) == BackgroundBeautySettings.Slot.WECHAT && hasConfiguredBackground(activity)) {
                     val state = states[activity] ?: return@hookOnce
                     (wechatProbeField(list, "C") as? View)?.let {
@@ -1160,14 +1174,13 @@ private class BackgroundBeautyRuntime(
         pendingPageRoots.keys.removeAll { activity == null || findActivity(it) === activity }
         preparedRoots.entries.removeAll { activity == null || it.value.first.activity === activity }
         listSelectors.entries.filter { activity == null || findActivity(it.key) === activity }.toList().forEach { (list, selector) ->
-            if (list.selector is BackgroundBeautyFeedbackDrawable) list.selector = selector
+            if (list.selector is BackgroundBeautyTransparentDrawable) list.selector = selector
             listSelectors.remove(list)
         }
         listPreDraws.entries.filter { activity == null || findActivity(it.key) === activity }.toList().forEach { (list, listener) ->
             val observer = list.viewTreeObserver
             if (observer.isAlive) observer.removeOnPreDrawListener(listener)
             listPreDraws.remove(list)
-            clearListRipple(list)
         }
         val entries = bounceColors.entries.filter { activity == null || findActivity(it.key) === activity }
             .map { it.key to it.value.toMap() }
@@ -1355,54 +1368,7 @@ private class BackgroundBeautyRuntime(
     private val dirtyBoundRows = WeakHashMap<View, Boolean>()
     private val listSelectors = WeakHashMap<AbsListView, Drawable?>()
     private val listPreDraws = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
-    private val touchFeedbackRows = WeakHashMap<View, View>()
-    private val touchFeedbackOrigins = WeakHashMap<View, Pair<Float, Float>>()
-    private fun updateListRipple(list: ViewGroup, event: android.view.MotionEvent) {
-        val slot = homeLists[list] ?: return
-        if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) return
-        val activity = findActivity(list) ?: return
-        if (states[activity]?.loadedBitmaps?.get(slot)?.bitmap?.isRecycled != false) return
-        when (event.actionMasked) {
-            android.view.MotionEvent.ACTION_DOWN -> {
-                for (index in list.childCount - 1 downTo 0) {
-                    val row = list.getChildAt(index)
-                    val x = event.x + list.scrollX - row.left - row.translationX
-                    val y = event.y + list.scrollY - row.top - row.translationY
-                    if (row.visibility == View.VISIBLE && x >= 0 && y >= 0 && x < row.width && y < row.height) {
-                        if (dirtyBoundRows.remove(row) == true || surfaceOwners[row] == null) applyBoundRow(list, row)
-                        (row.background as? BackgroundBeautyFeedbackDrawable)?.let { ripple ->
-                            ripple.setHotspot(x, y)
-                            ripple.setTouchPressed(true)
-                            if (diagnosticCounts.computeIfAbsent("ripple:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-                                HLog.i("$TAG DIAG ripple slot=${slot.key} row=${row.javaClass.name} hotspot=$x/$y")
-                            }
-                            touchFeedbackRows[list] = row
-                            touchFeedbackOrigins[list] = event.x to event.y
-                        }
-                        break
-                    }
-                }
-            }
-            android.view.MotionEvent.ACTION_MOVE -> {
-                val origin = touchFeedbackOrigins[list] ?: return
-                val slop = android.view.ViewConfiguration.get(list.context).scaledTouchSlop
-                if (kotlin.math.abs(event.x - origin.first) > slop || kotlin.math.abs(event.y - origin.second) > slop) clearListRipple(list)
-            }
-            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> clearListRipple(list)
-        }
-    }
-    private fun clearListRipple(list: View) {
-        (touchFeedbackRows.remove(list)?.background as? BackgroundBeautyFeedbackDrawable)?.setTouchPressed(false)
-        touchFeedbackOrigins.remove(list)
-    }
     private fun installRecyclerBinding(view: View) {
-        KavaReflector.findMethodRecursive(view.javaClass, "dispatchTouchEvent", android.view.MotionEvent::class.java)?.let { method ->
-            hookOnce(method, before = { param ->
-                val list = param.thisObject as? ViewGroup ?: return@hookOnce
-                val event = param.args.firstOrNull() as? android.view.MotionEvent ?: return@hookOnce
-                updateListRipple(list, event)
-            })
-        }
         if (view is ViewGroup && !listPreDraws.containsKey(view)) {
             val listener = ViewTreeObserver.OnPreDrawListener {
                 if (!destroyed && view.isShown) {
@@ -1438,7 +1404,7 @@ private class BackgroundBeautyRuntime(
         if (view is AbsListView) {
             if (!listSelectors.containsKey(view)) {
                 listSelectors[view] = view.selector
-                view.selector = BackgroundBeautyFeedbackDrawable()
+                view.selector = BackgroundBeautyTransparentDrawable()
             }
             val adapter = view.adapter ?: return
             if (listAdapters[view] === adapter) return
@@ -1516,15 +1482,16 @@ private class BackgroundBeautyRuntime(
             snapshot.originalMinimumWidth = row.minimumWidth
             snapshot.originalMinimumHeight = row.minimumHeight
         }
-        setTransparentSurface(state, row, slot, preserveFeedback = true)
+        setTransparentSurface(state, row, slot)
+        if (isWechatTaskSurface(row)) return
         val queue = ArrayDeque<View>()
         if (row is ViewGroup) for (i in 0 until row.childCount) queue.add(row.getChildAt(i))
         var visited = 0
         while (queue.isNotEmpty() && visited++ < 160) {
             val child = queue.removeFirst()
-            if (isComposeSurface(child) || isBottomBar(child)) continue
+            if (isComposeSurface(child) || isBottomBar(child) || isWechatTaskSurface(child)) continue
             if (child is ViewGroup) {
-                if (child.background != null) setTransparentSurface(state, child, slot, preserveFeedback = true)
+                if (child.background != null) setTransparentSurface(state, child, slot)
                 for (i in 0 until child.childCount) queue.add(child.getChildAt(i))
             }
         }
@@ -1690,6 +1657,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun refreshAll() {
+        restoreHomepageDynamicBackgrounds()
         if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
             !BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.ME)) {
             restoreInitialStoryMuteViews()
@@ -2126,7 +2094,7 @@ private class BackgroundBeautyRuntime(
             val node = queue.removeFirst()
             if (talkId != 0 && node.id == talkId && node is android.widget.Button) {
                 logChatSurface(node, "hold-to-talk-before")
-                setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
+                setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
                 logChatSurface(node, "hold-to-talk-after")
             }
             if (overlayId != 0 && node.id == overlayId && node is ViewGroup) {
@@ -2419,7 +2387,7 @@ private class BackgroundBeautyRuntime(
             } else if (view is ImageView) {
                 // Footer icons retain their image drawable. Only their independent button surface is cleared.
                 val inSpeech = findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = !inSpeech)
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
                 if (inSpeech) logChatSurface(view, "speech-icon")
             }
         }
@@ -2439,6 +2407,10 @@ private class BackgroundBeautyRuntime(
             val name = view.javaClass.name
             if (view !== root && isBottomBar(view)) continue
             if (view !== root && isComposeSurface(view)) continue
+            if (isWechatTaskSurface(view)) {
+                setTransparentSurface(state, view, slot)
+                continue
+            }
             if (name == "com.tencent.mm.ui.FrostedContentView" || name == APP_BRAND_DESKTOP_CONTAINER ||
                 hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW) ||
                 name == CHAT_FOOTER_CUSTOM ||
@@ -2465,7 +2437,7 @@ private class BackgroundBeautyRuntime(
             if (slot == BackgroundBeautySettings.Slot.WECHAT && view is android.widget.TextView &&
                 view.text?.toString()?.trim() == "折叠置顶聊天") {
                 val parent = view.parent as? ViewGroup
-                if (parent != null && parent !== root) setTransparentSurface(state, parent, slot, preserveFeedback = true)
+                if (parent != null && parent !== root) setTransparentSurface(state, parent, slot)
             }
             if (slot == BackgroundBeautySettings.Slot.CONTACTS && view.id == resourceId("imk")) {
                 // 运行快照确认该页 imk 外层 LinearLayout 仍绘制 #FF232323。
@@ -2514,7 +2486,7 @@ private class BackgroundBeautyRuntime(
                                 setTransparentSurface(state, child, slot)
                                 for (tabIndex in 0 until child.childCount) {
                                     val tab = child.getChildAt(tabIndex)
-                                    if (tab is ViewGroup) setTransparentSurface(state, tab, slot, preserveFeedback = true)
+                                    if (tab is ViewGroup) setTransparentSurface(state, tab, slot)
                                 }
                             }
                         }
@@ -2562,6 +2534,9 @@ private class BackgroundBeautyRuntime(
         val controller = wechatTaskControllers.entries.firstOrNull { findActivity(it.key) === activity }?.value?.get() ?: return false
         return wechatProbeField(controller, "P") as? Boolean == true && rect.top > activity.window.decorView.height * 0.94f
     }
+    private fun isWechatTaskSurface(view: View): Boolean =
+        view.javaClass.name == "com.tencent.mm.plugin.taskbar.ui.TaskBarContainer" ||
+            view.javaClass.name == APP_BRAND_DESKTOP_CONTAINER
     private fun isHomeContentList(view: View, slot: BackgroundBeautySettings.Slot): Boolean {
         if (slot == BackgroundBeautySettings.Slot.CHAT) return false
         return when (slot) {
@@ -2682,7 +2657,7 @@ private class BackgroundBeautyRuntime(
             val intersectsBottom = location[1] < activity.window.decorView.height &&
                 location[1] + view.height > activity.window.decorView.height * 0.9f
             val nativeBackground = bg != null && bg !is BackgroundBeautyTransparentDrawable &&
-                bg !is BackgroundBeautyFeedbackDrawable && bg !is ScreenAlignedBitmapDrawable
+                bg !is ScreenAlignedBitmapDrawable
             val selfDraw = view.javaClass.name.contains("Background") || view.javaClass.name.contains("SurfaceView")
             if (view.isShown && view.alpha > 0f && intersectsBottom &&
                 (nativeBackground || selfDraw || isSystemBarBackground(view)) && bottomEmitted++ < 24) {
@@ -2885,8 +2860,7 @@ private class BackgroundBeautyRuntime(
         state: HostState,
         view: View,
         slot: BackgroundBeautySettings.Slot,
-        clearForeground: Boolean = false,
-        preserveFeedback: Boolean = false
+        clearForeground: Boolean = false
     ) {
         if (slot == BackgroundBeautySettings.Slot.CHAT && state.surfaces[view]?.let {
                 it.slot == slot && it.appliedBitmap != null && view.background === it.appliedBackground
@@ -2896,7 +2870,6 @@ private class BackgroundBeautyRuntime(
         val retained = state.surfaces[view]
         if (retained != null && retained.slot == slot && retained.appliedBitmap == null &&
             retained.appliedBackground != null && view.background === retained.appliedBackground &&
-            (if (preserveFeedback) retained.appliedBackground is BackgroundBeautyFeedbackDrawable else retained.appliedBackground !is BackgroundBeautyFeedbackDrawable) &&
             (!clearForeground || view.foreground === retained.appliedForeground)) return
         applyNativeChrome(view, slot)
         surfaceMutationDepth++
@@ -2907,12 +2880,9 @@ private class BackgroundBeautyRuntime(
                 snapshot.appliedBitmap == null &&
                 snapshot.appliedBackground != null &&
                 view.background === snapshot.appliedBackground &&
-                (if (preserveFeedback) snapshot.appliedBackground is BackgroundBeautyFeedbackDrawable else snapshot.appliedBackground !is BackgroundBeautyFeedbackDrawable) &&
                 (!clearForeground || view.foreground === snapshot.appliedForeground)
             ) return
-            val marker: Drawable = if (preserveFeedback) {
-                BackgroundBeautyFeedbackDrawable()
-            } else BackgroundBeautyTransparentDrawable()
+            val marker: Drawable = BackgroundBeautyTransparentDrawable()
             view.backgroundTintList = null
             view.backgroundTintMode = null
             view.background = marker
