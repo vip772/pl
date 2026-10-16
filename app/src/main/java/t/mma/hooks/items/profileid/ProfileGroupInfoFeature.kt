@@ -38,10 +38,9 @@ class ProfileGroupInfoFeature {
         private val loadingGroups = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
 
         fun installProvider() {
-            val run = generation.incrementAndGet()
+            generation.incrementAndGet()
             WeContactHeaderApi.addProvider(joinTimeProvider)
             WeContactHeaderApi.addProvider(inviterProvider)
-            executor().execute { warmAllGroups(run) }
         }
 
         fun removeProvider() {
@@ -54,18 +53,7 @@ class ProfileGroupInfoFeature {
             loadedGroups.clear()
             loadingGroups.clear()
         }
-
-        private fun warmAllGroups(run: Int) {
-            if (generation.get() != run) return
-            runCatching {
-                WeChatApis.contacts()?.getGroups().orEmpty()
-                    .mapNotNull { it.wxId.takeIf { id -> id.endsWith("@chatroom") || id.endsWith("@im.chatroom") } }
-                    .forEach { scheduleGroup(it, run) }
-            }.onFailure {
-                HLog.e("[Hchat:profile_group_info] 预热群成员进群时间失败", it)
-            }
-        }
-
+        // 仅在资料页请求进群时间时加载当前群，注册 Provider 不触发全群消息扫描。
         private fun scheduleGroup(groupId: String, run: Int = generation.get()) {
             if (groupId.isBlank() || generation.get() != run
                 || loadedGroups.contains(groupId) || !loadingGroups.add(groupId)) return
