@@ -2504,12 +2504,12 @@ private class BackgroundBeautyRuntime(
                     HLog.i("$TAG CHROMEINPUT outlineApplied ${wechatProbeView(view, state.activity)}")
                 } finally { surfaceMutationDepth-- }
             } else if (view is ViewGroup) {
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = !inSpeech)
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
                 for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
             } else if (view.javaClass == View::class.java && findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null) {
                 // ew_.xml: SpeechInputLayout.m and .o are independent solid View backgrounds.
                 logChatSurface(view, "speech-before")
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = !inSpeech)
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
                 logChatSurface(view, "speech-after")
             } else if (view is ImageView) {
                 // Footer icons retain their image drawable. Only their independent button surface is cleared.
