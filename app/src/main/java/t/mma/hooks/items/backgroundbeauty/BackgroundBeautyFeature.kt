@@ -245,6 +245,7 @@ private class BackgroundBeautyRuntime(
         const val MAX_INITIAL_REFRESHES = 2
         const val MAX_LAUNCHER_BITMAPS = 4
         const val MAX_SCAN_NODES = 1200
+        private const val ENABLE_RENDER_DIAGNOSTICS = false
         const val TAB_WECHAT = 0
         const val TAB_CONTACTS = 1
         const val TAB_DISCOVER = 2
@@ -431,31 +432,6 @@ private class BackgroundBeautyRuntime(
                 installed = hookOnce(method, after = { param ->
                     (param.thisObject as? Activity)?.let { scheduleRefresh(it, MAX_INITIAL_REFRESHES) }
                 }) || installed
-            }
-            if (className == LAUNCHER_ACTIVITY) {
-                KavaReflector.findMethodRecursive(clazz, "dispatchTouchEvent", android.view.MotionEvent::class.java)?.let { method ->
-                    installed = hookOnce(method, after = { param ->
-                        val activity = param.thisObject as? Activity ?: return@hookOnce
-                        val event = param.args.firstOrNull() as? android.view.MotionEvent ?: return@hookOnce
-                        if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT) return@hookOnce
-                        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
-                            wechatTouchStart[activity] = event.y
-                            probeWindowCoverage(activity, "touch-down")
-                        } else if (event.actionMasked == android.view.MotionEvent.ACTION_MOVE &&
-                            event.y - (wechatTouchStart[activity] ?: event.y) > 100) {
-                            if (wechatCoveragePulls.put(activity, true) != true) probeWindowCoverage(activity, "pull-start")
-                            armWechatDiagnostics(activity, "touch-pull")
-                        } else if (event.actionMasked == android.view.MotionEvent.ACTION_UP) {
-                            armWechatDiagnostics(activity, "touch-up")
-                            wechatTouchStart.remove(activity)
-                            if (wechatCoveragePulls.remove(activity) == true) {
-                                probeWindowCoverage(activity, "pull-release")
-                                activity.window.decorView.postOnAnimation { probeWindowCoverage(activity, "pull-next-frame") }
-                                activity.window.decorView.postDelayed({ if (!destroyed) { probeWindowCoverage(activity, "pull-settled"); probeVisibleChrome(activity, "desktop-settled") } }, 450L)
-                            }
-                        }
-                    }) || installed
-                }
             }
             KavaReflector.findMethodRecursive(clazz, "onResume")?.let { method ->
                 installed = hookOnce(method, after = { param ->
@@ -660,6 +636,8 @@ private class BackgroundBeautyRuntime(
             Triple("com.tencent.mm.dynamicbackground.view.GradientColorBackgroundView", "onDraw", arrayOf(android.graphics.Canvas::class.java))
         )
         probes.forEach { (className, name, types) ->
+            // y 的后置保护属于业务逻辑，其他探针仅在诊断启用时安装。
+            if (!ENABLE_RENDER_DIAGNOSTICS && name != "y") return@forEach
             val clazz = KavaReflector.loadClass(className, context.hostClassLoader())
             val method = KavaReflector.findMethodRecursive(clazz, name, *types)
             if (method == null) {
@@ -667,6 +645,7 @@ private class BackgroundBeautyRuntime(
                 return@forEach
             }
             val hooked = hookOnce(method, before = { param ->
+                if (!ENABLE_RENDER_DIAGNOSTICS) return@hookOnce
                 // Check the limit before any reflection or parent inspection in drawing/dragging.
                 val count = diagnosticCounts.computeIfAbsent("wx-probe:$className:$name") { java.util.concurrent.atomic.AtomicInteger() }
                 val limit = if (name == "y") 32 else if (name == "onDraw") 6 else 12
@@ -729,7 +708,7 @@ private class BackgroundBeautyRuntime(
     private fun wechatHomepageBackdropEnabled(activity: Activity): Boolean =
         activity.javaClass.name == LAUNCHER_ACTIVITY &&
             prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
-            BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.WECHAT)
+            states[activity]?.loadedBitmaps?.get(BackgroundBeautySettings.Slot.WECHAT)?.bitmap?.isRecycled == false
     private val wechatTaskControllers = WeakHashMap<View, WeakReference<Any>>()
     private val wechatGradientControllers = WeakHashMap<View, WeakReference<Any>>()
     private fun rememberWechatTaskController(owner: Any?) {
@@ -1380,9 +1359,9 @@ private class BackgroundBeautyRuntime(
     private val touchFeedbackOrigins = WeakHashMap<View, Pair<Float, Float>>()
     private fun updateListRipple(list: ViewGroup, event: android.view.MotionEvent) {
         val slot = homeLists[list] ?: return
+        if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) return
         val activity = findActivity(list) ?: return
-        if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) || states[activity] == null ||
-            !BackgroundBeautyStore.hasImage(context.hostContext(), slot)) return
+        if (states[activity]?.loadedBitmaps?.get(slot)?.bitmap?.isRecycled != false) return
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
                 for (index in list.childCount - 1 downTo 0) {
@@ -1438,10 +1417,16 @@ private class BackgroundBeautyRuntime(
                             }
                         }
                     }
-                    for (index in 0 until view.childCount) {
-                        val row = view.getChildAt(index)
-                        val owner = findActivity(view)?.let { states[it] }
-                        if (dirtyBoundRows.remove(row) == true || owner?.surfaces?.get(row) == null) applyBoundRow(view, row)
+                    val slot = homeLists[view]
+                    val owner = findActivity(view)?.let { states[it] }
+                    if (slot != null && owner?.loadedBitmaps?.get(slot)?.bitmap?.isRecycled == false &&
+                        prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) {
+                        for (index in 0 until view.childCount) {
+                            val row = view.getChildAt(index)
+                            if (dirtyBoundRows.remove(row) == true || owner.surfaces[row] == null) {
+                                applyHomeRow(owner, row, slot)
+                            }
+                        }
                     }
                 }
                 true
@@ -1512,10 +1497,11 @@ private class BackgroundBeautyRuntime(
         if (Looper.myLooper() != Looper.getMainLooper()) return
         val slot = homeLists[list] ?: return
         val activity = findActivity(list) ?: return
-        if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
-            !BackgroundBeautyStore.hasImage(context.hostContext(), slot)) return
+        if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) return
         val state = states[activity] ?: return
+        if (state.loadedBitmaps[slot]?.bitmap?.isRecycled != false) return
         applyHomeRow(state, row, slot)
+        dirtyBoundRows.remove(row)
     }
 
     private fun applyHomeRow(state: HostState, row: View, slot: BackgroundBeautySettings.Slot) {
@@ -2584,6 +2570,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun probeVisibleChrome(activity: Activity, reason: String) {
+        if (!ENABLE_RENDER_DIAGNOSTICS) return
         if (destroyed) return
         val decor = activity.window.decorView
         if (reason == "desktop-settled") {
@@ -2621,6 +2608,7 @@ private class BackgroundBeautyRuntime(
     }
     private val wechatCoveragePulls = WeakHashMap<Activity, Boolean>()
     private fun probeWindowCoverage(activity: Activity, reason: String) {
+        if (!ENABLE_RENDER_DIAGNOSTICS) return
         if (destroyed || !hasConfiguredBackground(activity)) return
         val window = activity.window
         val decor = window.decorView
@@ -2654,6 +2642,7 @@ private class BackgroundBeautyRuntime(
     private val wechatDiagnosticFrames = WeakHashMap<Activity, Int>()
     private val wechatDiagnosticListeners = WeakHashMap<Activity, ViewTreeObserver.OnPreDrawListener>()
     private fun armWechatDiagnostics(activity: Activity, reason: String) {
+        if (!ENABLE_RENDER_DIAGNOSTICS) return
         if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT) return
         val key = "wechat-arm:$reason"
         if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 3) return
@@ -2887,6 +2876,11 @@ private class BackgroundBeautyRuntime(
         if (slot == BackgroundBeautySettings.Slot.CHAT && state.surfaces[view]?.let {
                 it.slot == slot && it.appliedBitmap != null && view.background === it.appliedBackground
             } == true) return
+        val retained = state.surfaces[view]
+        if (retained != null && retained.slot == slot && retained.appliedBitmap == null &&
+            retained.appliedBackground != null && view.background === retained.appliedBackground &&
+            (if (preserveFeedback) retained.appliedBackground is BackgroundBeautyFeedbackDrawable else retained.appliedBackground !is BackgroundBeautyFeedbackDrawable) &&
+            (!clearForeground || view.foreground === retained.appliedForeground)) return
         applyNativeChrome(view, slot)
         surfaceMutationDepth++
         try {

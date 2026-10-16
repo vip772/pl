@@ -2022,3 +2022,8 @@ NativeLibraryLoader 只记录同一模块 ClassLoader 下已经成功加载的�
 ## 单频道产物发布顺序与配额处理
 单频道工作流先将签名 APK 和以提交 SHA 命名的 mapping 文本上传至 GitHub Release，再执行可选的 Actions Artifact 备份。两个 upload-artifact 步骤均设置 continue-on-error，配额满或上传失败不阻断 Release 和后续现有步骤；Release 创建失败仍判作失败。发布前检查 APK 非空并复制真实 mapping，Release tag 精确指向本次 github.sha，避免构建期间分支前进导致产物与 tag 不一致。
 Release 附件中的 APK 保持 Hchat-release-signed.apk / Hchat-alt-entry-release-signed.apk 原命名，mapping 为 Hchat-release-mapping-<提交SHA>.txt。用户可直接进入仓库 Releases 的 Assets 下载，不依赖 Actions Artifact 存储配额。此变更不改变签名、版本生成或既有 Telegram 配置。
+
+## 沉浸式背景滚动热路径优化
+实机反馈开启背景后列表滑动卡顿；运行日志持续出现 touch-down/pull-start/pull-release/pull-next-frame/pull-settled 的 WXCOVER 反射诊断。移除仅用于此诊断的 LauncherUI.dispatchTouchEvent Hook，窗口覆盖/层级诊断默认关闭；原生渐变绘制抑制、任务栏保护和背景恢复保持运行。WXPROBE 在反射和收集节点前退出，保留该 Hook 后置回调中的业务保护。
+列表绑定/触摸改用 HostState 已加载的有效位图判断当前背景，不再在每次绑定或 MOVE 时读取背景文件属性；配置刷新和后台加载仍检查磁盘。列表 preDraw 将 Activity/HostState 查询移到可见行循环外，绑定已成功处理的行立即清理 dirty 标记，避免同一绑定在下一帧重复递归处理。已保留透明背景的节点在 applyNativeChrome 前直接复用；原生渐变绘制守卫使用已加载位图检查，避免每帧文件 stat。
+以上为源码热路径减少工作量，不等同于量测帧率结论。运行日志不含 FrameMetrics/Perfetto 数据，不能据此量化 CPU/GPU 各项占比。需 GitHub 构建后在同一背景、同一列表复测滑动、回弹、小程序下拉、切换页签、聊天返回及点击反馈。按约定不进行本地 Gradle 构建。
