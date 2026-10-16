@@ -57,6 +57,15 @@ fun main(){
  val chatRender=ScreenAlignedBitmapDrawable(Bitmap(),View(),.5f)
  chatRender.onBoundsForTest();renderCanvas.operations="";chatRender.draw(renderCanvas)
  check(renderCanvas.operations=="image," && chatRender.opacity==PixelFormat.TRANSLUCENT)
+ // Incoming chat surface can be one full screen to the right. Bitmap must stay in its clip.
+ window.height=200
+ val moving=View();moving.window=window;moving.x=100;moving.y=30
+ val incoming=ScreenAlignedBitmapDrawable(Bitmap(),moving,.5f,null,true)
+ incoming.onBoundsForTest();incoming.draw(renderCanvas)
+ check(renderCanvas.left==0f && renderCanvas.top == -30f)
+ moving.x=50;incoming.draw(renderCanvas);check(renderCanvas.left==0f)
+ moving.x=0;incoming.draw(renderCanvas);check(renderCanvas.left==0f)
+ moving.x=80;incoming.draw(renderCanvas);check(renderCanvas.left==0f)
  val g=SidePanelEdgeGesture(24f,8f)
  g.down(10f,200f,true);check(!g.move(12f,202f));g.reset()
  g.down(10f,200f,true);check(!g.move(12f,240f));check(!g.move(90f,241f));g.reset()

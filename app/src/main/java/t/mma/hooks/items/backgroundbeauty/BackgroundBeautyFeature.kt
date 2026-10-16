@@ -135,7 +135,8 @@ private class ScreenAlignedBitmapDrawable(
     bitmap: Bitmap,
     anchor: View,
     opacity: Float,
-    private val baseColor: Int? = null
+    private val baseColor: Int? = null,
+    private val followHorizontalMotion: Boolean = false
 ) : Drawable() {
     private val bitmapRef = WeakReference(bitmap)
     private val anchorRef = WeakReference(anchor)
@@ -173,7 +174,9 @@ private class ScreenAlignedBitmapDrawable(
         )
         val drawnWidth = bitmap.width * scale
         val drawnHeight = bitmap.height * scale
-        val offsetX = anchorLocation[0] - rootLocation[0]
+        // Chat backgrounds belong to the moving chat surface. Compensating its screen X
+        // shifts the bitmap out of its own clip while the page enters or swipes back.
+        val offsetX = if (followHorizontalMotion) 0 else anchorLocation[0] - rootLocation[0]
         val offsetY = anchorLocation[1] - rootLocation[1]
         destination.set(
             (rootWidth - drawnWidth) / 2f - offsetX,
@@ -1302,7 +1305,8 @@ private class BackgroundBeautyRuntime(
                     val opacity = snapshot.appliedOpacity
                     if (bitmap != null && !bitmap.isRecycled && opacity != null) {
                         snapshot.appliedBackground = ScreenAlignedBitmapDrawable(bitmap, view, opacity,
-                            resolveThemeBackground(view.context) or (0xff shl 24))
+                            resolveThemeBackground(view.context) or (0xff shl 24),
+                followHorizontalMotion = slot == BackgroundBeautySettings.Slot.CHAT)
                     }
                     view.backgroundTintList = null
                     view.backgroundTintMode = null
@@ -2871,7 +2875,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 (view !== state.activity.window.decorView || decorBackgroundApplied(view, snapshot.appliedBackground))
             ) return
             val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity,
-                resolveThemeBackground(view.context) or (0xff shl 24))
+                resolveThemeBackground(view.context) or (0xff shl 24),
+                followHorizontalMotion = slot == BackgroundBeautySettings.Slot.CHAT)
             val applied = image
             view.backgroundTintList = null
             view.backgroundTintMode = null
