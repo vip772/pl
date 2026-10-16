@@ -47,6 +47,18 @@ internal class HomeSidePanelDrawer(
     private var lastX = 0f
     private var profileAvatar: ImageView? = null
     private var avatarBitmap: Bitmap? = null
+    private var calendarCard: LinearLayout? = null
+    private var calendarKey: String? = null
+    private var dateReceiverRegistered = false
+    private val midnightRefresh = Runnable {
+        if (opened) { refreshCalendar(); scheduleMidnightRefresh() }
+    }
+    private val dateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: android.content.Intent?) {
+            refreshCalendar()
+            if (opened) scheduleMidnightRefresh()
+        }
+    }
     private var edgeEnabled = false
     fun setEdgeEnabled(value: Boolean) {
         edgeEnabled = value
@@ -58,6 +70,17 @@ internal class HomeSidePanelDrawer(
         if (host === parent && root.parent === parent) return
         host = parent
         buildPanel()
+        if (!dateReceiverRegistered) {
+            val filter = android.content.IntentFilter().apply {
+                addAction(android.content.Intent.ACTION_DATE_CHANGED)
+                addAction(android.content.Intent.ACTION_TIME_CHANGED)
+                addAction(android.content.Intent.ACTION_TIMEZONE_CHANGED)
+                addAction(android.content.Intent.ACTION_CONFIGURATION_CHANGED)
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 33) activity.registerReceiver(dateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            else activity.registerReceiver(dateReceiver, filter)
+            dateReceiverRegistered = true
+        }
         root.visibility = View.GONE
         root.elevation = dp(100).toFloat()
         root.isClickable = false
@@ -68,6 +91,11 @@ internal class HomeSidePanelDrawer(
     }
 
     fun detach() {
+        root.removeCallbacks(midnightRefresh)
+        if (dateReceiverRegistered) {
+            activity.unregisterReceiver(dateReceiver)
+            dateReceiverRegistered = false
+        }
         panel.animate().cancel()
         scrim.animate().cancel()
         (root.parent as? ViewGroup)?.removeView(root)
@@ -96,6 +124,8 @@ internal class HomeSidePanelDrawer(
         panel.animate().withEndAction(null).cancel()
         scrim.animate().cancel()
         opened = true
+        refreshCalendar()
+        scheduleMidnightRefresh()
         resizeRoot(open = true)
         edge.visibility = View.GONE
         root.visibility = View.VISIBLE
@@ -113,6 +143,7 @@ internal class HomeSidePanelDrawer(
     }
 
     fun close(animated: Boolean) {
+        root.removeCallbacks(midnightRefresh)
         opened = false
         if (!animated) {
             panel.animate().cancel(); scrim.animate().cancel()
@@ -138,7 +169,7 @@ internal class HomeSidePanelDrawer(
         panel.orientation = LinearLayout.VERTICAL
         panel.setBackgroundColor(color(if (night()) "#1A1C1A" else "#F7F8F6"))
         panel.clipChildren = true
-        panel.setPadding(0, 0, 0, dp(3))
+        panel.setPadding(0, 0, 0, 0)
         panel.addView(View(activity), LinearLayout.LayoutParams(-1, statusBarHeight()))
         panel.addView(buildProfile(), LinearLayout.LayoutParams(-1, -2).apply {
             leftMargin = dp(12); rightMargin = dp(12); bottomMargin = dp(8)
@@ -146,6 +177,10 @@ internal class HomeSidePanelDrawer(
 
         val scroll = ScrollView(activity).apply { isFillViewport = true; overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS }
         val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(22)) }
+        calendarCard = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(14), dp(12), dp(12)) }
+        calendarKey = null
+        body.addView(calendarCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
+        refreshCalendar()
         section(body, "快捷", true) { showShortcutPicker() }
         shortcutCard(body)
         section(body, "Hchat", false)
@@ -157,7 +192,7 @@ internal class HomeSidePanelDrawer(
         ))
         scroll.addView(body)
         panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-        panel.addView(View(activity).apply { setBackgroundColor(themeAccent()); alpha = .85f }, LinearLayout.LayoutParams(-1, dp(3)))
+
 
         root.addView(scrim, FrameLayout.LayoutParams(-1, -1))
         root.addView(panel, FrameLayout.LayoutParams(panelWidth, -1, Gravity.START))
@@ -171,6 +206,63 @@ internal class HomeSidePanelDrawer(
         root.isFocusable = true; root.isFocusableInTouchMode = true
         root.setOnKeyListener { _, key, ev ->
             if (key == android.view.KeyEvent.KEYCODE_BACK && ev.action == android.view.KeyEvent.ACTION_UP && opened) { close(true); true } else false
+        }
+    }
+
+    private fun scheduleMidnightRefresh() {
+        root.removeCallbacks(midnightRefresh)
+        val now = java.util.Calendar.getInstance()
+        val next = (now.clone() as java.util.Calendar).apply {
+            add(java.util.Calendar.DAY_OF_MONTH, 1)
+            set(java.util.Calendar.HOUR_OF_DAY, 0)
+            set(java.util.Calendar.MINUTE, 0)
+            set(java.util.Calendar.SECOND, 0)
+            set(java.util.Calendar.MILLISECOND, 0)
+        }
+        root.postDelayed(midnightRefresh, (next.timeInMillis - now.timeInMillis).coerceAtLeast(1L))
+    }
+    private fun refreshCalendar() {
+        val card = calendarCard ?: return
+        val month = SidePanelCalendarMonth.from(java.util.Calendar.getInstance())
+        val key = "${month.year}-${month.month}-${month.today}:${night()}"
+        if (calendarKey == key) return
+        calendarKey = key
+        card.removeAllViews()
+        card.background = rounded(if (night()) "#222822" else "#E5EFE6", 18)
+        card.addView(TextView(activity).apply {
+            text = "${month.year}年${month.month}月"
+            textSize = 16f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(themeTitle())
+            setPadding(dp(4), 0, 0, dp(10))
+            if (android.os.Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
+        }, LinearLayout.LayoutParams(-1, -2))
+        val week = LinearLayout(activity)
+        listOf("一", "二", "三", "四", "五", "六", "日").forEach { label ->
+            week.addView(TextView(activity).apply {
+                text = label; textSize = 11f; gravity = Gravity.CENTER; setTextColor(themeSub())
+            }, LinearLayout.LayoutParams(0, dp(26), 1f))
+        }
+        card.addView(week, LinearLayout.LayoutParams(-1, -2))
+        month.cells.chunked(7).forEach { dates ->
+            val row = LinearLayout(activity)
+            dates.forEach { day ->
+                row.addView(TextView(activity).apply {
+                    text = day?.toString().orEmpty()
+                    gravity = Gravity.CENTER
+                    textSize = 13f
+                    val today = day == month.today
+                    isSelected = today
+                    setTextColor(if (today) color(if (night()) "#13291B" else "#FFFFFF") else themeTitle())
+                    if (today) {
+                        background = rounded(themeAccent(), 12)
+                        typeface = Typeface.DEFAULT_BOLD
+                    }
+                    if (day != null) contentDescription = "${month.year}年${month.month}月${day}日" + if (today) "，今天" else ""
+                    importantForAccessibility = if (day == null) View.IMPORTANT_FOR_ACCESSIBILITY_NO else View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                }, LinearLayout.LayoutParams(0, dp(32), 1f).apply { setMargins(dp(1), dp(2), dp(1), dp(2)) })
+            }
+            card.addView(row, LinearLayout.LayoutParams(-1, -2))
         }
     }
 
@@ -362,6 +454,8 @@ internal class HomeSidePanelDrawer(
 
     private fun settleOpen() {
         opened = true
+        refreshCalendar()
+        scheduleMidnightRefresh()
         scrim.visibility = View.VISIBLE
         panel.animate().translationX(0f).setDuration(200L).setInterpolator(PathInterpolator(.4f, 0f, .2f, 1f)).start()
         scrim.animate().alpha(.42f).setDuration(200L).start()
