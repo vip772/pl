@@ -2048,3 +2048,14 @@ HomeUI q/w回调不再每次执行全树applyChromeTransparency和全量applySys
 ### 9908728后续现场采样：侧边栏资源查询与底栏背景冲突
 用户12:30实测明显改善但尚未持平。提前通知用户保持微信前台后，现包16秒固定8轮上下滑动，simpleperf cpu-clock 199Hz，3855样本无丢样本；同时采两个com.tencent.mm进程(主用户11248、分身15909)，不能将聚合百分比当作单进程精确占比。原始/data/local/tmp/hchat_perf/9908728.data，调用栈/sdcard/Download/hchat-9908728-callgraph.txt。v8.3.4 mapping核验qj.s=HomeSidePanelRuntime.Session，qj.q=globalLayout监听；refresh内updateTitleSpace/sizeHeader每次调用Resources.getIdentifier。wi.s=CustomBottomBarHost，preDraw→enforce→setBackground(null)→BackgroundBeauty写入Hook，后者又恢复透明marker并进行目标判断/控件查找，形成跨功能逐帧重复工作。
 修复：Session内缓存gp/coz固定ID；底栏enforce保留opacity=TRANSPARENT的已有背景，避免与沉浸式marker相互覆盖，其他非透明背景仍清理。保留首次透明、水波纹及侧边栏布局响应。不宣称已与关闭背景持平，需GitHub新包验证及同条件复采。未本地Gradle构建。
+
+
+### 2026-10-16 冷启动现场跟踪与 DexKit 查询并行度
+
+在 cecec65 现有安装包上采集冷启动。有效启动 Perfetto 为 12 秒、22.65 MB，未覆盖后续全部预热；此前 30 秒默认环形跟踪首段被覆盖，不能拿它判断启动阻塞。另有微信进程 25 秒 simpleperf，10090 个样本、无丢样，部分内存 DEX 缺少符号。原始数据保留于设备 Download/hchat-coldstart，未提交仓库。
+
+有效启动跟踪中，Hchat-DexInstal 名称对应 169 个不同线程记录、累计约 14592.6 ms CPU；Hchat-Init 对应 41 个线程记录、累计约 3899.6 ms CPU。这里是时间窗内累计线程记录，不代表同时存活 169 个调度器，也不表示 Java 单线程调度器失效。主线程一帧 traversal 约 1049.5 ms，其中 measure 约 657.1 ms。该数据证明启动存在重型并行工作与长帧，不能单凭重叠认定全部长帧均由 DexKit 导致。
+
+核验 DexKit 2.0.1 实际 AAR 的 public setThreadNum(int) 接口后，在共享 bridge 创建后、发布和任何查询前限制查询工作线程为 2，失败关闭未发布的 bridge；所有现有创建路径沿用统一工厂与串行门。不更改缓存键、定位条件、时效敏感 Hook 的调度阶段，也不添加固定等待。背景功能顺序移到公共 API 后、工具栏和侧边栏前，保留聊天页 API 订阅前置条件。
+
+这会降低查询峰值并行度，也可能延长缓存缺失时的完整定位时间。需要 GitHub 构建后复采启动帧、查询工作线程与功能就绪时间，不能宣称首次背景跳变或前十秒卡顿已完全消除。本轮未修改微信内部 Hook 入口，未本地运行 Gradle。

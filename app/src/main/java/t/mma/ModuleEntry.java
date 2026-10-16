@@ -523,16 +523,24 @@ public class ModuleEntry implements IXposedHookLoadPackage {
     }
 
     private DexKitBridge createDexKitBridge(ClassLoader classLoader, String apkPath) {
+        String key = apkPath != null ? apkPath : "";
         synchronized (DEXKIT_CREATE_LOCK) {
-            String key = apkPath != null ? apkPath : "";
             DexKitBridge cached = DEXKIT_BRIDGES.get(key);
             if (cached != null) return cached;
             DexKitBridge bridge = DexKitBridge.create(apkPath);
+            try {
+                // The Java scheduler is serial, but each native query has its own workers.
+                // Bound those workers before publishing the bridge or running any query.
+                bridge.setThreadNum(2);
+            } catch (Throwable error) {
+                bridge.close();
+                throw error;
+            }
             DEXKIT_BRIDGES.put(key, bridge);
+            HLog.i(TAG + " DexKit共享查询线程数=2");
             return bridge;
         }
     }
-
     private boolean isTinkerClassLoader(ClassLoader classLoader) {
         if (classLoader == null) return false;
         String text = String.valueOf(classLoader);

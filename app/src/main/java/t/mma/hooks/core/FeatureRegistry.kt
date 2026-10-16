@@ -115,10 +115,12 @@ object FeatureRegistry {
         return FeatureManager()
             .register(SettingsFeature())
             .register(WechatApiFeature())
+            // Visual hooks must precede optional toolbar/sidebar installation.
+            // Keep the public API first so the chat-page subscription is available.
+            .register(BackgroundBeautyFeature())
             .register(ChatToolbarFeature())
             .register(HomeSidePanelFeature())
             .register(AutoCacheFeature())
-            .register(BackgroundBeautyFeature())
             .register(MonetModuleGeneratorFeature())
             .register(AntiSecureMessageFeature())
             .register(SendSecureMessageFeature())
