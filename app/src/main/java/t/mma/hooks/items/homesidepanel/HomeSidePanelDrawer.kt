@@ -47,6 +47,12 @@ internal class HomeSidePanelDrawer(
     private var lastX = 0f
     private var profileAvatar: ImageView? = null
     private var avatarBitmap: Bitmap? = null
+    private var edgeEnabled = false
+    fun setEdgeEnabled(value: Boolean) {
+        edgeEnabled = value
+        edge.visibility = if (enabled && value && !opened) View.VISIBLE else View.GONE
+        root.visibility = if (opened || (enabled && value)) View.VISIBLE else View.GONE
+    }
 
     fun attachTo(parent: ViewGroup) {
         if (host === parent && root.parent === parent) return
@@ -77,8 +83,8 @@ internal class HomeSidePanelDrawer(
 
     fun setEnabled(value: Boolean) {
         enabled = value
-        root.visibility = if (value || opened) View.VISIBLE else View.GONE
-        edge.visibility = if (value && !opened) View.VISIBLE else View.GONE
+        root.visibility = if (opened || (value && edgeEnabled)) View.VISIBLE else View.GONE
+        edge.visibility = if (value && edgeEnabled && !opened) View.VISIBLE else View.GONE
         if (!value && opened) close(false)
     }
 
@@ -112,7 +118,7 @@ internal class HomeSidePanelDrawer(
             panel.animate().cancel(); scrim.animate().cancel()
             panel.translationX = -panelWidth.toFloat(); scrim.alpha = 0f; scrim.visibility = View.GONE
             panel.visibility = View.GONE
-            edge.visibility = if (enabled) View.VISIBLE else View.GONE
+            edge.visibility = if (enabled && edgeEnabled) View.VISIBLE else View.GONE
             resizeRoot(open = false)
             root.visibility = if (enabled) View.VISIBLE else View.GONE
             return
@@ -121,7 +127,7 @@ internal class HomeSidePanelDrawer(
             if (opened) return@withEndAction
             scrim.visibility = View.GONE
             panel.visibility = View.GONE
-            edge.visibility = if (enabled) View.VISIBLE else View.GONE
+            edge.visibility = if (enabled && edgeEnabled) View.VISIBLE else View.GONE
             resizeRoot(open = false)
             root.visibility = if (enabled) View.VISIBLE else View.GONE
         }.start()
@@ -299,7 +305,7 @@ internal class HomeSidePanelDrawer(
     }
 
     private fun onEdgeTouch(event: MotionEvent): Boolean {
-        if (!enabled) return false
+        if (!enabled || !edgeEnabled) return false
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> { downX = event.rawX; lastX = downX; dragging = false; return true }
             MotionEvent.ACTION_MOVE -> {

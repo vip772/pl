@@ -8,7 +8,7 @@ code='''class MotionEvent(val actionMasked:Int,val rawX:Float) {companion object
 class Animation {fun withEndAction(a:Any?)=this;fun cancel(){}}
 class View {var visibility=0;var translationX=0f;var alpha=0f;fun animate()=Animation();companion object {const val VISIBLE=0;const val GONE=8}}
 class Drawer {
- var enabled=true;var opened=false;var dragging=false;var downX=0f;var lastX=0f
+ var enabled=true;var edgeEnabled=true;var opened=false;var dragging=false;var downX=0f;var lastX=0f
  val panelWidth=300;val root=View();val panel=View();val edge=View();val scrim=View();var width=72
  fun dp(v:Int)=v
  fun resizeRoot(open:Boolean){width=if(open)1000 else 72}
@@ -24,6 +24,8 @@ fun main(){
  d.close(false);check(d.panel.visibility==8);d.touch(0,20f);d.touch(2,230f);d.touch(1,230f);check(d.opened);check(d.panel.visibility==0)
  val short=Drawer();short.touch(0,20f);short.touch(2,40f);short.touch(1,40f);check(!short.opened);check(short.width==72)
  val off=Drawer();off.enabled=false;check(!off.touch(0,20f));check(!off.opened)
+ val profile=Drawer();profile.edgeEnabled=false;check(!profile.touch(0,20f));profile.touch(2,220f);check(!profile.opened)
+ val edge=Drawer();edge.edgeEnabled=true;check(edge.touch(0,20f));edge.touch(2,220f);check(edge.opened)
  println("PASS: 历史边缘跟手拖动、展开阈值、短划关闭、关闭后重开面板可见、禁用不打开")
 }
 '''

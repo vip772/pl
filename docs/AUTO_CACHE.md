@@ -105,3 +105,10 @@
 用户日志Hchat-runtime-20261016-212624：21:25:58.816至59.047、21:26:02.048等多帧，背景bitmap=true/recycled=false，但destination=RectF(-1440,0,0,3120)，clip为(0,0,1440,3120)。图片已经可用，却被绘制到局部裁剪区左侧。ScreenAlignedBitmapDrawable此前始终扣除anchor.getLocationOnScreen的横向偏移；聊天容器进场的整屏位移也被抵消，不能随页面显示。
 修复为聊天图片显式启用followHorizontalMotion，只取消横向屏幕补偿；纵向对齐、缩放与透明度不变。首页等页面默认仍按屏幕对齐。背景首次设置及decor修复重建Drawable均传递该模式。保留聊天移动容器归属、返回动画、原生背景写入保护及水波纹路径。
 JVM回归加入屏外进场、中途、归位和右滑返回的局部绘图区覆盖断言，并保留原屏幕对齐/尺寸变化/反馈测试。未本地Gradle构建。日志能证实绘制坐标缺陷，不证明所有首帧延迟均由此引起：首次未缓存图片仍采用现有异步加载，实机是否完全消除闪现需新包确认。
+
+### 启动掉帧与首页侧边栏头像修复
+日志Hchat-runtime-20261016-214748显示：启动后首页首轮背景刷新slowRefresh=300ms；随后背景FrameMetrics报告wechat页120帧中maxMs=1443.929、后续maxMs=76.065，另有maxMs=8823.712。该FrameMetrics统计器在主线程逐帧读取指标并累计，不能证明它制造了8.8秒卡顿，但属于常驻诊断负担，本次移除整套统计监听、FrameSample与清理路径，保留页面目标状态framePageSlots和业务刷新。
+
+侧边栏昵称头像偶发空白的原因是头像图片只绑定当前ImageView；标题根View重建或重新收集后，新ImageView只设置灰色占位，Session没有保留已解码Bitmap。另有加载状态释放分散在正常完成路径，异常时可能阻塞后续加载。本次Session保留retainedAvatar，创建标题头像时立即复用；加载工作统一finally释放avatarLoading，并在未成功时延迟重试；销毁时移除重试任务。
+
+入口互斥规则：homeVisible且showProfile()为true时只显示昵称头像入口，edgeEnabled=false；showProfile()为false时才显示左侧72dp边缘触摸层并设置64dp系统手势排除区。关闭昵称头像模式后才可使用左边缘右划，打开昵称头像模式不会拦截左边缘滑动。

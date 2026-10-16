@@ -283,6 +283,9 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private var headerAttempts = 0
         private val avatarLoading = AtomicBoolean(false)
         private var avatarUrl: String? = null
+        private var retainedAvatar: android.graphics.Bitmap? = null
+        private var lastEdgeEnabled: Boolean? = null
+        private val avatarRetry = Runnable { if (attached) loadAvatar() }
         private var loadedAvatarAccount: String? = null
         private var nextAvatarAttemptAt = 0L
         private var headerRetryPending = false
@@ -310,6 +313,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
             val stateChanged = lastHomeVisible != homeVisible
             if (stateChanged) drawer.setEnabled(homeVisible)
+            val edgeEnabled = homeVisible && !showProfile()
+            drawer.setEdgeEnabled(edgeEnabled)
             if (header != null && header?.parent == null) header = null
             val headerVisible = homeVisible && isWechatTab()
             if (headerVisible) ensureHeader()
@@ -336,11 +341,12 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 updateScrollableTitle(headerVisible)
             }
             if (headerVisible) sizeHeader()
-            if (Build.VERSION.SDK_INT >= 29 && stateChanged) {
+            if (Build.VERSION.SDK_INT >= 29 && lastEdgeEnabled != edgeEnabled) {
                 decor.setSystemGestureExclusionRects(
-                    if (homeVisible) listOf(Rect(0, 0, dp(64), decor.height.coerceAtLeast(1))) else emptyList()
+                    if (edgeEnabled) listOf(Rect(0, 0, dp(64), decor.height.coerceAtLeast(1))) else emptyList()
                 )
             }
+            lastEdgeEnabled = edgeEnabled
             lastHomeVisible = homeVisible
             refreshEffect()
         }
@@ -353,6 +359,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
         fun detach() {
             attached = false
+            handler.removeCallbacks(avatarRetry)
             if (Build.VERSION.SDK_INT >= 29) decor.setSystemGestureExclusionRects(emptyList())
             restoreNativeTitle()
             avatarEffect?.stop()
@@ -410,6 +417,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 clipToOutline = true
                 outlineProvider = ViewOutlineProvider.BACKGROUND
             }
+            retainedAvatar?.takeUnless { it.isRecycled }?.let(iv::setImageBitmap)
             root.addView(iv, LinearLayout.LayoutParams(dp(38), dp(38)))
             val text = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0) }
             val nick = TextView(activity).apply {
@@ -474,6 +482,12 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val wxid = WeChatApis.account()?.selfWxId().orEmpty()
             if (wxid.isBlank()) { avatarLoading.set(false); return }
             val url = runCatching { WeChatApis.contacts()?.getContact(wxid)?.avatarUrl.orEmpty() }.getOrDefault("")
+            if (loadedAvatarAccount == wxid && retainedAvatar?.isRecycled == false) {
+                avatar?.setImageBitmap(retainedAvatar)
+                drawer.setAvatar(retainedAvatar)
+                avatarLoading.set(false)
+                return
+            }
             if (loadedAvatarAccount == wxid && (url.isBlank() || avatarUrl == url)) {
                 avatarLoading.set(false)
                 return
@@ -481,12 +495,14 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             nextAvatarAttemptAt = now + 1500L
             val started = now
             profileLoader.execute {
+                try {
                 val digest = MessageDigest.getInstance("SHA-256").digest(wxid.toByteArray()).joinToString("") { "%02x".format(it) }
                 val directory = File(t.mma.preferences.HchatStorage.storageDir(activity), "home_profile")
                 val file = File(directory, "$digest.png")
                 val cached = runCatching { if (file.isFile) BitmapFactory.decodeFile(file.absolutePath) else null }.getOrNull()
                 if (cached != null) handler.post {
                     if (attached && WeChatApis.account()?.selfWxId() == wxid) {
+                        retainedAvatar = cached
                         avatar?.setImageBitmap(cached)
                         drawer.setAvatar(cached)
                         loadedAvatarAccount = wxid
@@ -511,6 +527,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                             refreshed = true
                             handler.post {
                                 if (attached && WeChatApis.account()?.selfWxId() == wxid) {
+                                    retainedAvatar = bitmap
                                     avatar?.setImageBitmap(bitmap)
                                     drawer.setAvatar(bitmap)
                                     loadedAvatarAccount = wxid
@@ -524,8 +541,15 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 }
                 val complete = (cached != null && savedUrl == url) || refreshed
                 handler.post {
-                    avatarLoading.set(false)
                     if (complete && attached && WeChatApis.account()?.selfWxId() == wxid) avatarUrl = url
+                }
+                } catch (error: Throwable) {
+                    HLog.e("[Hchat:HomeSidePanel] 头像加载失败", error)
+                } finally {
+                    handler.post {
+                        avatarLoading.set(false)
+                        if (attached && loadedAvatarAccount != wxid) handler.postDelayed(avatarRetry, 3000L)
+                    }
                 }
             }
         }

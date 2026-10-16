@@ -392,7 +392,6 @@ private class BackgroundBeautyRuntime(
     }
 
     fun destroy() {
-        frameListeners.keys.toList().forEach(::removeFrameTimings)
         destroyed = true
         preloadedHome = null
         decorUpdateDepth.clear()
@@ -1722,61 +1721,9 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         }
     }
 
-    private class FrameSample {
-        var frames = 0
-        var overBudget = 0
-        var droppedReports = 0
-        var totalNs = 0L
-        var layoutNs = 0L
-        var drawNs = 0L
-        var syncNs = 0L
-        var commandNs = 0L
-        var swapNs = 0L
-        var maxNs = 0L
-    }
-    // Diagnostic labels reuse business-path state, without per-report tree scans.
     private val framePageSlots = WeakHashMap<Activity, BackgroundBeautySettings.Slot>()
-    private val frameListeners = WeakHashMap<Activity, android.view.Window.OnFrameMetricsAvailableListener>()
-    private fun observeFrameTimings(activity: Activity) {
-        if (android.os.Build.VERSION.SDK_INT < 24 || frameListeners.containsKey(activity)) return
-        val samples = HashMap<String, FrameSample>()
-        val listener = android.view.Window.OnFrameMetricsAvailableListener { _, metrics, dropped ->
-            if (destroyed) return@OnFrameMetricsAvailableListener
-            val enabled = prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)
-            val slot = framePageSlots[activity]?.key ?: "other"
-            val key = "$slot:enabled=$enabled"
-            val sample = samples.getOrPut(key) { FrameSample() }
-            val total = metrics.getMetric(android.view.FrameMetrics.TOTAL_DURATION).coerceAtLeast(0L)
-            val hz = activity.window.decorView.display?.refreshRate?.takeIf { it > 0f } ?: 60f
-            val budget = (1_000_000_000.0 / hz).toLong()
-            sample.frames++
-            if (total > budget) sample.overBudget++
-            sample.droppedReports += dropped
-            sample.totalNs += total
-            sample.maxNs = maxOf(sample.maxNs, total)
-            sample.layoutNs += metrics.getMetric(android.view.FrameMetrics.LAYOUT_MEASURE_DURATION).coerceAtLeast(0L)
-            sample.drawNs += metrics.getMetric(android.view.FrameMetrics.DRAW_DURATION).coerceAtLeast(0L)
-            sample.syncNs += metrics.getMetric(android.view.FrameMetrics.SYNC_DURATION).coerceAtLeast(0L)
-            sample.commandNs += metrics.getMetric(android.view.FrameMetrics.COMMAND_ISSUE_DURATION).coerceAtLeast(0L)
-            sample.swapNs += metrics.getMetric(android.view.FrameMetrics.SWAP_BUFFERS_DURATION).coerceAtLeast(0L)
-            if (sample.frames >= 120) {
-                fun ms(ns: Long) = ns / sample.frames / 1_000_000.0
-                HLog.i("$TAG PERF frames page=$key hz=$hz count=${sample.frames} overBudget=${sample.overBudget} reportsDropped=${sample.droppedReports} avgMs=${ms(sample.totalNs)} maxMs=${sample.maxNs / 1_000_000.0} layoutMs=${ms(sample.layoutNs)} drawMs=${ms(sample.drawNs)} syncMs=${ms(sample.syncNs)} commandMs=${ms(sample.commandNs)} swapMs=${ms(sample.swapNs)}")
-                samples.remove(key)
-            }
-        }
-        frameListeners[activity] = listener
-        activity.window.addOnFrameMetricsAvailableListener(listener, main)
-    }
-    private fun removeFrameTimings(activity: Activity) {
-        framePageSlots.remove(activity)
-        if (android.os.Build.VERSION.SDK_INT >= 24) {
-            frameListeners.remove(activity)?.let { activity.window.removeOnFrameMetricsAvailableListener(it) }
-        }
-    }
     private fun scheduleRefresh(activity: Activity, retries: Int = 0) {
         if (destroyed || activity.isFinishing || activity.isDestroyed) return
-        observeFrameTimings(activity)
         synchronized(observedActivities) { observedActivities[activity] = true }
         val task = synchronized(pendingRefreshes) {
             if (pendingRefreshes.containsKey(activity)) return@synchronized null
@@ -3273,7 +3220,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     }
 
     private fun forgetActivity(activity: Activity) {
-        removeFrameTimings(activity)
+        framePageSlots.remove(activity)
         synchronized(observedActivities) { observedActivities.remove(activity) }
         synchronized(nativeChatImages) { nativeChatImages.remove(activity) }
         synchronized(launcherTabIndices) { launcherTabIndices.remove(activity) }
