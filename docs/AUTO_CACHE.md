@@ -112,3 +112,8 @@ JVM回归加入屏外进场、中途、归位和右滑返回的局部绘图区�
 侧边栏昵称头像偶发空白的原因是头像图片只绑定当前ImageView；标题根View重建或重新收集后，新ImageView只设置灰色占位，Session没有保留已解码Bitmap。另有加载状态释放分散在正常完成路径，异常时可能阻塞后续加载。本次Session保留retainedAvatar，创建标题头像时立即复用；加载工作统一finally释放avatarLoading，并在未成功时延迟重试；销毁时移除重试任务。
 
 入口互斥规则：homeVisible且showProfile()为true时只显示昵称头像入口，edgeEnabled=false；showProfile()为false时才显示左侧72dp边缘触摸层并设置64dp系统手势排除区。关闭昵称头像模式后才可使用左边缘右划，打开昵称头像模式不会拦截左边缘滑动。
+
+### 8.0.78发现页原生隐藏条目首帧闪现
+本项目没有独立“隐藏发现页条目”配置。用户使用的隐藏状态由微信原生管理。日志22:57:19已有discover页背景预处理，22:57:54切页时背景应用；没有条目可见性日志，不能从日志单独归因背景透明处理。
+本地8.0.78 Smali明确链路：AbstractTabChildPreference.A载入Preference资源后调用FindMoreFriendsUI.F0；F0创建com.tencent.mm.ui.v5并调用x3.h(Runnable)；x3.h无条件向主线程Handler.post；v5.run读取y1的N/P/Q/R账号状态后调用FindMoreFriendsUI.V1，后者更新条目隐藏并notifyDataSetChanged。首次完整资源列表与延后状态刷新之间存在可绘制窗口。
+修复仅限versionName=8.0.78、精确v5 Runnable类和d字段类型=FindMoreFriendsUI、x3.h(Runnable):void，且仅主线程：原Runnable当场执行，跳过同一次入队，确保只执行一次。其它Runnable、其它线程、其它版本原样放行。没有复制隐藏名单、全局改Handler或提前同步整套发现页初始化。该Hook随BackgroundBeauty运行时安装，若运行时未安装则不覆盖此行为。当前仅具备8.0.78本地逆向证据，未声明其它版本验证通过。云端构建与实机验证仍需确认。

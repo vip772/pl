@@ -546,8 +546,32 @@ private class BackgroundBeautyRuntime(
         initialStoryMuteVisibility.clear()
     }
 
+    /** 8.0.78 F0 posts v5: account status -> V1 -> preference visibility + notify. */
+    private fun installDiscoverStatusBeforeDraw(): Boolean {
+        val version = runCatching { WeChatApis.version()?.current()?.versionName }.getOrNull()
+        if (version != "8.0.78") return false
+        val loader = context.hostClassLoader()
+        val taskClass = KavaReflector.loadClass("com.tencent.mm.ui.v5", loader) ?: return false
+        if (!Runnable::class.java.isAssignableFrom(taskClass)) return false
+        val ownerField = KavaReflector.declaredFields(taskClass).singleOrNull {
+            it.name == "d" && it.type.name == DISCOVER_FRAGMENT
+        } ?: return false
+        val scheduler = KavaReflector.loadClass("com.tencent.mm.sdk.platformtools.x3", loader) ?: return false
+        val enqueue = KavaReflector.findMethodRecursive(scheduler, "h", Runnable::class.java)
+            ?.takeIf { java.lang.reflect.Modifier.isStatic(it.modifiers) && it.returnType == Void.TYPE }
+            ?: return false
+        return hookOnce(enqueue, before = { param ->
+            if (Looper.myLooper() != Looper.getMainLooper()) return@hookOnce
+            val task = param.args.firstOrNull() as? Runnable ?: return@hookOnce
+            if (task.javaClass !== taskClass || KavaReflector.readField(ownerField, task) == null) return@hookOnce
+            // Run exactly the task the host created; do not enqueue a second update.
+            task.run()
+            param.result = null
+        })
+    }
+
     private fun installFragmentHooks(): Boolean {
-        var installed = false
+        var installed = installDiscoverStatusBeforeDraw()
         KavaReflector.loadClass(ME_FRAGMENT, context.hostClassLoader())?.let { clazz ->
             findWechatVerifiedMethod(clazz, "C0", Bundle::class.java)?.let { method ->
                 installed = hookOnce(method, after = { param ->
