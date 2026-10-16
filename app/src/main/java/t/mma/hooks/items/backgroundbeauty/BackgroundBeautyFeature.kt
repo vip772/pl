@@ -474,10 +474,14 @@ private class BackgroundBeautyRuntime(
                 val state = states[activity] ?: return@hookOnce
                 val slot = currentLauncherSlot(activity) ?: return@hookOnce
                 if (slot != BackgroundBeautySettings.Slot.CHAT && hasConfiguredBackground(activity)) {
-                    applyChromeTransparency(state, slot)
-                    applySystemBars(state)
-                    invalidateWechatBackdrops(activity)
-                    armWechatDiagnostics(activity, "home-complete:${method.name}")
+                    // q is also invoked by ConversationListView.onScroll: never scan the tree here.
+                    state.surfaces.entries.toList().forEach { (view, snapshot) ->
+                        if (view.isAttachedToWindow && isChromeSurface(view) &&
+                            (view.background !== snapshot.appliedBackground || snapshot.slot != slot)) {
+                            setTransparentSurface(state, view, slot)
+                        }
+                    }
+                    if (!state.systemBarsApplied) applySystemBars(state)
                 }
             }) || installed
         }
@@ -1365,6 +1369,7 @@ private class BackgroundBeautyRuntime(
             val windowClass = KavaReflector.loadClass("com.android.internal.policy.PhoneWindow", context.hostClassLoader())
             KavaReflector.findMethodRecursive(windowClass, name, Integer.TYPE)?.let { method ->
                 hookOnce(method, before = { param ->
+                    if (surfaceMutationDepth != 0 || restoringBounce) return@hookOnce
                     val probeWindow = param.thisObject as? android.view.Window
                     val probeActivity = probeWindow?.let { findActivity(it.decorView) }
                     if (probeActivity != null && probeActivity.javaClass.name == LAUNCHER_ACTIVITY &&
@@ -1384,8 +1389,9 @@ private class BackgroundBeautyRuntime(
                         param.args[0] = Color.TRANSPARENT
                     }
                 }, after = { param ->
+                    if (surfaceMutationDepth != 0 || restoringBounce) return@hookOnce
                     val window = param.thisObject as? android.view.Window ?: return@hookOnce
-                    val activity = findActivity(window.decorView) ?: return@hookOnce
+val activity = findActivity(window.decorView) ?: return@hookOnce
                     if (activity.javaClass.name == LAUNCHER_ACTIVITY &&
                         diagnosticCounts.computeIfAbsent("wx-bar-after:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 24) {
                         HLog.i("$TAG WXBAR phase=after method=$name effectiveArgument=${param.args.firstOrNull()} ${wechatProbeState(activity)}")
@@ -3176,16 +3182,16 @@ private class BackgroundBeautyRuntime(
         // FitSystemWindowLayoutView on first chat. Keep its original inset policy
         // throughout chat/return rather than toggling full-window layout flags.
         if (!isConversationActivity(state.activity)) {
-            window.decorView.systemUiVisibility =
-                window.decorView.systemUiVisibility or IMMERSIVE_FLAGS
+            val desired = window.decorView.systemUiVisibility or IMMERSIVE_FLAGS
+            if (window.decorView.systemUiVisibility != desired) window.decorView.systemUiVisibility = desired
         }
-        window.statusBarColor = Color.TRANSPARENT
-        window.navigationBarColor = Color.TRANSPARENT
+        if (window.statusBarColor != Color.TRANSPARENT) window.statusBarColor = Color.TRANSPARENT
+        if (window.navigationBarColor != Color.TRANSPARENT) window.navigationBarColor = Color.TRANSPARENT
         if (android.os.Build.VERSION.SDK_INT >= 28) {
-            window.navigationBarDividerColor = Color.TRANSPARENT
+            if (window.navigationBarDividerColor != Color.TRANSPARENT) window.navigationBarDividerColor = Color.TRANSPARENT
         }
         if (android.os.Build.VERSION.SDK_INT >= 29) {
-            window.isNavigationBarContrastEnforced = false
+            if (window.isNavigationBarContrastEnforced) window.isNavigationBarContrastEnforced = false
         }
         state.systemBarsApplied = true
         } finally { surfaceMutationDepth-- }
@@ -3386,9 +3392,10 @@ private class BackgroundBeautyRuntime(
         }
     }
 
-    private fun resourceId(name: String): Int {
+    private val resourceIds = HashMap<String, Int>()
+    private fun resourceId(name: String): Int = resourceIds.getOrPut(name) {
         val host = context.hostContext()
-        return host.resources.getIdentifier(name, "id", host.packageName)
+        host.resources.getIdentifier(name, "id", host.packageName)
     }
 
     private fun cloneDrawable(drawable: Drawable?, context: Context): Drawable? {
@@ -3456,10 +3463,21 @@ private class BackgroundBeautyRuntime(
         return false
     }
 
-    private fun findActivity(owner: Any?): Activity? = findActivity(
-        owner,
-        Collections.newSetFromMap(IdentityHashMap<Any, Boolean>())
-    )
+    private fun findActivity(owner: Any?): Activity? {
+        if (owner is Activity) return owner
+        if (owner is View) {
+            surfaceOwners[owner]?.activity?.let { return it }
+            var current: Context? = owner.context
+            while (current != null) {
+                if (current is Activity) return current
+                val base = (current as? ContextWrapper)?.baseContext ?: break
+                if (base === current) break
+                current = base
+            }
+            states.keys.firstOrNull { it.window.decorView === owner }?.let { return it }
+        }
+        return findActivity(owner, Collections.newSetFromMap(IdentityHashMap<Any, Boolean>()))
+    }
 
     private fun findActivity(owner: Any?, visited: MutableSet<Any>): Activity? {
         if (owner == null || !visited.add(owner)) return null

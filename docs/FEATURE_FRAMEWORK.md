@@ -2040,3 +2040,7 @@ Release 附件中的 APK 保持 Hchat-release-signed.apk / Hchat-alt-entry-relea
 ### efacf6f 复测失败后的基线恢复与帧耗时采样
 用户确认删除水波纹、阻断GL激活均未改善持续卡顿；不再将这些机制称为主因。最新日志首次 slowRefresh=331ms，随后17–48ms，未提供持续滚动逐帧时间。0f570de 与8b4ab97的 BackgroundBeautyFeature 内容相同；首次透明回归范围集中在后三次优化。恢复0f570de的 applyNativeChrome/setTransparentSurface 顺序、未填充列表的准备规则、首页背景配置判定；保留任务栏扫描边界及GL生命周期控制。按要求恢复329d04b水波纹和测试，撤销每次列表绑定后追加的全页刷新。
 加入 Android Window FrameMetrics：按当前页及功能开关分组，每120份帧报告汇总总时长、layout/draw/sync/command/swap均值、最大时长、超过当前刷新率预算数量和丢失报告数。不逐帧写日志；overBudget不是系统精确丢帧率，报告延迟可能使切页边界少量错分。此采样用于区分布局/绘制/渲染提交等待，不能替代Perfetto调用栈，不承诺本次解决持续卡顿。关闭背景也继续采样，便于同页对照。未本地Gradle构建。
+
+### Root现场采样定位首页滚动系统栏重入
+现有c714cab实机：simpleperf cpu-clock 199Hz、16秒、dwarf 16384，固定8轮上下滑动；3233样本，无丢样本。保存/data/local/tmp/hchat_perf/enabled.data及enabled.perfetto-trace，调用栈导出/sdcard/Download/wechat-perf-callgraph.txt。部分内存DEX符号不可读，但关键链可解析：AbsListView.FlingRunnable → ConversationListView.onScroll/v → HomeUI.a/q Hook → pi.i0.m → setStatusBarColor Hook → pi.i0.z/A → KavaReflector.findMethodRecursive；另有Resources.getIdentifier链。v8.3.3 c714cab mapping核验pi.i0.m=applySystemBars、z/A=findActivity。该链为采样证实的高频额外工作，不能把树状图的相对分支百分比直接称作总CPU占比。关闭背景现场对照受界面焦点/浮窗切换干扰尚未完成，不报告改善比例。
+HomeUI q/w回调不再每次执行全树applyChromeTransparency和全量applySystemBars，只修复已管理栏位；完整生命周期刷新仍执行原路径。系统栏Hook在模块mutationDepth非零时于任何反射前退出；系统属性仅差异时写入，资源ID缓存，已管理View及Decor优先直接返回Activity。保留水波纹及已恢复的首次透明流程。必须通过新包同动作采样验证实际改善，不承诺完全消除卡顿；未本地Gradle构建。
