@@ -2036,3 +2036,7 @@ Release 附件中的 APK 保持 Hchat-release-signed.apk / Hchat-alt-entry-relea
 按用户要求删除沉浸式背景的 RippleDrawable 包装、列表触摸 Hook、热点/按压状态维护；使用无绘制透明 Drawable，AbsListView selector 备份后置为透明，关闭功能时恢复原 selector。
 8.0.78 持久化 DynamicBgContainer.a():void 为激活入口，创建 DynamicBackgroundGLSurfaceView，addView 后调用 c() 向渲染线程发送恢复消息。b(boolean):void 为原生停止入口：暂停、释放、removeView 并清空 e。仅当容器直接属于 MainUIView、LauncherUI 启用且存在微信页背景时，拦截 a()；若已有 GL，先调用原生 b(false)，确认 e 清空后跳过激活。关闭/删除微信页背景及模块销毁时恢复被抑制且仍附着的容器激活。不使用全局 GL 禁用，也不改小程序桌面自己的容器生命周期。范围限定依赖已核验的类与方法形状，其他版本兼容性未验证。
 普通列表行及页面扫描在 TaskBarContainer/AppBrandDesktopContainer 边界停止，保留外层透明处理，内部由任务栏专用 Hook 管理。ConversationListView.y 完成绑定后 post 一次标题栏及页面修复，避免仅依赖滑动回调；首次透明结果仍需实机验证。回归脚本更新为验证透明 Drawable 无绘制，继续检查手势和背景对齐，不运行本地 Gradle。
+
+### efacf6f 复测失败后的基线恢复与帧耗时采样
+用户确认删除水波纹、阻断GL激活均未改善持续卡顿；不再将这些机制称为主因。最新日志首次 slowRefresh=331ms，随后17–48ms，未提供持续滚动逐帧时间。0f570de 与8b4ab97的 BackgroundBeautyFeature 内容相同；首次透明回归范围集中在后三次优化。恢复0f570de的 applyNativeChrome/setTransparentSurface 顺序、未填充列表的准备规则、首页背景配置判定；保留任务栏扫描边界及GL生命周期控制。按要求恢复329d04b水波纹和测试，撤销每次列表绑定后追加的全页刷新。
+加入 Android Window FrameMetrics：按当前页及功能开关分组，每120份帧报告汇总总时长、layout/draw/sync/command/swap均值、最大时长、超过当前刷新率预算数量和丢失报告数。不逐帧写日志；overBudget不是系统精确丢帧率，报告延迟可能使切页边界少量错分。此采样用于区分布局/绘制/渲染提交等待，不能替代Perfetto调用栈，不承诺本次解决持续卡顿。关闭背景也继续采样，便于同页对照。未本地Gradle构建。

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""JVM regression for production edge gesture and background drawable; no Gradle."""
+"""JVM regression for production edge gesture and background feedback drawable; no Gradle."""
 from pathlib import Path
 import os
 import subprocess
@@ -10,7 +10,7 @@ lib = Path(os.environ.get('KOTLIN_LIB_DIR', '/tmp/pl-kotlin-libs'))
 stdlib = next(lib.glob('kotlin-stdlib-*.jar'))
 feature = repo / 'app/src/main/java/t/mma/hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt'
 text = feature.read_text()
-start = text.index('private class BackgroundBeautyTransparentDrawable')
+start = text.index('private class BackgroundBeautyFeedbackDrawable')
 end = text.index('private class ScreenAlignedBitmapDrawable', start)
 stubs = {
     'R.kt': '''package android
@@ -69,11 +69,21 @@ fun main(){
  wide.down(116.71875f,1536.3867f,true);check(!wide.move(116.71875f,1536.3867f));check(wide.move(960.46875f,1571.4258f));wide.reset()
  wide.down(116.71875f,1536.3867f,true);check(!wide.move(120f,1600f));check(!wide.move(960f,1601f));wide.reset()
  wide.down(271f,1536f,true);check(!wide.move(960f,1536f))
- val plain=BackgroundBeautyTransparentDrawable()
- val plainCanvas=Canvas();plain.draw(plainCanvas)
- check(plainCanvas.operations=="")
- check(plain.opacity==PixelFormat.TRANSPARENT)
- println("PASS: tap/jitter/vertical/outside/disabled/leftward pass-through, horizontal takeover and reset, transparent drawable emits no drawing; screen alignment follows anchor movement and window resize without self-invalidating")
+ val native=PaintDrawable();val wrapper=BackgroundBeautyFeedbackDrawable();val canvas=Canvas()
+ wrapper.draw(canvas);check(native.draws==0)
+ wrapper.state=intArrayOf(android.R.attr.state_pressed);wrapper.draw(canvas);check(native.draws==0)
+ wrapper.state=intArrayOf(android.R.attr.state_focused,android.R.attr.state_selected);wrapper.draw(canvas);check(native.draws==0)
+ wrapper.state=intArrayOf();wrapper.draw(canvas);check(native.draws==0)
+ check(wrapper.isStateful())
+ wrapper.setTouchPressed(true)
+ val field=wrapper.javaClass.getDeclaredField("ripple");field.isAccessible=true
+ val inner=field.get(wrapper) as Drawable
+ check(inner.state.contains(android.R.attr.state_pressed) && inner.state.contains(android.R.attr.state_enabled))
+ wrapper.state=intArrayOf(android.R.attr.state_enabled)
+ check(inner.state.contains(android.R.attr.state_pressed))
+ wrapper.setTouchPressed(false)
+ check(!inner.state.contains(android.R.attr.state_pressed))
+ println("PASS: tap/jitter/vertical/outside/disabled/leftward pass-through, horizontal takeover and reset, original solid background never drawn; ripple-only content and state forwarding; screen alignment follows anchor movement and window resize without self-invalidating")
 }
 '''
 }
@@ -122,7 +132,7 @@ public abstract class Drawable {
     files=[]
     for name in ['R.kt','Test.kt']:
         p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end].replace('ColorStateList.valueOf', 'android.content.res.ColorStateList.valueOf') + chr(10) + text[text.index('private class ScreenAlignedBitmapDrawable'):text.index('private class BackgroundBeautyRuntime')].replace('    override fun onBoundsChange(bounds: Rect) {', '    fun onBoundsForTest() { updateDestination() }\n    override fun onBoundsChange(bounds: Rect) {') if name == 'Test.kt' else ''));files.append(str(p))
-    (work/'PixelFormat.kt').write_text('package android.graphics\nobject PixelFormat { const val TRANSPARENT=-2;const val TRANSLUCENT=-3;const val OPAQUE=-1 }')
+    (work/'PixelFormat.kt').write_text('package android.graphics\nobject PixelFormat { const val TRANSLUCENT=-3;const val OPAQUE=-1 }')
 
     prod=repo/'app/src/main/java/t/mma/hooks/items/homesidepanel/SidePanelEdgeGesture.kt'
     compiler=['java','-Xmx256m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(stdlib)+':'+str(work/'classes'),'-d',str(work/'tests.jar')]

@@ -96,6 +96,41 @@ private class BackgroundBeautyTransparentDrawable : Drawable() {
     override fun getOpacity(): Int = PixelFormat.TRANSPARENT
 }
 
+private class BackgroundBeautyFeedbackDrawable() : Drawable(), Drawable.Callback {
+    private val ripple = android.graphics.drawable.RippleDrawable(
+            ColorStateList.valueOf(0x40808080), null, ColorDrawable(Color.WHITE)
+    ).apply { callback = this@BackgroundBeautyFeedbackDrawable }
+    override fun draw(canvas: Canvas) { ripple.bounds = bounds; ripple.draw(canvas) }
+    override fun isStateful(): Boolean = true
+    private var touchPressed = false
+    private var hostState = intArrayOf()
+    fun setTouchPressed(pressed: Boolean) {
+        touchPressed = pressed
+        applyRippleState()
+    }
+    private fun applyRippleState() {
+        ripple.state = if (touchPressed) hostState.filter { it != android.R.attr.state_pressed }.toIntArray() + intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed)
+            else hostState.filter { it != android.R.attr.state_pressed }.toIntArray()
+        invalidateSelf()
+    }
+    override fun onStateChange(state: IntArray): Boolean {
+        hostState = state
+        ripple.state = if (touchPressed) state + intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed) else state
+        invalidateSelf()
+        return true
+    }
+    override fun onBoundsChange(bounds: Rect) { ripple.bounds = bounds }
+    override fun setHotspot(x: Float, y: Float) { ripple.setHotspot(x, y) }
+    override fun setHotspotBounds(left: Int, top: Int, right: Int, bottom: Int) { ripple.setHotspotBounds(left, top, right, bottom) }
+    override fun jumpToCurrentState() { ripple.jumpToCurrentState() }
+    override fun setAlpha(alpha: Int) { ripple.alpha = alpha }
+    override fun setColorFilter(colorFilter: ColorFilter?) { ripple.colorFilter = colorFilter }
+    @Deprecated("Drawable opacity is not used by the background renderer")
+    override fun getOpacity(): Int = PixelFormat.TRANSLUCENT
+    override fun invalidateDrawable(who: Drawable) = invalidateSelf()
+    override fun scheduleDrawable(who: Drawable, what: Runnable, `when`: Long) = scheduleSelf(what, `when`)
+    override fun unscheduleDrawable(who: Drawable, what: Runnable) = unscheduleSelf(what)
+}
 private class ScreenAlignedBitmapDrawable(
     bitmap: Bitmap,
     anchor: View,
@@ -354,6 +389,7 @@ private class BackgroundBeautyRuntime(
     }
 
     fun destroy() {
+        frameListeners.keys.toList().forEach(::removeFrameTimings)
         destroyed = true
         preloadedHome = null
         decorUpdateDepth.clear()
@@ -679,7 +715,7 @@ private class BackgroundBeautyRuntime(
     private fun wechatHomepageBackdropEnabled(activity: Activity): Boolean =
         activity.javaClass.name == LAUNCHER_ACTIVITY &&
             prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
-            states[activity]?.loadedBitmaps?.get(BackgroundBeautySettings.Slot.WECHAT)?.bitmap?.isRecycled == false
+            BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.WECHAT)
     private val wechatTaskControllers = WeakHashMap<View, WeakReference<Any>>()
     private val wechatGradientControllers = WeakHashMap<View, WeakReference<Any>>()
     private fun rememberWechatTaskController(owner: Any?) {
@@ -923,13 +959,6 @@ private class BackgroundBeautyRuntime(
                 val owner = wechatProbeField(list, "m") ?: return@hookOnce
                 rememberWechatTaskController(owner)
                 val activity = findActivity(list) ?: return@hookOnce
-                // Binding may precede HomeUI's final background writes; repair after this UI transaction.
-                list.post {
-                    if (!destroyed && list.isAttachedToWindow && hasConfiguredBackground(activity)) {
-                        applyWechatControllerChrome(owner)
-                        scheduleRefresh(activity)
-                    }
-                }
                 if (resolveTarget(activity) == BackgroundBeautySettings.Slot.WECHAT && hasConfiguredBackground(activity)) {
                     val state = states[activity] ?: return@hookOnce
                     (wechatProbeField(list, "C") as? View)?.let {
@@ -1174,13 +1203,14 @@ private class BackgroundBeautyRuntime(
         pendingPageRoots.keys.removeAll { activity == null || findActivity(it) === activity }
         preparedRoots.entries.removeAll { activity == null || it.value.first.activity === activity }
         listSelectors.entries.filter { activity == null || findActivity(it.key) === activity }.toList().forEach { (list, selector) ->
-            if (list.selector is BackgroundBeautyTransparentDrawable) list.selector = selector
+            if (list.selector is BackgroundBeautyFeedbackDrawable) list.selector = selector
             listSelectors.remove(list)
         }
         listPreDraws.entries.filter { activity == null || findActivity(it.key) === activity }.toList().forEach { (list, listener) ->
             val observer = list.viewTreeObserver
             if (observer.isAlive) observer.removeOnPreDrawListener(listener)
             listPreDraws.remove(list)
+            clearListRipple(list)
         }
         val entries = bounceColors.entries.filter { activity == null || findActivity(it.key) === activity }
             .map { it.key to it.value.toMap() }
@@ -1368,7 +1398,54 @@ private class BackgroundBeautyRuntime(
     private val dirtyBoundRows = WeakHashMap<View, Boolean>()
     private val listSelectors = WeakHashMap<AbsListView, Drawable?>()
     private val listPreDraws = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
+    private val touchFeedbackRows = WeakHashMap<View, View>()
+    private val touchFeedbackOrigins = WeakHashMap<View, Pair<Float, Float>>()
+    private fun updateListRipple(list: ViewGroup, event: android.view.MotionEvent) {
+        val slot = homeLists[list] ?: return
+        if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) return
+        val activity = findActivity(list) ?: return
+        if (states[activity]?.loadedBitmaps?.get(slot)?.bitmap?.isRecycled != false) return
+        when (event.actionMasked) {
+            android.view.MotionEvent.ACTION_DOWN -> {
+                for (index in list.childCount - 1 downTo 0) {
+                    val row = list.getChildAt(index)
+                    val x = event.x + list.scrollX - row.left - row.translationX
+                    val y = event.y + list.scrollY - row.top - row.translationY
+                    if (row.visibility == View.VISIBLE && x >= 0 && y >= 0 && x < row.width && y < row.height) {
+                        if (dirtyBoundRows.remove(row) == true || surfaceOwners[row] == null) applyBoundRow(list, row)
+                        (row.background as? BackgroundBeautyFeedbackDrawable)?.let { ripple ->
+                            ripple.setHotspot(x, y)
+                            ripple.setTouchPressed(true)
+                            if (diagnosticCounts.computeIfAbsent("ripple:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
+                                HLog.i("$TAG DIAG ripple slot=${slot.key} row=${row.javaClass.name} hotspot=$x/$y")
+                            }
+                            touchFeedbackRows[list] = row
+                            touchFeedbackOrigins[list] = event.x to event.y
+                        }
+                        break
+                    }
+                }
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val origin = touchFeedbackOrigins[list] ?: return
+                val slop = android.view.ViewConfiguration.get(list.context).scaledTouchSlop
+                if (kotlin.math.abs(event.x - origin.first) > slop || kotlin.math.abs(event.y - origin.second) > slop) clearListRipple(list)
+            }
+            android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> clearListRipple(list)
+        }
+    }
+    private fun clearListRipple(list: View) {
+        (touchFeedbackRows.remove(list)?.background as? BackgroundBeautyFeedbackDrawable)?.setTouchPressed(false)
+        touchFeedbackOrigins.remove(list)
+    }
     private fun installRecyclerBinding(view: View) {
+        KavaReflector.findMethodRecursive(view.javaClass, "dispatchTouchEvent", android.view.MotionEvent::class.java)?.let { method ->
+            hookOnce(method, before = { param ->
+                val list = param.thisObject as? ViewGroup ?: return@hookOnce
+                val event = param.args.firstOrNull() as? android.view.MotionEvent ?: return@hookOnce
+                updateListRipple(list, event)
+            })
+        }
         if (view is ViewGroup && !listPreDraws.containsKey(view)) {
             val listener = ViewTreeObserver.OnPreDrawListener {
                 if (!destroyed && view.isShown) {
@@ -1404,7 +1481,7 @@ private class BackgroundBeautyRuntime(
         if (view is AbsListView) {
             if (!listSelectors.containsKey(view)) {
                 listSelectors[view] = view.selector
-                view.selector = BackgroundBeautyTransparentDrawable()
+                view.selector = BackgroundBeautyFeedbackDrawable()
             }
             val adapter = view.adapter ?: return
             if (listAdapters[view] === adapter) return
@@ -1482,7 +1559,7 @@ private class BackgroundBeautyRuntime(
             snapshot.originalMinimumWidth = row.minimumWidth
             snapshot.originalMinimumHeight = row.minimumHeight
         }
-        setTransparentSurface(state, row, slot)
+        setTransparentSurface(state, row, slot, preserveFeedback = true)
         if (isWechatTaskSurface(row)) return
         val queue = ArrayDeque<View>()
         if (row is ViewGroup) for (i in 0 until row.childCount) queue.add(row.getChildAt(i))
@@ -1491,7 +1568,7 @@ private class BackgroundBeautyRuntime(
             val child = queue.removeFirst()
             if (isComposeSurface(child) || isBottomBar(child) || isWechatTaskSurface(child)) continue
             if (child is ViewGroup) {
-                if (child.background != null) setTransparentSurface(state, child, slot)
+                if (child.background != null) setTransparentSurface(state, child, slot, preserveFeedback = true)
                 for (i in 0 until child.childCount) queue.add(child.getChildAt(i))
             }
         }
@@ -1635,8 +1712,58 @@ private class BackgroundBeautyRuntime(
         }
     }
 
+    private class FrameSample {
+        var frames = 0
+        var overBudget = 0
+        var droppedReports = 0
+        var totalNs = 0L
+        var layoutNs = 0L
+        var drawNs = 0L
+        var syncNs = 0L
+        var commandNs = 0L
+        var swapNs = 0L
+        var maxNs = 0L
+    }
+    private val frameListeners = WeakHashMap<Activity, android.view.Window.OnFrameMetricsAvailableListener>()
+    private fun observeFrameTimings(activity: Activity) {
+        if (android.os.Build.VERSION.SDK_INT < 24 || frameListeners.containsKey(activity)) return
+        val samples = HashMap<String, FrameSample>()
+        val listener = android.view.Window.OnFrameMetricsAvailableListener { _, metrics, dropped ->
+            if (destroyed) return@OnFrameMetricsAvailableListener
+            val enabled = prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)
+            val slot = resolveTarget(activity)?.key ?: "other"
+            val key = "$slot:enabled=$enabled"
+            val sample = samples.getOrPut(key) { FrameSample() }
+            val total = metrics.getMetric(android.view.FrameMetrics.TOTAL_DURATION).coerceAtLeast(0L)
+            val hz = activity.window.decorView.display?.refreshRate?.takeIf { it > 0f } ?: 60f
+            val budget = (1_000_000_000.0 / hz).toLong()
+            sample.frames++
+            if (total > budget) sample.overBudget++
+            sample.droppedReports += dropped
+            sample.totalNs += total
+            sample.maxNs = maxOf(sample.maxNs, total)
+            sample.layoutNs += metrics.getMetric(android.view.FrameMetrics.LAYOUT_MEASURE_DURATION).coerceAtLeast(0L)
+            sample.drawNs += metrics.getMetric(android.view.FrameMetrics.DRAW_DURATION).coerceAtLeast(0L)
+            sample.syncNs += metrics.getMetric(android.view.FrameMetrics.SYNC_DURATION).coerceAtLeast(0L)
+            sample.commandNs += metrics.getMetric(android.view.FrameMetrics.COMMAND_ISSUE_DURATION).coerceAtLeast(0L)
+            sample.swapNs += metrics.getMetric(android.view.FrameMetrics.SWAP_BUFFERS_DURATION).coerceAtLeast(0L)
+            if (sample.frames >= 120) {
+                fun ms(ns: Long) = ns / sample.frames / 1_000_000.0
+                HLog.i("$TAG PERF frames page=$key hz=$hz count=${sample.frames} overBudget=${sample.overBudget} reportsDropped=${sample.droppedReports} avgMs=${ms(sample.totalNs)} maxMs=${sample.maxNs / 1_000_000.0} layoutMs=${ms(sample.layoutNs)} drawMs=${ms(sample.drawNs)} syncMs=${ms(sample.syncNs)} commandMs=${ms(sample.commandNs)} swapMs=${ms(sample.swapNs)}")
+                samples.remove(key)
+            }
+        }
+        frameListeners[activity] = listener
+        activity.window.addOnFrameMetricsAvailableListener(listener, main)
+    }
+    private fun removeFrameTimings(activity: Activity) {
+        if (android.os.Build.VERSION.SDK_INT >= 24) {
+            frameListeners.remove(activity)?.let { activity.window.removeOnFrameMetricsAvailableListener(it) }
+        }
+    }
     private fun scheduleRefresh(activity: Activity, retries: Int = 0) {
         if (destroyed || activity.isFinishing || activity.isDestroyed) return
+        observeFrameTimings(activity)
         synchronized(observedActivities) { observedActivities[activity] = true }
         val task = synchronized(pendingRefreshes) {
             if (pendingRefreshes.containsKey(activity)) return@synchronized null
@@ -1894,8 +2021,8 @@ private class BackgroundBeautyRuntime(
         val pendingList = homeLists.entries.any { (list, listSlot) ->
             listSlot == slot && list is ViewGroup && list.childCount == 0 && isDescendantOf(list, root)
         }
-        preparedRoots[root] = state to revision
-        if (pendingList) pendingPageRoots[root] = slot
+        if (!pendingList) preparedRoots[root] = state to revision
+        else pendingPageRoots[root] = slot
         if (diagnosticCounts.computeIfAbsent("prepare:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
             HLog.i("$TAG DIAG prepare slot=${slot.key} elapsedMs=${android.os.SystemClock.uptimeMillis() - started}")
         }
@@ -2042,7 +2169,7 @@ private class BackgroundBeautyRuntime(
             if (node.javaClass == View::class.java || node is ViewGroup || node is ImageView) {
                 // A passive microphone is not a separate touch target. Its parent's host ripple
                 // must not be duplicated by another module ripple on the image itself.
-                setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
             }
             logChatSurface(node, "speech-direct-after")
             if (node is ViewGroup) for (i in 0 until node.childCount) queue.add(node.getChildAt(i))
@@ -2094,7 +2221,7 @@ private class BackgroundBeautyRuntime(
             val node = queue.removeFirst()
             if (talkId != 0 && node.id == talkId && node is android.widget.Button) {
                 logChatSurface(node, "hold-to-talk-before")
-                setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
                 logChatSurface(node, "hold-to-talk-after")
             }
             if (overlayId != 0 && node.id == overlayId && node is ViewGroup) {
@@ -2130,7 +2257,7 @@ private class BackgroundBeautyRuntime(
         listOf("m", "p", "l").forEach { field ->
             (KavaReflector.readField(manager, field) as? View)?.let { view ->
                 logChatSurface(view, "emoji-before:$field")
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
                 logChatSurface(view, "emoji-after:$field")
             }
         }
@@ -2178,7 +2305,7 @@ private class BackgroundBeautyRuntime(
                 while (queue.isNotEmpty()) {
                     val view = queue.removeFirst()
                     if (view is ViewGroup || view is ImageView || view.javaClass == View::class.java) {
-                        setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                        setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
                     }
                     if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
                 }
@@ -2377,17 +2504,17 @@ private class BackgroundBeautyRuntime(
                     HLog.i("$TAG CHROMEINPUT outlineApplied ${wechatProbeView(view, state.activity)}")
                 } finally { surfaceMutationDepth-- }
             } else if (view is ViewGroup) {
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = !inSpeech)
                 for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
             } else if (view.javaClass == View::class.java && findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null) {
                 // ew_.xml: SpeechInputLayout.m and .o are independent solid View backgrounds.
                 logChatSurface(view, "speech-before")
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = !inSpeech)
                 logChatSurface(view, "speech-after")
             } else if (view is ImageView) {
                 // Footer icons retain their image drawable. Only their independent button surface is cleared.
                 val inSpeech = findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = !inSpeech)
                 if (inSpeech) logChatSurface(view, "speech-icon")
             }
         }
@@ -2437,7 +2564,7 @@ private class BackgroundBeautyRuntime(
             if (slot == BackgroundBeautySettings.Slot.WECHAT && view is android.widget.TextView &&
                 view.text?.toString()?.trim() == "折叠置顶聊天") {
                 val parent = view.parent as? ViewGroup
-                if (parent != null && parent !== root) setTransparentSurface(state, parent, slot)
+                if (parent != null && parent !== root) setTransparentSurface(state, parent, slot, preserveFeedback = true)
             }
             if (slot == BackgroundBeautySettings.Slot.CONTACTS && view.id == resourceId("imk")) {
                 // 运行快照确认该页 imk 外层 LinearLayout 仍绘制 #FF232323。
@@ -2486,7 +2613,7 @@ private class BackgroundBeautyRuntime(
                                 setTransparentSurface(state, child, slot)
                                 for (tabIndex in 0 until child.childCount) {
                                     val tab = child.getChildAt(tabIndex)
-                                    if (tab is ViewGroup) setTransparentSurface(state, tab, slot)
+                                    if (tab is ViewGroup) setTransparentSurface(state, tab, slot, preserveFeedback = true)
                                 }
                             }
                         }
@@ -2750,9 +2877,7 @@ private class BackgroundBeautyRuntime(
     private val initializedChrome = WeakHashMap<View, Boolean>()
     private val inputOutlineStyles = WeakHashMap<View, List<Any?>>()
     private fun applyNativeChrome(view: View, slot: BackgroundBeautySettings.Slot) {
-        if (restoringBounce) return
-        val actionBar = view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer"
-        if (initializedChrome[view] == true && !actionBar) return
+        if (restoringBounce || initializedChrome[view] == true) return
         // ActionBarContainer draws primary/stacked/split layers independently of View.background.
         if (slot == BackgroundBeautySettings.Slot.CHAT && view.javaClass.name != "androidx.appcompat.widget.ActionBarContainer") return
         if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW) ||
@@ -2837,14 +2962,6 @@ private class BackgroundBeautyRuntime(
                     values[setter] = KavaReflector.readField(view, field) as? Drawable
                     surfaceMutationDepth++
                     try { KavaReflector.invoke(setter, view, null) } finally { surfaceMutationDepth-- }
-                } else {
-                    // Verified 8.0.78 h/i/m are independent of View.background.
-                    val actual = KavaReflector.readField(view, field) as? Drawable
-                    if (actual != null) {
-                        values[setter] = actual
-                        surfaceMutationDepth++
-                        try { KavaReflector.invoke(setter, view, null) } finally { surfaceMutationDepth-- }
-                    }
                 }
                 hookOnce(setter, before = { param ->
                     val target = param.thisObject as? View ?: return@hookOnce
@@ -2860,17 +2977,12 @@ private class BackgroundBeautyRuntime(
         state: HostState,
         view: View,
         slot: BackgroundBeautySettings.Slot,
-        clearForeground: Boolean = false
+        clearForeground: Boolean = false,
+        preserveFeedback: Boolean = false
     ) {
         if (slot == BackgroundBeautySettings.Slot.CHAT && state.surfaces[view]?.let {
                 it.slot == slot && it.appliedBitmap != null && view.background === it.appliedBackground
             } == true) return
-        // ActionBarContainer's primary/stacked/split layers can outlive its transparent marker.
-        if (view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") applyNativeChrome(view, slot)
-        val retained = state.surfaces[view]
-        if (retained != null && retained.slot == slot && retained.appliedBitmap == null &&
-            retained.appliedBackground != null && view.background === retained.appliedBackground &&
-            (!clearForeground || view.foreground === retained.appliedForeground)) return
         applyNativeChrome(view, slot)
         surfaceMutationDepth++
         try {
@@ -2880,9 +2992,12 @@ private class BackgroundBeautyRuntime(
                 snapshot.appliedBitmap == null &&
                 snapshot.appliedBackground != null &&
                 view.background === snapshot.appliedBackground &&
+                (if (preserveFeedback) snapshot.appliedBackground is BackgroundBeautyFeedbackDrawable else snapshot.appliedBackground !is BackgroundBeautyFeedbackDrawable) &&
                 (!clearForeground || view.foreground === snapshot.appliedForeground)
             ) return
-            val marker: Drawable = BackgroundBeautyTransparentDrawable()
+            val marker: Drawable = if (preserveFeedback) {
+                BackgroundBeautyFeedbackDrawable()
+            } else BackgroundBeautyTransparentDrawable()
             view.backgroundTintList = null
             view.backgroundTintMode = null
             view.background = marker
@@ -3132,6 +3247,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun forgetActivity(activity: Activity) {
+        removeFrameTimings(activity)
         synchronized(observedActivities) { observedActivities.remove(activity) }
         synchronized(nativeChatImages) { nativeChatImages.remove(activity) }
         synchronized(launcherTabIndices) { launcherTabIndices.remove(activity) }
