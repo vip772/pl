@@ -2271,6 +2271,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             }
         }
     }
+    private val appGridItems = WeakHashMap<View, Boolean>()
     private fun installChatChromeLifecycle() {
         // 8.0.78 AppGrid adapter c.getView binds each page's icon surfaces.
         val appAdapter = KavaReflector.loadClass("com.tencent.mm.pluginsdk.ui.chat.c", context.hostClassLoader())
@@ -2282,6 +2283,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 val activity = findActivity(grid) ?: return@hookOnce
                 val state = states[activity] ?: return@hookOnce
                 if (!hasConfiguredBackground(activity) || resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT) return@hookOnce
+                appGridItems[row] = true
                 val holder = row.tag
                 val key = holder?.let { KavaReflector.readField(it, "p") as? String }
                 val iconName = when (key) {
@@ -2989,6 +2991,16 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         clearForeground: Boolean = false,
         preserveFeedback: Boolean = false
     ) {
+        // AppPanel containers cover the entire page. Only an AppGrid item root
+        // owns feedback; propagated pressed states must not animate ancestors.
+        var itemAncestor: View? = view
+        while (itemAncestor != null && appGridItems[itemAncestor] != true) {
+            itemAncestor = itemAncestor.parent as? View
+        }
+        val inAppPanel = itemAncestor != null ||
+            findAncestor(view, "com.tencent.mm.pluginsdk.ui.chat.AppPanel") != null
+        val feedback = preserveFeedback && (slot != BackgroundBeautySettings.Slot.CHAT ||
+            !inAppPanel || appGridItems[view] == true)
         if (slot == BackgroundBeautySettings.Slot.CHAT && state.surfaces[view]?.let {
                 it.slot == slot && it.appliedBitmap != null && view.background === it.appliedBackground
             } == true) return
@@ -3001,10 +3013,10 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 snapshot.appliedBitmap == null &&
                 snapshot.appliedBackground != null &&
                 view.background === snapshot.appliedBackground &&
-                (if (preserveFeedback) snapshot.appliedBackground is BackgroundBeautyFeedbackDrawable else snapshot.appliedBackground !is BackgroundBeautyFeedbackDrawable) &&
+                (if (feedback) snapshot.appliedBackground is BackgroundBeautyFeedbackDrawable else snapshot.appliedBackground !is BackgroundBeautyFeedbackDrawable) &&
                 (!clearForeground || view.foreground === snapshot.appliedForeground)
             ) return
-            val marker: Drawable = if (preserveFeedback) {
+            val marker: Drawable = if (feedback) {
                 BackgroundBeautyFeedbackDrawable()
             } else BackgroundBeautyTransparentDrawable()
             view.backgroundTintList = null
