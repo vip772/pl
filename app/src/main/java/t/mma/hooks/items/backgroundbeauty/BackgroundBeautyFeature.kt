@@ -1369,7 +1369,7 @@ private class BackgroundBeautyRuntime(
                     val x = event.x + list.scrollX - row.left - row.translationX
                     val y = event.y + list.scrollY - row.top - row.translationY
                     if (row.visibility == View.VISIBLE && x >= 0 && y >= 0 && x < row.width && y < row.height) {
-                        applyBoundRow(list, row)
+                        if (dirtyBoundRows.remove(row) == true || surfaceOwners[row] == null) applyBoundRow(list, row)
                         (row.background as? BackgroundBeautyFeedbackDrawable)?.let { ripple ->
                             ripple.setHotspot(x, y)
                             ripple.setTouchPressed(true)
@@ -1410,6 +1410,7 @@ private class BackgroundBeautyRuntime(
                         val ready = pendingPageRoots.keys.firstOrNull { isDescendantOf(view, it) }
                         if (ready != null) {
                             pendingPageRoots.remove(ready)
+                            preparedRoots.remove(ready)
                             findActivity(view)?.let { activity ->
                                 val state = states[activity]
                                 val slot = homeLists[view]
@@ -1446,7 +1447,9 @@ private class BackgroundBeautyRuntime(
                 hookOnce(method, after = { param ->
                     val list = param.args.getOrNull(2) as? View ?: return@hookOnce
                     val row = param.result as? View ?: return@hookOnce
-                    applyBoundRow(list, row)
+                    // getView may run repeatedly while measuring/layouting the same row.
+                    // Coalesce work until preDraw, after the adapter has finished rebinding it.
+                    if (homeLists.containsKey(list)) dirtyBoundRows[row] = true
                 })
             }
             return
@@ -1485,8 +1488,7 @@ private class BackgroundBeautyRuntime(
                     val holder = param.args.firstOrNull() ?: return@hookOnce
                     val row = KavaReflector.readField(holder, "itemView") as? View ?: return@hookOnce
                     dirtyBoundRows[row] = true
-                    val list = row.parent as? View
-                    if (list != null) applyBoundRow(list, row)
+                    // preDraw applies the final bound state once, including payload rebinds.
                 })
             }
             type = type.superclass
@@ -1505,6 +1507,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun applyHomeRow(state: HostState, row: View, slot: BackgroundBeautySettings.Slot) {
+        val started = android.os.SystemClock.uptimeMillis()
         state.surfaces[row]?.let { snapshot ->
             snapshot.originalPaddingLeft = row.paddingLeft
             snapshot.originalPaddingTop = row.paddingTop
@@ -1524,6 +1527,10 @@ private class BackgroundBeautyRuntime(
                 if (child.background != null) setTransparentSurface(state, child, slot, preserveFeedback = true)
                 for (i in 0 until child.childCount) queue.add(child.getChildAt(i))
             }
+        }
+        val elapsed = android.os.SystemClock.uptimeMillis() - started
+        if (elapsed >= 8 && diagnosticCounts.computeIfAbsent("slow-row:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
+            HLog.i("$TAG PERF row slot=${slot.key} class=${row.javaClass.name} nodes=$visited elapsedMs=$elapsed")
         }
     }
 
@@ -1919,10 +1926,8 @@ private class BackgroundBeautyRuntime(
         val pendingList = homeLists.entries.any { (list, listSlot) ->
             listSlot == slot && list is ViewGroup && list.childCount == 0 && isDescendantOf(list, root)
         }
-        if (!pendingList) preparedRoots[root] = state to revision
-        else {
-            pendingPageRoots[root] = slot
-        }
+        preparedRoots[root] = state to revision
+        if (pendingList) pendingPageRoots[root] = slot
         if (diagnosticCounts.computeIfAbsent("prepare:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
             HLog.i("$TAG DIAG prepare slot=${slot.key} elapsedMs=${android.os.SystemClock.uptimeMillis() - started}")
         }
@@ -2770,7 +2775,9 @@ private class BackgroundBeautyRuntime(
     private val initializedChrome = WeakHashMap<View, Boolean>()
     private val inputOutlineStyles = WeakHashMap<View, List<Any?>>()
     private fun applyNativeChrome(view: View, slot: BackgroundBeautySettings.Slot) {
-        if (restoringBounce || initializedChrome[view] == true) return
+        if (restoringBounce) return
+        val actionBar = view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer"
+        if (initializedChrome[view] == true && !actionBar) return
         // ActionBarContainer draws primary/stacked/split layers independently of View.background.
         if (slot == BackgroundBeautySettings.Slot.CHAT && view.javaClass.name != "androidx.appcompat.widget.ActionBarContainer") return
         if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW) ||
@@ -2855,6 +2862,14 @@ private class BackgroundBeautyRuntime(
                     values[setter] = KavaReflector.readField(view, field) as? Drawable
                     surfaceMutationDepth++
                     try { KavaReflector.invoke(setter, view, null) } finally { surfaceMutationDepth-- }
+                } else {
+                    // Verified 8.0.78 h/i/m are independent of View.background.
+                    val actual = KavaReflector.readField(view, field) as? Drawable
+                    if (actual != null) {
+                        values[setter] = actual
+                        surfaceMutationDepth++
+                        try { KavaReflector.invoke(setter, view, null) } finally { surfaceMutationDepth-- }
+                    }
                 }
                 hookOnce(setter, before = { param ->
                     val target = param.thisObject as? View ?: return@hookOnce
@@ -2876,6 +2891,8 @@ private class BackgroundBeautyRuntime(
         if (slot == BackgroundBeautySettings.Slot.CHAT && state.surfaces[view]?.let {
                 it.slot == slot && it.appliedBitmap != null && view.background === it.appliedBackground
             } == true) return
+        // ActionBarContainer's primary/stacked/split layers can outlive its transparent marker.
+        if (view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") applyNativeChrome(view, slot)
         val retained = state.surfaces[view]
         if (retained != null && retained.slot == slot && retained.appliedBitmap == null &&
             retained.appliedBackground != null && view.background === retained.appliedBackground &&

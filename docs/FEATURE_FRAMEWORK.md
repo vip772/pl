@@ -2027,3 +2027,7 @@ Release 附件中的 APK 保持 Hchat-release-signed.apk / Hchat-alt-entry-relea
 实机反馈开启背景后列表滑动卡顿；运行日志持续出现 touch-down/pull-start/pull-release/pull-next-frame/pull-settled 的 WXCOVER 反射诊断。移除仅用于此诊断的 LauncherUI.dispatchTouchEvent Hook，窗口覆盖/层级诊断默认关闭；原生渐变绘制抑制、任务栏保护和背景恢复保持运行。WXPROBE 在反射和收集节点前退出，保留该 Hook 后置回调中的业务保护。
 列表绑定/触摸改用 HostState 已加载的有效位图判断当前背景，不再在每次绑定或 MOVE 时读取背景文件属性；配置刷新和后台加载仍检查磁盘。列表 preDraw 将 Activity/HostState 查询移到可见行循环外，绑定已成功处理的行立即清理 dirty 标记，避免同一绑定在下一帧重复递归处理。已保留透明背景的节点在 applyNativeChrome 前直接复用；原生渐变绘制守卫使用已加载位图检查，避免每帧文件 stat。
 以上为源码热路径减少工作量，不等同于量测帧率结论。运行日志不含 FrameMetrics/Perfetto 数据，不能据此量化 CPU/GPU 各项占比。需 GitHub 构建后在同一背景、同一列表复测滑动、回弹、小程序下拉、切换页签、聊天返回及点击反馈。按约定不进行本地 Gradle 构建。
+
+### 第二轮实机反馈与调整
+4be8c1d 实机日志：09:55:34.244 slowRefresh=65ms，随后多次19–41ms，09:56:24.188=93ms；截图顶部灰色标题栏，持续滚动仍明显卡顿。日志不能直接量化持续滚动的 CPU/GPU 瓶颈。AbsListView getView 改为仅标脏，统一在 preDraw 按最终绑定结果处理，RecyclerView onBind 也不再立即递归；触摸已处理行不重复遍历。空的相邻页面只准备一次，等其列表实际出现行后使准备缓存失效并补处理，避免每次刷新重扫隐藏空列表。
+微信8.0.78持久化 smali_classes14/androidx/appcompat/widget/ActionBarContainer.smali 核验：h/i/m 分别对应 primary/stacked/split Drawable，setPrimaryBackground/setStackedBackground/setSplitBackground 更新这些字段。即便外层透明 marker 未变，仍重新校验三层实际背景并清理；保留原始值及恢复逻辑。此为修正可确认的检查缺口，截图灰色是否完全来自该层仍需实机确认。增加每类最多8条、耗时>=8ms才记录的 PERF row，帮助后续区分列表递归成本；不做逐帧树诊断或本地 Gradle 构建。
