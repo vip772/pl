@@ -87,7 +87,7 @@ internal fun HomeSidePanelMiuixPage(
                         SwitchRow(
                             checked = showProfile,
                             title = "昵称头像",
-                            summary = "关闭后恢复微信原生标题和未读数，保留特效，长按微信标题打开侧边栏",
+                            summary = "关闭后恢复微信原生标题和未读数，保留特效，从微信界面左边缘右划打开侧边栏",
                             onCheckedChange = { showProfile = it }
                         )
                     }

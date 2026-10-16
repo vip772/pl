@@ -18,6 +18,10 @@ object AutoCacheSettings {
     const val PREFS_NAME = "Hchat_auto_cache_config"
     const val KEY_ENABLE = "enable"
     const val KEY_CACHE_TYPE = "cache_type"
+    const val KEY_CHATS = "applicable_chats"
+
+    fun acceptsChat(talker: String?, selected: Set<String>): Boolean =
+        selected.isEmpty() || (!talker.isNullOrBlank() && talker in selected)
     const val TYPE_MEDIA = "media"
     const val TYPE_MEDIA_PDF = "media_pdf"
     const val TYPE_ALL = "all"
@@ -75,6 +79,8 @@ class AutoCacheFeature : BaseFeature() {
                     val message = event.storedMessage ?: event.message ?: return@subscribe
                     if (!message.isIncoming() || !AutoCacheSettings.accepts(message,
                             prefs.getString(AutoCacheSettings.KEY_CACHE_TYPE, AutoCacheSettings.TYPE_ALL))) return@subscribe
+                    if (!AutoCacheSettings.acceptsChat(message.talker,
+                            prefs.getStringSet(AutoCacheSettings.KEY_CHATS, emptySet()).orEmpty())) return@subscribe
                     val id = when {
                         message.msgSvrId > 0 -> "s${message.msgSvrId}"
                         message.msgId > 0 -> "l${message.msgId}"
@@ -110,7 +116,10 @@ class AutoCacheFeature : BaseFeature() {
                     ?: initial
                 val cacheType = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
                     .getString(AutoCacheSettings.KEY_CACHE_TYPE, AutoCacheSettings.TYPE_ALL)
-                if (!AutoCacheSettings.accepts(message, cacheType)) {
+                val selectedChats = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
+                    .getStringSet(AutoCacheSettings.KEY_CHATS, emptySet()).orEmpty()
+                if (!AutoCacheSettings.acceptsChat(message.talker, selectedChats) ||
+                    !AutoCacheSettings.accepts(message, cacheType)) {
                     pending.remove(key)
                     lastSubmitted.remove(key)
                     return@schedule

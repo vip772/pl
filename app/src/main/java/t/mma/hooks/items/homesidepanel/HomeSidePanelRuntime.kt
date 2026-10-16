@@ -10,6 +10,8 @@ import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -68,6 +70,16 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                     val requested = param.args.firstOrNull() as? Int ?: return
                     session.recordScrollTitleVisibility(view, requested)
                     if (session.hideScrollTitle()) param.args[0] = View.GONE
+                }
+            })
+        }
+        KavaReflector.findMethodRecursive(launcher, "dispatchTouchEvent", MotionEvent::class.java)?.let { method ->
+            hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    val activity = param.thisObject as? Activity ?: return
+                    if (!isLauncher(activity)) return
+                    val event = param.args.firstOrNull() as? MotionEvent ?: return
+                    if (sessions[activity]?.onEdgeTouch(event) == true) param.result = true
                 }
             })
         }
@@ -130,27 +142,53 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
     private fun isLauncher(activity: Activity): Boolean = activity.javaClass.name.endsWith(".LauncherUI") || activity.javaClass.name == "com.tencent.mm.ui.LauncherUI"
 
-    private data class NativeTitleState(
-        val foreground: android.graphics.drawable.Drawable?,
-        val longClickable: Boolean,
-        val listener: View.OnLongClickListener?
-    )
     private inner class Session(private val activity: Activity) {
         private val decor = activity.window.decorView as ViewGroup
         private val drawer = HomeSidePanelDrawer(activity) { close() }
+        private val edgeGesture = SidePanelEdgeGesture(dp(24).toFloat(),
+            maxOf(ViewConfiguration.get(activity).scaledTouchSlop.toFloat(), dp(24).toFloat()))
+        private var edgeCaptured = false
+        private var cancellingTouch = false
+        fun onEdgeTouch(event: MotionEvent): Boolean {
+            if (cancellingTouch) return false
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    edgeCaptured = false
+                    edgeGesture.down(event.x, event.y, attached && !chatVisible &&
+                        HomeSidePanelSettings.enabled(activity) && !drawer.isOpen())
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> edgeGesture.reset()
+                MotionEvent.ACTION_MOVE -> {
+                    if (!edgeCaptured && event.pointerCount == 1 && edgeGesture.move(event.x, event.y)) {
+                        edgeCaptured = true
+                        val cancel = MotionEvent.obtain(event)
+                        cancel.action = MotionEvent.ACTION_CANCEL
+                        cancellingTouch = true
+                        try { activity.dispatchTouchEvent(cancel) }
+                        finally { cancellingTouch = false; cancel.recycle() }
+                        drawer.show(true)
+                    }
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    val consumed = edgeCaptured
+                    edgeCaptured = false
+                    edgeGesture.reset()
+                    return consumed
+                }
+            }
+            return edgeCaptured
+        }
         private var header: ViewGroup? = null
         private var avatarEffect: AvatarHeaderEffect? = null
         private var effectTarget: View? = null
         private var effectContent: View? = null
-        private val nativeTitles = WeakHashMap<View, NativeTitleState>()
+        private val nativeTitles = WeakHashMap<View, android.graphics.drawable.Drawable?>()
         private fun showProfile(): Boolean = prefs.getBoolean(HomeSidePanelSettings.KEY_SHOW_PROFILE, true)
         private fun restoreNativeTitle() {
             if (nativeTitles.isEmpty()) return
             avatarEffect?.stop()
             nativeTitles.entries.toList().forEach { (view, original) ->
-                if (view.foreground === avatarEffect) view.foreground = original.foreground
-                view.setOnLongClickListener(original.listener)
-                view.isLongClickable = original.longClickable
+                if (view.foreground === avatarEffect) view.foreground = original
             }
             nativeTitles.clear()
         }
@@ -170,10 +208,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val title = if (titleRoot is TextView) (titleRoot.parent as? ViewGroup ?: titleRoot) else titleRoot
             effectContent = text ?: titleRoot
             if (!nativeTitles.containsKey(title)) {
-                val info = KavaReflector.readField(title, "mListenerInfo")
-                val listener = info?.let { KavaReflector.readField(it, "mOnLongClickListener") } as? View.OnLongClickListener
-                nativeTitles[title] = NativeTitleState(title.foreground, title.isLongClickable, listener)
-                title.setOnLongClickListener { drawer.toggle(); true }
+                nativeTitles[title] = title.foreground
             }
             if (effectTarget !== title) {
                 avatarEffect?.stop()

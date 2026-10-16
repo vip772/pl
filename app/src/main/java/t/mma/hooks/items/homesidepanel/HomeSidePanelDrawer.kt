@@ -79,6 +79,7 @@ internal class HomeSidePanelDrawer(
         if (!value && opened) close(false)
     }
 
+    fun isOpen(): Boolean = opened
     fun toggle() { if (opened) close(true) else show(true) }
 
     fun show(animated: Boolean) {

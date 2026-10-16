@@ -2167,8 +2167,8 @@ internal fun matchedFeatureSubTerms(query: String, provider: FeatureSettingsProv
 
 internal fun featureSubSearchTerms(featureId: String): List<String> {
     return when (featureId) {
-        "auto_cache" -> listOf("自动缓存", "自动下载", "图片", "视频", "文件", "文档", "防过期")
-        "home_side_panel" -> listOf("首页侧边栏", "快捷面板", "首页头像", "昵称头像", "长按微信", "侧边抽屉")
+        "auto_cache" -> listOf("自动缓存", "自动下载", "图片", "视频", "文件", "文档", "防过期", "适用聊天")
+        "home_side_panel" -> listOf("首页侧边栏", "快捷面板", "首页头像", "昵称头像", "左边缘右划", "侧边抽屉")
         AntiRecallFeature.ID -> listOf(
             "动态撤回", "撤回信息颜色", "颜色覆盖强度", "渐变颜色", "描边旋转周期", "描边宽度", "私聊防撤回", "群聊防撤回", "公众号防撤回", "撤回提示", "自定义撤回提示", "发送时间", "撤回时间", "时间格式", "语音防撤回", "图片防撤回", "视频防撤回"
         )
