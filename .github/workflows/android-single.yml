@@ -178,18 +178,6 @@ jobs:
           HCAT_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: sh ./gradlew :app:assembleRelease --build-cache --parallel --no-watch-fs -x lintVitalAnalyzeRelease
 
-      - name: 上传 APK 产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: Hchat-single-release
-          path: dist/${{ env.HCAT_APK_NAME }}
-
-      - name: 保存版本对应的混淆映射
-        uses: actions/upload-artifact@v4
-        with:
-          name: Hchat-release-mapping-${{ github.sha }}
-          path: app/build/outputs/mapping/release/mapping.txt
-          if-no-files-found: warn
       - name: 发布单频道发行版
         env:
           GH_TOKEN: ${{ github.token }}
@@ -199,16 +187,34 @@ jobs:
           title="${HCAT_RELEASE_TITLE}"
           apk_path="dist/${HCAT_APK_NAME}"
 
+          mapping_path="dist/Hchat-release-mapping-${GITHUB_SHA}.txt"
+          test -s "$apk_path"
+          cp app/build/outputs/mapping/release/mapping.txt "$mapping_path"
           notes_file="$(mktemp)"
           printf '%s\n' "${HCAT_CHANGE_LOG}" > "$notes_file"
 
           gh release create "$tag" \
             "${apk_path}#${HCAT_APK_NAME}" \
+            "$mapping_path" \
             --title "$title" \
             --notes-file "$notes_file" \
-            --target "${GITHUB_REF_NAME}" \
+            --target "${GITHUB_SHA}" \
             --latest
 
+      - name: 上传 APK 产物
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hchat-single-release
+          path: dist/${{ env.HCAT_APK_NAME }}
+
+      - name: 保存版本对应的混淆映射
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: Hchat-release-mapping-${{ github.sha }}
+          path: app/build/outputs/mapping/release/mapping.txt
+          if-no-files-found: warn
       - name: 推送 Telegram 私聊安装包
         if: ${{ success() }}
         env:

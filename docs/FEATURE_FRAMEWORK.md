@@ -2018,3 +2018,7 @@ NativeLibraryLoader 只记录同一模块 ClassLoader 下已经成功加载的�
 ## 自动缓存与首页入口调整
 
 自动缓存、首页侧边栏入口及悬浮底栏透明度的行为、保存路径和逆向验证范围见 [AUTO_CACHE.md](AUTO_CACHE.md)。
+
+## 单频道产物发布顺序与配额处理
+单频道工作流先将签名 APK 和以提交 SHA 命名的 mapping 文本上传至 GitHub Release，再执行可选的 Actions Artifact 备份。两个 upload-artifact 步骤均设置 continue-on-error，配额满或上传失败不阻断 Release 和后续现有步骤；Release 创建失败仍判作失败。发布前检查 APK 非空并复制真实 mapping，Release tag 精确指向本次 github.sha，避免构建期间分支前进导致产物与 tag 不一致。
+Release 附件中的 APK 保持 Hchat-release-signed.apk / Hchat-alt-entry-release-signed.apk 原命名，mapping 为 Hchat-release-mapping-<提交SHA>.txt。用户可直接进入仓库 Releases 的 Assets 下载，不依赖 Actions Artifact 存储配额。此变更不改变签名、版本生成或既有 Telegram 配置。
