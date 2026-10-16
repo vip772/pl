@@ -1730,6 +1730,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         var swapNs = 0L
         var maxNs = 0L
     }
+    // Diagnostic labels reuse business-path state, without per-report tree scans.
+    private val framePageSlots = WeakHashMap<Activity, BackgroundBeautySettings.Slot>()
     private val frameListeners = WeakHashMap<Activity, android.view.Window.OnFrameMetricsAvailableListener>()
     private fun observeFrameTimings(activity: Activity) {
         if (android.os.Build.VERSION.SDK_INT < 24 || frameListeners.containsKey(activity)) return
@@ -1737,7 +1739,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         val listener = android.view.Window.OnFrameMetricsAvailableListener { _, metrics, dropped ->
             if (destroyed) return@OnFrameMetricsAvailableListener
             val enabled = prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)
-            val slot = resolveTarget(activity)?.key ?: "other"
+            val slot = framePageSlots[activity]?.key ?: "other"
             val key = "$slot:enabled=$enabled"
             val sample = samples.getOrPut(key) { FrameSample() }
             val total = metrics.getMetric(android.view.FrameMetrics.TOTAL_DURATION).coerceAtLeast(0L)
@@ -1763,6 +1765,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         activity.window.addOnFrameMetricsAvailableListener(listener, main)
     }
     private fun removeFrameTimings(activity: Activity) {
+        framePageSlots.remove(activity)
         if (android.os.Build.VERSION.SDK_INT >= 24) {
             frameListeners.remove(activity)?.let { activity.window.removeOnFrameMetricsAvailableListener(it) }
         }
@@ -3332,13 +3335,15 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     }
     private fun resolveTarget(activity: Activity): BackgroundBeautySettings.Slot? {
         val name = activity.javaClass.name
-        if (hasClassName(activity, CHAT_ACTIVITY)) return BackgroundBeautySettings.Slot.CHAT
-        if (chatBackgroundHost(activity) != null &&
-            (name == LAUNCHER_ACTIVITY || isConversationActivity(activity))) {
-            return BackgroundBeautySettings.Slot.CHAT
+        val slot = when {
+            hasClassName(activity, CHAT_ACTIVITY) -> BackgroundBeautySettings.Slot.CHAT
+            (name == LAUNCHER_ACTIVITY || isConversationActivity(activity)) &&
+                chatBackgroundHost(activity) != null -> BackgroundBeautySettings.Slot.CHAT
+            name == LAUNCHER_ACTIVITY -> currentLauncherSlot(activity)
+            else -> null
         }
-        if (name != LAUNCHER_ACTIVITY) return null
-        return currentLauncherSlot(activity)
+        if (slot == null) framePageSlots.remove(activity) else framePageSlots[activity] = slot
+        return slot
     }
     private fun currentLauncherSlot(activity: Activity): BackgroundBeautySettings.Slot? {
         val index = KavaReflector.findMethodRecursive(activity.javaClass, "getCurrentTabIndex")

@@ -253,14 +253,23 @@ public class DexFinder {
                 ? HchatStorage.preferences(hostContext, CACHE_PREFS)
                 : null;
         this.runtimeCacheKey = buildRuntimeCacheKey(hostContext, classLoader);
+        // Restore once, before installers use this finder. Later restoration
+        // would overwrite members already resolved during this startup.
+        restoredCacheUsable = loadCache();
     }
+
+    private final boolean restoredCacheUsable;
 
     public synchronized void resolveAll() {
         if (resolvedAll) {
             logDetail("resolveAll 已完成，跳过重复解析");
             return;
         }
-        if (loadCache()) {
+        // Preserve the old cache-path repair, but outside descriptor restoration.
+        if (restoredCacheUsable && localSystemMessageMethod == null) {
+            resolveLocalSystemMessageMethod();
+        }
+        if (restoredCacheUsable && isCacheUsable()) {
             HLog.i(TAG + "公共API定位开始: resolveServiceManagerApi");
             resolveServiceManagerApi();
             HLog.i(TAG + "公共API定位结束: resolveServiceManagerApi");
@@ -3784,9 +3793,7 @@ public class DexFinder {
             if (localMessageCreateTimeMethod == null && localMessageInsertMethod != null) {
                 localMessageCreateTimeMethod = findLocalMessageCreateTimeMethod(localMessageInsertMethod.getDeclaringClass());
             }
-            if (localSystemMessageMethod == null) {
-                resolveLocalSystemMessageMethod();
-            }
+            // Restore descriptors only; API installation resolves missing entries.
             voiceUploadCtor = findCtorByExactTypes(voiceUploadClass, String.class, int.class);
             voiceUploadCdnCtor = findCtorByExactTypes(voiceUploadClass, String.class, boolean.class);
             sendPatSceneCtor = findSendPatSceneCtor(sendPatSceneClass);
