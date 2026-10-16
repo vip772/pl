@@ -7,11 +7,10 @@ import android.graphics.Rect
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.view.MotionEvent
-import android.view.ViewConfiguration
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -70,16 +69,6 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                     val requested = param.args.firstOrNull() as? Int ?: return
                     session.recordScrollTitleVisibility(view, requested)
                     if (session.hideScrollTitle()) param.args[0] = View.GONE
-                }
-            })
-        }
-        KavaReflector.findMethodRecursive(launcher, "dispatchTouchEvent", MotionEvent::class.java)?.let { method ->
-            hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val activity = param.thisObject as? Activity ?: return
-                    if (!isLauncher(activity)) return
-                    val event = param.args.firstOrNull() as? MotionEvent ?: return
-                    if (sessions[activity]?.onEdgeTouch(event) == true) param.result = true
                 }
             })
         }
@@ -145,39 +134,6 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     private inner class Session(private val activity: Activity) {
         private val decor = activity.window.decorView as ViewGroup
         private val drawer = HomeSidePanelDrawer(activity) { close() }
-        private val edgeGesture = SidePanelEdgeGesture(dp(24).toFloat(),
-            maxOf(ViewConfiguration.get(activity).scaledTouchSlop.toFloat(), dp(24).toFloat()))
-        private var edgeCaptured = false
-        private var cancellingTouch = false
-        fun onEdgeTouch(event: MotionEvent): Boolean {
-            if (cancellingTouch) return false
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    edgeCaptured = false
-                    edgeGesture.down(event.x, event.y, attached && !chatVisible &&
-                        HomeSidePanelSettings.enabled(activity) && !drawer.isOpen())
-                }
-                MotionEvent.ACTION_POINTER_DOWN -> edgeGesture.reset()
-                MotionEvent.ACTION_MOVE -> {
-                    if (!edgeCaptured && event.pointerCount == 1 && edgeGesture.move(event.x, event.y)) {
-                        edgeCaptured = true
-                        val cancel = MotionEvent.obtain(event)
-                        cancel.action = MotionEvent.ACTION_CANCEL
-                        cancellingTouch = true
-                        try { activity.dispatchTouchEvent(cancel) }
-                        finally { cancellingTouch = false; cancel.recycle() }
-                        drawer.show(true)
-                    }
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                    val consumed = edgeCaptured
-                    edgeCaptured = false
-                    edgeGesture.reset()
-                    return consumed
-                }
-            }
-            return edgeCaptured
-        }
         private var header: ViewGroup? = null
         private var avatarEffect: AvatarHeaderEffect? = null
         private var effectTarget: View? = null
@@ -380,6 +336,11 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 updateScrollableTitle(headerVisible)
             }
             if (headerVisible) sizeHeader()
+            if (Build.VERSION.SDK_INT >= 29 && stateChanged) {
+                decor.setSystemGestureExclusionRects(
+                    if (homeVisible) listOf(Rect(0, 0, dp(64), decor.height.coerceAtLeast(1))) else emptyList()
+                )
+            }
             lastHomeVisible = homeVisible
             refreshEffect()
         }
@@ -392,6 +353,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
 
         fun detach() {
             attached = false
+            if (Build.VERSION.SDK_INT >= 29) decor.setSystemGestureExclusionRects(emptyList())
             restoreNativeTitle()
             avatarEffect?.stop()
             avatarEffect = null

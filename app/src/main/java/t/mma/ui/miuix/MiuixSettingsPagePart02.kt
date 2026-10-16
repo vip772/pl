@@ -1477,6 +1477,7 @@ internal fun practicalFeatureGroups(
                 RoundAvatarFeature.ID,
                 CustomFriendAvatarFeature.ID,
                 CustomBottomBarFeature.ID,
+                t.mma.hooks.items.homesidepanel.HomeSidePanelFeature.ID,
                 DynamicBadgeSettings.ID,
                 FloatingBottomBarSettings.FEATURE_ID,
                 FloatingChatHeaderFeature.ID,

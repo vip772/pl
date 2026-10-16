@@ -44,7 +44,7 @@ class HomeSidePanelFeature : BaseFeature() {
 private class HomeSidePanelSettingsProvider : SimpleFeatureSettingsProvider(
     HomeSidePanelFeature.ID,
     "首页侧边栏",
-    "点击微信首页标题栏头像昵称，打开快捷面板",
-    FeatureSettingsProvider.CATEGORY_ENHANCE,
+    "左边缘右划或点击微信首页头像昵称，打开快捷面板",
+    FeatureSettingsProvider.CATEGORY_PRACTICAL,
     true
 )

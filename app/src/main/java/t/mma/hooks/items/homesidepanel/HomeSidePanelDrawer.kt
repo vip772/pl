@@ -38,6 +38,7 @@ internal class HomeSidePanelDrawer(
     private val root = FrameLayout(activity)
     private val scrim = View(activity)
     private val panel = LinearLayout(activity)
+    private val edge = View(activity)
     private var host: ViewGroup? = null
     private var enabled = false
     private var opened = false
@@ -54,8 +55,9 @@ internal class HomeSidePanelDrawer(
         root.visibility = View.GONE
         root.elevation = dp(100).toFloat()
         root.isClickable = false
-        parent.addView(root, ViewGroup.LayoutParams(-1, -1))
+        parent.addView(root, ViewGroup.LayoutParams(dp(72), -1))
         root.bringToFront()
+        resizeRoot(open = false)
 
     }
 
@@ -75,7 +77,8 @@ internal class HomeSidePanelDrawer(
 
     fun setEnabled(value: Boolean) {
         enabled = value
-        root.visibility = if (opened) View.VISIBLE else View.GONE
+        root.visibility = if (value || opened) View.VISIBLE else View.GONE
+        edge.visibility = if (value && !opened) View.VISIBLE else View.GONE
         if (!value && opened) close(false)
     }
 
@@ -87,6 +90,8 @@ internal class HomeSidePanelDrawer(
         panel.animate().withEndAction(null).cancel()
         scrim.animate().cancel()
         opened = true
+        resizeRoot(open = true)
+        edge.visibility = View.GONE
         root.visibility = View.VISIBLE
         scrim.visibility = View.VISIBLE
         panel.visibility = View.VISIBLE
@@ -107,14 +112,18 @@ internal class HomeSidePanelDrawer(
             panel.animate().cancel(); scrim.animate().cancel()
             panel.translationX = -panelWidth.toFloat(); scrim.alpha = 0f; scrim.visibility = View.GONE
             panel.visibility = View.GONE
-                root.visibility = View.GONE
+            edge.visibility = if (enabled) View.VISIBLE else View.GONE
+            resizeRoot(open = false)
+            root.visibility = if (enabled) View.VISIBLE else View.GONE
             return
         }
         panel.animate().translationX(-panelWidth.toFloat()).setDuration(180L).setInterpolator(PathInterpolator(.3f, 0f, .8f, .15f)).withEndAction {
             if (opened) return@withEndAction
             scrim.visibility = View.GONE
             panel.visibility = View.GONE
-                root.visibility = View.GONE
+            edge.visibility = if (enabled) View.VISIBLE else View.GONE
+            resizeRoot(open = false)
+            root.visibility = if (enabled) View.VISIBLE else View.GONE
         }.start()
         scrim.animate().alpha(0f).setDuration(180L).start()
     }
@@ -146,10 +155,12 @@ internal class HomeSidePanelDrawer(
 
         root.addView(scrim, FrameLayout.LayoutParams(-1, -1))
         root.addView(panel, FrameLayout.LayoutParams(panelWidth, -1, Gravity.START))
+        root.addView(edge, FrameLayout.LayoutParams(dp(72), -1, Gravity.START))
         panel.translationX = -panelWidth.toFloat()
         scrim.setBackgroundColor(Color.BLACK)
         scrim.alpha = 0f; scrim.visibility = View.GONE
         scrim.setOnClickListener { close(true) }
+        edge.setOnTouchListener { _, event -> onEdgeTouch(event) }
         panel.setOnTouchListener { _, event -> onPanelTouch(event) }
         root.isFocusable = true; root.isFocusableInTouchMode = true
         root.setOnKeyListener { _, key, ev ->
@@ -287,6 +298,39 @@ internal class HomeSidePanelDrawer(
         host?.let { attachTo(it); setEnabled(enabled) }
     }
 
+    private fun onEdgeTouch(event: MotionEvent): Boolean {
+        if (!enabled) return false
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> { downX = event.rawX; lastX = downX; dragging = false; return true }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = event.rawX - downX
+                if (!opened && dx > dp(8)) {
+                    panel.animate().withEndAction(null).cancel()
+                    scrim.animate().cancel()
+                    panel.visibility = View.VISIBLE
+                    opened = true
+                    resizeRoot(open = true)
+                    root.visibility = View.VISIBLE
+                    panel.translationX = -panelWidth.toFloat()
+                    scrim.visibility = View.VISIBLE
+                    dragging = true
+                }
+                if (opened && (dragging || dx < -dp(8))) {
+                    dragging = true
+                    edge.visibility = View.GONE
+                    panel.translationX = (panel.translationX + event.rawX - lastX).coerceIn(-panelWidth.toFloat(), 0f)
+                    scrim.alpha = .42f * (1f + panel.translationX / panelWidth)
+                    lastX = event.rawX
+                    return true
+                }
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                if (opened && dragging) { if (panel.translationX > -panelWidth * .55f) settleOpen() else close(true); dragging = false; return true }
+            }
+        }
+        return true
+    }
+
     private fun onPanelTouch(event: MotionEvent): Boolean {
         if (!opened) return false
         when (event.actionMasked) {
@@ -317,6 +361,14 @@ internal class HomeSidePanelDrawer(
         scrim.animate().alpha(.42f).setDuration(200L).start()
     }
     private fun openUrl(url: String) { runCatching { activity.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(url))) }.onFailure { toast("无法打开链接") } }
+    private fun resizeRoot(open: Boolean) {
+        val params = root.layoutParams ?: return
+        val targetWidth = if (open) ViewGroup.LayoutParams.MATCH_PARENT else dp(72)
+        if (params.width != targetWidth) {
+            params.width = targetWidth
+            root.layoutParams = params
+        }
+    }
     private fun toast(message: String) { Toast.makeText(activity, message, Toast.LENGTH_SHORT).show() }
     private fun dp(value: Int): Int = (value * density + .5f).toInt()
     private fun statusBarHeight(): Int { val id = activity.resources.getIdentifier("status_bar_height", "dimen", "android"); return if (id > 0) activity.resources.getDimensionPixelSize(id) else dp(28) }
