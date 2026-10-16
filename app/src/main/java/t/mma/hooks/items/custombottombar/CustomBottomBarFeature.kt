@@ -1461,7 +1461,12 @@ private class CustomBottomBarHost(
 
     fun enforce(): Boolean {
         if (!applied.get() || !isHierarchyCurrent()) return false
-        bottomTab.background = null
+        // BackgroundBeauty owns a transparent marker; clearing it every preDraw
+        // makes its write hook restore it again, causing perpetual work on scroll.
+        val background = bottomTab.background
+        if (background != null && background.opacity != android.graphics.PixelFormat.TRANSPARENT) {
+            bottomTab.background = null
+        }
         hideNativeTabChildren()
         parent.clipChildren = false
         parent.clipToPadding = false

@@ -157,7 +157,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private fun bindNativeTitle(visible: Boolean) {
             if (!visible || showProfile()) { restoreNativeTitle(); return }
             val host = header?.parent as? ViewGroup ?: findActionBarContent(decor) ?: return
-            val titleId = activity.resources.getIdentifier("gp", "id", activity.packageName)
+            val titleId = hostResourceId("gp")
             val titleRoot = host.findViewById<View>(titleId) ?: return
             fun findTitleText(view: View): TextView? {
                 if (view is TextView && view.text.toString().trim().startsWith("微信")) return view
@@ -222,10 +222,15 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             replacedTitles.entries.toList().forEach { (view, visibility) -> view.visibility = visibility }
             replacedTitles.clear()
         }
+        // Fixed IDs for this Activity's host resources: never resolve names in global-layout callbacks.
+        private val hostResourceIds = HashMap<String, Int>()
+        private fun hostResourceId(name: String): Int = hostResourceIds.getOrPut(name) {
+            activity.resources.getIdentifier(name, "id", activity.packageName)
+        }
         private fun updateTitleSpace(visible: Boolean) {
             if (!visible) { restoreTitles(); return }
             val host = header?.parent as? ViewGroup ?: return
-            val titleId = activity.resources.getIdentifier("gp", "id", activity.packageName)
+            val titleId = hostResourceId("gp")
             if (titleId == 0) return
             val title = host.findViewById<View>(titleId) ?: return
             if (!replacedTitles.containsKey(title)) replacedTitles[title] = title.visibility
@@ -258,7 +263,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val host = root.parent as? ViewGroup ?: return
             val nick = name ?: return
             if (host.width <= 0) return
-            val buttonsId = activity.resources.getIdentifier("coz", "id", activity.packageName)
+            val buttonsId = hostResourceId("coz")
             val buttons = if (buttonsId != 0) host.findViewById<View>(buttonsId) else null
             val right = if (buttons != null && buttons.visibility == View.VISIBLE && buttons.width > 0) buttons.left - dp(8) else host.width - dp(14)
             val available = (right - dp(14)).coerceAtLeast(dp(48))

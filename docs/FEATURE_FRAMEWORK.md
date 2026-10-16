@@ -2044,3 +2044,7 @@ Release 附件中的 APK 保持 Hchat-release-signed.apk / Hchat-alt-entry-relea
 ### Root现场采样定位首页滚动系统栏重入
 现有c714cab实机：simpleperf cpu-clock 199Hz、16秒、dwarf 16384，固定8轮上下滑动；3233样本，无丢样本。保存/data/local/tmp/hchat_perf/enabled.data及enabled.perfetto-trace，调用栈导出/sdcard/Download/wechat-perf-callgraph.txt。部分内存DEX符号不可读，但关键链可解析：AbsListView.FlingRunnable → ConversationListView.onScroll/v → HomeUI.a/q Hook → pi.i0.m → setStatusBarColor Hook → pi.i0.z/A → KavaReflector.findMethodRecursive；另有Resources.getIdentifier链。v8.3.3 c714cab mapping核验pi.i0.m=applySystemBars、z/A=findActivity。该链为采样证实的高频额外工作，不能把树状图的相对分支百分比直接称作总CPU占比。关闭背景现场对照受界面焦点/浮窗切换干扰尚未完成，不报告改善比例。
 HomeUI q/w回调不再每次执行全树applyChromeTransparency和全量applySystemBars，只修复已管理栏位；完整生命周期刷新仍执行原路径。系统栏Hook在模块mutationDepth非零时于任何反射前退出；系统属性仅差异时写入，资源ID缓存，已管理View及Decor优先直接返回Activity。保留水波纹及已恢复的首次透明流程。必须通过新包同动作采样验证实际改善，不承诺完全消除卡顿；未本地Gradle构建。
+
+### 9908728后续现场采样：侧边栏资源查询与底栏背景冲突
+用户12:30实测明显改善但尚未持平。提前通知用户保持微信前台后，现包16秒固定8轮上下滑动，simpleperf cpu-clock 199Hz，3855样本无丢样本；同时采两个com.tencent.mm进程(主用户11248、分身15909)，不能将聚合百分比当作单进程精确占比。原始/data/local/tmp/hchat_perf/9908728.data，调用栈/sdcard/Download/hchat-9908728-callgraph.txt。v8.3.4 mapping核验qj.s=HomeSidePanelRuntime.Session，qj.q=globalLayout监听；refresh内updateTitleSpace/sizeHeader每次调用Resources.getIdentifier。wi.s=CustomBottomBarHost，preDraw→enforce→setBackground(null)→BackgroundBeauty写入Hook，后者又恢复透明marker并进行目标判断/控件查找，形成跨功能逐帧重复工作。
+修复：Session内缓存gp/coz固定ID；底栏enforce保留opacity=TRANSPARENT的已有背景，避免与沉浸式marker相互覆盖，其他非透明背景仍清理。保留首次透明、水波纹及侧边栏布局响应。不宣称已与关闭背景持平，需GitHub新包验证及同条件复采。未本地Gradle构建。
