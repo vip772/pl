@@ -175,7 +175,12 @@ internal class HomeSidePanelDrawer(
             leftMargin = dp(12); rightMargin = dp(12); bottomMargin = dp(8)
         })
 
-        val scroll = ScrollView(activity).apply { isFillViewport = true; overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS }
+        val scroll = ScrollView(activity).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+        }
         val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(22)) }
         calendarCard = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(14), dp(12), dp(12)) }
         calendarKey = null
@@ -234,7 +239,8 @@ internal class HomeSidePanelDrawer(
             textSize = 16f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(themeTitle())
-            setPadding(dp(4), 0, 0, dp(10))
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(10))
             if (android.os.Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
         }, LinearLayout.LayoutParams(-1, -2))
         val week = LinearLayout(activity)
