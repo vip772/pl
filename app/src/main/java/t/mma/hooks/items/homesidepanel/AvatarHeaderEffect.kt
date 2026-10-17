@@ -43,6 +43,7 @@ internal class AvatarHeaderEffect(private val host: View, private val content: V
     private var strokeDp = 1.4f
     private var lightning = false
     private var lightningScale = 1f
+    private var customInset: Float? = null
     private val bolt = Path()
     private val branches = Path()
     private val point = FloatArray(2)
@@ -59,10 +60,11 @@ internal class AvatarHeaderEffect(private val host: View, private val content: V
             host.postOnAnimation(this)
         }
     }
-    fun update(value: String, speed: Int, strokeWidth: Float, electric: Boolean, scaleLightningWidth: Boolean = false) {
+    fun update(value: String, speed: Int, strokeWidth: Float, electric: Boolean, scaleLightningWidth: Boolean = false, avatarInsetDp: Float? = null) {
         val nextWidth = strokeWidth.coerceIn(0.5f, 4f)
         lightningScale = if (scaleLightningWidth) nextWidth / 1.4f else 1f
-        if (strokeDp != nextWidth || lightning != electric) {
+        if (strokeDp != nextWidth || lightning != electric || customInset != avatarInsetDp) {
+            customInset = avatarInsetDp
             width = -1
             strokeDp = nextWidth
             lightning = electric
@@ -104,7 +106,7 @@ internal class AvatarHeaderEffect(private val host: View, private val content: V
             width = host.width
             height = host.height
             val density = host.resources.displayMetrics.density
-            val inset = (if (lightning) 9f else strokeDp / 2f + 2f) * density
+            val inset = (customInset ?: if (lightning) 9f else strokeDp / 2f + 2f) * density
             rect.set(contentRect)
             if (text == null) rect.inset(inset, inset)
             outline.reset()

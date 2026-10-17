@@ -61,9 +61,8 @@ internal class HomeSidePanelDrawer(
     private var contentScroll: ScrollView? = null
     private var cardsBody: LinearLayout? = null
     private val cardViews = linkedMapOf<String, View>()
-    private var photoView: ImageView? = null
+    private var photoView: SidePanelMediaView? = null
     private var backgroundBitmap: Bitmap? = null
-    private var photoBitmap: Bitmap? = null
     private var imageGeneration = 0
     private val imageLoader = java.util.concurrent.Executors.newSingleThreadExecutor { task -> Thread(task, "Hchat-PanelImages").apply { isDaemon = true } }
     private var effects: SidePanelEffects? = null
@@ -74,9 +73,10 @@ internal class HomeSidePanelDrawer(
     private val screen = FrameLayout(activity)
     fun setActive(value: Boolean) { active = value; if(value && opened) refreshLunar(); if (value && renderedNight != night()) renderPage(); updateEffects() }
     private fun updateEffects() {
+        photoView?.setPlayback(opened && active && !settingsPage)
         effects?.running = opened && active && prefs.getBoolean(SidePanelAppearance.EFFECT, false)
         if (opened && active && !settingsPage && prefs.getBoolean(SidePanelAppearance.LIGHTNING, false)) {
-            avatarEffects?.update(prefs.getString(SidePanelAppearance.COLORS, t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),2400,prefs.getFloat(SidePanelAppearance.WIDTH,1.5f),true,scaleLightningWidth = true)
+            avatarEffects?.update(prefs.getString(SidePanelAppearance.COLORS, t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),2400,prefs.getFloat(SidePanelAppearance.WIDTH,1.5f),true,scaleLightningWidth = true, avatarInsetDp = 5f)
         } else avatarEffects?.stop()
     }
     private var edgeEnabled = false
@@ -113,6 +113,7 @@ internal class HomeSidePanelDrawer(
         screen.animate().withEndAction(null).cancel()
         settingsCleanup?.invoke(); settingsCleanup = null
         opened = false; updateEffects()
+        photoView?.dispose();photoView=null
         imageGeneration++
         imageLoader.shutdownNow()
         panel.animate().cancel()
@@ -174,6 +175,7 @@ internal class HomeSidePanelDrawer(
     }
 
     fun close(animated: Boolean) {
+        photoView?.setPlayback(false)
         screen.animate().withEndAction(null).cancel()
         screen.alpha = 1f; screen.translationX = 0f
         effects?.running = false
@@ -226,15 +228,18 @@ internal class HomeSidePanelDrawer(
     private fun loadImages() {
         val generation = ++imageGeneration
         imageLoader.execute {
-            val photo = SidePanelImages.load(activity.applicationContext, "photo")
             val backdrop = SidePanelImages.load(activity.applicationContext, "background")
             activity.runOnUiThread {
                 if (generation != imageGeneration || host == null) return@runOnUiThread
-                photoBitmap = photo; backgroundBitmap = backdrop
-                photoView?.setImageBitmap(photo)
+                backgroundBitmap = backdrop
+                loadPhotoMedia()
                 applyPanelBackground()
             }
         }
+    }
+    private fun loadPhotoMedia() {
+        photoView?.load(SidePanelImages.photoFile(activity),prefs.getLong(SidePanelAppearance.PHOTO,0L))
+        photoView?.setPlayback(opened && active && !settingsPage,restart=true)
     }
     private fun pickImage(key: String) {
         SidePanelImagePicker.launch(activity, key) { result ->
@@ -251,6 +256,7 @@ internal class HomeSidePanelDrawer(
     }
     private fun switchPage(settings: Boolean) {
         if (settingsPage == settings) return
+        if(settings) photoView?.setPlayback(false)
         screen.animate().cancel()
         screen.animate().alpha(0f).translationX(if (settings) -dp(32).toFloat() else dp(32).toFloat()).setDuration(130).withEndAction {
             settingsPage = settings
@@ -266,6 +272,7 @@ internal class HomeSidePanelDrawer(
         screen.removeAllViews(); cardViews.clear()
         avatarEffects = null
         profileAvatar = null
+        photoView?.dispose()
         photoView = null
         lunarLabel = null
         renderedNight = night()
@@ -303,11 +310,12 @@ internal class HomeSidePanelDrawer(
                 clipToOutline = true; outlineProvider = ViewOutlineProvider.BACKGROUND
             }
             photoCard.addView(TextView(activity).apply {
-                text = "＋ 添加 / 更换照片"; gravity = Gravity.CENTER; setTextColor(themeSub())
+                text = "＋ 添加 / 更换图片或视频"; gravity = Gravity.CENTER; setTextColor(themeSub())
             },FrameLayout.LayoutParams(-1,dp(170)))
-            photoView = ImageView(activity).apply { scaleType = ImageView.ScaleType.CENTER_CROP; setImageBitmap(photoBitmap) }
+            photoView = SidePanelMediaView(activity)
             photoCard.addView(photoView,FrameLayout.LayoutParams(-1,dp(170)))
             photoCard.setOnClickListener { pickImage("photo") }
+            loadPhotoMedia()
             cardViews["photo"] = photoCard
             val shortcuts = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
             shortcutCard(shortcuts); cardViews["shortcuts"] = shortcuts
@@ -350,7 +358,7 @@ internal class HomeSidePanelDrawer(
             if (view is ViewGroup) for (index in 0 until view.childCount) surfaces(view.getChildAt(index))
         }
         surfaces(card)
-        if (id == "photo") photoView?.imageAlpha = opacity
+        if (id == "photo") photoView?.alpha = opacity / 255f
     }
     private fun cardBox() = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL;setPadding(dp(12),dp(16),dp(12),dp(16))
@@ -439,10 +447,10 @@ internal class HomeSidePanelDrawer(
     private data class Row(val icon: String, val title: String, val subtitle: String, val click: () -> Unit)
 
     private fun menuCard(parent: LinearLayout, rows: List<Row>) {
-        val card = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; background = rounded(if (night()) "#242724" else "#FFFFFF", 16, if (night()) "#1AFFFFFF" else "#12000000"); elevation = dp(2).toFloat() }
+        val card = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; background = rounded(if (night()) "#242724" else "#FFFFFF", 16); clipToOutline = true; outlineProvider = ViewOutlineProvider.BACKGROUND; elevation = dp(2).toFloat() }
         rows.forEachIndexed { index, rowData ->
             if (index > 0) card.addView(View(activity).apply { setBackgroundColor(if (night()) color("#14FFFFFF") else color("#08000000")) }, LinearLayout.LayoutParams(-1, 1).apply { leftMargin = dp(62) })
-            val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12)); isClickable = true; isFocusable = true; background = ripple(if (night()) "#242724" else "#FFFFFF"); setOnClickListener { rowData.click() } }
+            val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(14), dp(12), dp(14), dp(12)); isClickable = true; isFocusable = true; background = RippleDrawable(ColorStateList.valueOf(if (night()) color("#33FFFFFF") else color("#1F000000")), null, android.graphics.drawable.ColorDrawable(Color.WHITE)); setOnClickListener { rowData.click() } }
             row.addView(TextView(activity).apply { text = rowData.icon; gravity = Gravity.CENTER; textSize = 17f; background = rounded(if (night()) "#227FBF90" else "#182F8A4E", 11) }, LinearLayout.LayoutParams(dp(38), dp(38)))
             val labels = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), 0, dp(6), 0) }
             labels.addView(TextView(activity).apply { text = rowData.title; textSize = 14.5f; setTextColor(themeTitle()); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD) })

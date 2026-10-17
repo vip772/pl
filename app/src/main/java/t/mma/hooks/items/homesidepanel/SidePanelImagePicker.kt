@@ -33,7 +33,8 @@ internal object SidePanelImagePicker {
         pending[requestCode] = Pending(WeakReference(activity), slot, callback)
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
-            type = "image/*"
+            type = if(slot == "photo") "*/*" else "image/*"
+            if(slot == "photo") putExtra(Intent.EXTRA_MIME_TYPES,arrayOf("image/*","video/*"))
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
         }
@@ -41,12 +42,13 @@ internal object SidePanelImagePicker {
             .onFailure {
                 val fallback = Intent(Intent.ACTION_GET_CONTENT).apply {
                     addCategory(Intent.CATEGORY_OPENABLE)
-                    type = "image/*"
+                    type = if(slot == "photo") "*/*" else "image/*"
+                    if(slot == "photo") putExtra(Intent.EXTRA_MIME_TYPES,arrayOf("image/*","video/*"))
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 runCatching {
                     activity.startActivityForResult(
-                        Intent.createChooser(fallback, "选择侧边栏图片"),
+                        Intent.createChooser(fallback, "选择侧边栏图片或视频"),
                         requestCode
                     )
                 }.onFailure {
