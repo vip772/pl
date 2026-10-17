@@ -2168,6 +2168,7 @@ internal fun matchedFeatureSubTerms(query: String, provider: FeatureSettingsProv
 
 internal fun featureSubSearchTerms(featureId: String): List<String> {
     return when (featureId) {
+        "step_multiplier" -> listOf("步数倍增", "微信运动", "运动步数", "倍率", "步数")
         "auto_cache" -> listOf("自动缓存", "自动下载", "图片", "视频", "文件", "文档", "防过期", "适用聊天")
         "home_side_panel" -> listOf("首页侧边栏", "快捷面板", "首页头像", "昵称头像", "左边缘右划", "侧边抽屉")
         AntiRecallFeature.ID -> listOf(

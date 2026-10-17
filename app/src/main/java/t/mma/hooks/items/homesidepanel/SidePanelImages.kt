@@ -10,17 +10,18 @@ import t.mma.utils.HLog
 
 internal object SidePanelImages {
     private fun file(context: Context, key: String) = File(File(HchatStorage.storageDir(context), "side_panel"), "$key.jpg")
-    fun photoFile(context: Context): File? {
-        val directory = file(context,"photo").parentFile!!
-        val name = HomeSidePanelSettings.preferences(context).getString("panel_photo_file",null)
-        return name?.takeIf { it == "photo.image" || it == "photo.video" }?.let { File(directory,it) }?.takeIf { it.isFile }
-            ?: file(context,"photo").takeIf { it.isFile }
+    fun photoFile(context: Context, key: String = "photo"): File? {
+        val directory = file(context,key).parentFile!!
+        val name = HomeSidePanelSettings.preferences(context).getString("panel_${key}_file",null)
+        return name?.takeIf { it == "$key.image" || it == "$key.video" }?.let { File(directory,it) }?.takeIf { it.isFile }
+            ?: file(context,key).takeIf { it.isFile }
     }
-    private fun savePhoto(context: Context, uri: Uri): Boolean = runCatching {
-        val directory = file(context,"photo").parentFile!!.apply { mkdirs() }
+    private fun savePhoto(context: Context, key: String, uri: Uri): Boolean = runCatching {
+        require(key == "photo" || key in SidePanelAppearance.extraPhotos(context))
+        val directory = file(context,key).parentFile!!.apply { mkdirs() }
         val video = context.contentResolver.getType(uri)?.startsWith("video/") == true
-        val target = File(directory,if(video) "photo.video" else "photo.image")
-        val temporary = File(directory,"photo.import")
+        val target = File(directory,if(video) "$key.video" else "$key.image")
+        val temporary = File(directory,"$key.import")
         try {
             context.contentResolver.openInputStream(uri)!!.use { input -> temporary.outputStream().use { output ->
                 val buffer=ByteArray(8192);var total=0L
@@ -43,15 +44,16 @@ internal object SidePanelImages {
                 // API 27 Movie decodes GIF frames at source size.
                 if(android.os.Build.VERSION.SDK_INT<28) require(bounds.outWidth.toLong()*bounds.outHeight <= 2_000_000L)
             }
+            require(key == "photo" || key in SidePanelAppearance.extraPhotos(context))
             java.nio.file.Files.move(temporary.toPath(),target.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-            HomeSidePanelSettings.preferences(context).edit().putString("panel_photo_file",target.name)
-                .putLong(SidePanelAppearance.PHOTO,System.currentTimeMillis()).apply()
-            listOf("photo.jpg","photo.image","photo.video").filter { it!=target.name }.forEach { File(directory,it).delete() }
+            HomeSidePanelSettings.preferences(context).edit().putString("panel_${key}_file",target.name)
+                .putLong(SidePanelAppearance.photoRevision(key),System.currentTimeMillis()).apply()
+            listOf("$key.jpg","$key.image","$key.video").filter { it!=target.name }.forEach { File(directory,it).delete() }
             true
         } finally { temporary.delete() }
     }.getOrElse { HLog.e("[Hchat:HomeSidePanel] 照片媒体导入失败",it);false }
     fun saveFromUri(context: Context, key: String, uri: Uri): Boolean {
-        if(key == "photo") return savePhoto(context,uri)
+        if(SidePanelAppearance.isPhoto(key)) return savePhoto(context,key,uri)
         return runCatching {
         require(key == "photo" || key == "background")
         val target = file(context, key)
@@ -80,7 +82,7 @@ internal object SidePanelImages {
             finally { bitmap.recycle() }
             java.nio.file.Files.move(temporary.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             HomeSidePanelSettings.preferences(context).edit().putLong(
-                if (key == "photo") SidePanelAppearance.PHOTO else SidePanelAppearance.BACKGROUND, System.currentTimeMillis()
+                if (SidePanelAppearance.isPhoto(key)) SidePanelAppearance.photoRevision(key) else SidePanelAppearance.BACKGROUND, System.currentTimeMillis()
             ).apply()
             true
         } finally { source.delete(); temporary.delete() }
@@ -91,8 +93,12 @@ internal object SidePanelImages {
     }.getOrNull()
     fun clear(context: Context, key: String) {
         file(context, key).delete()
+        if(SidePanelAppearance.isPhoto(key)) {
+            listOf("$key.image","$key.video").forEach { java.io.File(file(context,key).parentFile,it).delete() }
+            HomeSidePanelSettings.preferences(context).edit().remove("panel_${key}_file").remove(SidePanelAppearance.photoRevision(key)).apply()
+        }
         HomeSidePanelSettings.preferences(context).edit().putLong(
-            if (key == "photo") SidePanelAppearance.PHOTO else SidePanelAppearance.BACKGROUND, System.currentTimeMillis()
+            if (SidePanelAppearance.isPhoto(key)) SidePanelAppearance.photoRevision(key) else SidePanelAppearance.BACKGROUND, System.currentTimeMillis()
         ).apply()
     }
 }

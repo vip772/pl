@@ -57,11 +57,14 @@ internal class HomeSidePanelDrawer(
     private var clock: android.widget.TextClock? = null
     private var dateLabel: android.widget.TextClock? = null
     private var settingsPage = false
+    private var settingsSubBack: (() -> Boolean)? = null
+    private var settingsScrollY = 0
     private var settingsCleanup: (() -> Unit)? = null
     private var contentScroll: ScrollView? = null
     private var cardsBody: LinearLayout? = null
     private val cardViews = linkedMapOf<String, View>()
-    private var photoView: SidePanelMediaView? = null
+    private val photoViews = linkedMapOf<String,SidePanelMediaView>()
+    private var shortcutDrag: HomeSidePanelSettings.Shortcut? = null
     private var backgroundBitmap: Bitmap? = null
     private var imageGeneration = 0
     private val imageLoader = java.util.concurrent.Executors.newSingleThreadExecutor { task -> Thread(task, "Hchat-PanelImages").apply { isDaemon = true } }
@@ -73,7 +76,7 @@ internal class HomeSidePanelDrawer(
     private val screen = FrameLayout(activity)
     fun setActive(value: Boolean) { active = value; if(value && opened) refreshLunar(); if (value && renderedNight != night()) renderPage(); updateEffects() }
     private fun updateEffects() {
-        photoView?.setPlayback(opened && active && !settingsPage)
+        photoViews.values.forEach { it.setPlayback(opened && active && !settingsPage) }
         effects?.running = opened && active && prefs.getBoolean(SidePanelAppearance.EFFECT, false)
         if (opened && active && !settingsPage && prefs.getBoolean(SidePanelAppearance.LIGHTNING, false)) {
             avatarEffects?.update(prefs.getString(SidePanelAppearance.COLORS, t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),2400,prefs.getFloat(SidePanelAppearance.WIDTH,1.5f),true,scaleLightningWidth = true, avatarInsetDp = 5f)
@@ -113,7 +116,7 @@ internal class HomeSidePanelDrawer(
         screen.animate().withEndAction(null).cancel()
         settingsCleanup?.invoke(); settingsCleanup = null
         opened = false; updateEffects()
-        photoView?.dispose();photoView=null
+        photoViews.values.forEach { it.dispose() };photoViews.clear()
         imageGeneration++
         imageLoader.shutdownNow()
         panel.animate().cancel()
@@ -175,7 +178,7 @@ internal class HomeSidePanelDrawer(
     }
 
     fun close(animated: Boolean) {
-        photoView?.setPlayback(false)
+        photoViews.values.forEach { it.setPlayback(false) }
         screen.animate().withEndAction(null).cancel()
         screen.alpha = 1f; screen.translationX = 0f
         effects?.running = false
@@ -221,7 +224,7 @@ internal class HomeSidePanelDrawer(
         panel.setOnTouchListener { _, event -> onPanelTouch(event) }
         root.isFocusable = true; root.isFocusableInTouchMode = true
         root.setOnKeyListener { _, key, ev ->
-            if (key == android.view.KeyEvent.KEYCODE_BACK && ev.action == android.view.KeyEvent.ACTION_UP && opened) { if (settingsPage) switchPage(false) else close(true); true } else false
+            if (key == android.view.KeyEvent.KEYCODE_BACK && ev.action == android.view.KeyEvent.ACTION_UP && opened) { if (settingsPage) { if(settingsSubBack?.invoke()!=true) switchPage(false) } else close(true); true } else false
         }
     }
 
@@ -238,8 +241,10 @@ internal class HomeSidePanelDrawer(
         }
     }
     private fun loadPhotoMedia() {
-        photoView?.load(SidePanelImages.photoFile(activity),prefs.getLong(SidePanelAppearance.PHOTO,0L))
-        photoView?.setPlayback(opened && active && !settingsPage,restart=true)
+        photoViews.forEach { (id,view) ->
+            view.load(SidePanelImages.photoFile(activity,id),prefs.getLong(SidePanelAppearance.photoRevision(id),0L))
+            view.setPlayback(opened && active && !settingsPage,restart=true)
+        }
     }
     private fun pickImage(key: String) {
         SidePanelImagePicker.launch(activity, key) { result ->
@@ -256,7 +261,7 @@ internal class HomeSidePanelDrawer(
     }
     private fun switchPage(settings: Boolean) {
         if (settingsPage == settings) return
-        if(settings) photoView?.setPlayback(false)
+        if(settings) photoViews.values.forEach { it.setPlayback(false) }
         screen.animate().cancel()
         screen.animate().alpha(0f).translationX(if (settings) -dp(32).toFloat() else dp(32).toFloat()).setDuration(130).withEndAction {
             settingsPage = settings
@@ -272,8 +277,7 @@ internal class HomeSidePanelDrawer(
         screen.removeAllViews(); cardViews.clear()
         avatarEffects = null
         profileAvatar = null
-        photoView?.dispose()
-        photoView = null
+        photoViews.values.forEach { it.dispose() };photoViews.clear()
         lunarLabel = null
         renderedNight = night()
         val column = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -305,18 +309,20 @@ internal class HomeSidePanelDrawer(
                 gravity = Gravity.CENTER; setPadding(0,dp(12),0,0); setOnClickListener { showSignatureEditor(this) }
             }, LinearLayout.LayoutParams(-1,-2))
             cardViews["clock"] = timeCard
-            val photoCard = FrameLayout(activity).apply {
-                background = rounded(if (night()) "#242724" else "#FFFFFF",16)
-                clipToOutline = true; outlineProvider = ViewOutlineProvider.BACKGROUND
+            (listOf("photo") + SidePanelAppearance.extraPhotos(activity)).forEach { id ->
+                val height=dp(SidePanelAppearance.photoHeight(activity,id))
+                val photoCard=FrameLayout(activity).apply {
+                    background=rounded(if(night()) "#242724" else "#FFFFFF",16)
+                    clipToOutline=true;outlineProvider=ViewOutlineProvider.BACKGROUND
+                }
+                photoCard.addView(TextView(activity).apply { text="＋ 添加 / 更换图片或视频";gravity=Gravity.CENTER;setTextColor(themeSub()) },FrameLayout.LayoutParams(-1,height))
+                val media=SidePanelMediaView(activity)
+                photoViews[id]=media
+                photoCard.addView(media,FrameLayout.LayoutParams(-1,height))
+                photoCard.setOnClickListener { pickImage(id) }
+                cardViews[id]=photoCard
             }
-            photoCard.addView(TextView(activity).apply {
-                text = "＋ 添加 / 更换图片或视频"; gravity = Gravity.CENTER; setTextColor(themeSub())
-            },FrameLayout.LayoutParams(-1,dp(170)))
-            photoView = SidePanelMediaView(activity)
-            photoCard.addView(photoView,FrameLayout.LayoutParams(-1,dp(170)))
-            photoCard.setOnClickListener { pickImage("photo") }
             loadPhotoMedia()
-            cardViews["photo"] = photoCard
             val shortcuts = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
             shortcutCard(shortcuts); cardViews["shortcuts"] = shortcuts
             val hchat = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
@@ -335,14 +341,19 @@ internal class HomeSidePanelDrawer(
         } else {
             body.addView(TextView(activity).apply {
                 text = "‹  侧边栏设置"; textSize = 19f; setTextColor(themeTitle()); setPadding(0,dp(12),0,dp(18))
-                setOnClickListener { switchPage(false) }
+                setOnClickListener { if(settingsSubBack?.invoke()!=true) switchPage(false) }
             })
             settingsCleanup = t.mma.ui.miuix.SidePanelSettingsEditor.mount(activity,body,
                 backgroundChanged = { applyPanelBackground() },
                 pickBackground = { pickImage("background") },
                 clearBackground = { SidePanelImages.clear(activity,"background");backgroundBitmap=null;applyPanelBackground() },
                 editShortcuts = { showShortcutPicker() },
-                effectsChanged = { updateEffects() })
+                effectsChanged = { updateEffects() },
+                registerBack = { settingsSubBack=it },
+                pageChanged = { entering ->
+                    if(entering) { settingsScrollY=scroll.scrollY;scroll.scrollTo(0,0) }
+                    else scroll.postDelayed({ scroll.scrollTo(0,settingsScrollY) },240L)
+                })
         }
         scroll.addView(body)
         column.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
@@ -358,7 +369,7 @@ internal class HomeSidePanelDrawer(
             if (view is ViewGroup) for (index in 0 until view.childCount) surfaces(view.getChildAt(index))
         }
         surfaces(card)
-        if (id == "photo") photoView?.alpha = opacity / 255f
+        if (SidePanelAppearance.isPhoto(id)) photoViews[id]?.alpha = opacity / 255f
     }
     private fun cardBox() = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL;setPadding(dp(12),dp(16),dp(12),dp(16))
@@ -366,20 +377,20 @@ internal class HomeSidePanelDrawer(
     }
     private fun installCardDrag(card:View) {
         fun bind(view:View) {
-            if (view === card || view.hasOnClickListeners()) view.setOnLongClickListener {
+            if ((view === card || view.hasOnClickListeners()) && view.getTag(SHORTCUT_TAG) == null) view.setOnLongClickListener {
                 dragCard=card;card.alpha=.7f
                 contentScroll?.requestDisallowInterceptTouchEvent(true)
                 val started = card.startDragAndDrop(android.content.ClipData.newPlainText("side-panel-card",card.tag.toString()),View.DragShadowBuilder(card),card,0)
                 if (!started) { dragCard = null; card.alpha = 1f; contentScroll?.requestDisallowInterceptTouchEvent(false) }
                 started
             }
-            if(view is ViewGroup) for(i in 0 until view.childCount) bind(view.getChildAt(i))
+            if(view.getTag(SHORTCUT_TAG) == null && view is ViewGroup) for(i in 0 until view.childCount) bind(view.getChildAt(i))
         }
         bind(card)
         cardsBody?.setOnDragListener { _,event ->
             val moving=dragCard
             when(event.action) {
-                android.view.DragEvent.ACTION_DRAG_STARTED -> moving != null
+                android.view.DragEvent.ACTION_DRAG_STARTED -> moving != null && shortcutDrag == null
                 android.view.DragEvent.ACTION_DRAG_LOCATION -> {
                     val body=cardsBody
                     if(moving!=null && body!=null){
@@ -435,15 +446,52 @@ internal class HomeSidePanelDrawer(
         return card
     }
 
+    private val SHORTCUT_TAG get() = 0x7f0f6e11
     private fun shortcutCard(body: LinearLayout) {
-        menuCard(body, HomeSidePanelSettings.shortcuts(activity).map { shortcut ->
-            Row(shortcut.emoji, shortcut.title, shortcut.subtitle) {
-                if (!HomeSidePanelPageLauncher.openShortcut(activity, shortcut)) toast("无法打开「${shortcut.title}」") else onNavigate()
-                close(false)
+        val values=HomeSidePanelSettings.shortcuts(activity)
+        values.chunked(4).forEachIndexed { rowIndex,items ->
+            val row=LinearLayout(activity).apply { orientation=LinearLayout.HORIZONTAL }
+            items.forEachIndexed { index,item ->
+                val tile=LinearLayout(activity).apply {
+                    orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER
+                    setPadding(dp(2),dp(10),dp(2),dp(10))
+                    background=ripple(if(night()) "#242724" else "#FFFFFF")
+                    setTag(SHORTCUT_TAG,item.id)
+                    setOnClickListener {
+                        if(!HomeSidePanelPageLauncher.openShortcut(activity,item)) toast("无法打开「${item.title}」")
+                        else { close(false); if(item!=HomeSidePanelSettings.Shortcut.CLEAR_UNREAD) onNavigate() }
+                    }
+                    setOnLongClickListener {
+                        shortcutDrag=item
+                        val started=startDragAndDrop(android.content.ClipData.newPlainText("panel-shortcut",item.id),View.DragShadowBuilder(this),item,0)
+                        if(!started) shortcutDrag=null
+                        started
+                    }
+                    setOnDragListener { _,event ->
+                        val moving=shortcutDrag
+                        when(event.action) {
+                            android.view.DragEvent.ACTION_DRAG_STARTED -> moving!=null
+                            android.view.DragEvent.ACTION_DROP -> {
+                                if(moving!=null && moving!=item) {
+                                    val order=HomeSidePanelSettings.shortcuts(activity).toMutableList()
+                                    order.remove(moving);order.add(order.indexOf(item).coerceAtLeast(0),moving)
+                                    HomeSidePanelSettings.saveShortcuts(activity,order)
+                                };true
+                            }
+                            android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                                if(shortcutDrag!=null) { shortcutDrag=null;body.post { if(!settingsPage && opened) { body.removeAllViews();shortcutCard(body);applyCardOpacity(body,"shortcuts");installCardDrag(body) } } };true
+                            }
+                            else -> moving!=null
+                        }
+                    }
+                }
+                tile.addView(SidePanelShortcutIcon(activity,item),LinearLayout.LayoutParams(dp(26),dp(26)))
+                tile.addView(TextView(activity).apply { text=item.title;textSize=11f;gravity=Gravity.CENTER;setTextColor(themeTitle());setPadding(0,dp(6),0,0);maxLines=1 },LinearLayout.LayoutParams(-1,-2))
+                row.addView(tile,LinearLayout.LayoutParams(0,dp(82),1f).apply { if(index>0) leftMargin=dp(5) })
             }
-        })
+            body.addView(row,LinearLayout.LayoutParams(-1,-2).apply { if(rowIndex>0) topMargin=dp(5) })
+        }
     }
-
     private data class Row(val icon: String, val title: String, val subtitle: String, val click: () -> Unit)
 
     private fun menuCard(parent: LinearLayout, rows: List<Row>) {
@@ -476,7 +524,7 @@ internal class HomeSidePanelDrawer(
         val dialog = Dialog(activity).apply { requestWindowFeature(Window.FEATURE_NO_TITLE); setContentView(root); setCanceledOnTouchOutside(true) }
         HomeSidePanelSettings.Shortcut.entries.forEach { shortcut ->
             val line = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(12), dp(10), dp(8), dp(10)); isClickable = true; background = ripple(if (night()) "#242724" else "#FFFFFF") }
-            line.addView(TextView(activity).apply { text = shortcut.emoji; textSize = 18f; gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(34), dp(34)))
+            line.addView(SidePanelShortcutIcon(activity,shortcut), LinearLayout.LayoutParams(dp(28), dp(28)).apply { rightMargin=dp(6) })
             line.addView(TextView(activity).apply { text = "${shortcut.title}\n${shortcut.subtitle}"; textSize = 14f; setTextColor(themeTitle()) }, LinearLayout.LayoutParams(0, -2, 1f))
             val check = TextView(activity).apply { textSize = 18f; setTextColor(themeAccent()) }
             line.addView(check, LinearLayout.LayoutParams(dp(28), dp(28)))

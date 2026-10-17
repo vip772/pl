@@ -6,8 +6,21 @@ import android.net.Uri
 
 /** Stable WeChat page routes used by the OKK-style drawer. */
 internal object HomeSidePanelPageLauncher {
+    private val clearing = java.util.concurrent.atomic.AtomicBoolean(false)
     fun openShortcut(activity: Activity, shortcut: HomeSidePanelSettings.Shortcut): Boolean {
+        if(shortcut == HomeSidePanelSettings.Shortcut.CLEAR_UNREAD) {
+            if(!clearing.compareAndSet(false,true)) return true
+            t.mma.hooks.items.quickread.QuickMarkReadRuntime.requestPreparation()
+            Thread({ try { t.mma.hooks.items.quickread.QuickMarkReadRuntime.markAllRead(activity.applicationContext,true) }
+                catch(error:Throwable) { t.mma.utils.HLog.e("[Hchat:HomeSidePanel] 清空未读失败",error) }
+                finally { clearing.set(false) } },"Hchat-PanelMarkRead").start()
+            return true
+        }
         val candidates = when (shortcut) {
+            HomeSidePanelSettings.Shortcut.CLEAR_UNREAD -> emptyList()
+            HomeSidePanelSettings.Shortcut.SCAN -> listOf("com.tencent.mm.plugin.scanner.ui.BaseScanUI")
+            HomeSidePanelSettings.Shortcut.SETTINGS -> listOf("com.tencent.mm.plugin.setting.ui.setting.SettingsUI")
+            HomeSidePanelSettings.Shortcut.WALLET -> listOf("com.tencent.mm.plugin.mall.ui.MallWalletUI")
             HomeSidePanelSettings.Shortcut.QR_CODE -> listOf(
                 "com.tencent.mm.plugin.setting.ui.setting.SelfQRCodeUI",
                 "com.tencent.mm.plugin.setting.ui.setting.ColorfulSelfQRCodeUI"

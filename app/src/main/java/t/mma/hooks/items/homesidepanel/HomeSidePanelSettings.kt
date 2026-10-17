@@ -12,7 +12,7 @@ object HomeSidePanelSettings {
     const val KEY_SIGNATURE = "signature"
     const val KEY_SHORTCUTS = "shortcuts"
     const val KEY_SIGNATURE_TIP_SHOWN = "signature_tip_shown"
-    const val MAX_SHORTCUTS = 3
+    const val MAX_SHORTCUTS = 8
 
     const val DEFAULT_ENABLE = false
     const val DEFAULT_SIGNATURE = "Hchat 快捷面板"
@@ -23,10 +23,14 @@ object HomeSidePanelSettings {
         val subtitle: String,
         val emoji: String
     ) {
-        QR_CODE("qrcode", "我的二维码", "展示个人二维码", "▦"),
+        QR_CODE("qrcode", "二维码", "展示个人二维码", "▦"),
         PAY("pay", "收付款", "付款码 / 收款", "¥"),
         SERVICE("service", "服务", "支付与服务", "◈"),
-        FAVORITE("favorite", "收藏", "我的收藏", "★");
+        FAVORITE("favorite", "收藏", "我的收藏", "★"),
+        SCAN("scan", "扫一扫", "扫描二维码", ""),
+        CLEAR_UNREAD("clear_unread", "清空未读", "标记全部会话已读", ""),
+        SETTINGS("settings", "设置", "微信设置", ""),
+        WALLET("wallet", "钱包", "我的钱包", "");
 
         companion object {
             val defaultOrder = listOf(QR_CODE, PAY, FAVORITE)

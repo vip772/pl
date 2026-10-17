@@ -2,6 +2,13 @@ package t.mma.ui.miuix
 
 import android.app.Activity
 import android.view.ViewGroup
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -27,7 +34,7 @@ import top.yukonga.miuix.kmp.theme.lightColorScheme
 internal object SidePanelSettingsEditor {
     fun mount(activity: Activity, parent: ViewGroup, backgroundChanged: () -> Unit,
               pickBackground: () -> Unit, clearBackground: () -> Unit,
-              editShortcuts: () -> Unit, effectsChanged: () -> Unit): () -> Unit {
+              editShortcuts: () -> Unit, effectsChanged: () -> Unit, registerBack: ((() -> Boolean)?) -> Unit, pageChanged: (Boolean) -> Unit): () -> Unit {
         val owner = EmbeddedComposeOwner()
         val view = ComposeView(activity)
         owner.install(view)
@@ -39,7 +46,40 @@ internal object SidePanelSettingsEditor {
             val dark = (activity.resources.configuration.uiMode and 0x30) == 0x20
             CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner) {
                 MiuixTheme(colors = if (dark) darkColorScheme() else lightColorScheme()) {
+                    var cardPage by remember { mutableStateOf(false) }
+                    var revision by remember { mutableStateOf(0) }
+                    DisposableEffect(Unit) {
+                        registerBack { if(cardPage) { cardPage=false;pageChanged(false);true } else false }
+                        onDispose { registerBack(null) }
+                    }
+                    AnimatedContent(targetState=cardPage,transitionSpec={
+                        (slideInHorizontally(tween(220)) { if(targetState) it else -it } + fadeIn(tween(220))) togetherWith
+                            (slideOutHorizontally(tween(180)) { if(targetState) -it else it } + fadeOut(tween(180)))
+                    },label="侧栏卡片设置") { cards ->
                     Column(modifier = Modifier.fillMaxWidth()) {
+                    if(cards) {
+                        Action("‹  卡片设置") { cardPage=false;pageChanged(false) }
+                        val extras=remember(revision) { SidePanelAppearance.extraPhotos(activity) }
+                        val entries=listOf("clock" to "时间卡片","photo" to "图片卡片","shortcuts" to "快捷卡片","hchat" to "Hchat卡片") + extras.mapIndexed { index,id -> id to "图片卡片 ${index+2}" }
+                        entries.forEach { (id,label) ->
+                            key(id) {
+                            SettingsCard {
+                                Column {
+                                    PreferenceSlider("${label}透明度",SidePanelAppearance.cardOpacity(id),0f..1f,1f,true,prefs,{})
+                                    if(SidePanelAppearance.isPhoto(id)) {
+                                        PreferenceHeight(id,activity)
+                                        if(id == "photo") Action("添加卡片") { SidePanelAppearance.addPhoto(activity);revision++ }
+                                        else Action("移除卡片") { SidePanelAppearance.removePhoto(activity,id);revision++ }
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.height(6.dp))
+                            }
+                        }
+                    } else {
+                        SettingsCard { Action("卡片设置") { cardPage=true;pageChanged(true) } }
+                        Spacer(Modifier.height(6.dp))
+
                         SettingsCard {
                             Column {
                                 PreferenceSlider("侧边栏透明度", SidePanelAppearance.OPACITY, .1f..1f, 1f, true,
@@ -84,12 +124,8 @@ internal object SidePanelSettingsEditor {
                         }
                         Spacer(Modifier.height(6.dp))
                         SettingsCard { Action("快捷栏编辑",editShortcuts) }
-                        listOf("clock" to "时间卡片", "photo" to "照片卡片", "shortcuts" to "快捷卡片", "hchat" to "Hchat卡片").forEach { (id,label) ->
-                            Spacer(Modifier.height(6.dp))
-                            SettingsCard {
-                                PreferenceSlider("${label}透明度",SidePanelAppearance.cardOpacity(id),0f..1f,1f,true,prefs,{})
-                            }
-                        }
+                    }
+                    }
                     }
                 }
             }
@@ -100,6 +136,16 @@ internal object SidePanelSettingsEditor {
             (view.parent as? ViewGroup)?.removeView(view)
             owner.clear(view)
             owner.destroy()
+        }
+    }
+
+    @Composable
+    private fun PreferenceHeight(id:String,activity:Activity) {
+        val prefs=HomeSidePanelSettings.preferences(activity)
+        var height by remember(id) { mutableStateOf(SidePanelAppearance.photoHeight(activity,id).toFloat()) }
+        Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=12.dp)) {
+            Text("卡片高度 ${height.toInt()} dp",color=MiuixTheme.colorScheme.onSurface)
+            Slider(value=height,onValueChange={ height=it;prefs.edit().putInt("${id}_height",it.toInt()).apply() },valueRange=80f..500f,modifier=Modifier.fillMaxWidth())
         }
     }
 

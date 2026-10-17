@@ -1087,6 +1087,7 @@ internal fun FeatureSettingsPage(
     onOpenScriptPluginManager: () -> Unit = {}
 ) {
     when (provider.featureId()) {
+        t.mma.hooks.items.stepmultiplier.StepMultiplierFeature.ID -> StepMultiplierMiuixPage(context,provider,onBack)
         AutoRedPacketFeature.ID -> RedPacketMiuixPage(context, provider, onBack)
         AutoTransferFeature.ID -> AutoTransferMiuixPage(context, provider, onBack)
         FakeWalletBalanceFeature.ID -> FakeWalletBalanceMiuixPage(context, provider, onBack)

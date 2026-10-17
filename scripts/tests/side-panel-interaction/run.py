@@ -7,6 +7,8 @@ object SidePanelAppearance {fun cardOpacity(id:String)=id}
 class ClipData {companion object {fun newPlainText(a:String,b:String)=ClipData()}}
 class View {var alpha=1f;var tag:Any="photo";var click:(()->Unit)?=null;var longClick:(()->Boolean)?=null
  class DragShadowBuilder(v:View)
+ var shortcutTag:Any?=null
+ fun getTag(k:Int)=shortcutTag
  fun hasOnClickListeners()=click!=null
  fun setOnLongClickListener(l:()->Boolean){longClick=l}
  fun startDragAndDrop(c:ClipData,s:DragShadowBuilder,v:View,f:Int)=true
@@ -15,6 +17,7 @@ class View {var alpha=1f;var tag:Any="photo";var click:(()->Unit)?=null;var long
 }
 class ViewGroup:View() {val children=mutableListOf<View>();val childCount get()=children.size;fun getChildAt(i:Int)=children[i]}
 class Harness {
+ val SHORTCUT_TAG=1
  var dragCard:View?=null;val contentScroll:View?=View();val prefs=Prefs()
  fun install(card:View){
 '''+s[a:b].replace('android.content.','').replace('View.DragShadowBuilder','View.DragShadowBuilder')+'''}

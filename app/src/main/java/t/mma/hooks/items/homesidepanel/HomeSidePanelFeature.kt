@@ -19,6 +19,7 @@ class HomeSidePanelFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
+        t.mma.hooks.items.quickread.QuickMarkReadRuntime.install(context)
         val installed = HomeSidePanelRuntime(context).also { it.install() }
         runtime = installed
         t.mma.hooks.api.core.WeChatApis.lifecycle()?.let { lifecycle ->
