@@ -10,6 +10,8 @@ class View {var visibility=0;var translationX=0f;var alpha=0f;fun animate()=Anim
 class Drawer {
  var enabled=true;var edgeEnabled=true;var opened=false;var dragging=false;var downX=0f;var lastX=0f
  val panelWidth=300;val root=View();val panel=View();val edge=View();val scrim=View();var width=72
+ fun prepareMainPage(){}
+ fun refreshLunar(){}
  fun dp(v:Int)=v
  fun resizeRoot(open:Boolean){width=if(open)1000 else 72}
  fun settleOpen(){opened=true;panel.translationX=0f}

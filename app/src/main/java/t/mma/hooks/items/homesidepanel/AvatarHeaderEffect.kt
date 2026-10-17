@@ -42,6 +42,7 @@ internal class AvatarHeaderEffect(private val host: View, private val content: V
     private var running = false
     private var strokeDp = 1.4f
     private var lightning = false
+    private var lightningScale = 1f
     private val bolt = Path()
     private val branches = Path()
     private val point = FloatArray(2)
@@ -58,8 +59,9 @@ internal class AvatarHeaderEffect(private val host: View, private val content: V
             host.postOnAnimation(this)
         }
     }
-    fun update(value: String, speed: Int, strokeWidth: Float, electric: Boolean) {
+    fun update(value: String, speed: Int, strokeWidth: Float, electric: Boolean, scaleLightningWidth: Boolean = false) {
         val nextWidth = strokeWidth.coerceIn(0.5f, 4f)
+        lightningScale = if (scaleLightningWidth) nextWidth / 1.4f else 1f
         if (strokeDp != nextWidth || lightning != electric) {
             width = -1
             strokeDp = nextWidth
@@ -184,22 +186,22 @@ internal class AvatarHeaderEffect(private val host: View, private val content: V
             }
             bolt.close()
         }
-        paint.strokeWidth = 4f * density
+        paint.strokeWidth = 4f * density * lightningScale
         paint.alpha = 35
         canvas.drawPath(bolt, paint)
-        paint.strokeWidth = 2.2f * density
+        paint.strokeWidth = 2.2f * density * lightningScale
         paint.alpha = 100
         canvas.drawPath(bolt, paint)
-        paint.strokeWidth = 1f * density
+        paint.strokeWidth = 1f * density * lightningScale
         paint.alpha = 255
         canvas.drawPath(bolt, paint)
-        paint.strokeWidth = 0.65f * density
+        paint.strokeWidth = 0.65f * density * lightningScale
         paint.alpha = 200
         canvas.drawPath(branches, paint)
         paint.shader = null
         paint.color = Color.WHITE
         paint.alpha = 210
-        paint.strokeWidth = 0.4f * density
+        paint.strokeWidth = 0.4f * density * lightningScale
         canvas.drawPath(bolt, paint)
     }
     override fun setAlpha(alpha: Int) = Unit

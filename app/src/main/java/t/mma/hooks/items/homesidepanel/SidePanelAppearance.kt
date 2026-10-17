@@ -13,6 +13,7 @@ internal object SidePanelAppearance {
     const val WIDTH = "panel_lightning_width"
     const val COLORS = "panel_lightning_colors"
     const val ORDER = "panel_card_order"
+    fun cardOpacity(id: String) = "panel_card_opacity_$id"
     val cards = listOf("clock", "photo", "shortcuts", "hchat")
     fun order(context: Context): List<String> {
         val saved = HomeSidePanelSettings.preferences(context).getString(ORDER, "").orEmpty()

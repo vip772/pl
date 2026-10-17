@@ -34,7 +34,7 @@ internal class HomeSidePanelDrawer(
     private val onNavigate: () -> Unit
 ) {
     private val density = activity.resources.displayMetrics.density
-    private val panelWidth = minOf(activity.resources.displayMetrics.widthPixels - dp(16), minOf((activity.resources.displayMetrics.widthPixels * .78f).toInt(), dp(300)) + dp(20))
+    private val panelWidth = minOf(activity.resources.displayMetrics.widthPixels - dp(16), minOf((activity.resources.displayMetrics.widthPixels * .78f).toInt(), dp(300)) + dp(50))
     private val root = FrameLayout(activity)
     private val scrim = View(activity)
     private val panel = LinearLayout(activity)
@@ -48,10 +48,16 @@ internal class HomeSidePanelDrawer(
     private var profileAvatar: ImageView? = null
     private var avatarBitmap: Bitmap? = null
     private val prefs = HomeSidePanelSettings.preferences(activity)
+    private var lunarLabel: TextView? = null
+    private var lunarReceiverRegistered = false
+    private val lunarReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: android.content.Intent?) { if (opened) refreshLunar() }
+    }
+    private fun refreshLunar() { lunarLabel?.text = SidePanelLunar.today() }
     private var clock: android.widget.TextClock? = null
     private var dateLabel: android.widget.TextClock? = null
     private var settingsPage = false
-    private var gradientCleanup: (() -> Unit)? = null
+    private var settingsCleanup: (() -> Unit)? = null
     private var contentScroll: ScrollView? = null
     private var cardsBody: LinearLayout? = null
     private val cardViews = linkedMapOf<String, View>()
@@ -61,15 +67,17 @@ internal class HomeSidePanelDrawer(
     private var imageGeneration = 0
     private val imageLoader = java.util.concurrent.Executors.newSingleThreadExecutor { task -> Thread(task, "Hchat-PanelImages").apply { isDaemon = true } }
     private var effects: SidePanelEffects? = null
-    private var avatarEffects: SidePanelEffects? = null
+    private var avatarEffects: AvatarHeaderEffect? = null
     private var active = true
     private var dragCard: View? = null
     private var renderedNight: Boolean? = null
     private val screen = FrameLayout(activity)
-    fun setActive(value: Boolean) { active = value; if (value && renderedNight != night()) renderPage(); updateEffects() }
+    fun setActive(value: Boolean) { active = value; if(value && opened) refreshLunar(); if (value && renderedNight != night()) renderPage(); updateEffects() }
     private fun updateEffects() {
         effects?.running = opened && active && prefs.getBoolean(SidePanelAppearance.EFFECT, false)
-        avatarEffects?.running = opened && active && prefs.getBoolean(SidePanelAppearance.LIGHTNING, false)
+        if (opened && active && !settingsPage && prefs.getBoolean(SidePanelAppearance.LIGHTNING, false)) {
+            avatarEffects?.update(prefs.getString(SidePanelAppearance.COLORS, t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),2400,prefs.getFloat(SidePanelAppearance.WIDTH,1.5f),true,scaleLightningWidth = true)
+        } else avatarEffects?.stop()
     }
     private var edgeEnabled = false
     fun setEdgeEnabled(value: Boolean) {
@@ -82,6 +90,15 @@ internal class HomeSidePanelDrawer(
         if (host === parent && root.parent === parent) return
         host = parent
         buildPanel()
+        if (!lunarReceiverRegistered) {
+            val filter = android.content.IntentFilter().apply {
+                addAction(android.content.Intent.ACTION_TIME_TICK);addAction(android.content.Intent.ACTION_DATE_CHANGED)
+                addAction(android.content.Intent.ACTION_TIME_CHANGED);addAction(android.content.Intent.ACTION_TIMEZONE_CHANGED)
+            }
+            if (android.os.Build.VERSION.SDK_INT >= 33) activity.registerReceiver(lunarReceiver,filter,Context.RECEIVER_NOT_EXPORTED)
+            else activity.registerReceiver(lunarReceiver,filter)
+            lunarReceiverRegistered = true
+        }
         root.visibility = View.GONE
         root.elevation = dp(100).toFloat()
         root.isClickable = false
@@ -92,8 +109,9 @@ internal class HomeSidePanelDrawer(
     }
 
     fun detach() {
+        if(lunarReceiverRegistered) { activity.unregisterReceiver(lunarReceiver);lunarReceiverRegistered=false }
         screen.animate().withEndAction(null).cancel()
-        gradientCleanup?.invoke(); gradientCleanup = null
+        settingsCleanup?.invoke(); settingsCleanup = null
         opened = false; updateEffects()
         imageGeneration++
         imageLoader.shutdownNow()
@@ -120,11 +138,23 @@ internal class HomeSidePanelDrawer(
     fun isOpen(): Boolean = opened
     fun toggle() { if (opened) close(true) else show(true) }
 
+    private fun prepareMainPage() {
+        screen.animate().withEndAction(null).cancel()
+        screen.alpha = 1f
+        screen.translationX = 0f
+        if (settingsPage) {
+            settingsPage = false
+            renderPage()
+        }
+        contentScroll?.scrollTo(0,0)
+    }
     fun show(animated: Boolean) {
         if (!enabled || opened) return
+        prepareMainPage()
         panel.animate().withEndAction(null).cancel()
         scrim.animate().cancel()
         opened = true
+        refreshLunar()
         if (renderedNight != night()) renderPage()
         updateEffects()
         resizeRoot(open = true)
@@ -147,7 +177,7 @@ internal class HomeSidePanelDrawer(
         screen.animate().withEndAction(null).cancel()
         screen.alpha = 1f; screen.translationX = 0f
         effects?.running = false
-        avatarEffects?.running = false
+        avatarEffects?.stop()
         opened = false
         if (!animated) {
             panel.animate().cancel(); scrim.animate().cancel()
@@ -231,12 +261,13 @@ internal class HomeSidePanelDrawer(
         }.start()
     }
     private fun renderPage() {
-        gradientCleanup?.invoke(); gradientCleanup = null
-        effects?.running = false; avatarEffects?.running = false
+        settingsCleanup?.invoke(); settingsCleanup = null
+        effects?.running = false; avatarEffects?.stop()
         screen.removeAllViews(); cardViews.clear()
         avatarEffects = null
         profileAvatar = null
         photoView = null
+        lunarLabel = null
         renderedNight = night()
         val column = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         screen.addView(column, FrameLayout.LayoutParams(-1,-1))
@@ -244,13 +275,13 @@ internal class HomeSidePanelDrawer(
             isFillViewport = true; isVerticalScrollBarEnabled = false; isHorizontalScrollBarEnabled = false
         }
         contentScroll = scroll
-        val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12),dp(3),dp(12),dp(20)) }
+        val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12),0,dp(12),dp(20)) }
         cardsBody = body
         if (!settingsPage) {
-            column.addView(buildProfile(), LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(3) })
+            column.addView(buildProfile(), LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(6) })
             val timeCard = cardBox()
             clock = android.widget.TextClock(activity).apply {
-                format12Hour = "HH:mm"; format24Hour = "HH:mm"; textSize = 36f
+                format12Hour = "HH:mm:ss"; format24Hour = "HH:mm:ss"; textSize = 36f
                 gravity = Gravity.CENTER; setTextColor(themeTitle()); typeface = Typeface.DEFAULT_BOLD
             }
             timeCard.addView(clock, LinearLayout.LayoutParams(-1,-2))
@@ -259,6 +290,9 @@ internal class HomeSidePanelDrawer(
                 gravity = Gravity.CENTER; textSize = 13f; setTextColor(themeSub())
             }
             timeCard.addView(dateLabel, LinearLayout.LayoutParams(-1,-2))
+            lunarLabel = TextView(activity).apply { textSize=12f;gravity=Gravity.CENTER;setTextColor(themeSub());setPadding(0,dp(5),0,0) }
+            timeCard.addView(lunarLabel, LinearLayout.LayoutParams(-1,-2))
+            refreshLunar()
             timeCard.addView(TextView(activity).apply {
                 text = HomeSidePanelSettings.signature(activity); textSize = 13f; setTextColor(themeSub())
                 gravity = Gravity.CENTER; setPadding(0,dp(12),0,0); setOnClickListener { showSignatureEditor(this) }
@@ -276,8 +310,6 @@ internal class HomeSidePanelDrawer(
             photoCard.setOnClickListener { pickImage("photo") }
             cardViews["photo"] = photoCard
             val shortcuts = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-            val edit = TextView(activity).apply { text = "✎"; gravity = Gravity.END; setTextColor(themeAccent()); contentDescription = "编辑快捷"; setOnClickListener { showShortcutPicker() } }
-            shortcuts.addView(edit,LinearLayout.LayoutParams(-1,dp(28)))
             shortcutCard(shortcuts); cardViews["shortcuts"] = shortcuts
             val hchat = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
             menuCard(hchat,listOf(
@@ -288,7 +320,8 @@ internal class HomeSidePanelDrawer(
             ));cardViews["hchat"] = hchat
             SidePanelAppearance.order(activity).forEach { id ->
                 val card = cardViews.getValue(id); card.tag = id
-                body.addView(card,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(3) })
+                body.addView(card,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(6) })
+                applyCardOpacity(card,id)
                 installCardDrag(card)
             }
         } else {
@@ -296,67 +329,36 @@ internal class HomeSidePanelDrawer(
                 text = "‹  侧边栏设置"; textSize = 19f; setTextColor(themeTitle()); setPadding(0,dp(12),0,dp(18))
                 setOnClickListener { switchPage(false) }
             })
-            addSlider(body,"侧边栏透明度",10,100,(prefs.getFloat(SidePanelAppearance.OPACITY,1f)*100).toInt()) {
-                prefs.edit().putFloat(SidePanelAppearance.OPACITY,it/100f).apply();applyPanelBackground()
-            }
-            addAction(body,"添加 / 更换背景图") { pickImage("background") }
-            addAction(body,"清除背景图") { SidePanelImages.clear(activity,"background");backgroundBitmap=null;applyPanelBackground() }
-            addToggle(body,"整体动态特效",SidePanelAppearance.EFFECT) { renderPage() }
-            if (prefs.getBoolean(SidePanelAppearance.EFFECT,false)) {
-                addAction(body,"粉色 ❤  ${if(prefs.getString(SidePanelAppearance.EFFECT_KIND,"heart")=="heart") "✓" else ""}") {
-                    prefs.edit().putString(SidePanelAppearance.EFFECT_KIND,"heart").apply();renderPage()
-                }
-                addAction(body,"✨  ${if(prefs.getString(SidePanelAppearance.EFFECT_KIND,"heart")=="sparkle") "✓" else ""}") {
-                    prefs.edit().putString(SidePanelAppearance.EFFECT_KIND,"sparkle").apply();renderPage()
-                }
-            }
-            addToggle(body,"头像动态闪电",SidePanelAppearance.LIGHTNING) { renderPage() }
-            if (prefs.getBoolean(SidePanelAppearance.LIGHTNING,false)) {
-                addSlider(body,"闪电粗细",5,60,(prefs.getFloat(SidePanelAppearance.WIDTH,1.5f)*10).toInt()) {
-                    prefs.edit().putFloat(SidePanelAppearance.WIDTH,it/10f).apply()
-                }
-                gradientCleanup = t.mma.ui.miuix.SidePanelGradientEditor.mount(activity,body,
-                    prefs.getString(SidePanelAppearance.COLORS,t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty()) {
-                    prefs.edit().putString(SidePanelAppearance.COLORS,it).apply()
-                }
-            }
+            settingsCleanup = t.mma.ui.miuix.SidePanelSettingsEditor.mount(activity,body,
+                backgroundChanged = { applyPanelBackground() },
+                pickBackground = { pickImage("background") },
+                clearBackground = { SidePanelImages.clear(activity,"background");backgroundBitmap=null;applyPanelBackground() },
+                editShortcuts = { showShortcutPicker() },
+                effectsChanged = { updateEffects() })
         }
         scroll.addView(body)
         column.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
-        effects = SidePanelEffects(activity,false)
+        effects = SidePanelEffects(activity)
         screen.addView(effects,FrameLayout.LayoutParams(-1,-1))
         applyPanelBackground();updateEffects()
+    }
+    private fun applyCardOpacity(card: View, id: String) {
+        val opacity = (prefs.getFloat(SidePanelAppearance.cardOpacity(id),1f).coerceIn(0f,1f)*255).toInt()
+        fun surfaces(view: View) {
+            // Menu row ripple/base surfaces must fade along with the containing card.
+            if (view === card || view is ViewGroup) view.background?.mutate()?.alpha = opacity
+            if (view is ViewGroup) for (index in 0 until view.childCount) surfaces(view.getChildAt(index))
+        }
+        surfaces(card)
+        if (id == "photo") photoView?.imageAlpha = opacity
     }
     private fun cardBox() = LinearLayout(activity).apply {
         orientation = LinearLayout.VERTICAL;setPadding(dp(12),dp(16),dp(12),dp(16))
         background = rounded(if(night()) "#242724" else "#FFFFFF",16)
     }
-    private fun addAction(parent: LinearLayout,label:String,action:()->Unit) {
-        parent.addView(TextView(activity).apply {
-            text=label;textSize=14f;setTextColor(themeTitle());setPadding(dp(12),dp(14),dp(12),dp(14));setOnClickListener { action() }
-        },LinearLayout.LayoutParams(-1,-2))
-    }
-    private fun addToggle(parent:LinearLayout,label:String,key:String,changed:()->Unit) {
-        parent.addView(android.widget.Switch(activity).apply {
-            text=label;setTextColor(themeTitle());isChecked=prefs.getBoolean(key,false);setPadding(dp(12),dp(12),dp(12),dp(12))
-            setOnCheckedChangeListener { _,value -> prefs.edit().putBoolean(key,value).apply();changed() }
-        },LinearLayout.LayoutParams(-1,-2))
-    }
-    private fun addSlider(parent:LinearLayout,label:String,min:Int,max:Int,value:Int,changed:(Int)->Unit) {
-        val title=TextView(activity).apply { text="$label  $value";setTextColor(themeTitle());setPadding(dp(12),dp(12),dp(12),0) }
-        parent.addView(title)
-        parent.addView(android.widget.SeekBar(activity).apply {
-            this.max=max-min;progress=value.coerceIn(min,max)-min
-            setOnSeekBarChangeListener(object:android.widget.SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(bar:android.widget.SeekBar?,progress:Int,user:Boolean) { if(user){title.text="$label  ${progress+min}";changed(progress+min)} }
-                override fun onStartTrackingTouch(bar:android.widget.SeekBar?) {}
-                override fun onStopTrackingTouch(bar:android.widget.SeekBar?) {}
-            })
-        },LinearLayout.LayoutParams(-1,dp(44)))
-    }
     private fun installCardDrag(card:View) {
         fun bind(view:View) {
-            view.setOnLongClickListener {
+            if (view === card || view.hasOnClickListeners()) view.setOnLongClickListener {
                 dragCard=card;card.alpha=.7f
                 contentScroll?.requestDisallowInterceptTouchEvent(true)
                 val started = card.startDragAndDrop(android.content.ClipData.newPlainText("side-panel-card",card.tag.toString()),View.DragShadowBuilder(card),card,0)
@@ -395,14 +397,10 @@ internal class HomeSidePanelDrawer(
         val card = LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(18), dp(18), dp(16), dp(18))
-            background = rounded(if (night()) "#222822" else "#E5EFE6", 20, if (night()) "#2AFFFFFF" else "#1F000000")
-            elevation = dp(2).toFloat()
+
         }
         val avatarWrap = FrameLayout(activity).apply {
-            setPadding(dp(2), dp(2), dp(2), dp(2))
-            background = oval(themeAccent())
-            clipToOutline = true
-            outlineProvider = ViewOutlineProvider.BACKGROUND
+            clipChildren = false; clipToPadding = false
         }
         val avatar = ImageView(activity).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -412,21 +410,20 @@ internal class HomeSidePanelDrawer(
         }
         profileAvatar = avatar
         avatarBitmap?.let { avatar.setImageBitmap(it) }
-        avatarWrap.addView(avatar, FrameLayout.LayoutParams(-1, -1))
-        avatarEffects = SidePanelEffects(activity, true)
-        avatarWrap.addView(avatarEffects, FrameLayout.LayoutParams(-1, -1))
-         card.addView(avatarWrap, LinearLayout.LayoutParams(dp(54), dp(54)))
+        avatarWrap.addView(avatar, FrameLayout.LayoutParams(-1, -1).apply { setMargins(dp(7),dp(7),dp(7),dp(7)) })
+        avatarEffects = AvatarHeaderEffect(avatarWrap)
+        avatarWrap.foreground = avatarEffects
+        avatarWrap.addOnLayoutChangeListener { _,_,_,_,_,_,_,_,_ -> updateEffects() }
+         card.addView(avatarWrap, LinearLayout.LayoutParams(dp(68), dp(68)))
         val text = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0) }
         text.addView(TextView(activity).apply { this.text = accountName(); textSize = 18f; setTextColor(themeTitle()); typeface = Typeface.DEFAULT_BOLD; maxLines = 1 })
         text.addView(TextView(activity).apply {
             this.text = "● 在线"; textSize = 12f; setTextColor(Color.rgb(7,193,96)); setPadding(0,dp(5),0,0)
         })
         card.addView(text, LinearLayout.LayoutParams(0, -2, 1f))
-        card.addView(TextView(activity).apply {
-            this.text = "⚙"; textSize = 23f; gravity = Gravity.CENTER; setTextColor(themeTitle())
+        card.addView(SidePanelSettingsIcon(activity).apply {
             contentDescription = "侧边栏设置"; setOnClickListener { switchPage(true) }
         }, LinearLayout.LayoutParams(dp(40), dp(48)))
-
         return card
     }
 
@@ -512,7 +509,7 @@ internal class HomeSidePanelDrawer(
     private fun onEdgeTouch(event: MotionEvent): Boolean {
         if (!enabled || !edgeEnabled) return false
         when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> { downX = event.rawX; lastX = downX; dragging = false; return true }
+            MotionEvent.ACTION_DOWN -> { if (!opened) prepareMainPage(); downX = event.rawX; lastX = downX; dragging = false; return true }
             MotionEvent.ACTION_MOVE -> {
                 val dx = event.rawX - downX
                 if (!opened && dx > dp(8)) {
@@ -520,6 +517,7 @@ internal class HomeSidePanelDrawer(
                     scrim.animate().cancel()
                     panel.visibility = View.VISIBLE
                     opened = true
+        refreshLunar()
                     resizeRoot(open = true)
                     root.visibility = View.VISIBLE
                     panel.translationX = -panelWidth.toFloat()
@@ -567,6 +565,7 @@ internal class HomeSidePanelDrawer(
 
     private fun settleOpen() {
         opened = true
+        refreshLunar()
         if (renderedNight != night()) renderPage()
         updateEffects()
         scrim.visibility = View.VISIBLE
