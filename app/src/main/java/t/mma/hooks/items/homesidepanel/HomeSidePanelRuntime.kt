@@ -173,8 +173,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
         }
         private var effectPaused = false
-        fun pauseEffect() { effectPaused = true; avatarEffect?.stop() }
-        fun resumeEffect() { effectPaused = false; refreshEffect() }
+        fun pauseEffect() { drawer.setActive(false); effectPaused = true; avatarEffect?.stop() }
+        fun resumeEffect() { drawer.setActive(true); effectPaused = false; refreshEffect() }
         fun refreshEffect() {
             val root = if (showProfile()) header else effectTarget
             root ?: return

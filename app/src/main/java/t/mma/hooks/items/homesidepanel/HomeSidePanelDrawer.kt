@@ -34,7 +34,7 @@ internal class HomeSidePanelDrawer(
     private val onNavigate: () -> Unit
 ) {
     private val density = activity.resources.displayMetrics.density
-    private val panelWidth = minOf((activity.resources.displayMetrics.widthPixels * .78f).toInt(), dp(300))
+    private val panelWidth = minOf(activity.resources.displayMetrics.widthPixels - dp(16), minOf((activity.resources.displayMetrics.widthPixels * .78f).toInt(), dp(300)) + dp(20))
     private val root = FrameLayout(activity)
     private val scrim = View(activity)
     private val panel = LinearLayout(activity)
@@ -47,17 +47,29 @@ internal class HomeSidePanelDrawer(
     private var lastX = 0f
     private var profileAvatar: ImageView? = null
     private var avatarBitmap: Bitmap? = null
-    private var calendarCard: LinearLayout? = null
-    private var calendarKey: String? = null
-    private var dateReceiverRegistered = false
-    private val midnightRefresh = Runnable {
-        if (opened) { refreshCalendar(); scheduleMidnightRefresh() }
-    }
-    private val dateReceiver = object : android.content.BroadcastReceiver() {
-        override fun onReceive(context: Context?, intent: android.content.Intent?) {
-            refreshCalendar()
-            if (opened) scheduleMidnightRefresh()
-        }
+    private val prefs = HomeSidePanelSettings.preferences(activity)
+    private var clock: android.widget.TextClock? = null
+    private var dateLabel: android.widget.TextClock? = null
+    private var settingsPage = false
+    private var gradientCleanup: (() -> Unit)? = null
+    private var contentScroll: ScrollView? = null
+    private var cardsBody: LinearLayout? = null
+    private val cardViews = linkedMapOf<String, View>()
+    private var photoView: ImageView? = null
+    private var backgroundBitmap: Bitmap? = null
+    private var photoBitmap: Bitmap? = null
+    private var imageGeneration = 0
+    private val imageLoader = java.util.concurrent.Executors.newSingleThreadExecutor { task -> Thread(task, "Hchat-PanelImages").apply { isDaemon = true } }
+    private var effects: SidePanelEffects? = null
+    private var avatarEffects: SidePanelEffects? = null
+    private var active = true
+    private var dragCard: View? = null
+    private var renderedNight: Boolean? = null
+    private val screen = FrameLayout(activity)
+    fun setActive(value: Boolean) { active = value; if (value && renderedNight != night()) renderPage(); updateEffects() }
+    private fun updateEffects() {
+        effects?.running = opened && active && prefs.getBoolean(SidePanelAppearance.EFFECT, false)
+        avatarEffects?.running = opened && active && prefs.getBoolean(SidePanelAppearance.LIGHTNING, false)
     }
     private var edgeEnabled = false
     fun setEdgeEnabled(value: Boolean) {
@@ -70,17 +82,6 @@ internal class HomeSidePanelDrawer(
         if (host === parent && root.parent === parent) return
         host = parent
         buildPanel()
-        if (!dateReceiverRegistered) {
-            val filter = android.content.IntentFilter().apply {
-                addAction(android.content.Intent.ACTION_DATE_CHANGED)
-                addAction(android.content.Intent.ACTION_TIME_CHANGED)
-                addAction(android.content.Intent.ACTION_TIMEZONE_CHANGED)
-                addAction(android.content.Intent.ACTION_CONFIGURATION_CHANGED)
-            }
-            if (android.os.Build.VERSION.SDK_INT >= 33) activity.registerReceiver(dateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            else activity.registerReceiver(dateReceiver, filter)
-            dateReceiverRegistered = true
-        }
         root.visibility = View.GONE
         root.elevation = dp(100).toFloat()
         root.isClickable = false
@@ -91,11 +92,11 @@ internal class HomeSidePanelDrawer(
     }
 
     fun detach() {
-        root.removeCallbacks(midnightRefresh)
-        if (dateReceiverRegistered) {
-            activity.unregisterReceiver(dateReceiver)
-            dateReceiverRegistered = false
-        }
+        screen.animate().withEndAction(null).cancel()
+        gradientCleanup?.invoke(); gradientCleanup = null
+        opened = false; updateEffects()
+        imageGeneration++
+        imageLoader.shutdownNow()
         panel.animate().cancel()
         scrim.animate().cancel()
         (root.parent as? ViewGroup)?.removeView(root)
@@ -124,8 +125,8 @@ internal class HomeSidePanelDrawer(
         panel.animate().withEndAction(null).cancel()
         scrim.animate().cancel()
         opened = true
-        refreshCalendar()
-        scheduleMidnightRefresh()
+        if (renderedNight != night()) renderPage()
+        updateEffects()
         resizeRoot(open = true)
         edge.visibility = View.GONE
         root.visibility = View.VISIBLE
@@ -143,7 +144,10 @@ internal class HomeSidePanelDrawer(
     }
 
     fun close(animated: Boolean) {
-        root.removeCallbacks(midnightRefresh)
+        screen.animate().withEndAction(null).cancel()
+        screen.alpha = 1f; screen.translationX = 0f
+        effects?.running = false
+        avatarEffects?.running = false
         opened = false
         if (!animated) {
             panel.animate().cancel(); scrim.animate().cancel()
@@ -151,7 +155,7 @@ internal class HomeSidePanelDrawer(
             panel.visibility = View.GONE
             edge.visibility = if (enabled && edgeEnabled) View.VISIBLE else View.GONE
             resizeRoot(open = false)
-            root.visibility = if (enabled) View.VISIBLE else View.GONE
+            root.visibility = if (enabled && edgeEnabled) View.VISIBLE else View.GONE
             return
         }
         panel.animate().translationX(-panelWidth.toFloat()).setDuration(180L).setInterpolator(PathInterpolator(.3f, 0f, .8f, .15f)).withEndAction {
@@ -160,7 +164,7 @@ internal class HomeSidePanelDrawer(
             panel.visibility = View.GONE
             edge.visibility = if (enabled && edgeEnabled) View.VISIBLE else View.GONE
             resizeRoot(open = false)
-            root.visibility = if (enabled) View.VISIBLE else View.GONE
+            root.visibility = if (enabled && edgeEnabled) View.VISIBLE else View.GONE
         }.start()
         scrim.animate().alpha(0f).setDuration(180L).start()
     }
@@ -171,34 +175,9 @@ internal class HomeSidePanelDrawer(
         panel.clipChildren = true
         panel.setPadding(0, 0, 0, 0)
         panel.addView(View(activity), LinearLayout.LayoutParams(-1, statusBarHeight()))
-        panel.addView(buildProfile(), LinearLayout.LayoutParams(-1, -2).apply {
-            leftMargin = dp(12); rightMargin = dp(12); bottomMargin = dp(8)
-        })
-
-        val scroll = ScrollView(activity).apply {
-            isFillViewport = true
-            isVerticalScrollBarEnabled = false
-            isHorizontalScrollBarEnabled = false
-            overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
-        }
-        val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(16), dp(8), dp(16), dp(22)) }
-        calendarCard = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12), dp(14), dp(12), dp(12)) }
-        calendarKey = null
-        body.addView(calendarCard, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(12) })
-        refreshCalendar()
-        section(body, "快捷", true) { showShortcutPicker() }
-        shortcutCard(body)
-        section(body, "Hchat", false)
-        menuCard(body, listOf(
-            Row("⚙", "模块设置", "全部功能开关 · 配置") { MiuixSettingsPage.show(activity); onNavigate() },
-            Row("🎨", "主题", "主界面背景与透明度") { MiuixSettingsPage.showFeature(activity, "background_beauty"); onNavigate() },
-            Row("📍", "虚拟定位", "设置微信定位位置") { MiuixSettingsPage.showFeature(activity, "fake_location"); onNavigate() },
-            Row("▢", "悬浮底栏", "底部导航栏样式") { MiuixSettingsPage.showFeature(activity, "custom_bottom_bar"); onNavigate() }
-        ))
-        scroll.addView(body)
-        panel.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
-
-
+        panel.addView(screen, LinearLayout.LayoutParams(-1, 0, 1f))
+        renderPage()
+        loadImages()
         root.addView(scrim, FrameLayout.LayoutParams(-1, -1))
         root.addView(panel, FrameLayout.LayoutParams(panelWidth, -1, Gravity.START))
         root.addView(edge, FrameLayout.LayoutParams(dp(72), -1, Gravity.START))
@@ -210,65 +189,205 @@ internal class HomeSidePanelDrawer(
         panel.setOnTouchListener { _, event -> onPanelTouch(event) }
         root.isFocusable = true; root.isFocusableInTouchMode = true
         root.setOnKeyListener { _, key, ev ->
-            if (key == android.view.KeyEvent.KEYCODE_BACK && ev.action == android.view.KeyEvent.ACTION_UP && opened) { close(true); true } else false
+            if (key == android.view.KeyEvent.KEYCODE_BACK && ev.action == android.view.KeyEvent.ACTION_UP && opened) { if (settingsPage) switchPage(false) else close(true); true } else false
         }
     }
 
-    private fun scheduleMidnightRefresh() {
-        root.removeCallbacks(midnightRefresh)
-        val now = java.util.Calendar.getInstance()
-        val next = (now.clone() as java.util.Calendar).apply {
-            add(java.util.Calendar.DAY_OF_MONTH, 1)
-            set(java.util.Calendar.HOUR_OF_DAY, 0)
-            set(java.util.Calendar.MINUTE, 0)
-            set(java.util.Calendar.SECOND, 0)
-            set(java.util.Calendar.MILLISECOND, 0)
-        }
-        root.postDelayed(midnightRefresh, (next.timeInMillis - now.timeInMillis).coerceAtLeast(1L))
-    }
-    private fun refreshCalendar() {
-        val card = calendarCard ?: return
-        val month = SidePanelCalendarMonth.from(java.util.Calendar.getInstance())
-        val key = "${month.year}-${month.month}-${month.today}:${night()}"
-        if (calendarKey == key) return
-        calendarKey = key
-        card.removeAllViews()
-        card.background = rounded(if (night()) "#222822" else "#E5EFE6", 18)
-        card.addView(TextView(activity).apply {
-            text = "${month.year}年${month.month}月"
-            textSize = 16f
-            typeface = Typeface.DEFAULT_BOLD
-            setTextColor(themeTitle())
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(10))
-            if (android.os.Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
-        }, LinearLayout.LayoutParams(-1, -2))
-        val week = LinearLayout(activity)
-        listOf("一", "二", "三", "四", "五", "六", "日").forEach { label ->
-            week.addView(TextView(activity).apply {
-                text = label; textSize = 11f; gravity = Gravity.CENTER; setTextColor(themeSub())
-            }, LinearLayout.LayoutParams(0, dp(26), 1f))
-        }
-        card.addView(week, LinearLayout.LayoutParams(-1, -2))
-        month.cells.chunked(7).forEach { dates ->
-            val row = LinearLayout(activity)
-            dates.forEach { day ->
-                row.addView(TextView(activity).apply {
-                    text = day?.toString().orEmpty()
-                    gravity = Gravity.CENTER
-                    textSize = 13f
-                    val today = day == month.today
-                    isSelected = today
-                    setTextColor(if (today) color(if (night()) "#13291B" else "#FFFFFF") else themeTitle())
-                    if (today) {
-                        background = rounded(themeAccent(), 12)
-                        typeface = Typeface.DEFAULT_BOLD
-                    }
-                    if (day != null) contentDescription = "${month.year}年${month.month}月${day}日" + if (today) "，今天" else ""
-                    importantForAccessibility = if (day == null) View.IMPORTANT_FOR_ACCESSIBILITY_NO else View.IMPORTANT_FOR_ACCESSIBILITY_YES
-                }, LinearLayout.LayoutParams(0, dp(32), 1f).apply { setMargins(dp(1), dp(2), dp(1), dp(2)) })
+    private fun loadImages() {
+        val generation = ++imageGeneration
+        imageLoader.execute {
+            val photo = SidePanelImages.load(activity.applicationContext, "photo")
+            val backdrop = SidePanelImages.load(activity.applicationContext, "background")
+            activity.runOnUiThread {
+                if (generation != imageGeneration || host == null) return@runOnUiThread
+                photoBitmap = photo; backgroundBitmap = backdrop
+                photoView?.setImageBitmap(photo)
+                applyPanelBackground()
             }
-            card.addView(row, LinearLayout.LayoutParams(-1, -2))
+        }
+    }
+    private fun pickImage(key: String) {
+        SidePanelImagePicker.launch(activity, key) { result ->
+            if (result == SidePanelPickResult.SAVED && host != null) loadImages()
+            else if (result == SidePanelPickResult.FAILED) toast("图片导入失败")
+        }
+    }
+    private fun applyPanelBackground() {
+        val drawable: android.graphics.drawable.Drawable = backgroundBitmap?.let {
+            android.graphics.drawable.BitmapDrawable(activity.resources, it).apply { gravity = Gravity.FILL }
+        } ?: android.graphics.drawable.ColorDrawable(color(if (night()) "#1A1C1A" else "#F7F8F6"))
+        drawable.alpha = (prefs.getFloat(SidePanelAppearance.OPACITY, 1f).coerceIn(.1f,1f) * 255).toInt()
+        panel.background = drawable
+    }
+    private fun switchPage(settings: Boolean) {
+        if (settingsPage == settings) return
+        screen.animate().cancel()
+        screen.animate().alpha(0f).translationX(if (settings) -dp(32).toFloat() else dp(32).toFloat()).setDuration(130).withEndAction {
+            settingsPage = settings
+            renderPage()
+            screen.translationX = if (settings) dp(32).toFloat() else -dp(32).toFloat()
+            screen.alpha = 0f
+            screen.animate().alpha(1f).translationX(0f).setDuration(180).start()
+        }.start()
+    }
+    private fun renderPage() {
+        gradientCleanup?.invoke(); gradientCleanup = null
+        effects?.running = false; avatarEffects?.running = false
+        screen.removeAllViews(); cardViews.clear()
+        avatarEffects = null
+        profileAvatar = null
+        photoView = null
+        renderedNight = night()
+        val column = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+        screen.addView(column, FrameLayout.LayoutParams(-1,-1))
+        val scroll = ScrollView(activity).apply {
+            isFillViewport = true; isVerticalScrollBarEnabled = false; isHorizontalScrollBarEnabled = false
+        }
+        contentScroll = scroll
+        val body = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(12),dp(3),dp(12),dp(20)) }
+        cardsBody = body
+        if (!settingsPage) {
+            column.addView(buildProfile(), LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(3) })
+            val timeCard = cardBox()
+            clock = android.widget.TextClock(activity).apply {
+                format12Hour = "HH:mm"; format24Hour = "HH:mm"; textSize = 36f
+                gravity = Gravity.CENTER; setTextColor(themeTitle()); typeface = Typeface.DEFAULT_BOLD
+            }
+            timeCard.addView(clock, LinearLayout.LayoutParams(-1,-2))
+            dateLabel = android.widget.TextClock(activity).apply {
+                format12Hour = "yyyy年M月d日 EEEE"; format24Hour = "yyyy年M月d日 EEEE"
+                gravity = Gravity.CENTER; textSize = 13f; setTextColor(themeSub())
+            }
+            timeCard.addView(dateLabel, LinearLayout.LayoutParams(-1,-2))
+            timeCard.addView(TextView(activity).apply {
+                text = HomeSidePanelSettings.signature(activity); textSize = 13f; setTextColor(themeSub())
+                gravity = Gravity.CENTER; setPadding(0,dp(12),0,0); setOnClickListener { showSignatureEditor(this) }
+            }, LinearLayout.LayoutParams(-1,-2))
+            cardViews["clock"] = timeCard
+            val photoCard = FrameLayout(activity).apply {
+                background = rounded(if (night()) "#242724" else "#FFFFFF",16)
+                clipToOutline = true; outlineProvider = ViewOutlineProvider.BACKGROUND
+            }
+            photoCard.addView(TextView(activity).apply {
+                text = "＋ 添加 / 更换照片"; gravity = Gravity.CENTER; setTextColor(themeSub())
+            },FrameLayout.LayoutParams(-1,dp(170)))
+            photoView = ImageView(activity).apply { scaleType = ImageView.ScaleType.CENTER_CROP; setImageBitmap(photoBitmap) }
+            photoCard.addView(photoView,FrameLayout.LayoutParams(-1,dp(170)))
+            photoCard.setOnClickListener { pickImage("photo") }
+            cardViews["photo"] = photoCard
+            val shortcuts = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+            val edit = TextView(activity).apply { text = "✎"; gravity = Gravity.END; setTextColor(themeAccent()); contentDescription = "编辑快捷"; setOnClickListener { showShortcutPicker() } }
+            shortcuts.addView(edit,LinearLayout.LayoutParams(-1,dp(28)))
+            shortcutCard(shortcuts); cardViews["shortcuts"] = shortcuts
+            val hchat = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
+            menuCard(hchat,listOf(
+                Row("⚙","模块设置","全部功能开关 · 配置") { MiuixSettingsPage.show(activity); onNavigate() },
+                Row("🎨","主题","主界面背景与透明度") { MiuixSettingsPage.showFeature(activity,"background_beauty"); onNavigate() },
+                Row("📍","虚拟定位","设置微信定位位置") { MiuixSettingsPage.showFeature(activity,"fake_location"); onNavigate() },
+                Row("▢","悬浮底栏","底部导航栏样式") { MiuixSettingsPage.showFeature(activity,"custom_bottom_bar"); onNavigate() }
+            ));cardViews["hchat"] = hchat
+            SidePanelAppearance.order(activity).forEach { id ->
+                val card = cardViews.getValue(id); card.tag = id
+                body.addView(card,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(3) })
+                installCardDrag(card)
+            }
+        } else {
+            body.addView(TextView(activity).apply {
+                text = "‹  侧边栏设置"; textSize = 19f; setTextColor(themeTitle()); setPadding(0,dp(12),0,dp(18))
+                setOnClickListener { switchPage(false) }
+            })
+            addSlider(body,"侧边栏透明度",10,100,(prefs.getFloat(SidePanelAppearance.OPACITY,1f)*100).toInt()) {
+                prefs.edit().putFloat(SidePanelAppearance.OPACITY,it/100f).apply();applyPanelBackground()
+            }
+            addAction(body,"添加 / 更换背景图") { pickImage("background") }
+            addAction(body,"清除背景图") { SidePanelImages.clear(activity,"background");backgroundBitmap=null;applyPanelBackground() }
+            addToggle(body,"整体动态特效",SidePanelAppearance.EFFECT) { renderPage() }
+            if (prefs.getBoolean(SidePanelAppearance.EFFECT,false)) {
+                addAction(body,"粉色 ❤  ${if(prefs.getString(SidePanelAppearance.EFFECT_KIND,"heart")=="heart") "✓" else ""}") {
+                    prefs.edit().putString(SidePanelAppearance.EFFECT_KIND,"heart").apply();renderPage()
+                }
+                addAction(body,"✨  ${if(prefs.getString(SidePanelAppearance.EFFECT_KIND,"heart")=="sparkle") "✓" else ""}") {
+                    prefs.edit().putString(SidePanelAppearance.EFFECT_KIND,"sparkle").apply();renderPage()
+                }
+            }
+            addToggle(body,"头像动态闪电",SidePanelAppearance.LIGHTNING) { renderPage() }
+            if (prefs.getBoolean(SidePanelAppearance.LIGHTNING,false)) {
+                addSlider(body,"闪电粗细",5,60,(prefs.getFloat(SidePanelAppearance.WIDTH,1.5f)*10).toInt()) {
+                    prefs.edit().putFloat(SidePanelAppearance.WIDTH,it/10f).apply()
+                }
+                gradientCleanup = t.mma.ui.miuix.SidePanelGradientEditor.mount(activity,body,
+                    prefs.getString(SidePanelAppearance.COLORS,t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty()) {
+                    prefs.edit().putString(SidePanelAppearance.COLORS,it).apply()
+                }
+            }
+        }
+        scroll.addView(body)
+        column.addView(scroll,LinearLayout.LayoutParams(-1,0,1f))
+        effects = SidePanelEffects(activity,false)
+        screen.addView(effects,FrameLayout.LayoutParams(-1,-1))
+        applyPanelBackground();updateEffects()
+    }
+    private fun cardBox() = LinearLayout(activity).apply {
+        orientation = LinearLayout.VERTICAL;setPadding(dp(12),dp(16),dp(12),dp(16))
+        background = rounded(if(night()) "#242724" else "#FFFFFF",16)
+    }
+    private fun addAction(parent: LinearLayout,label:String,action:()->Unit) {
+        parent.addView(TextView(activity).apply {
+            text=label;textSize=14f;setTextColor(themeTitle());setPadding(dp(12),dp(14),dp(12),dp(14));setOnClickListener { action() }
+        },LinearLayout.LayoutParams(-1,-2))
+    }
+    private fun addToggle(parent:LinearLayout,label:String,key:String,changed:()->Unit) {
+        parent.addView(android.widget.Switch(activity).apply {
+            text=label;setTextColor(themeTitle());isChecked=prefs.getBoolean(key,false);setPadding(dp(12),dp(12),dp(12),dp(12))
+            setOnCheckedChangeListener { _,value -> prefs.edit().putBoolean(key,value).apply();changed() }
+        },LinearLayout.LayoutParams(-1,-2))
+    }
+    private fun addSlider(parent:LinearLayout,label:String,min:Int,max:Int,value:Int,changed:(Int)->Unit) {
+        val title=TextView(activity).apply { text="$label  $value";setTextColor(themeTitle());setPadding(dp(12),dp(12),dp(12),0) }
+        parent.addView(title)
+        parent.addView(android.widget.SeekBar(activity).apply {
+            this.max=max-min;progress=value.coerceIn(min,max)-min
+            setOnSeekBarChangeListener(object:android.widget.SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar:android.widget.SeekBar?,progress:Int,user:Boolean) { if(user){title.text="$label  ${progress+min}";changed(progress+min)} }
+                override fun onStartTrackingTouch(bar:android.widget.SeekBar?) {}
+                override fun onStopTrackingTouch(bar:android.widget.SeekBar?) {}
+            })
+        },LinearLayout.LayoutParams(-1,dp(44)))
+    }
+    private fun installCardDrag(card:View) {
+        fun bind(view:View) {
+            view.setOnLongClickListener {
+                dragCard=card;card.alpha=.7f
+                contentScroll?.requestDisallowInterceptTouchEvent(true)
+                val started = card.startDragAndDrop(android.content.ClipData.newPlainText("side-panel-card",card.tag.toString()),View.DragShadowBuilder(card),card,0)
+                if (!started) { dragCard = null; card.alpha = 1f; contentScroll?.requestDisallowInterceptTouchEvent(false) }
+                started
+            }
+            if(view is ViewGroup) for(i in 0 until view.childCount) bind(view.getChildAt(i))
+        }
+        bind(card)
+        cardsBody?.setOnDragListener { _,event ->
+            val moving=dragCard
+            when(event.action) {
+                android.view.DragEvent.ACTION_DRAG_STARTED -> moving != null
+                android.view.DragEvent.ACTION_DRAG_LOCATION -> {
+                    val body=cardsBody
+                    if(moving!=null && body!=null){
+                        val candidates=(0 until body.childCount).map{body.getChildAt(it)}
+                        val target=candidates.firstOrNull{event.y < it.top+it.height/2f} ?: candidates.lastOrNull()
+                        if(target!=null && target!==moving){val index=body.indexOfChild(target);body.removeView(moving);body.addView(moving,index)}
+                        val scroll=contentScroll
+                        if(scroll!=null){val y=event.y-scroll.scrollY;if(y<dp(56))scroll.smoothScrollBy(0,-dp(24)) else if(y>scroll.height-dp(56))scroll.smoothScrollBy(0,dp(24))}
+                    };true
+                }
+                android.view.DragEvent.ACTION_DROP -> {
+                    cardsBody?.let { body -> prefs.edit().putString(SidePanelAppearance.ORDER,(0 until body.childCount).joinToString(","){body.getChildAt(it).tag.toString()}).apply() };true
+                }
+                android.view.DragEvent.ACTION_DRAG_ENDED -> {
+                    cardsBody?.let { body -> prefs.edit().putString(SidePanelAppearance.ORDER,(0 until body.childCount).joinToString(","){body.getChildAt(it).tag.toString()}).apply() }
+                    moving?.alpha=1f;dragCard=null;contentScroll?.requestDisallowInterceptTouchEvent(false);true }
+                else -> true
+            }
         }
     }
 
@@ -293,19 +412,21 @@ internal class HomeSidePanelDrawer(
         }
         profileAvatar = avatar
         avatarBitmap?.let { avatar.setImageBitmap(it) }
-        avatarWrap.addView(avatar, FrameLayout.LayoutParams(-1, -1)); card.addView(avatarWrap, LinearLayout.LayoutParams(dp(54), dp(54)))
+        avatarWrap.addView(avatar, FrameLayout.LayoutParams(-1, -1))
+        avatarEffects = SidePanelEffects(activity, true)
+        avatarWrap.addView(avatarEffects, FrameLayout.LayoutParams(-1, -1))
+         card.addView(avatarWrap, LinearLayout.LayoutParams(dp(54), dp(54)))
         val text = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(14), 0, 0, 0) }
         text.addView(TextView(activity).apply { this.text = accountName(); textSize = 18f; setTextColor(themeTitle()); typeface = Typeface.DEFAULT_BOLD; maxLines = 1 })
-        val signature = TextView(activity).apply {
-            val shown = HomeSidePanelSettings.signatureTipShown(activity)
-            this.text = if (shown) HomeSidePanelSettings.signature(activity) else "✎ 编辑签名 · ${HomeSidePanelSettings.signature(activity)}"
-            if (!shown) HomeSidePanelSettings.markSignatureTipShown(activity)
-            textSize = 12f; setTextColor(themeSub()); setPadding(dp(10), dp(4), dp(10), dp(4)); background = rounded(if (night()) "#1E241E" else "#D6E4D8", 12)
-            setOnClickListener { showSignatureEditor(this) }
-        }
-        text.addView(signature, LinearLayout.LayoutParams(-2, -2).apply { topMargin = dp(6) })
+        text.addView(TextView(activity).apply {
+            this.text = "● 在线"; textSize = 12f; setTextColor(Color.rgb(7,193,96)); setPadding(0,dp(5),0,0)
+        })
         card.addView(text, LinearLayout.LayoutParams(0, -2, 1f))
-        card.setOnClickListener { toggle() }
+        card.addView(TextView(activity).apply {
+            this.text = "⚙"; textSize = 23f; gravity = Gravity.CENTER; setTextColor(themeTitle())
+            contentDescription = "侧边栏设置"; setOnClickListener { switchPage(true) }
+        }, LinearLayout.LayoutParams(dp(40), dp(48)))
+
         return card
     }
 
@@ -316,14 +437,6 @@ internal class HomeSidePanelDrawer(
                 close(false)
             }
         })
-    }
-
-    private fun section(parent: LinearLayout, title: String, editable: Boolean, action: (() -> Unit)? = null) {
-        val row = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL; setPadding(dp(4), dp(12), dp(2), dp(8)) }
-        row.addView(View(activity).apply { background = rounded(themeAccent(), 2) }, LinearLayout.LayoutParams(dp(3), dp(12)).apply { rightMargin = dp(8) })
-        row.addView(TextView(activity).apply { text = title; textSize = 12.5f; setTextColor(themeSub()); typeface = Typeface.create("sans-serif-medium", Typeface.BOLD); letterSpacing = .04f }, LinearLayout.LayoutParams(0, -2, 1f))
-        if (editable && action != null) row.addView(TextView(activity).apply { text = "✎"; gravity = Gravity.CENTER; textSize = 13f; setTextColor(themeAccent()); background = oval(if (night()) "#227FBF90" else "#182F8A4E"); setOnClickListener { action() } }, LinearLayout.LayoutParams(dp(28), dp(28)))
-        parent.addView(row)
     }
 
     private data class Row(val icon: String, val title: String, val subtitle: String, val click: () -> Unit)
@@ -341,12 +454,12 @@ internal class HomeSidePanelDrawer(
             row.addView(TextView(activity).apply { text = "›"; textSize = 18f; setTextColor(themeSub()) })
             card.addView(row)
         }
-        parent.addView(card, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
+        parent.addView(card, LinearLayout.LayoutParams(-1, -2))
     }
 
     private fun showSignatureEditor(target: TextView) {
         val input = EditText(activity).apply { setText(HomeSidePanelSettings.signature(activity)); setSingleLine(true); textSize = 15f; setTextColor(themeTitle()); background = rounded(if (night()) "#242724" else "#FFFFFF", 10); setPadding(dp(12), 0, dp(12), 0) }
-        val box = dialogBox("侧栏签名", "显示在昵称下方，点击签名可随时修改", input)
+        val box = dialogBox("侧栏签名", "显示在时间日期卡片下方", input)
         addDialogActions(box.first, box.second) { HomeSidePanelSettings.saveSignature(activity, input.text.toString()); target.text = input.text.toString().trim().ifEmpty { HomeSidePanelSettings.DEFAULT_SIGNATURE }; toast("签名已保存") }
     }
 
@@ -395,13 +508,7 @@ internal class HomeSidePanelDrawer(
         root.addView(actions)
     }
 
-    private fun rebuild() {
-        (root.parent as? ViewGroup)?.removeView(root)
-        root.removeAllViews()
-        panel.removeAllViews()
-        host?.let { attachTo(it); setEnabled(enabled) }
-    }
-
+    private fun rebuild() { renderPage() }
     private fun onEdgeTouch(event: MotionEvent): Boolean {
         if (!enabled || !edgeEnabled) return false
         when (event.actionMasked) {
@@ -460,8 +567,8 @@ internal class HomeSidePanelDrawer(
 
     private fun settleOpen() {
         opened = true
-        refreshCalendar()
-        scheduleMidnightRefresh()
+        if (renderedNight != night()) renderPage()
+        updateEffects()
         scrim.visibility = View.VISIBLE
         panel.animate().translationX(0f).setDuration(200L).setInterpolator(PathInterpolator(.4f, 0f, .2f, 1f)).start()
         scrim.animate().alpha(.42f).setDuration(200L).start()
