@@ -48,7 +48,6 @@ internal object MomentsFakeForwardRuntimeRegistry {
         return runtime?.clearAll(onComplete) == true
     }
 
-    fun whenReloadReady(callback: () -> Unit) { runtime?.whenReloadReady(callback) }
     fun reloadTimelineAdapter(adapter: Any?): Boolean {
         return runtime?.reloadTimelineAdapter(adapter) == true
     }
@@ -101,29 +100,13 @@ internal class MomentsFakeForwardRuntime(
         return ready
     }
 
-    private val reloadCallbacks = java.util.concurrent.CopyOnWriteArrayList<() -> Unit>()
-    private val reloadHandler = Handler(Looper.getMainLooper())
-    fun whenReloadReady(callback: () -> Unit) {
-        reloadCallbacks.add(callback)
-        reloadHandler.postDelayed({ reloadCallbacks.remove(callback) }, 30_000L)
-        prepareTimelineReload()
-        dispatchReloadCallbacks()
-    }
-    private fun dispatchReloadCallbacks() {
-        if (timelineLocalReloadMethod == null && improveTimelineRefreshMethod == null) return
-        reloadCallbacks.toList().forEach { callback ->
-            if (reloadCallbacks.remove(callback)) reloadHandler.post { callback() }
-        }
-    }
     private fun prepareTimelineReload() {
         DexInstallScheduler.schedule("moments_fake:timeline_reload", "朋友圈本地刷新入口", DexInstallScheduler.Stage.BRIDGE) {
             locateTimelineLocalReloadMethod()?.let(::installTimelineAdapterTracker)
             KavaReflector.loadClass(IMPROVE_MVVM_LIST_CLASS, context.hostClassLoader())
                 ?.let { locateImproveTimelineRefreshMethod(it) }
             // Either verified branch is sufficient; otherwise use bounded scheduler retries.
-            val available = timelineAdapterTrackerInstalled || improveTimelineRefreshMethod != null
-            if (available) dispatchReloadCallbacks()
-            available
+            timelineAdapterTrackerInstalled || improveTimelineRefreshMethod != null
         }
     }
     fun isReady(): Boolean = ready
@@ -667,10 +650,10 @@ internal class MomentsFakeForwardRuntime(
     }
 
     private fun isImproveTimelineRefreshMethod(method: Method, mvvmListClass: Class<*>): Boolean {
-        if (!method.declaringClass.isAssignableFrom(mvvmListClass) || method.returnType != Void.TYPE) return false
+        if (method.declaringClass != mvvmListClass || method.returnType != Void.TYPE) return false
         if (!Modifier.isStatic(method.modifiers)) return method.parameterTypes.isEmpty()
         val types = method.parameterTypes
-        return types.size == 4 && types[0] == method.declaringClass &&
+        return types.size == 4 && types[0] == mvvmListClass &&
             types[2] == Integer.TYPE && types[3] == Any::class.java
     }
 

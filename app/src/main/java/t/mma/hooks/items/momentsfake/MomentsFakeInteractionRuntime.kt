@@ -474,15 +474,12 @@ internal class MomentsFakeInteractionRuntime(
     internal fun refreshTimelineViews(activity: Activity, anchor: View?) {
         // A timeline refresh must never scan LauncherUI or unrelated Activities.
         if (!isSnsActivity(activity)) return
-        val activityRef = java.lang.ref.WeakReference(activity)
-        val anchorRef = java.lang.ref.WeakReference(anchor)
-        MomentsFakeForwardRuntimeRegistry.whenReloadReady {
-            val owner = activityRef.get() ?: return@whenReloadReady
-            val root = owner.window?.decorView ?: return@whenReloadReady
-            if (owner.isFinishing || owner.isDestroyed || !isSnsActivity(owner) || !root.isShown) return@whenReloadReady
-            val target = anchorRef.get()?.takeIf { it.rootView === root.rootView }
-            val refreshed = notifyNearestAdapter(target) || notifyAdapters(root)
-            t.mma.utils.HLog.i("[Hchat:MomentsFake] 本地即时刷新 success=$refreshed activity=${owner.javaClass.name}")
+        val decor = activity.window?.decorView ?: return
+        decor.post {
+            if (activity.isFinishing || activity.isDestroyed || !isSnsActivity(activity)) return@post
+            if (!notifyNearestAdapter(anchor?.takeIf { it.rootView === decor.rootView })) notifyAdapters(decor)
+            decor.requestLayout()
+            decor.invalidate()
         }
     }
 
@@ -501,35 +498,30 @@ internal class MomentsFakeInteractionRuntime(
                 return true
             }
             if (current is AbsListView) {
-                if (MomentsFakeForwardRuntimeRegistry.reloadTimelineAdapter(current.adapter)) {
-                    current.invalidateViews()
-                    return true
-                }
+                MomentsFakeForwardRuntimeRegistry.reloadTimelineAdapter(current.adapter)
+                current.invalidateViews()
+                return true
             }
             current = current.parent
         }
         return false
     }
 
-    private fun notifyAdapters(view: View): Boolean {
-        if (notifyRecyclerAdapter(view)) return true
-        if (view is AbsListView && MomentsFakeForwardRuntimeRegistry.reloadTimelineAdapter(view.adapter)) {
+    private fun notifyAdapters(view: View) {
+        if (!notifyRecyclerAdapter(view) && view is AbsListView) {
+            MomentsFakeForwardRuntimeRegistry.reloadTimelineAdapter(view.adapter)
             view.invalidateViews()
-            return true
         }
         if (view is ViewGroup) {
-            for (index in 0 until view.childCount) {
-                if (notifyAdapters(view.getChildAt(index))) return true
-            }
+            for (index in 0 until view.childCount) notifyAdapters(view.getChildAt(index))
         }
-        return false
     }
 
     private fun notifyRecyclerAdapter(view: View): Boolean {
         val recyclerClass = recyclerViewClass ?: return false
         if (!recyclerClass.isInstance(view)) return false
         val adapter = KavaReflector.invokeMethod(view, "getAdapter")
-        if (!MomentsFakeForwardRuntimeRegistry.reloadTimelineAdapter(adapter)) return false
+        MomentsFakeForwardRuntimeRegistry.reloadTimelineAdapter(adapter)
         KavaReflector.invokeMethod(adapter, "notifyDataSetChanged")
         return true
     }
