@@ -4,3 +4,5 @@
 关键词：StartupStall、mainUnresponsive、mainRecovered、probeSchedulingGapMs。日志包含主线程、初始化线程和Dex安装线程堆栈、当前Hook签名、超过50ms的Hook安装耗时以及各安装任务总耗时。所有写入复用异步运行日志。
 全进程暂停会使采样线程也暂停；调度间隔不等同于主线程阻塞时长，Java堆栈不能代替ART原生trace。诊断有额外开销。本次不改变功能执行顺序。
 测试：安装诊断版，开启运行日志，强停重开微信，首页持续滚动；记录卡住和恢复时间，恢复后导出运行日志。
+
+2026-10-18复测定位：主线程在朋友圈伪互动 refreshTimelineViews → notifyAdapters → reloadTimelineAdapter → locateTimelineLocalReloadMethod 中执行 DexKit nativeFindMethod，观测等待7547ms。修复限制朋友圈页面、空数据不刷新，将旧版Cursor及新版Improve入口定位移入DexInstallScheduler串行队列，UI只读取已准备结果，未就绪时请求有限补装。保留原定位条件及缓存，不变更微信内部入口；本次不新增版本兼容结论。需要实机复测首页启动滚动，以及朋友圈伪赞/伪评论刷新、伪转发清理。

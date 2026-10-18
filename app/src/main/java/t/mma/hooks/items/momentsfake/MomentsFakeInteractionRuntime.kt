@@ -208,7 +208,9 @@ internal class MomentsFakeInteractionRuntime(
 
     fun reapplyAll() {
         submit {
-            store.allIds().forEach { snsId ->
+            val ids = store.allIds()
+            if (ids.isEmpty()) return@submit
+            ids.forEach { snsId ->
                 val stored = store.entry(snsId)
                 synchronized(persistenceLock) {
                     val nativeInfo = queryNativeInfo(snsId) ?: return@synchronized
@@ -470,15 +472,25 @@ internal class MomentsFakeInteractionRuntime(
     }
 
     internal fun refreshTimelineViews(activity: Activity, anchor: View?) {
+        // A timeline refresh must never scan LauncherUI or unrelated Activities.
+        if (!isSnsActivity(activity)) return
         val decor = activity.window?.decorView ?: return
         decor.post {
-            if (activity.isFinishing || activity.isDestroyed) return@post
-            if (!notifyNearestAdapter(anchor)) notifyAdapters(decor)
+            if (activity.isFinishing || activity.isDestroyed || !isSnsActivity(activity)) return@post
+            if (!notifyNearestAdapter(anchor?.takeIf { it.rootView === decor.rootView })) notifyAdapters(decor)
             decor.requestLayout()
             decor.invalidate()
         }
     }
 
+    private fun isSnsActivity(activity: Activity): Boolean {
+        var type: Class<*>? = activity.javaClass
+        while (type != null) {
+            if (type.name.startsWith("com.tencent.mm.plugin.sns.")) return true
+            type = type.superclass
+        }
+        return false
+    }
     private fun notifyNearestAdapter(anchor: View?): Boolean {
         var current: Any? = anchor
         while (current is View) {

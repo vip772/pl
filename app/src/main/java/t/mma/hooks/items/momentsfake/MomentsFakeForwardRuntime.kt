@@ -12,6 +12,7 @@ import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.sns.SnsContextMenuTarget
 import t.mma.hooks.api.sns.SnsLocalPostIdentity
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
@@ -91,7 +92,7 @@ internal class MomentsFakeForwardRuntime(
     fun warmup(): Boolean {
         ready = WeChatApis.snsApi()?.warmupCachedPostLocalWrite() == true &&
             installDeleteGuard() && installSourceTypeGuard()
-        locateTimelineLocalReloadMethod()?.let(::installTimelineAdapterTracker)
+        prepareTimelineReload()
         installImprovePageDiagnostic()
         if (ready) {
             repairRegisteredSourceTypes()
@@ -99,6 +100,15 @@ internal class MomentsFakeForwardRuntime(
         return ready
     }
 
+    private fun prepareTimelineReload() {
+        DexInstallScheduler.schedule("moments_fake:timeline_reload", "朋友圈本地刷新入口", DexInstallScheduler.Stage.BRIDGE) {
+            locateTimelineLocalReloadMethod()?.let(::installTimelineAdapterTracker)
+            KavaReflector.loadClass(IMPROVE_MVVM_LIST_CLASS, context.hostClassLoader())
+                ?.let { locateImproveTimelineRefreshMethod(it) }
+            // Either verified branch is sufficient; otherwise use bounded scheduler retries.
+            timelineAdapterTrackerInstalled || improveTimelineRefreshMethod != null
+        }
+    }
     fun isReady(): Boolean = ready
 
     fun clearAll(onComplete: (Boolean) -> Unit): Boolean {
@@ -554,9 +564,8 @@ internal class MomentsFakeForwardRuntime(
             if (mvvmList != null && refreshImproveMvvmList(mvvmList, "currentActivity")) return true
         }
         if (improveTimelineActive) return true
-        val method = timelineLocalReloadMethod ?: locateTimelineLocalReloadMethod()
+        val method = timelineLocalReloadMethod ?: run { prepareTimelineReload(); null }
             ?: return true.also { trace("清空伪转发发现页本地重载: 当前无时间线实例") }
-        installTimelineAdapterTracker(method)
         val adapter = timelineAdapterRef.get() ?: findCurrentTimelineAdapter(method.declaringClass)
             ?: return true.also { trace("清空伪转发发现页本地重载: 当前无活动 Adapter") }
         return KavaReflector.invokeSuccessfully(method, adapter, "")
@@ -570,8 +579,7 @@ internal class MomentsFakeForwardRuntime(
     fun reloadTimelineAdapter(adapter: Any?): Boolean {
         if (reloadImproveTimeline(adapter)) return true
         if (improveTimelineActive) return true
-        val method = timelineLocalReloadMethod ?: locateTimelineLocalReloadMethod() ?: return false
-        installTimelineAdapterTracker(method)
+        val method = timelineLocalReloadMethod ?: run { prepareTimelineReload(); null } ?: return false
         val tracked = timelineAdapterRef.get()
         val target = when {
             method.declaringClass.isInstance(adapter) -> adapter
@@ -601,8 +609,7 @@ internal class MomentsFakeForwardRuntime(
     private fun refreshImproveMvvmList(mvvmList: Any, ownerName: String): Boolean {
         val mvvmListClass = mvvmList.javaClass
         val method = improveTimelineRefreshMethod?.takeIf { isImproveTimelineRefreshMethod(it, mvvmListClass) }
-            ?: locateImproveTimelineRefreshMethod(mvvmListClass)
-            ?: return false
+            ?: return false.also { prepareTimelineReload() }
         val refreshed = if (Modifier.isStatic(method.modifiers)) {
             KavaReflector.invokeSuccessfully(method, null, mvvmList, null, 1, null)
         } else {
