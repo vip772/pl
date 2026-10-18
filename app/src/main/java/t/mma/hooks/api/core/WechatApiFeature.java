@@ -20,7 +20,6 @@ import t.mma.event.Events;
 import t.mma.hooks.core.DexInstallScheduler;
 import t.mma.hooks.core.Feature;
 import t.mma.hooks.core.FeatureContext;
-import t.mma.hooks.items.chatopendiagnostics.ChatOpenDiagnosticsFeature;
 import de.robv.android.xposed.XposedBridge;
 
 /**
@@ -127,7 +126,6 @@ public class WechatApiFeature implements Feature {
                 conversationChangeApi, contactChangeApi, chatroomChangeApi,
                 lifecycleApi, diagnosticsApi, taskApi, messageObserveApi, chatPageApi, versionApi,
                 transferApi, verifyUserApi, snsApi);
-        ChatOpenDiagnosticsFeature.installDirect(context);
         DexInstallScheduler.scheduleTask("wechat_api:warmup", "微信公共API预热",
                 DexInstallScheduler.Stage.BRIDGE, 1000, () -> {
             try {
@@ -183,7 +181,6 @@ public class WechatApiFeature implements Feature {
 
     @Override
     public void onDestroy(FeatureContext context) {
-        ChatOpenDiagnosticsFeature.destroyDirect();
         WeChatTaskApi taskApi = WeChatApis.tasks();
         if (taskApi != null) taskApi.shutdown();
         WeChatApis.clear();
