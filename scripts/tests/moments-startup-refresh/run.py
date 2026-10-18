@@ -21,3 +21,23 @@ assert not refresh(['saved'], ['com.tencent.mm.ui.LauncherUI'])
 assert refresh(['saved'], ['com.tencent.mm.plugin.sns.ui.SnsTimeLineUI'])
 assert refresh(['saved'], ['wrapper.Activity', 'com.tencent.mm.plugin.sns.ui.SnsUserUI'])
 print('PASS: 首页隔离、空数据跳过、朋友圈继承页面、刷新路径无同步定位及有限补装')
+
+assert 'whenReloadReady' in i and 'if (available) dispatchReloadCallbacks()' in f
+assert '!method.declaringClass.isAssignableFrom(mvvmListClass)' in f
+assert 'types[0] == method.declaringClass' in f
+assert 'if (notifyAdapters(view.getChildAt(index))) return true' in i
+assert 'if (!MomentsFakeForwardRuntimeRegistry.reloadTimelineAdapter(adapter)) return false' in i
+for ready_first in [False, True]:
+ pending = []; delivered = []
+ def dispatch(ready):
+  if ready:
+   for callback in pending[:]:
+    if callback in pending:
+     pending.remove(callback); delivered.append(callback)
+ dispatch(ready_first)
+ pending.append('refresh')
+ dispatch(ready_first)
+ dispatch(True)
+ dispatch(True)
+ assert delivered == ['refresh'] and not pending
+print('PASS: 就绪补刷竞态、单次派发、运行时子类签名、首个成功列表停止扫描')
