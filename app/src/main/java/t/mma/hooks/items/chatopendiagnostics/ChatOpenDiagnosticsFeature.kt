@@ -78,6 +78,7 @@ class ChatOpenDiagnosticsFeature : BaseFeature() {
         private var destroyed = false
 
         fun install() {
+            worker.execute { SingleMessageRemoval.run(context.hostContext()) }
             log("installed activityStart=${WeChatApis.activityStart()?.isAvailable() == true} chatPage=${chatPage.isAvailable()} messageStore=${WeChatApis.messageStore()?.isAvailable() == true}")
         }
 
