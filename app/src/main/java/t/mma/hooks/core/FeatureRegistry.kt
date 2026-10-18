@@ -15,7 +15,7 @@ import t.mma.hooks.items.chattime.ChatTimeStyleFeature
 import t.mma.hooks.items.chattoolbar.ChatToolbarFeature
 import t.mma.hooks.items.conversationgroup.ConversationGroupFeature
 import t.mma.hooks.items.conversationanalysis.ConversationAnalysisFeature
-
+import t.mma.hooks.items.chatopendiagnostics.ChatOpenDiagnosticsFeature
 import t.mma.hooks.items.homesidepanel.HomeSidePanelFeature
 import t.mma.hooks.items.monetgenerator.MonetModuleGeneratorFeature
 import t.mma.hooks.items.securemessage.AntiSecureMessageFeature
@@ -156,6 +156,7 @@ object FeatureRegistry {
             .register(AutoMessageForwardFeature())
             .register(ConversationGroupFeature())
             .register(ConversationAnalysisFeature())
+            .register(ChatOpenDiagnosticsFeature())
             .register(MessageAffixFeature())
             .register(TypingReportBlockFeature())
             .register(PatBlockFeature())
