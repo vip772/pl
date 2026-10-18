@@ -17,28 +17,49 @@ import java.util.concurrent.atomic.AtomicLong
  * 只在运行日志开启时记录聊天页打开失败的诊断信息，不参与聊天页业务逻辑。
  */
 class ChatOpenDiagnosticsFeature : BaseFeature() {
-    private var runtime: Runtime? = null
-
     override fun featureId(): String = ID
     override fun name(): String = "聊天页打开诊断"
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val chatPage = WeChatApis.chatPage() ?: return
-        val activityStart = WeChatApis.activityStart() ?: return
-        val installed = Runtime(context, chatPage)
-        runtime = installed
-        trackSubscription(chatPage.subscribe(installed::onChatPageChanged))
-        trackSubscription(activityStart.subscribe(installed::onStartActivity))
-        installed.install()
+        installDirect(context)
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
+        destroyDirect()
     }
 
     companion object {
         const val ID = "chat_open_diagnostics"
+        private var directRuntime: Runtime? = null
+
+        @JvmStatic
+        fun installDirect(context: FeatureContext) {
+            if (directRuntime != null) return
+            val chatPage = WeChatApis.chatPage()
+            val activityStart = WeChatApis.activityStart()
+            if (chatPage == null || activityStart == null) {
+                HLog.w("[Hchat:ChatOpenDiag] API未就绪，等待公共API完成初始化")
+                return
+            }
+            runCatching {
+                chatPage.install()
+                activityStart.install()
+                val installed = Runtime(context, chatPage)
+                directRuntime = installed
+                chatPage.subscribe(installed::onChatPageChanged)
+                activityStart.subscribe(installed::onStartActivity)
+                installed.install()
+            }.onFailure {
+                directRuntime = null
+                HLog.e("[Hchat:ChatOpenDiag] 安装失败", it)
+            }
+        }
+
+        @JvmStatic
+        fun destroyDirect() {
+            directRuntime?.destroy()
+            directRuntime = null
+        }
     }
 
     private class Runtime(
@@ -57,7 +78,7 @@ class ChatOpenDiagnosticsFeature : BaseFeature() {
         private var destroyed = false
 
         fun install() {
-            log("installed")
+            log("installed activityStart=${WeChatApis.activityStart()?.isAvailable() == true} chatPage=${chatPage.isAvailable()} messageStore=${WeChatApis.messageStore()?.isAvailable() == true}")
         }
 
         fun onStartActivity(intent: Intent, caller: Any?, method: java.lang.reflect.Method) {
