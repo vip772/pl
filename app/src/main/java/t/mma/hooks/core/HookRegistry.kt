@@ -12,7 +12,13 @@ class HookRegistry private constructor() {
     private val unhooks = CopyOnWriteArrayList<XC_MethodHook.Unhook>()
 
     fun hook(method: Member, callback: XC_MethodHook): XC_MethodHook.Unhook {
-        val unhook = XposedBridge.hookMethod(method, callback)
+        val label = "hook:" + method.toString()
+        val token = t.mma.utils.StartupStallDiagnostics.begin(label)
+        val unhook = try {
+            XposedBridge.hookMethod(method, callback)
+        } finally {
+            t.mma.utils.StartupStallDiagnostics.end(token, label)
+        }
         if (unhook != null) {
             unhooks.add(unhook)
         }

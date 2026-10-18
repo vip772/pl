@@ -111,7 +111,12 @@ object DexInstallScheduler {
             try {
                 ok = synchronized(dexKitExecutionLock) {
                     HLog.i("$TAG 开始执行: ${state.label} key=$key attempt=${state.retryIndex.get() + 1} thread=${Thread.currentThread().name}")
-                    installer()
+                    val started = android.os.SystemClock.uptimeMillis()
+                    try {
+                        installer()
+                    } finally {
+                        HLog.i("$TAG 安装耗时 key=$key elapsedMs=${android.os.SystemClock.uptimeMillis() - started} thread=${Thread.currentThread().name}")
+                    }
                 }
             } catch (e: Throwable) {
                 HLog.e("$TAG ${state.label} 安装异常: ${e.message}", e)
