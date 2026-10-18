@@ -1,6 +1,7 @@
 package t.mma.hooks.items.chatopendiagnostics
 
 import android.app.Activity
+import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import t.mma.hooks.api.core.WeChatApis
@@ -8,7 +9,6 @@ import t.mma.hooks.api.model.WeChatMessage
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
 import t.mma.utils.HLog
-import t.mma.utils.RuntimeLogStore
 import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
@@ -23,11 +23,12 @@ class ChatOpenDiagnosticsFeature : BaseFeature() {
     override fun name(): String = "聊天页打开诊断"
 
     override fun onFeatureInstall(context: FeatureContext) {
-        if (!RuntimeLogStore.isEnabled(context.hostContext())) return
         val chatPage = WeChatApis.chatPage() ?: return
+        val activityStart = WeChatApis.activityStart() ?: return
         val installed = Runtime(context, chatPage)
         runtime = installed
         trackSubscription(chatPage.subscribe(installed::onChatPageChanged))
+        trackSubscription(activityStart.subscribe(installed::onStartActivity))
         installed.install()
     }
 
@@ -51,10 +52,26 @@ class ChatOpenDiagnosticsFeature : BaseFeature() {
         private val sequence = AtomicLong(0L)
         private var activeToken = 0L
         private var activeTalker = ""
+        private var lastRequestedTalker = ""
+        private var lastRequestedAt = 0L
         private var destroyed = false
 
         fun install() {
             log("installed")
+        }
+
+        fun onStartActivity(intent: Intent, caller: Any?, method: java.lang.reflect.Method) {
+            if (destroyed) return
+            val className = intent.component?.className.orEmpty()
+            val talker = intent.getStringExtra("Chat_User")?.trim().orEmpty()
+            if (talker.isEmpty() && !className.contains(".ui.chatting.")) return
+            val resolvedTalker = talker.ifEmpty { chatPage.currentTalker().orEmpty() }
+            if (resolvedTalker.isEmpty()) return
+            val now = android.os.SystemClock.uptimeMillis()
+            if (resolvedTalker == lastRequestedTalker && now - lastRequestedAt < 800L) return
+            lastRequestedTalker = resolvedTalker
+            lastRequestedAt = now
+            beginOpen(resolvedTalker, "activityStart", className, caller?.javaClass?.name.orEmpty())
         }
 
         fun onChatPageChanged(event: t.mma.hooks.api.ui.WeChatChatPageApi.ChatPageEvent) {
@@ -73,6 +90,17 @@ class ChatOpenDiagnosticsFeature : BaseFeature() {
             val requestedAt = android.os.SystemClock.uptimeMillis()
             log("chatOpenRequested token=$token talkerHash=${hash(talker)} group=${event.group} source=${event.activityName}")
             snapshot(token, talker, "requested")
+            scheduleTimeout(token, talker, requestedAt, 2500L)
+            scheduleTimeout(token, talker, requestedAt, 6000L)
+        }
+
+        private fun beginOpen(talker: String, source: String, targetClass: String, callerClass: String) {
+            val token = sequence.incrementAndGet()
+            activeToken = token
+            activeTalker = talker
+            val requestedAt = android.os.SystemClock.uptimeMillis()
+            log("chatLaunchRequested token=$token talkerHash=${hash(talker)} source=$source target=$targetClass caller=$callerClass currentActivity=${WeChatApis.currentActivity()?.currentActivityName().orEmpty()}")
+            snapshot(token, talker, "launch_requested")
             scheduleTimeout(token, talker, requestedAt, 2500L)
             scheduleTimeout(token, talker, requestedAt, 6000L)
         }
@@ -132,7 +160,14 @@ class ChatOpenDiagnosticsFeature : BaseFeature() {
                 message.isText() -> "text"
                 else -> "unknown"
             }
-            return "id=${message.msgId} type=${message.type} kind=$kind appType=$appType send=${message.isSend} time=${message.createTime} contentLen=${content.length} xmlLen=${xml.length} xmlTags=${tags.ifBlank { "none" }} contentHash=${hash(content)} xmlHash=${hash(xml)}"
+            return "id=${message.msgId} svrId=${message.msgSvrId} type=${message.type} kind=$kind appType=$appType send=${message.isSend} talkerHash=${hash(message.talker)} senderHash=${hash(message.sendTalker())} time=${message.createTime} contentLen=${content.length} xmlLen=${xml.length} xmlTags=${tags.ifBlank { "none" }} contentHash=${hash(content)} xmlHash=${hash(xml)} contentRaw=${raw(content)} xmlRaw=${raw(xml)}"
+        }
+
+        private fun raw(value: String): String {
+            return value.take(12000)
+                .replace("\\", "\\\\")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n")
         }
 
         private fun captureMainStack(token: Long, reason: String) {
