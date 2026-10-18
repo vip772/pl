@@ -10,20 +10,14 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 class HookRegistry private constructor() {
     private val unhooks = CopyOnWriteArrayList<XC_MethodHook.Unhook>()
-
     fun hook(method: Member, callback: XC_MethodHook): XC_MethodHook.Unhook {
-        val label = "hook:" + method.toString()
-        val token = t.mma.utils.StartupStallDiagnostics.begin(label)
-        val unhook = try {
-            XposedBridge.hookMethod(method, callback)
-        } finally {
-            t.mma.utils.StartupStallDiagnostics.end(token, label)
-        }
+        val unhook = XposedBridge.hookMethod(method, callback)
         if (unhook != null) {
             unhooks.add(unhook)
         }
         return unhook
     }
+
 
     fun add(unhook: XC_MethodHook.Unhook?) {
         if (unhook != null) {

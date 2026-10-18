@@ -110,7 +110,11 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     }
 
     private fun attachNow(activity: Activity) {
-        if (!isLauncher(activity) || activity.isFinishing || activity.isDestroyed || sessions[activity] != null) return
+        if (!isLauncher(activity) || activity.isFinishing || activity.isDestroyed) return
+        sessions[activity]?.let {
+            it.recoverFromResume()
+            return
+        }
         runCatching {
             val session = Session(activity)
             session.attach()
@@ -303,7 +307,17 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             drawer.attachTo(decor)
             refresh()
         }
-
+        fun recoverFromResume() {
+            if (!attached) return
+            resumeEffect()
+            refresh()
+            decor.postOnAnimation {
+                if (attached) {
+                    refresh()
+                    refreshEffect()
+                }
+            }
+        }
         fun refresh() {
             if (!attached) return
             val enabled = HomeSidePanelSettings.enabled(activity)
@@ -380,7 +394,6 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private fun close() { drawer.close(true) }
 
         private fun ensureHeader() {
-            if (header?.isAttachedToWindow == true) return
             val host = findActionBarContent(decor)
             if (host == null || !isWechatTab()) {
                 if (!headerRetryPending && headerAttempts++ < 8) {
