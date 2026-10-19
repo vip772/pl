@@ -71,7 +71,21 @@ internal object HomeWeather {
         check(high >= low)
         val daily = JSONObject().put("temperature_2m_max",org.json.JSONArray().put(high))
             .put("temperature_2m_min",org.json.JSONArray().put(low))
-        return JSONObject().put("current",current).put("daily",daily).put("provider", "qweather")
+        val week = org.json.JSONArray()
+        val days = forecast.getJSONArray("days")
+        for (i in 0 until minOf(days.length(), 7)) {
+            val item = days.getJSONObject(i)
+            // Older one-day fixtures/cache do not contain daily condition metadata.
+            if (!item.has("forecastStartTime")) continue
+            val highDay = celsius(item.getJSONObject("temperatureMax"))
+            val lowDay = celsius(item.getJSONObject("temperatureMin"))
+            check(highDay >= lowDay)
+            val sky = item.getJSONObject("daytime").getJSONObject("condition")
+            week.put(JSONObject().put("date",item.getString("forecastStartTime").take(10))
+                .put("high",highDay).put("low",lowDay)
+                .put("code",sky.getString("code").toInt()).put("condition",sky.getString("text")))
+        }
+        return JSONObject().put("current",current).put("daily",daily).put("week",week).put("provider", "qweather")
     }
     internal fun normalizeBackup(data: JSONObject): JSONObject {
         val current = data.getJSONObject("current")
@@ -88,7 +102,20 @@ internal object HomeWeather {
             in 95..99 -> 302; else -> 999
         }
         current.put("condition", condition).put("weather_code", mapped)
-        return data.put("provider", "open-meteo")
+        val week = org.json.JSONArray()
+        val daily = data.optJSONObject("daily")
+        val dates = daily?.optJSONArray("time")
+        if (dates != null) for (i in 0 until minOf(dates.length(), 7)) {
+            val rawCode = daily.getJSONArray("weather_code").getInt(i)
+            val sky = normalizeBackup(JSONObject().put("current",JSONObject().put("weather_code",rawCode)))
+                .getJSONObject("current")
+            val high = daily.getJSONArray("temperature_2m_max").getDouble(i)
+            val low = daily.getJSONArray("temperature_2m_min").getDouble(i)
+            check(high.isFinite() && low.isFinite() && high >= low)
+            week.put(JSONObject().put("date",dates.getString(i)).put("high",high).put("low",low)
+                .put("code",sky.getInt("weather_code")).put("condition",sky.getString("condition")))
+        }
+        return data.put("week",week).put("provider", "open-meteo")
     }
     fun search(query: String, callback: (List<City>?) -> Unit) {
         worker.execute {
@@ -117,10 +144,47 @@ internal object HomeWeather {
         val name = prefs.getString("weather_city", "").orEmpty()
         val lat = prefs.getString("weather_lat", "").orEmpty()
         val lon = prefs.getString("weather_lon", "").orEmpty()
-        val key = "$lat,$lon"
+        val showWeek = prefs.getBoolean("weather_seven_day", false)
+        val key = "$lat,$lon" + if (showWeek) ":week7" else ""
+        var weekPage = false
+        var swipePage: (Boolean) -> Unit = {}
         val density = context.resources.displayMetrics.density
         fun dp(value: Int) = (value * density + .5f).toInt()
-        val panel = LinearLayout(context).apply {
+        val panel: LinearLayout = object : LinearLayout(context) {
+            private var downX = 0f
+            private var downY = 0f
+            private var horizontal = false
+            private val slop = android.view.ViewConfiguration.get(context).scaledTouchSlop
+            override fun onInterceptTouchEvent(event: android.view.MotionEvent): Boolean {
+                if (!showWeek) return super.onInterceptTouchEvent(event)
+                when (event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> { downX=event.x; downY=event.y; horizontal=false }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val dx=kotlin.math.abs(event.x-downX); val dy=kotlin.math.abs(event.y-downY)
+                        if(dx>slop && dx>dy*1.5f) {
+                            horizontal=true; parent?.requestDisallowInterceptTouchEvent(true); return true
+                        }
+                    }
+                }
+                return super.onInterceptTouchEvent(event)
+            }
+            override fun onTouchEvent(event: android.view.MotionEvent): Boolean {
+                if (!showWeek) return super.onTouchEvent(event)
+                when(event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> { downX=event.x; downY=event.y; horizontal=false }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val dx=kotlin.math.abs(event.x-downX); val dy=kotlin.math.abs(event.y-downY)
+                        if(dx>slop && dx>dy*1.5f) { horizontal=true; parent?.requestDisallowInterceptTouchEvent(true) }
+                    }
+                    android.view.MotionEvent.ACTION_UP -> {
+                        if(horizontal && kotlin.math.abs(event.x-downX)>maxOf(slop*3,dp(40))) swipePage(event.x<downX)
+                        horizontal=false; parent?.requestDisallowInterceptTouchEvent(false)
+                    }
+                    android.view.MotionEvent.ACTION_CANCEL -> { horizontal=false; parent?.requestDisallowInterceptTouchEvent(false) }
+                }
+                return true
+            }
+        }.apply {
             orientation = LinearLayout.VERTICAL
             val d = resources.displayMetrics.density
             setPadding(((if(compact) 12 else 20)*d).toInt(), (18*d).toInt(), ((if(compact) 12 else 20)*d).toInt(), (16*d).toInt())
@@ -133,14 +197,31 @@ internal object HomeWeather {
         fun text(value: String, size: Float, dim: Boolean = false) = TextView(context).apply {
             text = value; textSize = size; setTextColor(if (dim) 0xFF777777.toInt() else 0xFF23272D.toInt())
         }
+        fun weatherIcon(code: Int) = when(code) { 100 -> "☀"; 150 -> "☾"; in 101..104,in 151..154 -> "☁"; in 300..399 -> if(code in 302..304) "ϟ" else "☂"; in 400..499 -> "❄"; else -> "≋" }
         fun render(data: JSONObject?, stale: Boolean = false) {
+            swipePage = { next -> weekPage=next; render(data,stale) }
             panel.removeAllViews()
             val heading = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; if(compact) orientation=LinearLayout.VERTICAL }
             heading.addView(text("⌖ ${name.substringBefore("·").trim().ifBlank { "请选择天气城市" }}", 14f), if(compact) LinearLayout.LayoutParams(-1,-2) else LinearLayout.LayoutParams(0,-2,1f))
             val stamp = if (data != null) java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(data.getLong("saved"))) else "--:--"
             heading.addView(text(if(stale) "更新失败 · $stamp" else "更新于 $stamp", 11f, true))
             panel.addView(heading)
-            if (data == null) {
+            if (showWeek && weekPage) {
+                panel.addView(text("七天预报",16f).apply { setPadding(0,dp(12),0,dp(8)) })
+                val days = data?.optJSONArray("week")
+                if (days == null || days.length() < 7) {
+                    panel.addView(text("七天预报暂不可用，请稍后重试",13f,true))
+                } else for (i in 0 until 7) {
+                    val day=days.getJSONObject(i)
+                    val date=java.time.LocalDate.parse(day.getString("date"))
+                    val weekday=listOf("周一","周二","周三","周四","周五","周六","周日")[date.dayOfWeek.value-1]
+                    val row=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(0,dp(7),0,dp(7)) }
+                    row.addView(text("${date.monthValue}/${date.dayOfMonth} ${if(date==java.time.LocalDate.now()) "今天" else weekday}",if(compact) 11f else 13f),LinearLayout.LayoutParams(0,-2,1f))
+                    row.addView(text("${weatherIcon(day.getInt("code"))} ${day.getString("condition")}",if(compact) 11f else 13f).apply { gravity=Gravity.CENTER },LinearLayout.LayoutParams(0,-2,1f))
+                    row.addView(text("${day.getDouble("high").roundToInt()}° / ${day.getDouble("low").roundToInt()}°",if(compact) 11f else 13f).apply { gravity=Gravity.END },LinearLayout.LayoutParams(0,-2,1f))
+                    panel.addView(row)
+                }
+            } else if (data == null) {
                 panel.addView(text(if(name.isBlank()) "在首页扩展设置中选择城市" else "暂无天气缓存，稍后重试",16f))
             } else {
                 val current = data.getJSONObject("current")
@@ -148,7 +229,7 @@ internal object HomeWeather {
                 fun number(key: String) = current.getDouble(key).roundToInt()
                 val code = current.getInt("weather_code")
                 val condition = current.getString("condition")
-                val icon = when(code) { 100 -> "☀"; 150 -> "☾"; in 101..104,in 151..154 -> "☁"; in 300..399 -> if(code in 302..304) "ϟ" else "☂"; in 400..499 -> "❄"; else -> "≋" }
+                val icon = weatherIcon(code)
                 val body = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0,dp(12),0,dp(12)) }
                 val temp = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
                 temp.addView(text("${number("temperature_2m")}°",if(compact) 40f else 56f));temp.addView(text("体感 ${number("apparent_temperature")}°",12f,true))
@@ -209,6 +290,7 @@ internal object HomeWeather {
                 }
                 panel.addView(stats)
             }
+            if(showWeek) panel.addView(text(if(weekPage) "○  ●" else "●  ○",12f,true).apply { gravity=Gravity.CENTER; setPadding(0,dp(8),0,0); contentDescription=if(weekPage) "七天预报，右滑返回" else "当前天气，左滑查看七天预报" })
         }
         fun validated(data: JSONObject): JSONObject {
             val current = data.getJSONObject("current")
@@ -218,6 +300,18 @@ internal object HomeWeather {
             check(current.getString("condition").isNotBlank())
             val daily = data.getJSONObject("daily")
             listOf("temperature_2m_max", "temperature_2m_min").forEach { check(daily.getJSONArray(it).getDouble(0).isFinite()) }
+            if(showWeek) {
+                val days=data.getJSONArray("week"); check(days.length()==7)
+                var previous: java.time.LocalDate? = null
+                for(i in 0 until 7) {
+                    val day=days.getJSONObject(i)
+                    val date=java.time.LocalDate.parse(day.getString("date"))
+                    check(previous==null || date==previous!!.plusDays(1)); previous=date
+                    val high=day.getDouble("high"); val low=day.getDouble("low")
+                    check(high.isFinite() && low.isFinite() && high>=low)
+                    check(day.getString("condition").isNotBlank()); day.getInt("code")
+                }
+            }
             return data
         }
         val cached = runCatching { validated(JSONObject(storage.getString(key,null)!!)) }.getOrNull()
@@ -245,12 +339,12 @@ internal object HomeWeather {
                 val longitude = lon.toDouble().also { check(it.isFinite() && it in -180.0..180.0) }
                 val location = String.format(java.util.Locale.ROOT, "%.2f/%.2f", latitude, longitude)
                 val now = request("https://$HOST/weather/v1/current/$location?lang=zh")
-                val forecast = request("https://$HOST/weather/v1/daily/$location?days=1&lang=zh&localTime=true")
+                val forecast = request("https://$HOST/weather/v1/daily/$location?days=${if(showWeek) 7 else 1}&lang=zh&localTime=true")
                 validated(normalize(now, forecast)).apply { put("saved",System.currentTimeMillis()) }
             }.recoverCatching {
                 val latitude = lat.toDouble().also { check(it.isFinite() && it in -90.0..90.0) }
                 val longitude = lon.toDouble().also { check(it.isFinite() && it in -180.0..180.0) }
-                val url = "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1"
+                val url = "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=${if(showWeek) 7 else 1}"
                 validated(normalizeBackup(request(url))).apply { put("saved",System.currentTimeMillis()) }
             }.getOrNull()
             if(result!=null) storage.edit().putString(key,result.toString()).apply()

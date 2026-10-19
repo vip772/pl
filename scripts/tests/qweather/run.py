@@ -6,8 +6,8 @@ normalize=source[source.index('    internal fun normalize('):source.index('    f
 lib=Path('/tmp/pl-kotlin-libs');std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
 files={
 'Json.kt':'''package org.json
-class JSONObject { private val values=mutableMapOf<String,Any>();fun put(k:String,v:Any)=apply{values[k]=v};fun getDouble(k:String)=(values.getValue(k) as Number).toDouble();fun getString(k:String)=values.getValue(k) as String;fun getInt(k:String)=(values.getValue(k) as Number).toInt();fun optInt(k:String,d:Int)=(values[k] as? Number)?.toInt() ?: d;fun getJSONObject(k:String)=values.getValue(k) as JSONObject;fun getJSONArray(k:String)=values.getValue(k) as JSONArray }
-class JSONArray {private val values=mutableListOf<Any>();fun put(v:Any)=apply{values.add(v)};fun getJSONObject(i:Int)=values[i] as JSONObject;fun getDouble(i:Int)=(values[i] as Number).toDouble()}
+class JSONObject { private val values=mutableMapOf<String,Any>();fun put(k:String,v:Any)=apply{values[k]=v};fun getDouble(k:String)=(values.getValue(k) as Number).toDouble();fun getString(k:String)=values.getValue(k) as String;fun getInt(k:String)=(values.getValue(k) as Number).toInt();fun optInt(k:String,d:Int)=(values[k] as? Number)?.toInt() ?: d;fun has(k:String)=values.containsKey(k);fun optJSONObject(k:String)=values[k] as? JSONObject;fun optJSONArray(k:String)=values[k] as? JSONArray;fun getJSONObject(k:String)=values.getValue(k) as JSONObject;fun getJSONArray(k:String)=values.getValue(k) as JSONArray }
+class JSONArray {private val values=mutableListOf<Any>();fun put(v:Any)=apply{values.add(v)};fun length()=values.size;fun getInt(i:Int)=(values[i] as Number).toInt();fun getString(i:Int)=values[i] as String;fun getJSONObject(i:Int)=values[i] as JSONObject;fun getDouble(i:Int)=(values[i] as Number).toDouble()}
 ''',
 'Weather.kt':'import org.json.JSONObject\nobject Weather {\n'+normalize+'}\n',
 'Test.kt':'''import org.json.*
@@ -31,6 +31,20 @@ fun main(){
  check(runCatching{Weather.normalize(now(speed=-1.0),forecast())}.isFailure)
  check(runCatching{Weather.normalize(now(),forecast(high=0.0,low=10.0))}.isFailure)
  check(runCatching{Weather.normalize(now(),JSONObject().put("days",JSONArray()))}.isFailure)
+ val days=JSONArray()
+ val times=JSONArray();val highs=JSONArray();val lows=JSONArray();val codes=JSONArray()
+ for(i in 0 until 7) {
+  val date="2026-10-${20+i}"
+  days.put(JSONObject().put("forecastStartTime",date+"T00:00+08:00").put("temperatureMax",measure(20.0+i)).put("temperatureMin",measure(10.0+i)).put("daytime",JSONObject().put("condition",JSONObject().put("text","多云").put("code","101"))))
+  times.put(date);highs.put(20.0+i);lows.put(10.0+i);codes.put(3)
+ }
+ val week=Weather.normalize(now(),JSONObject().put("days",days)).getJSONArray("week")
+ check(week.length()==7);check(week.getJSONObject(6).getString("date")=="2026-10-26")
+ check(week.getJSONObject(6).getDouble("high")==26.0);check(week.getJSONObject(0).getString("condition")=="多云")
+ val backup=Weather.normalizeBackup(JSONObject().put("current",JSONObject().put("weather_code",0)).put("daily",JSONObject().put("time",times).put("temperature_2m_max",highs).put("temperature_2m_min",lows).put("weather_code",codes))).getJSONArray("week")
+ check(backup.length()==7);check(backup.getJSONObject(6).getInt("code")==104)
+ check(backup.getJSONObject(6).getDouble("low")==16.0)
+ println("PASS: seven-day primary and backup dates, extrema and condition conversion")
  println("PASS: QWeather v1 fields, humidity, m/s and km/h, daily extrema, invalid/missing data rejected")
 }
 '''}
