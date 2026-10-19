@@ -17,7 +17,7 @@ internal object SidePanelImages {
             ?: file(context,key).takeIf { it.isFile }
     }
     private fun savePhoto(context: Context, key: String, uri: Uri): Boolean = runCatching {
-        require(key == "photo" || key in SidePanelAppearance.extraPhotos(context))
+        require(key == "photo" || key == "home_extension_photo" || key in SidePanelAppearance.extraPhotos(context))
         val directory = file(context,key).parentFile!!.apply { mkdirs() }
         val video = context.contentResolver.getType(uri)?.startsWith("video/") == true
         val target = File(directory,if(video) "$key.video" else "$key.image")
@@ -44,7 +44,7 @@ internal object SidePanelImages {
                 // API 27 Movie decodes GIF frames at source size.
                 if(android.os.Build.VERSION.SDK_INT<28) require(bounds.outWidth.toLong()*bounds.outHeight <= 2_000_000L)
             }
-            require(key == "photo" || key in SidePanelAppearance.extraPhotos(context))
+            require(key == "photo" || key == "home_extension_photo" || key in SidePanelAppearance.extraPhotos(context))
             java.nio.file.Files.move(temporary.toPath(),target.toPath(),java.nio.file.StandardCopyOption.REPLACE_EXISTING)
             HomeSidePanelSettings.preferences(context).edit().putString("panel_${key}_file",target.name)
                 .putLong(SidePanelAppearance.photoRevision(key),System.currentTimeMillis()).apply()

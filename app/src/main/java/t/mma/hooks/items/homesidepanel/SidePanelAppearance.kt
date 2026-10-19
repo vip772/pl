@@ -14,7 +14,7 @@ internal object SidePanelAppearance {
     const val COLORS = "panel_lightning_colors"
     const val ORDER = "panel_card_order"
     fun cardOpacity(id: String) = "panel_card_opacity_$id"
-    fun isPhoto(id: String) = id == "photo" || id.matches(Regex("photo_[a-f0-9]+"))
+    fun isPhoto(id: String) = id == "photo" || id == "home_extension_photo" || id.matches(Regex("photo_[a-f0-9]+"))
     fun photoRevision(id: String) = if(id == "photo") PHOTO else "${id}_revision"
     fun photoHeight(context: Context,id: String) = HomeSidePanelSettings.preferences(context).getInt("${id}_height",170).coerceIn(80,500)
     fun extraPhotos(context: Context): List<String> = HomeSidePanelSettings.preferences(context).getString("extra_photos","").orEmpty()

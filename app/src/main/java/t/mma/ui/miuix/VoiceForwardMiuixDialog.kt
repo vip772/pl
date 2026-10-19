@@ -343,7 +343,8 @@ object VoiceForwardMiuixDialog {
         initialSelectedIds: Set<String> = emptySet(),
         allowEmpty: Boolean = false,
         singleSelection: Boolean = false,
-        showClearSelectionAction: Boolean = false
+        showClearSelectionAction: Boolean = false,
+        maxSelection: Int = Int.MAX_VALUE
     ): DialogHandle {
         return show(activity, onDismiss) { close ->
             WindowDialog(
@@ -470,7 +471,10 @@ object VoiceForwardMiuixDialog {
                                             } else if (singleSelection) {
                                                 setOf(contact.id)
                                             } else {
-                                                selectedIds + contact.id
+                                                if (selectedIds.size >= maxSelection) {
+                                                    Toast.makeText(activity, "最多选择" + maxSelection + "个", Toast.LENGTH_SHORT).show()
+                                                    selectedIds
+                                                } else selectedIds + contact.id
                                             }
                                         }
                                     }

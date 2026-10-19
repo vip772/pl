@@ -21,6 +21,10 @@ import t.mma.utils.HLog
 import t.mma.utils.KavaReflector
 import java.lang.ref.WeakReference
 import java.net.URL
+import t.mma.hooks.items.homesidepanel.SidePanelMediaView
+import t.mma.hooks.items.homesidepanel.SidePanelImages
+import t.mma.hooks.items.homesidepanel.HomeSidePanelSettings
+import t.mma.hooks.items.homesidepanel.SidePanelAppearance
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.WeakHashMap
@@ -38,9 +42,15 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     }
     @Volatile private var destroyed = false
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        main.post { sessions.values.toList().forEach { it.render() } }
+        main.post { sessions.values.toList().forEach { it.safeRender() } }
     }
+    private var changeSubscription: t.mma.hooks.api.conversation.WeChatConversationChangeApi.Subscription? = null
+    private val updateRecent = Runnable { if (!destroyed) sessions.values.toList().forEach { it.invalidateContacts() } }
     fun install() {
+        changeSubscription = WeChatApis.conversationChanges()?.subscribe {
+            main.removeCallbacks(updateRecent)
+            main.postDelayed(updateRecent, 600)
+        }
         prefs.registerOnSharedPreferenceChangeListener(listener)
         val owner = KavaReflector.loadClass("com.tencent.mm.ui.conversation.ConversationListView", context.hostClassLoader()) ?: return
         KavaReflector.findMethodRecursive(owner, "setAdapter", ListAdapter::class.java)?.let { method ->
@@ -55,7 +65,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val list = param.thisObject as? ListView ?: return
-                    if (owner.isInstance(list)) { attach(list); sessions[list]?.render() }
+                    if (owner.isInstance(list)) { attach(list); sessions[list]?.safeRender() }
                 }
             })
         }
@@ -63,7 +73,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         if (launcher != null) KavaReflector.findMethodRecursive(launcher, "onResume")?.let { method ->
             hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (param.thisObject is Activity) main.post { sessions.values.toList().forEach { it.render() } }
+                    if (param.thisObject is Activity) main.post { sessions.values.toList().forEach { it.safeRender() } }
                 }
             })
         }
@@ -74,16 +84,17 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             val session = Session(list)
             sessions[list] = session
             try { list.addHeaderView(session.root, null, false) } catch (error: Throwable) { sessions.remove(list); throw error }
-            session.render()
+            main.post { session.safeRender() }
         }.onFailure { HLog.e("[Hchat:HomeExtension] 首页列表头挂载失败", it) }
     }
     fun destroy() {
         destroyed = true
+        changeSubscription?.unsubscribe(); changeSubscription = null
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
         hooks.forEach { HookRegistry.get().unhook(it) }
         hooks.clear()
         main.removeCallbacksAndMessages(null)
-        sessions.toList().forEach { (list, session) -> list.removeHeaderView(session.root) }
+        sessions.toList().forEach { (list, session) -> session.dispose(); list.removeHeaderView(session.root) }
         sessions.clear()
         worker.shutdownNow()
         avatars.evictAll()
@@ -91,10 +102,28 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     private data class Contact(val id: String, val name: String, val avatar: String, val group: Boolean)
     private inner class Session(list: ListView) {
         private val ctx = list.context
-        val root = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL }
+        val root = object : LinearLayout(ctx) {
+            override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
+                super.onWindowFocusChanged(hasWindowFocus)
+                media?.setPlayback(hasWindowFocus && isShown && getGlobalVisibleRect(android.graphics.Rect()))
+                if (hasWindowFocus) safeRender()
+            }
+        }.apply { orientation = LinearLayout.VERTICAL; tag = HomeExtensionSurface.TAG }
         private var week = LocalDate.now()
         private var today = week
-        private var groups = false
+        private var media: SidePanelMediaView? = null
+        private var loadedConfig = ""
+        private var refreshing = false
+        private var renderQueued = false
+        private var scrollObserver: android.view.ViewTreeObserver? = null
+        private var scrollListener: android.view.ViewTreeObserver.OnScrollChangedListener? = null
+        fun dispose() { clearMedia() }
+        private fun clearMedia() {
+            scrollListener?.let { callback -> scrollObserver?.takeIf { it.isAlive }?.removeOnScrollChangedListener(callback) }
+            scrollListener = null; scrollObserver = null
+            media?.dispose(); media = null
+        }
+        fun invalidateContacts() { loadedAt = 0L; safeRender() }
         private var generation = 0
         private var loading = false
         private var cache = emptyList<Contact>()
@@ -116,33 +145,46 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             }
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { setMargins(dp(12), dp(5), dp(12), dp(5)) }
         }
-        fun render() {
+        fun safeRender() {
+            if (destroyed || renderQueued) return
+            renderQueued = true
+            main.post {
+                renderQueued = false
+                if (!destroyed && !refreshing) {
+                    refreshing = true
+                    try { render() } catch (error: Throwable) { HLog.e("[Hchat:HomeExtension] 刷新失败", error) }
+                    finally { refreshing = false }
+                }
+            }
+        }
+        private fun render() {
             if (destroyed) return
             val date = LocalDate.now()
             if (today != date) { today = date; week = date }
             generation++
+            clearMedia()
             root.removeAllViews()
             val enabled = prefs.getBoolean(HomeExtensionSettings.ENABLE, false)
             val calendar = enabled && prefs.getBoolean(HomeExtensionSettings.CALENDAR, true)
-            val recent = enabled && prefs.getBoolean(HomeExtensionSettings.RECENT, true)
-            root.visibility = if (calendar || recent) View.VISIBLE else View.GONE
-            root.layoutParams = AbsListView.LayoutParams(-1, if (calendar || recent) -2 else 0)
-            if (calendar) renderCalendar()
-            if (recent) {
-                renderRecent()
-                if (!loading && System.currentTimeMillis() - loadedAt > 30_000) loadContacts()
+            val recent = enabled && (prefs.getBoolean(HomeExtensionSettings.FAVORITES, false) || prefs.getBoolean(HomeExtensionSettings.RECENT, true))
+            val photo = enabled && prefs.getBoolean(HomeExtensionSettings.PHOTO, false)
+            root.visibility = if (calendar || recent || photo) View.VISIBLE else View.GONE
+            root.layoutParams = AbsListView.LayoutParams(-1, if (calendar || recent || photo) -2 else 0)
+            HomeExtensionSettings.order(prefs.getString(HomeExtensionSettings.ORDER, null)).forEach {
+                when (it) {
+                    "calendar" -> if (calendar) renderCalendar()
+                    "contacts" -> if (recent) renderRecent()
+                    "photo" -> if (photo) renderPhoto()
+                }
             }
+            val config = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false).toString() + prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")
+            if (recent && !loading && (config != loadedConfig || System.currentTimeMillis() - loadedAt > 30_000)) loadContacts(config)
         }
         private fun renderCalendar() {
             val panel = card(HomeExtensionSettings.CALENDAR_ALPHA)
             val title = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL }
-            title.addView(text(week.format(DateTimeFormatter.ofPattern("yyyy年 M月")), 18f), LinearLayout.LayoutParams(0, dp(36), 1f))
-            listOf("‹", "今天", "›").forEachIndexed { i, label ->
-                title.addView(text(label, 16f).apply {
-                    contentDescription = listOf("上一周", "回到今天", "下一周")[i]
-                    setOnClickListener { week = when (i) { 0 -> week.minusWeeks(1); 2 -> week.plusWeeks(1); else -> today }; render() }
-                }, LinearLayout.LayoutParams(dp(48), dp(44)))
-            }
+            title.addView(text(week.format(DateTimeFormatter.ofPattern("yyyy年 M月")), 18f).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(0, dp(40), 1f))
+            title.addView(text(prefs.getString(HomeExtensionSettings.GREETING, HomeExtensionSettings.DEFAULT_GREETING).orEmpty()).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; maxLines = 2 }, LinearLayout.LayoutParams(0, dp(40), 1.5f))
             panel.addView(title)
             val days = LinearLayout(ctx)
             val monday = week.minusDays((week.dayOfWeek.value - 1).toLong())
@@ -157,27 +199,20 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                         background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(0xFF07A86A.toInt()) }
                     }
                 }, LinearLayout.LayoutParams(dp(36), dp(36)))
-                days.addView(column, LinearLayout.LayoutParams(0, dp(66), 1f))
+                val lunar = android.icu.util.ChineseCalendar().apply { timeInMillis = date.atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() }
+                val day = lunar.get(android.icu.util.Calendar.DAY_OF_MONTH)
+                val numbers = listOf("一", "二", "三", "四", "五", "六", "七", "八", "九", "十")
+                val label = when(day) { 10 -> "初十"; 20 -> "二十"; 30 -> "三十"; else -> listOf("初", "十", "廿")[(day - 1) / 10] + numbers[(day - 1) % 10] }
+                column.addView(text(label, 11f), LinearLayout.LayoutParams(-1, dp(24)))
+                days.addView(column, LinearLayout.LayoutParams(0, dp(90), 1f))
             }
             panel.addView(days)
-            val lunar = android.icu.util.ChineseCalendar().apply { timeInMillis = System.currentTimeMillis() }
-            panel.addView(text("农历 " + (lunar.get(android.icu.util.Calendar.MONTH) + 1) + "月" + lunar.get(android.icu.util.Calendar.DAY_OF_MONTH) + "日", 12f))
-            panel.addView(text(prefs.getString(HomeExtensionSettings.GREETING, HomeExtensionSettings.DEFAULT_GREETING).orEmpty()).apply {
-                setPadding(0, dp(8), 0, dp(2)); maxLines = 3
-            })
             root.addView(panel)
         }
         private fun renderRecent() {
             val panel = card(HomeExtensionSettings.RECENT_ALPHA)
-            val tabs = LinearLayout(ctx)
-            listOf("最近联系人", "最近群聊").forEachIndexed { i, label ->
-                tabs.addView(text(label, 15f).apply {
-                    if (groups == (i == 1)) setTextColor(0xFF07A86A.toInt())
-                    setOnClickListener { groups = i == 1; render() }
-                }, LinearLayout.LayoutParams(0, dp(40), 1f))
-            }
-            panel.addView(tabs)
-            val contacts = cache.filter { it.group == groups }.take(12)
+            val config = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false).toString() + prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")
+            val contacts = if (loadedConfig == config) cache.take(8) else emptyList()
             if (contacts.isEmpty()) panel.addView(text(if (loadedAt == 0L) "正在加载最近会话…" else "暂无最近会话"), LinearLayout.LayoutParams(-1, dp(70)))
             else {
                 val row = LinearLayout(ctx)
@@ -193,8 +228,17 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                     }
                     column.addView(avatar, LinearLayout.LayoutParams(dp(46), dp(46)))
                     column.addView(text(contact.name, 11f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(dp(66), dp(27)))
-                    column.setOnClickListener {
-                        if (WeChatApis.ui()?.openChat(contact.id) != true) Toast.makeText(ctx, "暂时无法打开此会话", Toast.LENGTH_SHORT).show()
+                    avatar.isClickable = true
+                    avatar.foreground = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x3307A86A), null, android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(Color.WHITE) })
+                    avatar.setOnClickListener {
+                        val opened = runCatching {
+                            val activity = WeChatApis.currentActivity()?.currentActivity() as? Activity
+                            if (activity != null) {
+                                activity.startActivity(android.content.Intent().setClassName(ctx.packageName, "com.tencent.mm.ui.chatting.ChattingUI").putExtra("Chat_User", contact.id).putExtra("finish_direct", true))
+                                true
+                            } else WeChatApis.ui()?.openChat(contact.id) == true
+                        }.getOrDefault(false)
+                        if (!opened) Toast.makeText(ctx, "暂时无法打开此会话", Toast.LENGTH_SHORT).show()
                     }
                     row.addView(column, LinearLayout.LayoutParams(dp(72), -2))
                     if (contact.avatar.isNotBlank()) loadAvatar(contact.avatar, avatar, token)
@@ -203,23 +247,48 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             }
             root.addView(panel)
         }
-        private fun loadContacts() {
+        private fun renderPhoto() {
+            val file = SidePanelImages.photoFile(ctx, HomeExtensionSettings.PHOTO_SLOT)
+            if (file == null) { root.addView(text("请在首页扩展中添加照片或视频"), LinearLayout.LayoutParams(-1, dp(70))); return }
+            val view = SidePanelMediaView(ctx)
+            media = view
+            val frame = FrameLayout(ctx).apply {
+                addView(view, FrameLayout.LayoutParams(-1, -1))
+                alpha = prefs.getInt(HomeExtensionSettings.PHOTO_ALPHA, 100).coerceIn(0, 100) / 100f
+            }
+            val width = prefs.getInt(HomeExtensionSettings.PHOTO_WIDTH, 100).coerceIn(30, 100)
+            val holder = LinearLayout(ctx).apply { gravity = Gravity.CENTER; setPadding(dp(12), dp(5), dp(12), dp(5)) }
+            holder.addView(frame, LinearLayout.LayoutParams(0, dp(prefs.getInt(HomeExtensionSettings.PHOTO_HEIGHT, 180).coerceIn(80, 500)), width.toFloat()))
+            if (width < 100) { holder.weightSum = 100f }
+            root.addView(holder)
+            view.load(file, HomeSidePanelSettings.preferences(ctx).getLong(SidePanelAppearance.photoRevision(HomeExtensionSettings.PHOTO_SLOT), 0L))
+            fun playback() { view.setPlayback(root.isShown && root.windowVisibility == View.VISIBLE && frame.getGlobalVisibleRect(android.graphics.Rect()) && root.hasWindowFocus()) }
+            val callback = android.view.ViewTreeObserver.OnScrollChangedListener { playback() }
+            scrollObserver = root.viewTreeObserver
+            scrollListener = callback
+            scrollObserver?.addOnScrollChangedListener(callback)
+            frame.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) { playback() }
+                override fun onViewDetachedFromWindow(v: View) { view.setPlayback(false) }
+            })
+            frame.post { playback() }
+        }
+        private fun loadContacts(config: String) {
             loading = true
             worker.execute {
                 val result = runCatching {
                     val contacts = WeChatApis.contacts() ?: error("联系人 API 未就绪")
                     val conversations = WeChatApis.conversations() ?: error("会话 API 未就绪")
-                    var people = 0; var rooms = 0
-                    conversations.getRecentConversationUsernames(200).mapNotNull { id ->
+                    val favorites = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false)
+                    val ids = if (favorites) HomeExtensionSettings.favorites(prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")) else conversations.getRecentConversationUsernames(200)
+                    ids.filter { favorites || contacts.isGroup(it) || contacts.isFriend(it) }.take(8).map { id ->
                         val group = contacts.isGroup(id)
-                        if (group) { if (rooms >= 12) return@mapNotNull null; rooms++ }
-                        else { if (people >= 12 || !contacts.isFriend(id)) return@mapNotNull null; people++ }
                         Contact(id, contacts.getDisplayName(id).orEmpty().ifBlank { id }, contacts.getAvatarUrl(id, false).orEmpty(), group)
                     }
                 }
                 if (!destroyed) main.post {
                     loading = false
-                    if (!destroyed) { cache = result.getOrDefault(emptyList()); loadedAt = System.currentTimeMillis(); render() }
+                    if (!destroyed) { cache = result.getOrDefault(emptyList()); loadedConfig = config; loadedAt = System.currentTimeMillis(); safeRender() }
                 }
             }
         }

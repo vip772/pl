@@ -14,6 +14,16 @@ object HomeExtensionSettings {
     const val RECENT = "recent"
     const val CALENDAR_ALPHA = "calendar_alpha"
     const val RECENT_ALPHA = "recent_alpha"
+    const val FAVORITES = "favorites"
+    const val FAVORITE_IDS = "favorite_ids"
+    const val PHOTO = "photo"
+    const val PHOTO_SLOT = "home_extension_photo"
+    const val PHOTO_HEIGHT = "photo_height"
+    const val PHOTO_WIDTH = "photo_width"
+    const val PHOTO_ALPHA = "photo_alpha"
+    const val ORDER = "order"
+    fun order(value: String?) = (value.orEmpty().split(",").filter { it in listOf("calendar", "contacts", "photo") } + listOf("calendar", "contacts", "photo")).distinct()
+    fun favorites(value: String?) = value.orEmpty().split(",").filter { it.isNotBlank() }.distinct().take(8)
     const val GREETING = "greeting"
     const val DEFAULT_GREETING = "愿你今天也有好心情"
     fun preferences(context: Context) = HchatStorage.preferences(context, PREFS)

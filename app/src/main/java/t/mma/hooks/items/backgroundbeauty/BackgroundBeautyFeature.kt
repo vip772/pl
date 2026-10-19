@@ -1583,6 +1583,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     }
 
     private fun applyHomeRow(state: HostState, row: View, slot: BackgroundBeautySettings.Slot) {
+        if (t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(row)) return
         val started = android.os.SystemClock.uptimeMillis()
         state.surfaces[row]?.let { snapshot ->
             snapshot.originalPaddingLeft = row.paddingLeft
@@ -1599,6 +1600,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         var visited = 0
         while (queue.isNotEmpty() && visited++ < 160) {
             val child = queue.removeFirst()
+            if (t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(child)) continue
             if (isComposeSurface(child) || isBottomBar(child) || isWechatTaskSurface(child)) continue
             if (child is ViewGroup) {
                 if (child.background != null) setTransparentSurface(state, child, slot, preserveFeedback = true)
@@ -2967,6 +2969,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         clearForeground: Boolean = false,
         preserveFeedback: Boolean = false
     ) {
+        if (t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(view)) return
         // AppPanel containers cover the entire page. Only an AppGrid item root
         // owns feedback; propagated pressed states must not animate ancestors.
         var itemAncestor: View? = view
