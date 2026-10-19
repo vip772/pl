@@ -1,6 +1,7 @@
 package t.mma.ui.miuix
 
 import android.app.Activity
+import kotlin.math.roundToInt
 import android.view.ViewGroup
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -85,7 +86,7 @@ internal object SidePanelSettingsEditor {
 
                         SettingsCard {
                             Column {
-                                PreferenceSlider("侧边栏透明度", SidePanelAppearance.OPACITY, .1f..1f, 1f, true,
+                                PreferenceSlider("侧边栏透明度", SidePanelAppearance.OPACITY, 0f..1f, 1f, true,
                                     prefs, backgroundChanged)
                                 Action("添加 / 更换背景图", pickBackground)
                                 Action("清除背景图", clearBackground)
@@ -186,11 +187,11 @@ internal object SidePanelSettingsEditor {
                                  percent:Boolean,prefs:android.content.SharedPreferences,changed:()->Unit) {
         var value by remember(key) { mutableStateOf(prefs.getFloat(key,default).coerceIn(range.start,range.endInclusive)) }
         Column(modifier=Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=12.dp)) {
-            val label=if(percent) "${(value*100).toInt()}%" else "${String.format(java.util.Locale.ROOT,"%.1f",value)} dp"
+            val label=if(percent) "${((1f-value)*100).roundToInt()}%" else "${String.format(java.util.Locale.ROOT,"%.1f",value)} dp"
             Text(text="$title  $label",color=MiuixTheme.colorScheme.onSurface)
-            Slider(value=value,onValueChange={
-                value=it
-                prefs.edit().putFloat(key,it).apply()
+            Slider(value=if(percent) 1f-value else value,onValueChange={
+                value=if(percent) 1f-it else it
+                prefs.edit().putFloat(key,value).apply()
                 changed()
             },valueRange=range,modifier=Modifier.fillMaxWidth())
         }

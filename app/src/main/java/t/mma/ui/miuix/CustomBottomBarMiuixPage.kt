@@ -385,10 +385,10 @@ internal fun FloatingBottomBarMiuixPage(
                     if (enabled) {
                         InsetDivider()
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
-                            Text(text = "底栏背景不透明度 ${opacity}%", color = MiuixTheme.colorScheme.onSurface)
+                            Text(text = "底栏背景透明度 ${100 - opacity}%", color = MiuixTheme.colorScheme.onSurface)
                             Slider(
-                                value = opacity.toFloat(),
-                                onValueChange = { opacity = FloatingBottomBarSettings.normalizeOpacity(it.toInt()) },
+                                value = 100f - opacity,
+                                onValueChange = { opacity = FloatingBottomBarSettings.normalizeOpacity(100 - it.toInt()) },
                                 valueRange = 0f..100f,
                                 steps = 99,
                                 onValueChangeFinished = {

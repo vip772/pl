@@ -256,7 +256,7 @@ internal class HomeSidePanelDrawer(
         val drawable: android.graphics.drawable.Drawable = backgroundBitmap?.let {
             android.graphics.drawable.BitmapDrawable(activity.resources, it).apply { gravity = Gravity.FILL }
         } ?: android.graphics.drawable.ColorDrawable(color(if (night()) "#1A1C1A" else "#F7F8F6"))
-        drawable.alpha = (prefs.getFloat(SidePanelAppearance.OPACITY, 1f).coerceIn(.1f,1f) * 255).toInt()
+        drawable.alpha = (prefs.getFloat(SidePanelAppearance.OPACITY, 1f).coerceIn(0f,1f) * 255).toInt()
         panel.background = drawable
     }
     private fun switchPage(settings: Boolean) {

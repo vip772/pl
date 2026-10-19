@@ -89,6 +89,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     }
     private fun attach(list: ListView) {
         if (destroyed) return
+        runCatching { installRecycleGuard(list) }.onFailure { HLog.e("[Hchat:HomeExtension] 列表复用隔离安装失败", it); return }
         sessions[list]?.let { it.safeRender(); return }
         if (list.adapter == null) return
         runCatching {
@@ -98,12 +99,29 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             main.post { session.safeRender() }
         }.onFailure { HLog.e("[Hchat:HomeExtension] 首页列表头挂载失败", it) }
     }
+    private val guardedAdapters = mutableSetOf<java.lang.reflect.Method>()
+    private fun installRecycleGuard(list: ListView) {
+        var adapter = list.adapter ?: return
+        while (adapter is HeaderViewListAdapter) adapter = adapter.wrappedAdapter ?: return
+        val method = KavaReflector.findMethodRecursive(adapter.javaClass, "getView", Integer.TYPE, View::class.java, android.view.ViewGroup::class.java) ?: return
+        if (method in guardedAdapters) return
+        val unhook = HookRegistry.get().hook(method, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                val recycled = param.args.getOrNull(1) as? View ?: return
+                // Module headers must never enter WeChat's conversation ViewHolder binding.
+                if (HomeExtensionSurface.contains(recycled)) param.args[1] = null
+            }
+        })
+        hooks += unhook
+        guardedAdapters += method
+    }
     fun destroy() {
         destroyed = true
         changeSubscription?.unsubscribe(); changeSubscription = null
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
         hooks.forEach { HookRegistry.get().unhook(it) }
         hooks.clear()
+        guardedAdapters.clear()
         main.removeCallbacksAndMessages(null)
         sessions.toList().forEach { (list, session) -> session.dispose(); list.removeHeaderView(session.root) }
         sessions.clear()
@@ -113,7 +131,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     private data class Contact(val id: String, val name: String, val avatar: String, val group: Boolean)
     private inner class Session(list: ListView) {
         private val ctx = list.context
-        val root = object : LinearLayout(ctx) {
+        val root = object : LinearLayout(ctx), HomeExtensionSurface.Root {
             override fun onWindowVisibilityChanged(visibility: Int) {
                 super.onWindowVisibilityChanged(visibility)
                 if (visibility != View.VISIBLE) media?.setPlayback(false) else updatePlayback()
@@ -123,7 +141,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 updatePlayback()
                 if (hasWindowFocus) safeRender()
             }
-        }.apply { orientation = LinearLayout.VERTICAL; tag = HomeExtensionSurface.TAG }
+        }.apply { orientation = LinearLayout.VERTICAL }
         private var week = LocalDate.now()
         private var today = week
         private var media: SidePanelMediaView? = null
