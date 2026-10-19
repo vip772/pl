@@ -136,7 +136,7 @@ internal object HomeWeather {
         fun render(data: JSONObject?, stale: Boolean = false) {
             panel.removeAllViews()
             val heading = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; if(compact) orientation=LinearLayout.VERTICAL }
-            heading.addView(text("⌖ ${name.ifBlank { "请选择天气城市" }}", 14f), if(compact) LinearLayout.LayoutParams(-1,-2) else LinearLayout.LayoutParams(0,-2,1f))
+            heading.addView(text("⌖ ${name.substringBefore("·").trim().ifBlank { "请选择天气城市" }}", 14f), if(compact) LinearLayout.LayoutParams(-1,-2) else LinearLayout.LayoutParams(0,-2,1f))
             val stamp = if (data != null) java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(data.getLong("saved"))) else "--:--"
             heading.addView(text(if(stale) "更新失败 · $stamp" else "更新于 $stamp", 11f, true))
             panel.addView(heading)
@@ -151,26 +151,64 @@ internal object HomeWeather {
                 val icon = when(code) { 100 -> "☀"; 150 -> "☾"; in 101..104,in 151..154 -> "☁"; in 300..399 -> if(code in 302..304) "ϟ" else "☂"; in 400..499 -> "❄"; else -> "≋" }
                 val body = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0,dp(12),0,dp(12)) }
                 val temp = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-                temp.addView(text("${number("temperature_2m")}°",if(compact) 40f else 64f));temp.addView(text("体感 ${number("apparent_temperature")}°",14f,true))
-                body.addView(temp,LinearLayout.LayoutParams(0,-2,1f))
+                temp.addView(text("${number("temperature_2m")}°",if(compact) 40f else 56f));temp.addView(text("体感 ${number("apparent_temperature")}°",12f,true))
+                body.addView(temp,LinearLayout.LayoutParams(0,-2,if(compact) 1f else 3f))
                 val sky = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER }
-                sky.addView(text(icon,if(compact) 32f else 56f));sky.addView(text(condition,17f))
-                body.addView(sky,LinearLayout.LayoutParams(0,-2,1f));panel.addView(body)
+                sky.addView(text(icon,if(compact) 32f else 40f));sky.addView(text(condition,15f).apply { gravity=Gravity.CENTER })
+                body.addView(sky,LinearLayout.LayoutParams(0,-2,if(compact) 1f else 2f))
+                val feels = number("apparent_temperature")
+                val wind = current.getDouble("wind_speed_10m")
+                val clothing = when {
+                    feels < 5 -> "建议穿厚外套，注意保暖"
+                    feels < 15 -> "建议穿外套或毛衣"
+                    feels < 23 -> "建议穿长袖，备薄外套"
+                    feels < 28 -> "建议穿轻薄、透气衣物"
+                    else -> "建议穿短袖，注意防暑"
+                }
+                val life = when {
+                    code in 302..304 -> "有雷雨，减少户外活动"
+                    code in 300..399 -> "出门带伞，注意路面湿滑"
+                    code in 400..499 -> "注意防滑，外出保暖"
+                    code in 500..515 -> "能见度可能较低，出行留意"
+                    wind >= 39 -> "风力较大，外出注意防风"
+                    feels >= 30 -> "及时补水，避开午后高温"
+                    feels < 5 -> "户外活动注意防寒"
+                    else -> "可安排日常户外活动"
+                }
+                val advice = LinearLayout(context).apply {
+                    orientation=LinearLayout.VERTICAL
+                    setPadding(dp(if(compact) 0 else 14),dp(6),0,dp(6))
+                    addView(text("穿衣提醒",12f,true))
+                    addView(text(clothing,12f))
+                    addView(text("生活建议",12f,true).apply { setPadding(0,dp(8),0,0) })
+                    addView(text(life,12f))
+                }
+                // With weights 3:2:7, the sky center is at one third of the card content.
+                if (!compact) body.addView(advice,LinearLayout.LayoutParams(0,-2,7f))
+                panel.addView(body)
+                if (compact) panel.addView(advice)
                 panel.addView(android.view.View(context).apply { setBackgroundColor(0xFFE8E8E8.toInt()) },LinearLayout.LayoutParams(-1,1))
-                val stats=LinearLayout(context).apply { if(compact) orientation=LinearLayout.VERTICAL; setPadding(0,dp(18),0,dp(6)) }
-                val values=listOf("${daily.getJSONArray("temperature_2m_max").getDouble(0).roundToInt()}° / ${daily.getJSONArray("temperature_2m_min").getDouble(0).roundToInt()}°" to "最高 / 最低", "${number("relative_humidity_2m")}%" to "湿度", "${String.format(java.util.Locale.ROOT,"%.1f",current.getDouble("wind_speed_10m"))} km/h" to "风速")
-                values.forEachIndexed { index, (value,label) ->
-                    if(index>0 && !compact) stats.addView(android.view.View(context).apply { setBackgroundColor(0xFFE8E8E8.toInt()) },LinearLayout.LayoutParams(dp(1),dp(36)))
-                    stats.addView(LinearLayout(context).apply { orientation=LinearLayout.VERTICAL;gravity=Gravity.CENTER;addView(text(value,if(compact) 14f else 16f));addView(text(label,12f,true)) },if(compact) LinearLayout.LayoutParams(-1,-2) else LinearLayout.LayoutParams(0,-2,1f))
+                val stats=LinearLayout(context).apply { gravity=Gravity.CENTER_VERTICAL; setPadding(0,dp(18),0,dp(6)) }
+                val values=listOf(
+                    Triple("🌡", "${daily.getJSONArray("temperature_2m_max").getDouble(0).roundToInt()}° / ${daily.getJSONArray("temperature_2m_min").getDouble(0).roundToInt()}°", "最高 / 最低"),
+                    Triple("💧", "${number("relative_humidity_2m")}%", "湿度"),
+                    Triple("≋", "${String.format(java.util.Locale.ROOT,"%.1f",wind)} km/h", "风速")
+                )
+                values.forEachIndexed { index, (symbol,value,label) ->
+                    if(index>0) stats.addView(android.view.View(context).apply { setBackgroundColor(0xFFE8E8E8.toInt()) },LinearLayout.LayoutParams(dp(1),dp(36)))
+                    stats.addView(LinearLayout(context).apply {
+                        orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER
+                        addView(text("$symbol $value",if(compact) 11f else 14f).apply {
+                            gravity=Gravity.CENTER
+                            setSingleLine(true)
+                            setAutoSizeTextTypeUniformWithConfiguration(8,if(compact) 11 else 14,1,android.util.TypedValue.COMPLEX_UNIT_SP)
+                            contentDescription="$label $value"
+                        },LinearLayout.LayoutParams(-1,dp(25)))
+                        addView(text(label,if(compact) 10f else 12f,true).apply { gravity=Gravity.CENTER })
+                    },LinearLayout.LayoutParams(0,-2,1f))
                 }
                 panel.addView(stats)
             }
-            val backup = data?.optString("provider") == "open-meteo"
-            panel.addView(text(if (backup) "天气数据 · Open-Meteo（备用）" else "天气数据 · 和风天气 QWeather",9f,true).apply {
-                setOnClickListener {
-                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(if (backup) "https://open-meteo.com/" else "https://developer.qweather.com/attribution.html")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
-                }
-            })
         }
         fun validated(data: JSONObject): JSONObject {
             val current = data.getJSONObject("current")

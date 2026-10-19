@@ -123,7 +123,7 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                     SwitchRow(weather, "首页天气", "城市天气、温度、体感、湿度和风速；后台按需更新") { weather = it; prefs.edit().putBoolean(Settings.WEATHER, it).apply() }
                     if (weather) {
                         InputRow(title = "搜索城市", summary = cityName.ifBlank { "输入城市名后点击搜索，可用中文或拼音" }, value = cityQuery, onValueChange = { cityQuery = it.take(80) })
-                        ActionRow(if(weatherSearching) "正在搜索…" else "搜索并选择城市", "免密钥 · Open-Meteo · 30分钟缓存") {
+                        ActionRow(if(weatherSearching) "正在搜索…" else "搜索并选择城市", "") {
                             if (!weatherSearching && cityQuery.isNotBlank() && activity != null) {
                                 weatherSearching = true
                                 t.mma.hooks.items.homeextension.HomeWeather.search(cityQuery.trim()) { cities ->
