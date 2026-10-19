@@ -13,6 +13,7 @@ internal object SidePanelAppearance {
     const val WIDTH = "panel_lightning_width"
     const val COLORS = "panel_lightning_colors"
     const val ORDER = "panel_card_order"
+    fun cardEnabled(id: String) = "panel_card_enabled_$id"
     fun cardOpacity(id: String) = "panel_card_opacity_$id"
     fun isPhoto(id: String) = id == "photo" || id == "home_extension_photo" || id.matches(Regex("photo_[a-f0-9]+"))
     fun photoRevision(id: String) = if(id == "photo") PHOTO else "${id}_revision"
@@ -29,10 +30,10 @@ internal object SidePanelAppearance {
         val prefs=HomeSidePanelSettings.preferences(context)
         prefs.edit().putString("extra_photos",extraPhotos(context).filter { it!=id }.joinToString(","))
             .putString(ORDER,order(context).filter { it!=id }.joinToString(","))
-            .remove(cardOpacity(id)).remove("${id}_height").apply()
+            .remove(cardOpacity(id)).remove(cardEnabled(id)).remove("${id}_height").apply()
         SidePanelImages.clear(context,id)
     }
-    val cards = listOf("clock", "photo", "shortcuts", "hchat")
+    val cards = listOf("clock", "photo", "shortcuts", "hchat", "weather")
     fun order(context: Context): List<String> {
         val available = cards + extraPhotos(context)
         val saved = HomeSidePanelSettings.preferences(context).getString(ORDER, "").orEmpty()

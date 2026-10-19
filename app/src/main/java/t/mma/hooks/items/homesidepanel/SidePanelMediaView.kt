@@ -16,7 +16,7 @@ import java.util.concurrent.Executors
 import t.mma.utils.HLog
 
 /** Local-only photo frame. Decoding is off-main; playback exists only while the main drawer is visible. */
-internal class SidePanelMediaView(context: Context, private val recoverPlayback: Boolean = false) : FrameLayout(context) {
+internal class SidePanelMediaView(context: Context, private val recoverPlayback: Boolean = false, private val adjustablePhoto: Boolean = false) : FrameLayout(context) {
     private val loader = Executors.newSingleThreadExecutor { task -> Thread(task,"Hchat-PanelMedia").apply { isDaemon=true } }
     private var generation = 0
     private var currentPath: String? = null
@@ -117,7 +117,8 @@ internal class SidePanelMediaView(context: Context, private val recoverPlayback:
                     animated=drawable as? Animatable
                     if(Build.VERSION.SDK_INT>=28 && drawable is android.graphics.drawable.AnimatedImageDrawable)
                         (drawable as android.graphics.drawable.AnimatedImageDrawable).repeatCount=android.graphics.drawable.AnimatedImageDrawable.REPEAT_INFINITE
-                    image=ImageView(context).apply { scaleType=ImageView.ScaleType.CENTER_CROP;setImageDrawable(drawable) }
+                    image=(if (adjustablePhoto && animated == null) t.mma.hooks.items.homeextension.AdjustablePhotoView(context, "${file.name}_${revision}")
+                        else ImageView(context).apply { scaleType=ImageView.ScaleType.CENTER_CROP }).apply { setImageDrawable(drawable) }
                     addView(image,LayoutParams(-1,-1))
                 }
                 if(active) resumePlayback(restartPending)

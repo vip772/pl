@@ -60,11 +60,14 @@ internal object SidePanelSettingsEditor {
                     if(cards) {
                         Action("‹  卡片设置") { cardPage=false;pageChanged(false) }
                         val extras=remember(revision) { SidePanelAppearance.extraPhotos(activity) }
-                        val entries=listOf("clock" to "时间卡片","photo" to "图片卡片","shortcuts" to "快捷卡片","hchat" to "Hchat卡片") + extras.mapIndexed { index,id -> id to "图片卡片 ${index+2}" }
+                        val entries=listOf("clock" to "时间卡片","photo" to "图片卡片","shortcuts" to "快捷卡片","hchat" to "Hchat卡片", "weather" to "天气卡片") + extras.mapIndexed { index,id -> id to "图片卡片 ${index+2}" }
                         entries.forEach { (id,label) ->
                             key(id) {
                             SettingsCard {
                                 Column {
+                                    var cardEnabled by remember(id) { mutableStateOf(prefs.getBoolean(SidePanelAppearance.cardEnabled(id), id != "weather")) }
+                                    SwitchRow(cardEnabled, label, "关闭后侧边栏不显示此卡片") { cardEnabled = it; prefs.edit().putBoolean(SidePanelAppearance.cardEnabled(id), it).apply() }
+                                    if(id == "weather") WeatherCityEditor(activity)
                                     PreferenceSlider("${label}透明度",SidePanelAppearance.cardOpacity(id),0f..1f,1f,true,prefs,{})
                                     if(SidePanelAppearance.isPhoto(id)) {
                                         PreferenceHeight(id,activity)
@@ -139,6 +142,29 @@ internal object SidePanelSettingsEditor {
         }
     }
 
+    @Composable
+    private fun WeatherCityEditor(activity: Activity) {
+        val prefs = HomeSidePanelSettings.preferences(activity)
+        var city by remember { mutableStateOf(prefs.getString("weather_city", "").orEmpty()) }
+        var query by remember { mutableStateOf("") }
+        var busy by remember { mutableStateOf(false) }
+        InputRow(title = "天气城市", summary = city.ifBlank { "输入城市名称，点击搜索选择" }, value = query, onValueChange = { query = it.take(80) })
+        Action(if(busy) "正在搜索…" else "搜索并选择城市") {
+            if(!busy && query.isNotBlank()) {
+                busy = true
+                t.mma.hooks.items.homeextension.HomeWeather.search(query.trim()) { cities ->
+                    busy = false
+                    if(!activity.isFinishing && !activity.isDestroyed) {
+                        if(cities.isNullOrEmpty()) android.widget.Toast.makeText(activity, "未找到城市或网络暂不可用，请尝试拼音", android.widget.Toast.LENGTH_SHORT).show()
+                        else VoiceForwardMiuixDialog.showChoices(activity, "选择天气城市", "侧边栏城市独立保存", cities.map { it.name to "${it.latitude}, ${it.longitude}" }, onSelected = { index ->
+                            val selected = cities[index]; city = selected.name
+                            prefs.edit().putString("weather_city", selected.name).putString("weather_lat", selected.latitude.toString()).putString("weather_lon", selected.longitude.toString()).apply()
+                        }, onDismiss = {})
+                    }
+                }
+            }
+        }
+    }
     @Composable
     private fun PreferenceHeight(id:String,activity:Activity) {
         val prefs=HomeSidePanelSettings.preferences(activity)

@@ -162,7 +162,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         }
         private fun card(alphaKey: String) = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setPadding(dp(if(compactCard) 6 else 14), dp(10), dp(if(compactCard) 6 else 14), dp(10))
             background = GradientDrawable().apply {
                 cornerRadius = dp(18).toFloat()
                 val color = if (dark()) 0x202328 else 0xFFFFFF
@@ -187,6 +187,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             val date = LocalDate.now()
             if (today != date) { today = date; week = date }
             val signature = listOf(prefs.all.toSortedMap().toString(), today.toString(), cache.toString(),
+                (if (prefs.getBoolean(HomeExtensionSettings.WEATHER, false)) System.currentTimeMillis() / (30*60_000L) else 0L).toString(),
                 ctx.resources.configuration.uiMode.toString(),
                 HomeSidePanelSettings.preferences(ctx).getLong(SidePanelAppearance.photoRevision(HomeExtensionSettings.PHOTO_SLOT), 0L).toString()).joinToString("|")
             if (signature == renderedSignature) {
@@ -200,16 +201,47 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             val calendar = enabled && prefs.getBoolean(HomeExtensionSettings.CALENDAR, true)
             val recent = enabled && (prefs.getBoolean(HomeExtensionSettings.FAVORITES, false) || prefs.getBoolean(HomeExtensionSettings.RECENT, true))
             val photo = enabled && prefs.getBoolean(HomeExtensionSettings.PHOTO, false)
+            val weather = enabled && prefs.getBoolean(HomeExtensionSettings.WEATHER, false)
             if (!photo) clearMedia()
-            root.visibility = if (calendar || recent || photo) View.VISIBLE else View.GONE
-            root.layoutParams = AbsListView.LayoutParams(-1, if (calendar || recent || photo) -2 else 0)
-            HomeExtensionSettings.order(prefs.getString(HomeExtensionSettings.ORDER, null)).forEach {
-                when (it) {
-                    "calendar" -> if (calendar) renderCalendar()
-                    "contacts" -> if (recent) renderRecent()
-                    "photo" -> if (photo) renderPhoto()
+            root.visibility = if (calendar || recent || photo || weather) View.VISIBLE else View.GONE
+            root.layoutParams = AbsListView.LayoutParams(-1, if (calendar || recent || photo || weather) -2 else 0)
+            val active = setOfNotNull(if(calendar) "calendar" else null, if(recent) "contacts" else null,
+                if(photo) "photo" else null, if(weather) "weather" else null)
+            val order = HomeExtensionSettings.order(prefs.getString(HomeExtensionSettings.ORDER, null))
+            val custom = prefs.getBoolean(HomeExtensionSettings.CUSTOM_LAYOUT, false)
+            val rows = if(custom) HomeCardLayout.rows(prefs.getString(HomeExtensionSettings.LAYOUT_ROWS, null), order)
+                else order.map { listOf(it) }
+            rows.map { it.filter { id -> id in active } }.filter { it.isNotEmpty() }.forEach { row ->
+                val cards = row.map { id ->
+                    compactCard = row.size == 2
+                    when(id) {
+                        "calendar" -> renderCalendar()
+                        "contacts" -> renderRecent()
+                        "photo" -> renderPhoto()
+                        "weather" -> root.addView(HomeWeather.card(ctx, compactCard))
+                    }
+                    root.getChildAt(root.childCount - 1).also { root.removeView(it) }
+                }
+                if(cards.size == 1) {
+                    cards[0].layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
+                        if(row[0] != "photo") setMargins(dp(12), dp(5), dp(12), dp(5))
+                    }
+                    root.addView(cards[0])
+                }
+                else {
+                    val line = HomeCardRow(ctx).apply {
+                        setPadding(dp(12), 0, dp(12), 0)
+                        layoutParams = LinearLayout.LayoutParams(-1, -2)
+                    }
+                    cards.forEachIndexed { index, view ->
+                        line.addView(view, LinearLayout.LayoutParams(0, -2, 1f).apply {
+                            setMargins(if(index == 0) 0 else dp(5), dp(5), if(index == 0) dp(5) else 0, dp(5))
+                        })
+                    }
+                    root.addView(line)
                 }
             }
+            compactCard = false
             renderedSignature = signature
             refreshContactsIfNeeded()
         }
@@ -219,11 +251,12 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             val config = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false).toString() + prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")
             if (!loading && (config != loadedConfig || System.currentTimeMillis() - loadedAt > 30_000)) loadContacts(config)
         }
+        private var compactCard = false
         private fun renderCalendar() {
             val panel = card(HomeExtensionSettings.CALENDAR_ALPHA)
-            val title = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL }
-            title.addView(text(week.format(DateTimeFormatter.ofPattern("yyyy年 M月")), 18f).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }, LinearLayout.LayoutParams(0, dp(40), 1f))
-            title.addView(text(prefs.getString(HomeExtensionSettings.GREETING, HomeExtensionSettings.DEFAULT_GREETING).orEmpty()).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; maxLines = 2 }, LinearLayout.LayoutParams(0, dp(40), 1.5f))
+            val title = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL; if(compactCard) orientation = LinearLayout.VERTICAL }
+            title.addView(text(week.format(DateTimeFormatter.ofPattern("yyyy年 M月")), if(compactCard) 13f else 18f).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }, if(compactCard) LinearLayout.LayoutParams(-1, dp(26)) else LinearLayout.LayoutParams(0, dp(40), 1f))
+            title.addView(text(prefs.getString(HomeExtensionSettings.GREETING, HomeExtensionSettings.DEFAULT_GREETING).orEmpty()).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; maxLines = 2 }, if(compactCard) LinearLayout.LayoutParams(-1, dp(32)) else LinearLayout.LayoutParams(0, dp(40), 1.5f))
             panel.addView(title)
             val days = LinearLayout(ctx)
             val monday = week.minusDays((week.dayOfWeek.value - 1).toLong())
@@ -231,18 +264,18 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 val date = monday.plusDays(index.toLong())
                 val column = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
                 column.addView(text(listOf("一", "二", "三", "四", "五", "六", "日")[index], 12f), LinearLayout.LayoutParams(-1, dp(24)))
-                column.addView(text(date.dayOfMonth.toString(), 19f).apply {
+                column.addView(text(date.dayOfMonth.toString(), if(compactCard) 14f else 19f).apply {
                     contentDescription = date.toString()
                     if (date == today) {
                         setTextColor(Color.WHITE)
                         background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(0xFF07A86A.toInt()) }
                     }
-                }, LinearLayout.LayoutParams(dp(36), dp(36)))
+                }, LinearLayout.LayoutParams(if(compactCard) -1 else dp(36), dp(36)))
                 val lunar = android.icu.util.ChineseCalendar().apply { timeInMillis = date.atTime(12, 0).atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli() }
                 val day = lunar.get(android.icu.util.Calendar.DAY_OF_MONTH)
                 val numbers = listOf("一", "二", "三", "四", "五", "六", "七", "八", "九", "十")
                 val label = when(day) { 10 -> "初十"; 20 -> "二十"; 30 -> "三十"; else -> listOf("初", "十", "廿")[(day - 1) / 10] + numbers[(day - 1) % 10] }
-                column.addView(text(label, 11f), LinearLayout.LayoutParams(-1, dp(24)))
+                column.addView(text(label, if(compactCard) 9f else 11f), LinearLayout.LayoutParams(-1, dp(24)))
                 days.addView(column, LinearLayout.LayoutParams(0, dp(90), 1f))
             }
             panel.addView(days)
@@ -292,15 +325,16 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             val file = SidePanelImages.photoFile(ctx, HomeExtensionSettings.PHOTO_SLOT)
             if (file == null) { clearMedia(); root.addView(text("请在首页扩展中添加照片或视频"), LinearLayout.LayoutParams(-1, dp(70))); return }
             val revision = HomeSidePanelSettings.preferences(ctx).getLong(SidePanelAppearance.photoRevision(HomeExtensionSettings.PHOTO_SLOT), 0L)
-            val signature = listOf(file.path, revision.toString(), prefs.getInt(HomeExtensionSettings.PHOTO_WIDTH, 100).toString(),
+            val signature = listOf(compactCard.toString(), file.path, revision.toString(), prefs.getInt(HomeExtensionSettings.PHOTO_WIDTH, 100).toString(),
                 prefs.getInt(HomeExtensionSettings.PHOTO_HEIGHT, 180).toString(), prefs.getInt(HomeExtensionSettings.PHOTO_ALPHA, 100).toString()).joinToString("|")
             if (photoSignature == signature && photoHolder != null) {
+                (photoHolder?.parent as? android.view.ViewGroup)?.removeView(photoHolder)
                 root.addView(photoHolder)
                 root.post { updatePlayback() }
                 return
             }
             clearMedia()
-            val view = SidePanelMediaView(ctx, recoverPlayback = true)
+            val view = SidePanelMediaView(ctx, recoverPlayback = true, adjustablePhoto = true)
             media = view
             val frame = FrameLayout(ctx).apply {
                 background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(Color.TRANSPARENT) }
@@ -309,7 +343,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 alpha = prefs.getInt(HomeExtensionSettings.PHOTO_ALPHA, 100).coerceIn(0, 100) / 100f
             }
             val width = prefs.getInt(HomeExtensionSettings.PHOTO_WIDTH, 100).coerceIn(30, 100)
-            val holder = LinearLayout(ctx).apply { gravity = Gravity.CENTER; setPadding(dp(12), dp(5), dp(12), dp(5)) }
+            val holder = LinearLayout(ctx).apply { gravity = Gravity.CENTER; setPadding(dp(if(compactCard) 0 else 12), dp(if(compactCard) 0 else 5), dp(if(compactCard) 0 else 12), dp(if(compactCard) 0 else 5)) }
             holder.addView(frame, LinearLayout.LayoutParams(0, dp(prefs.getInt(HomeExtensionSettings.PHOTO_HEIGHT, 180).coerceIn(80, 500)), width.toFloat()))
             if (width < 100) { holder.weightSum = 100f }
             photoHolder = holder

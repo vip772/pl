@@ -310,6 +310,7 @@ internal class HomeSidePanelDrawer(
             }, LinearLayout.LayoutParams(-1,-2))
             cardViews["clock"] = timeCard
             (listOf("photo") + SidePanelAppearance.extraPhotos(activity)).forEach { id ->
+                if (!prefs.getBoolean(SidePanelAppearance.cardEnabled(id), true)) return@forEach
                 val height=dp(SidePanelAppearance.photoHeight(activity,id))
                 val photoCard=FrameLayout(activity).apply {
                     background=rounded(if(night()) "#242724" else "#FFFFFF",16)
@@ -332,7 +333,10 @@ internal class HomeSidePanelDrawer(
                 Row("📍","虚拟定位","设置微信定位位置") { MiuixSettingsPage.showFeature(activity,"fake_location"); onNavigate() },
                 Row("▢","悬浮底栏","底部导航栏样式") { MiuixSettingsPage.showFeature(activity,"custom_bottom_bar"); onNavigate() }
             ));cardViews["hchat"] = hchat
-            SidePanelAppearance.order(activity).forEach { id ->
+            if (prefs.getBoolean(SidePanelAppearance.cardEnabled("weather"), false)) {
+                cardViews["weather"] = t.mma.hooks.items.homeextension.HomeWeather.card(activity, settings = prefs)
+            }
+            SidePanelAppearance.order(activity).filter { prefs.getBoolean(SidePanelAppearance.cardEnabled(it), it != "weather") }.forEach { id ->
                 val card = cardViews.getValue(id); card.tag = id
                 body.addView(card,LinearLayout.LayoutParams(-1,-2).apply { bottomMargin = dp(6) })
                 applyCardOpacity(card,id)
