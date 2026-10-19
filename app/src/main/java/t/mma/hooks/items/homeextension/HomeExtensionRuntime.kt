@@ -99,11 +99,11 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         private var loading = false
         private var cache = emptyList<Contact>()
         private var loadedAt = 0L
-        private val foreground: Int get() = if (dark()) Color.WHITE else Color.rgb(35, 39, 45)
+        private val textForegroundColor: Int get() = if (dark()) Color.WHITE else Color.rgb(35, 39, 45)
         private fun dark() = ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         private fun dp(value: Int) = (value * ctx.resources.displayMetrics.density).toInt()
         private fun text(value: String, size: Float = 14f) = TextView(ctx).apply {
-            text = value; textSize = size; setTextColor(foreground); gravity = Gravity.CENTER
+            text = value; textSize = size; setTextColor(this@Session.textForegroundColor); gravity = Gravity.CENTER
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         }
         private fun card(alphaKey: String) = LinearLayout(ctx).apply {
