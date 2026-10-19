@@ -19,6 +19,7 @@ import kotlin.math.roundToInt
 internal object HomeWeather {
     private const val HOST = "n276xa5gxm.re.qweatherapi.com"
     private const val API_KEY = "92858ad8f04a427480e004ae8fefac7e"
+    private const val CACHE_TTL = 6 * 60 * 60_000L
     data class City(val name: String, val latitude: Double, val longitude: Double)
     private val worker = Executors.newSingleThreadExecutor { Thread(it, "Hchat-Weather").apply { isDaemon = true } }
     private val main = Handler(Looper.getMainLooper())
@@ -30,7 +31,7 @@ internal object HomeWeather {
         try {
             connection.connectTimeout = 5000; connection.readTimeout = 5000
             connection.setRequestProperty("User-Agent", "Hchat-Weather/1.0")
-            connection.setRequestProperty("X-QW-Api-Key", API_KEY)
+            if (connection.url.host == HOST) connection.setRequestProperty("X-QW-Api-Key", API_KEY)
             connection.setRequestProperty("Accept-Encoding", "gzip")
             check(connection.responseCode == 200)
             val data = connection.inputStream.use { raw ->
@@ -70,7 +71,24 @@ internal object HomeWeather {
         check(high >= low)
         val daily = JSONObject().put("temperature_2m_max",org.json.JSONArray().put(high))
             .put("temperature_2m_min",org.json.JSONArray().put(low))
-        return JSONObject().put("current",current).put("daily",daily)
+        return JSONObject().put("current",current).put("daily",daily).put("provider", "qweather")
+    }
+    internal fun normalizeBackup(data: JSONObject): JSONObject {
+        val current = data.getJSONObject("current")
+        val code = current.getInt("weather_code")
+        val condition = when(code) {
+            0 -> "晴"; 1,2 -> "多云"; 3 -> "阴"; 45,48 -> "雾"
+            in 51..67 -> "雨"; in 71..77 -> "雪"; in 80..82 -> "阵雨"
+            85,86 -> "阵雪"; in 95..99 -> "雷雨"; else -> "天气"
+        }
+        val mapped = when(code) {
+            0 -> if(current.optInt("is_day",1)==1) 100 else 150
+            1,2 -> 101; 3 -> 104; 45,48 -> 501
+            in 51..67,in 80..82 -> 305; in 71..77,85,86 -> 400
+            in 95..99 -> 302; else -> 999
+        }
+        current.put("condition", condition).put("weather_code", mapped)
+        return data.put("provider", "open-meteo")
     }
     fun search(query: String, callback: (List<City>?) -> Unit) {
         worker.execute {
@@ -81,6 +99,13 @@ internal object HomeWeather {
                 (0 until (items?.length() ?: 0)).map { index ->
                     val item = items!!.getJSONObject(index)
                     City(listOf(item.optString("name"), item.optString("adm2"), item.optString("adm1"), item.optString("country")).filter { it.isNotBlank() }.distinct().joinToString(" · "), item.getDouble("lat"), item.getDouble("lon"))
+                }
+            }.recoverCatching {
+                val data = request("https://geocoding-api.open-meteo.com/v1/search?name=${URLEncoder.encode(query, "UTF-8")}&count=10&language=zh&format=json")
+                val items = data.optJSONArray("results")
+                (0 until (items?.length() ?: 0)).map { index ->
+                    val item = items!!.getJSONObject(index)
+                    City(listOf(item.optString("name"), item.optString("admin1"), item.optString("country")).filter { it.isNotBlank() }.distinct().joinToString(" · "), item.getDouble("latitude"), item.getDouble("longitude"))
                 }
             }.getOrNull()
             main.post { callback(result) }
@@ -140,15 +165,19 @@ internal object HomeWeather {
                 }
                 panel.addView(stats)
             }
-            panel.addView(text("天气数据 · 和风天气 QWeather",9f,true).apply {
+            val backup = data?.optString("provider") == "open-meteo"
+            panel.addView(text(if (backup) "天气数据 · Open-Meteo（备用）" else "天气数据 · 和风天气 QWeather",9f,true).apply {
                 setOnClickListener {
-                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse("https://developer.qweather.com/attribution.html")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                    runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(if (backup) "https://open-meteo.com/" else "https://developer.qweather.com/attribution.html")).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 }
             })
         }
         fun validated(data: JSONObject): JSONObject {
             val current = data.getJSONObject("current")
             listOf("temperature_2m", "apparent_temperature", "relative_humidity_2m", "weather_code", "wind_speed_10m").forEach { check(current.getDouble(it).isFinite()) }
+            check(current.getDouble("relative_humidity_2m") in 0.0..100.0)
+            check(current.getDouble("wind_speed_10m") >= 0.0)
+            check(current.getString("condition").isNotBlank())
             val daily = data.getJSONObject("daily")
             listOf("temperature_2m_max", "temperature_2m_min").forEach { check(daily.getJSONArray(it).getDouble(0).isFinite()) }
             return data
@@ -169,7 +198,7 @@ internal object HomeWeather {
             removeAll { it.get() == null }; add(java.lang.ref.WeakReference(refresh))
         }
         if(lat.toDoubleOrNull()==null || lon.toDoubleOrNull()==null) return panel
-        if(cached != null && System.currentTimeMillis()-cached.optLong("saved") < 30*60_000L) return panel
+        if(cached != null && System.currentTimeMillis()-cached.optLong("saved") < CACHE_TTL) return panel
         if(!inFlight.add(key)) return panel
         if(System.currentTimeMillis()-(failures[key] ?: 0L)<5*60_000L) { inFlight.remove(key);return panel }
         worker.execute {
@@ -180,6 +209,11 @@ internal object HomeWeather {
                 val now = request("https://$HOST/weather/v1/current/$location?lang=zh")
                 val forecast = request("https://$HOST/weather/v1/daily/$location?days=1&lang=zh&localTime=true")
                 validated(normalize(now, forecast)).apply { put("saved",System.currentTimeMillis()) }
+            }.recoverCatching {
+                val latitude = lat.toDouble().also { check(it.isFinite() && it in -90.0..90.0) }
+                val longitude = lon.toDouble().also { check(it.isFinite() && it in -180.0..180.0) }
+                val url = "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min&timezone=auto&forecast_days=1"
+                validated(normalizeBackup(request(url))).apply { put("saved",System.currentTimeMillis()) }
             }.getOrNull()
             if(result!=null) storage.edit().putString(key,result.toString()).apply()
             main.post {

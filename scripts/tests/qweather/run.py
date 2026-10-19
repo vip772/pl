@@ -6,7 +6,7 @@ normalize=source[source.index('    internal fun normalize('):source.index('    f
 lib=Path('/tmp/pl-kotlin-libs');std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
 files={
 'Json.kt':'''package org.json
-class JSONObject { private val values=mutableMapOf<String,Any>();fun put(k:String,v:Any)=apply{values[k]=v};fun getDouble(k:String)=(values.getValue(k) as Number).toDouble();fun getString(k:String)=values.getValue(k) as String;fun getJSONObject(k:String)=values.getValue(k) as JSONObject;fun getJSONArray(k:String)=values.getValue(k) as JSONArray }
+class JSONObject { private val values=mutableMapOf<String,Any>();fun put(k:String,v:Any)=apply{values[k]=v};fun getDouble(k:String)=(values.getValue(k) as Number).toDouble();fun getString(k:String)=values.getValue(k) as String;fun getInt(k:String)=(values.getValue(k) as Number).toInt();fun optInt(k:String,d:Int)=(values[k] as? Number)?.toInt() ?: d;fun getJSONObject(k:String)=values.getValue(k) as JSONObject;fun getJSONArray(k:String)=values.getValue(k) as JSONArray }
 class JSONArray {private val values=mutableListOf<Any>();fun put(v:Any)=apply{values.add(v)};fun getJSONObject(i:Int)=values[i] as JSONObject;fun getDouble(i:Int)=(values[i] as Number).toDouble()}
 ''',
 'Weather.kt':'import org.json.JSONObject\nobject Weather {\n'+normalize+'}\n',
@@ -15,6 +15,11 @@ fun measure(v:Double,u:String="°C")=JSONObject().put("value",v).put("unit",u)
 fun now(h:Double=.69,u:String="m/s",speed:Double=4.74)=JSONObject().put("temperature",measure(31.71)).put("feelsLike",measure(33.64)).put("humidity",h).put("wind",JSONObject().put("speed",measure(speed,u))).put("condition",JSONObject().put("text","少云").put("code","102"))
 fun forecast(high:Double=29.94,low:Double=20.93)=JSONObject().put("days",JSONArray().put(JSONObject().put("temperatureMax",measure(high)).put("temperatureMin",measure(low))))
 fun main(){
+ for((code,expected) in listOf(0 to 100,3 to 104,45 to 501,63 to 305,75 to 400,95 to 302)) {
+  val mapped=Weather.normalizeBackup(JSONObject().put("current",JSONObject().put("weather_code",code).put("is_day",1)))
+  check(mapped.getJSONObject("current").getInt("weather_code")==expected);check(mapped.getString("provider")=="open-meteo")
+ }
+ check(Weather.normalizeBackup(JSONObject().put("current",JSONObject().put("weather_code",0).put("is_day",0))).getJSONObject("current").getInt("weather_code")==150)
  val result=Weather.normalize(now(),forecast());val c=result.getJSONObject("current")
  check(kotlin.math.abs(c.getDouble("relative_humidity_2m")-69)<.0001)
  check(kotlin.math.abs(c.getDouble("wind_speed_10m")-17.064)<.0001)
@@ -34,6 +39,9 @@ with tempfile.TemporaryDirectory() as d:
  for name,text in files.items():(p/name).write_text(text)
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(p/'test.jar'),*map(str,p.glob('*.kt'))],check=True,timeout=40)
  subprocess.run(['java','-cp',f'{p}/test.jar:{std}','TestKt'],check=True,timeout=10)
-assert 'open-meteo.com' not in source
+assert 'open-meteo.com' in source
+assert 'private const val CACHE_TTL = 6 * 60 * 60_000L' in source
+assert 'if (connection.url.host == HOST)' in source
+assert 'validated(normalizeBackup(request(url)))' in source
 assert 'X-QW-Api-Key' in source and 'GZIPInputStream' in source
-print('PASS: old provider removed; header authentication and Gzip supported')
+print('PASS: six-hour cache and fallback configured; credential restricted to QWeather host; Gzip supported')

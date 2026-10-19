@@ -131,7 +131,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     private data class Contact(val id: String, val name: String, val avatar: String, val group: Boolean)
     private inner class Session(list: ListView) {
         private val ctx = list.context
-        val root = object : LinearLayout(ctx), HomeExtensionSurface.Root {
+        val root: LinearLayout = object : LinearLayout(ctx), HomeExtensionSurface.Root {
             override fun onWindowVisibilityChanged(visibility: Int) {
                 super.onWindowVisibilityChanged(visibility)
                 if (visibility != View.VISIBLE) media?.setPlayback(false) else updatePlayback()
