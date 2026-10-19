@@ -29,6 +29,9 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
     var favorites by remember { mutableStateOf(prefs.getBoolean(Settings.FAVORITES, false)) }
     var recent by remember { mutableStateOf(!favorites && prefs.getBoolean(Settings.RECENT, true)) }
     var orbit by remember { mutableStateOf(prefs.getBoolean(Settings.AVATAR_ORBIT, true)) }
+    val recallPrefs = remember { t.mma.preferences.HchatStorage.preferences(context, t.mma.hooks.items.antirecall.AntiRecallSettings.PREFS_NAME) }
+    val defaultOrbitColor = remember { recallPrefs.getString(t.mma.hooks.items.antirecall.AntiRecallSettings.KEY_DYNAMIC_COLOR, t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty() }
+    var orbitColor by remember { mutableStateOf(prefs.getString(Settings.ORBIT_COLOR, defaultOrbitColor).orEmpty()) }
     var selected by remember { mutableStateOf(Settings.favorites(prefs.getString(Settings.FAVORITE_IDS, ""))) }
     var photo by remember { mutableStateOf(prefs.getBoolean(Settings.PHOTO, false)) }
     var order by remember { mutableStateOf(Settings.order(prefs.getString(Settings.ORDER, null))) }
@@ -63,7 +66,16 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                         recent = it; if (it) favorites = false
                         prefs.edit().putBoolean(Settings.FAVORITES, favorites).putBoolean(Settings.RECENT, recent).apply()
                     }
-                    if (favorites || recent) SwitchRow(orbit, "头像环绕动效", "复用动态撤回三色渐变，顺时针3秒一圈，带渐隐拖尾") { orbit = it; prefs.edit().putBoolean(Settings.AVATAR_ORBIT, it).apply() }
+                    if (favorites || recent) SwitchRow(orbit, "头像环绕动效", "顺时针3秒一圈，带渐隐拖尾，颜色和大小可调整") { orbit = it; prefs.edit().putBoolean(Settings.AVATAR_ORBIT, it).apply() }
+                    if ((favorites || recent) && orbit) {
+                        ColorPickerRow("环绕渐变颜色", "分别编辑起始色、中间色、结束色", orbitColor,
+                            threeColorGradient = true, onReset = {
+                                orbitColor = t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT
+                                prefs.edit().putString(Settings.ORBIT_COLOR, orbitColor).apply()
+                            }) { orbitColor = it; prefs.edit().putString(Settings.ORBIT_COLOR, it).apply() }
+                        HomeExtensionSlider(context, "圆点直径 dp", Settings.ORBIT_SIZE, Settings.DEFAULT_ORBIT_SIZE, 2f..10f)
+                        HomeExtensionSlider(context, "距头像边缘 dp", Settings.ORBIT_GAP, Settings.DEFAULT_ORBIT_GAP, 2f..12f)
+                    }
                     if (favorites || recent) HomeExtensionSlider(context, "背景透明度", Settings.RECENT_ALPHA, 75, 0f..100f, true)
                 } } }
                 item { SmallTitle(text = "首页照片") }

@@ -266,7 +266,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                         clipToOutline = true
                         setImageResource(android.R.drawable.sym_def_app_icon)
                     }
-                    if (row is ContactOrbitRow) column.addView(row.wrap(avatar), LinearLayout.LayoutParams(dp(56), dp(56)))
+                    if (row is ContactOrbitRow) column.addView(row.wrap(avatar), LinearLayout.LayoutParams(dp(row.avatarExtentDp), dp(row.avatarExtentDp)))
                     else column.addView(avatar, LinearLayout.LayoutParams(dp(46), dp(46)))
                     column.addView(text(contact.name, 11f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(dp(66), dp(27)))
                     avatar.isClickable = true
@@ -281,7 +281,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                         }.getOrDefault(false)
                         if (!opened) Toast.makeText(ctx, "暂时无法打开此会话", Toast.LENGTH_SHORT).show()
                     }
-                    row.addView(column, LinearLayout.LayoutParams(dp(72), -2))
+                    row.addView(column, LinearLayout.LayoutParams(dp(if (row is ContactOrbitRow) maxOf(72, row.avatarExtentDp + 6) else 72), -2))
                     if (contact.avatar.isNotBlank()) loadAvatar(contact.avatar, avatar, token)
                 }
                 panel.addView(HorizontalScrollView(ctx).apply { isHorizontalScrollBarEnabled = false; addView(row) })

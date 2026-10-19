@@ -13,6 +13,11 @@ object HomeExtensionSettings {
     const val CALENDAR = "calendar"
     const val RECENT = "recent"
     const val CALENDAR_ALPHA = "calendar_alpha"
+    const val ORBIT_COLOR = "orbit_color"
+    const val ORBIT_SIZE = "orbit_size"
+    const val ORBIT_GAP = "orbit_gap"
+    const val DEFAULT_ORBIT_SIZE = 5 // diameter, dp
+    const val DEFAULT_ORBIT_GAP = 4 // avatar edge to orbit centre, dp
     const val AVATAR_ORBIT = "avatar_orbit"
     const val RECENT_ALPHA = "recent_alpha"
     const val FAVORITES = "favorites"

@@ -22,6 +22,10 @@ import t.mma.preferences.HchatStorage
 
 /** One clock for all avatars. Scroll/focus/layout events resume an otherwise idle row. */
 internal class ContactOrbitRow(context: Context) : LinearLayout(context) {
+    private val prefs = HomeExtensionSettings.preferences(context)
+    private val dotSize = prefs.getInt(HomeExtensionSettings.ORBIT_SIZE, HomeExtensionSettings.DEFAULT_ORBIT_SIZE).coerceIn(2, 10)
+    private val gap = prefs.getInt(HomeExtensionSettings.ORBIT_GAP, HomeExtensionSettings.DEFAULT_ORBIT_GAP).coerceIn(2, 12)
+    val avatarExtentDp = 46 + 2 * gap + dotSize + 2
     private val orbits = ArrayList<OrbitAvatar>(8)
     private val visibleRect = Rect()
     private var observer: ViewTreeObserver? = null
@@ -43,7 +47,7 @@ internal class ContactOrbitRow(context: Context) : LinearLayout(context) {
             if (visible) { scheduled = true; postOnAnimation(this) }
         }
     }
-    fun wrap(avatar: ImageView): View = OrbitAvatar(context, avatar).also { orbits.add(it) }
+    fun wrap(avatar: ImageView): View = OrbitAvatar(context, avatar, gap.toFloat(), dotSize / 2f).also { orbits.add(it) }
     private fun refresh() {
         if (!scheduled && isAttachedToWindow && isShown && hasWindowFocus()) {
             scheduled = true
@@ -78,12 +82,13 @@ internal class ContactOrbitRow(context: Context) : LinearLayout(context) {
     }
     private fun updateColors() {
         val prefs = HchatStorage.preferences(context, AntiRecallSettings.PREFS_NAME)
-        val colors = DynamicRecallGradient.parts(prefs.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
-            DynamicRecallGradient.DEFAULT).orEmpty()).map { Color.parseColor(it) }
-        for (orbit in orbits) orbit.updateColors(intArrayOf(colors[0], colors[1], colors[2], colors[0]))
+        val fallback = prefs.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR, DynamicRecallGradient.DEFAULT)
+        val colors = DynamicRecallGradient.parts(this.prefs.getString(HomeExtensionSettings.ORBIT_COLOR, fallback).orEmpty()).map { Color.parseColor(it) }
+        val palette = intArrayOf(colors[0], colors[1], colors[2], colors[0])
+        for (orbit in orbits) orbit.updateColors(palette)
     }
 
-    private class OrbitAvatar(context: Context, avatar: ImageView) : FrameLayout(context) {
+    private class OrbitAvatar(context: Context, avatar: ImageView, private val gap: Float, private val dotRadius: Float) : FrameLayout(context) {
         private val density = resources.displayMetrics.density
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val outline = Path()
@@ -91,26 +96,30 @@ internal class ContactOrbitRow(context: Context) : LinearLayout(context) {
         private val bounds = RectF()
         private val point = FloatArray(2)
         private var length = 0f
+        private var palette: IntArray? = null
         var progress = 0f
         init {
-            // 5dp reserve: orbit centre 2dp beyond the avatar, plus the dot radius.
+            // Keep the avatar size fixed; the outer container reserves space for the orbit.
             addView(avatar, LayoutParams((46 * density + .5f).toInt(), (46 * density + .5f).toInt(), Gravity.CENTER))
         }
         fun updateColors(colors: IntArray) {
+            if (palette?.contentEquals(colors) == true && paint.shader != null) return
+            palette = colors
+            rebuildShader()
+        }
+        private fun rebuildShader() {
+            val colors = palette ?: return
             paint.shader = SweepGradient(width / 2f, height / 2f, colors, floatArrayOf(0f, 1f / 3f, 2f / 3f, 1f))
         }
         override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
             super.onSizeChanged(w, h, oldw, oldh)
-            val half = 25 * density // 23dp avatar half-size + 2dp outside its edge
+            val half = (23 + gap) * density
             bounds.set(w / 2f - half, h / 2f - half, w / 2f + half, h / 2f + half)
             outline.reset()
-            outline.addRoundRect(bounds, 16 * density, 16 * density, Path.Direction.CW)
+            outline.addRoundRect(bounds, (14 + gap) * density, (14 + gap) * density, Path.Direction.CW)
             measure.setPath(outline, true)
             length = measure.length
-            val prefs = HchatStorage.preferences(context, AntiRecallSettings.PREFS_NAME)
-            val colors = DynamicRecallGradient.parts(prefs.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
-                DynamicRecallGradient.DEFAULT).orEmpty()).map { Color.parseColor(it) }
-            updateColors(intArrayOf(colors[0], colors[1], colors[2], colors[0]))
+            rebuildShader()
         }
         override fun dispatchDraw(canvas: Canvas) {
             super.dispatchDraw(canvas)
@@ -121,7 +130,7 @@ internal class ContactOrbitRow(context: Context) : LinearLayout(context) {
                 val distance = ((progress - i * .006f + 1f) % 1f) * length
                 measure.getPosTan(distance, point, null)
                 paint.alpha = (255 * strength * strength).toInt()
-                canvas.drawCircle(point[0], point[1], density * (0.2f + 1.3f * strength), paint)
+                canvas.drawCircle(point[0], point[1], density * (0.15f + (dotRadius - 0.15f) * strength), paint)
             }
         }
     }
