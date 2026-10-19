@@ -6,7 +6,7 @@ import android.widget.LinearLayout
 
 /** Validated rows: every card once, at most two per row. */
 internal object HomeCardLayout {
-    val ids = listOf("calendar", "contacts", "photo", "weather")
+    val ids = listOf("calendar", "contacts", "photo", "weather", "music")
     fun rows(value: String?, fallback: List<String> = ids): List<List<String>> {
         val seen = HashSet<String>()
         val result = mutableListOf<List<String>>()

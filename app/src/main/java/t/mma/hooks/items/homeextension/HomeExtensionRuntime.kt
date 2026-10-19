@@ -220,11 +220,12 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             val recent = enabled && (prefs.getBoolean(HomeExtensionSettings.FAVORITES, false) || prefs.getBoolean(HomeExtensionSettings.RECENT, true))
             val photo = enabled && prefs.getBoolean(HomeExtensionSettings.PHOTO, false)
             val weather = enabled && prefs.getBoolean(HomeExtensionSettings.WEATHER, false)
+            val music = enabled && prefs.getBoolean(HomeExtensionSettings.MUSIC, false)
             if (!photo) clearMedia()
-            root.visibility = if (calendar || recent || photo || weather) View.VISIBLE else View.GONE
-            root.layoutParams = AbsListView.LayoutParams(-1, if (calendar || recent || photo || weather) -2 else 0)
+            root.visibility = if (calendar || recent || photo || weather || music) View.VISIBLE else View.GONE
+            root.layoutParams = AbsListView.LayoutParams(-1, if (calendar || recent || photo || weather || music) -2 else 0)
             val active = setOfNotNull(if(calendar) "calendar" else null, if(recent) "contacts" else null,
-                if(photo) "photo" else null, if(weather) "weather" else null)
+                if(photo) "photo" else null, if(weather) "weather" else null, if(music) "music" else null)
             val order = HomeExtensionSettings.order(prefs.getString(HomeExtensionSettings.ORDER, null))
             val custom = prefs.getBoolean(HomeExtensionSettings.CUSTOM_LAYOUT, false)
             val rows = if(custom) HomeCardLayout.rows(prefs.getString(HomeExtensionSettings.LAYOUT_ROWS, null), order)
@@ -237,6 +238,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                         "contacts" -> renderRecent()
                         "photo" -> renderPhoto()
                         "weather" -> root.addView(HomeWeather.card(ctx, compactCard))
+                        "music" -> root.addView(HomeMusic.card(ctx, compactCard))
                     }
                     root.getChildAt(root.childCount - 1).also { root.removeView(it) }
                 }

@@ -39,9 +39,11 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
     var cityName by remember { mutableStateOf(prefs.getString("weather_city", "").orEmpty()) }
     var weatherSearching by remember { mutableStateOf(false) }
     var photo by remember { mutableStateOf(prefs.getBoolean(Settings.PHOTO, false)) }
+    var music by remember { mutableStateOf(prefs.getBoolean(Settings.MUSIC, false)) }
+    var musicStyle by remember { mutableStateOf(prefs.getInt(Settings.MUSIC_STYLE, 1)) }
     var customLayout by remember { mutableStateOf(prefs.getBoolean(Settings.CUSTOM_LAYOUT, false)) }
     var layoutRows by remember { mutableStateOf(t.mma.hooks.items.homeextension.HomeCardLayout.rows(prefs.getString(Settings.LAYOUT_ROWS, null), Settings.order(prefs.getString(Settings.ORDER, null)))) }
-    val cardNames = mapOf("calendar" to "日历", "contacts" to "快捷联系人", "photo" to "首页照片", "weather" to "首页天气")
+    val cardNames = mapOf("calendar" to "日历", "contacts" to "快捷联系人", "photo" to "首页照片", "weather" to "首页天气", "music" to "首页音乐")
     fun saveRows(rows: List<List<String>>) {
         layoutRows = rows
         prefs.edit().putString(Settings.LAYOUT_ROWS, t.mma.hooks.items.homeextension.HomeCardLayout.encode(rows)).apply()
@@ -143,6 +145,16 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                         HomeExtensionSlider(context, "背景透明度", Settings.WEATHER_ALPHA, 100, 0f..100f, true)
                     }
                 } } }
+                item { SmallTitle(text = "首页音乐") }
+                item { SettingsCard { Column {
+                    SwitchRow(music, "首页音乐", "音乐卡片、搜索歌曲与播放控制") { music = it; prefs.edit().putBoolean(Settings.MUSIC, it).apply() }
+                    if (music) {
+                        ActionRow("音乐卡片样式", if (musicStyle == 1) "样式1 · 唱片卡片" else "样式4 · 主题卡片") {
+                            if (activity != null) VoiceForwardMiuixDialog.showChoices(activity, "选择音乐卡片样式", "选择后返回首页生效", listOf("样式1" to "唱片卡片", "样式4" to "主题卡片"), onSelected = { index -> musicStyle = if(index == 0) 1 else 4; prefs.edit().putInt(Settings.MUSIC_STYLE, musicStyle).apply() }, onDismiss = {})
+                        }
+                        HomeExtensionSlider(context, "背景透明度", Settings.MUSIC_ALPHA, 100, 0f..100f, true)
+                    }
+                } } }
                 item { SmallTitle(text = "首页照片") }
                 item { SettingsCard { Column {
                     SwitchRow(photo, "首页照片", "支持静态图片、动图和视频") { photo = it; prefs.edit().putBoolean(Settings.PHOTO, it).apply() }
@@ -157,7 +169,7 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                 if(!customLayout) item { SmallTitle(text = "区域上下顺序") }
                 if(!customLayout) item { SettingsCard { Column {
                     order.forEachIndexed { index, id ->
-                        val label = mapOf("calendar" to "日历", "contacts" to "快捷联系人", "photo" to "首页照片", "weather" to "首页天气")[id].orEmpty()
+                        val label = mapOf("calendar" to "日历", "contacts" to "快捷联系人", "photo" to "首页照片", "weather" to "首页天气", "music" to "首页音乐")[id].orEmpty()
                         ActionRow("${index + 1}. $label", "调整位置") {
                             if (activity != null) VoiceForwardMiuixDialog.showChoices(
                                 activity = activity,

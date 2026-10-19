@@ -24,6 +24,9 @@ object HomeExtensionSettings {
     const val FAVORITE_IDS = "favorite_ids"
     const val WEATHER = "weather"
     const val WEATHER_ALPHA = "weather_alpha"
+    const val MUSIC = "music"
+    const val MUSIC_ALPHA = "music_alpha"
+    const val MUSIC_STYLE = "music_style"
     const val PHOTO = "photo"
     const val PHOTO_SLOT = "home_extension_photo"
     const val PHOTO_HEIGHT = "photo_height"
@@ -32,7 +35,7 @@ object HomeExtensionSettings {
     const val CUSTOM_LAYOUT = "custom_layout"
     const val LAYOUT_ROWS = "layout_rows"
     const val ORDER = "order"
-    fun order(value: String?) = (value.orEmpty().split(",").filter { it in listOf("calendar", "contacts", "photo", "weather") } + listOf("calendar", "contacts", "photo", "weather")).distinct()
+    fun order(value: String?) = (value.orEmpty().split(",").filter { it in listOf("calendar", "contacts", "photo", "weather", "music") } + listOf("calendar", "contacts", "photo", "weather", "music")).distinct()
     fun favorites(value: String?) = value.orEmpty().split(",").filter { it.isNotBlank() }.distinct().take(8)
     const val GREETING = "greeting"
     const val DEFAULT_GREETING = "愿你今天也有好心情"
