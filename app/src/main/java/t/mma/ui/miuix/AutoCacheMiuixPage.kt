@@ -1,5 +1,6 @@
 package t.mma.ui.miuix
 
+import androidx.compose.foundation.layout.Arrangement
 import android.content.Context
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -65,6 +66,7 @@ internal fun AutoCacheMiuixPage(context: Context, provider: FeatureSettingsProvi
                 LazyColumn(
                     modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
                     state = state,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
                     contentPadding = PaddingValues(
                         top = padding.calculateTopPadding() + 8.dp,
                         bottom = padding.calculateBottomPadding() + 84.dp
@@ -85,6 +87,7 @@ internal fun AutoCacheMiuixPage(context: Context, provider: FeatureSettingsProvi
                         }
                     }
                     if (enabled) {
+                        item { SmallTitle(text = "缓存范围") }
                         item {
                             SettingsCard {
                                 ActionRow(

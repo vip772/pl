@@ -13,6 +13,7 @@ object HomeExtensionSettings {
     const val CALENDAR = "calendar"
     const val RECENT = "recent"
     const val CALENDAR_ALPHA = "calendar_alpha"
+    const val AVATAR_ORBIT = "avatar_orbit"
     const val RECENT_ALPHA = "recent_alpha"
     const val FAVORITES = "favorites"
     const val FAVORITE_IDS = "favorite_ids"

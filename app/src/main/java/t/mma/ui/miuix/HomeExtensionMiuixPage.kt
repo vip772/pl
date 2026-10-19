@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
+import top.yukonga.miuix.kmp.basic.SmallTitle
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -27,6 +28,7 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
     var calendar by remember { mutableStateOf(prefs.getBoolean(Settings.CALENDAR, true)) }
     var favorites by remember { mutableStateOf(prefs.getBoolean(Settings.FAVORITES, false)) }
     var recent by remember { mutableStateOf(!favorites && prefs.getBoolean(Settings.RECENT, true)) }
+    var orbit by remember { mutableStateOf(prefs.getBoolean(Settings.AVATAR_ORBIT, true)) }
     var selected by remember { mutableStateOf(Settings.favorites(prefs.getString(Settings.FAVORITE_IDS, ""))) }
     var photo by remember { mutableStateOf(prefs.getBoolean(Settings.PHOTO, false)) }
     var order by remember { mutableStateOf(Settings.order(prefs.getString(Settings.ORDER, null))) }
@@ -35,10 +37,12 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
     val behavior = MiuixScrollBehavior()
     PageScaffold(title = provider.title(), largeTitle = provider.title(), scrollBehavior = behavior,
         bottomBar = { BottomActionBar(primaryText = "返回", onPrimaryClick = onBack) }) { padding ->
-        LazyColumn(modifier = Modifier.fillMaxSize().nestedScroll(behavior.nestedScrollConnection), contentPadding = PaddingValues(
+        LazyColumn(modifier = Modifier.fillMaxSize().nestedScroll(behavior.nestedScrollConnection), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(
             top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)) {
+            item { SmallTitle(text = "功能开关") }
             item { SettingsCard { SwitchRow(enabled, "首页扩展", "设置立即保存，返回首页生效") { enabled = it; prefs.edit().putBoolean(Settings.ENABLE, it).apply() } } }
             if (enabled) {
+                item { SmallTitle(text = "首页日历") }
                 item { SettingsCard { Column {
                     SwitchRow(calendar, "首页日历", "日期下方显示对应农历") { calendar = it; prefs.edit().putBoolean(Settings.CALENDAR, it).apply() }
                     if (calendar) {
@@ -46,8 +50,8 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                         InputRow(title = "问候语", summary = "显示在年月右侧，最多120字", value = greeting, onValueChange = { greeting = it.take(120); prefs.edit().putString(Settings.GREETING, greeting).apply() })
                     }
                 } } }
+                item { SmallTitle(text = "快捷联系人") }
                 item { SettingsCard { Column {
-                    Text("快捷联系人", modifier = Modifier.padding(20.dp), color = MiuixTheme.colorScheme.onSurface)
                     SwitchRow(favorites, "常用联系人", "自选联系人和群聊，合计最多8个") {
                         favorites = it; if (it) recent = false
                         prefs.edit().putBoolean(Settings.FAVORITES, favorites).putBoolean(Settings.RECENT, recent).apply()
@@ -59,8 +63,10 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                         recent = it; if (it) favorites = false
                         prefs.edit().putBoolean(Settings.FAVORITES, favorites).putBoolean(Settings.RECENT, recent).apply()
                     }
+                    if (favorites || recent) SwitchRow(orbit, "头像环绕动效", "复用动态撤回三色渐变，顺时针3秒一圈，带渐隐拖尾") { orbit = it; prefs.edit().putBoolean(Settings.AVATAR_ORBIT, it).apply() }
                     if (favorites || recent) HomeExtensionSlider(context, "背景透明度", Settings.RECENT_ALPHA, 75, 0f..100f, true)
                 } } }
+                item { SmallTitle(text = "首页照片") }
                 item { SettingsCard { Column {
                     SwitchRow(photo, "首页照片", "支持静态图片、动图和视频") { photo = it; prefs.edit().putBoolean(Settings.PHOTO, it).apply() }
                     if (photo) {
@@ -71,8 +77,8 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                         HomeExtensionSlider(context, "透明度", Settings.PHOTO_ALPHA, 100, 0f..100f, true)
                     }
                 } } }
+                item { SmallTitle(text = "区域上下顺序") }
                 item { SettingsCard { Column {
-                    Text("区域上下顺序", modifier = Modifier.padding(20.dp), color = MiuixTheme.colorScheme.onSurface)
                     order.forEachIndexed { index, id ->
                         val label = mapOf("calendar" to "日历", "contacts" to "快捷联系人", "photo" to "首页照片")[id].orEmpty()
                         ActionRow("${index + 1}. $label", "调整位置") {

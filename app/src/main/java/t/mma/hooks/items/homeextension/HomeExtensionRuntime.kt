@@ -132,9 +132,12 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         private var renderQueued = false
         private var renderedSignature: String? = null
         private var playbackFrame: View? = null
+        private var photoHolder: View? = null
+        private var photoSignature: String? = null
+        private val mediaVisibleRect = android.graphics.Rect()
         private fun updatePlayback() {
             val frame = playbackFrame
-            media?.setPlayback(frame != null && frame.isShown && frame.hasWindowFocus() && frame.getGlobalVisibleRect(android.graphics.Rect()))
+            media?.ensurePlayback(frame != null && frame.isShown && frame.hasWindowFocus() && frame.getGlobalVisibleRect(mediaVisibleRect))
         }
         private var scrollObserver: android.view.ViewTreeObserver? = null
         private var scrollListener: android.view.ViewTreeObserver.OnScrollChangedListener? = null
@@ -143,6 +146,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             scrollListener?.let { callback -> scrollObserver?.takeIf { it.isAlive }?.removeOnScrollChangedListener(callback) }
             scrollListener = null; scrollObserver = null; playbackFrame = null
             media?.dispose(); media = null
+            photoHolder = null; photoSignature = null
         }
         fun invalidateContacts() { loadedAt = 0L; safeRender() }
         private var generation = 0
@@ -191,12 +195,12 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 return
             }
             generation++
-            clearMedia()
             root.removeAllViews()
             val enabled = prefs.getBoolean(HomeExtensionSettings.ENABLE, false)
             val calendar = enabled && prefs.getBoolean(HomeExtensionSettings.CALENDAR, true)
             val recent = enabled && (prefs.getBoolean(HomeExtensionSettings.FAVORITES, false) || prefs.getBoolean(HomeExtensionSettings.RECENT, true))
             val photo = enabled && prefs.getBoolean(HomeExtensionSettings.PHOTO, false)
+            if (!photo) clearMedia()
             root.visibility = if (calendar || recent || photo) View.VISIBLE else View.GONE
             root.layoutParams = AbsListView.LayoutParams(-1, if (calendar || recent || photo) -2 else 0)
             HomeExtensionSettings.order(prefs.getString(HomeExtensionSettings.ORDER, null)).forEach {
@@ -250,7 +254,8 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             val contacts = if (loadedConfig == config) cache.take(8) else emptyList()
             if (contacts.isEmpty()) panel.addView(text(if (loadedAt == 0L) "正在加载最近会话…" else "暂无最近会话"), LinearLayout.LayoutParams(-1, dp(70)))
             else {
-                val row = LinearLayout(ctx)
+                val orbitEnabled = prefs.getBoolean(HomeExtensionSettings.AVATAR_ORBIT, true)
+                val row = if (orbitEnabled) ContactOrbitRow(ctx) else LinearLayout(ctx)
                 val token = generation
                 contacts.forEach { contact ->
                     val column = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(dp(3), dp(5), dp(3), dp(4)) }
@@ -261,7 +266,8 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                         clipToOutline = true
                         setImageResource(android.R.drawable.sym_def_app_icon)
                     }
-                    column.addView(avatar, LinearLayout.LayoutParams(dp(46), dp(46)))
+                    if (row is ContactOrbitRow) column.addView(row.wrap(avatar), LinearLayout.LayoutParams(dp(56), dp(56)))
+                    else column.addView(avatar, LinearLayout.LayoutParams(dp(46), dp(46)))
                     column.addView(text(contact.name, 11f).apply { maxLines = 1; ellipsize = android.text.TextUtils.TruncateAt.END }, LinearLayout.LayoutParams(dp(66), dp(27)))
                     avatar.isClickable = true
                     avatar.foreground = android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x3307A86A), null, android.graphics.drawable.GradientDrawable().apply { cornerRadius = dp(14).toFloat(); setColor(Color.WHITE) })
@@ -284,8 +290,17 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         }
         private fun renderPhoto() {
             val file = SidePanelImages.photoFile(ctx, HomeExtensionSettings.PHOTO_SLOT)
-            if (file == null) { root.addView(text("请在首页扩展中添加照片或视频"), LinearLayout.LayoutParams(-1, dp(70))); return }
-            val view = SidePanelMediaView(ctx)
+            if (file == null) { clearMedia(); root.addView(text("请在首页扩展中添加照片或视频"), LinearLayout.LayoutParams(-1, dp(70))); return }
+            val revision = HomeSidePanelSettings.preferences(ctx).getLong(SidePanelAppearance.photoRevision(HomeExtensionSettings.PHOTO_SLOT), 0L)
+            val signature = listOf(file.path, revision.toString(), prefs.getInt(HomeExtensionSettings.PHOTO_WIDTH, 100).toString(),
+                prefs.getInt(HomeExtensionSettings.PHOTO_HEIGHT, 180).toString(), prefs.getInt(HomeExtensionSettings.PHOTO_ALPHA, 100).toString()).joinToString("|")
+            if (photoSignature == signature && photoHolder != null) {
+                root.addView(photoHolder)
+                root.post { updatePlayback() }
+                return
+            }
+            clearMedia()
+            val view = SidePanelMediaView(ctx, recoverPlayback = true)
             media = view
             val frame = FrameLayout(ctx).apply {
                 background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(Color.TRANSPARENT) }
@@ -297,6 +312,8 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             val holder = LinearLayout(ctx).apply { gravity = Gravity.CENTER; setPadding(dp(12), dp(5), dp(12), dp(5)) }
             holder.addView(frame, LinearLayout.LayoutParams(0, dp(prefs.getInt(HomeExtensionSettings.PHOTO_HEIGHT, 180).coerceIn(80, 500)), width.toFloat()))
             if (width < 100) { holder.weightSum = 100f }
+            photoHolder = holder
+            photoSignature = signature
             root.addView(holder)
             view.load(file, HomeSidePanelSettings.preferences(ctx).getLong(SidePanelAppearance.photoRevision(HomeExtensionSettings.PHOTO_SLOT), 0L))
             playbackFrame = frame
@@ -305,9 +322,10 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             scrollObserver = root.viewTreeObserver
             scrollListener = callback
             scrollObserver?.addOnScrollChangedListener(callback)
+            frame.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> playback() }
             frame.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(v: View) { playback() }
-                override fun onViewDetachedFromWindow(v: View) { view.setPlayback(false) }
+                override fun onViewDetachedFromWindow(v: View) { main.post { if (!frame.isAttachedToWindow) view.setPlayback(false) } }
             })
             frame.post { playback() }
         }

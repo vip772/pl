@@ -16,7 +16,7 @@ import java.util.concurrent.Executors
 import t.mma.utils.HLog
 
 /** Local-only photo frame. Decoding is off-main; playback exists only while the main drawer is visible. */
-internal class SidePanelMediaView(context: Context) : FrameLayout(context) {
+internal class SidePanelMediaView(context: Context, private val recoverPlayback: Boolean = false) : FrameLayout(context) {
     private val loader = Executors.newSingleThreadExecutor { task -> Thread(task,"Hchat-PanelMedia").apply { isDaemon=true } }
     private var generation = 0
     private var currentPath: String? = null
@@ -31,10 +31,38 @@ internal class SidePanelMediaView(context: Context) : FrameLayout(context) {
     private var image: ImageView? = null
     private var decodePending = false
     private var restartPending = false
+    private var recoveryAttempts = 0
+    private var recoveryQueued = false
+    private val recovery = Runnable {
+        recoveryQueued = false
+        if (!disposed && active && isShown && hasWindowFocus() && player == null && texture?.isAvailable == true) startVideo()
+    }
+    /** Event-driven recovery only: no timer loop or frame-by-frame player probing. */
+    fun ensurePlayback(visible: Boolean) {
+        val wasActive = active
+        setPlayback(visible)
+        if (!recoverPlayback) return
+        if (!visible) {
+            removeCallbacks(recovery); recoveryQueued = false
+            if (wasActive) recoveryAttempts = 0
+            return
+        }
+        if (decodePending || disposed) return
+        animated?.let { if (!it.isRunning) it.start() }
+        movieView?.let { if (!it.playing) it.playing = true }
+        if (texture != null && player == null && wasActive) scheduleRecovery()
+    }
+    private fun scheduleRecovery() {
+        if (!recoverPlayback || disposed || !active || recoveryQueued || recoveryAttempts >= 2) return
+        recoveryAttempts++
+        recoveryQueued = true
+        postDelayed(recovery, 500L * recoveryAttempts)
+    }
 
     fun load(file: File?, revision: Long) {
         if (disposed || (currentPath == file?.path && currentRevision == revision)) return
         generation++
+        removeCallbacks(recovery); recoveryQueued = false; recoveryAttempts = 0
         decodePending=false
         stopVideo()
         animated?.stop();animated=null;movieView?.playing=false;movieView=null;image=null
@@ -130,10 +158,10 @@ internal class SidePanelMediaView(context: Context) : FrameLayout(context) {
             }
             next.setOnVideoSizeChangedListener { _,_,_ -> fitVideo() }
             next.setOnErrorListener { failed,what,extra ->
-                if(player===failed) { HLog.e("[Hchat:HomeSidePanel] 视频播放失败 $what/$extra");stopVideo() };true
+                if(player===failed) { HLog.e("[Hchat:HomeSidePanel] 视频播放失败 $what/$extra");stopVideo();scheduleRecovery() };true
             }
             next.prepareAsync()
-        } catch(error:Throwable) { HLog.e("[Hchat:HomeSidePanel] 视频打开失败",error);stopVideo() }
+        } catch(error:Throwable) { HLog.e("[Hchat:HomeSidePanel] 视频打开失败",error);stopVideo();scheduleRecovery() }
     }
     private fun fitVideo() {
         val view=texture ?: return
@@ -153,6 +181,7 @@ internal class SidePanelMediaView(context: Context) : FrameLayout(context) {
     fun dispose() {
         if(disposed) return
         setPlayback(false)
+        removeCallbacks(recovery); recoveryQueued = false
         disposed=true;generation++;loader.shutdownNow()
         image?.setImageDrawable(null);removeAllViews()
     }
