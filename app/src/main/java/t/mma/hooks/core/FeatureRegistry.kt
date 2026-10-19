@@ -119,6 +119,7 @@ object FeatureRegistry {
             .register(BackgroundBeautyFeature())
             .register(ChatToolbarFeature())
             .register(HomeSidePanelFeature())
+            .register(t.mma.hooks.items.homeextension.HomeExtensionFeature())
             .register(t.mma.hooks.items.stepmultiplier.StepMultiplierFeature())
             .register(AutoCacheFeature())
             .register(MonetModuleGeneratorFeature())
