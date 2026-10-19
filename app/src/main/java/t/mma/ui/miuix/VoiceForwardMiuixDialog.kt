@@ -344,7 +344,8 @@ object VoiceForwardMiuixDialog {
         allowEmpty: Boolean = false,
         singleSelection: Boolean = false,
         showClearSelectionAction: Boolean = false,
-        maxSelection: Int = Int.MAX_VALUE
+        maxSelection: Int = Int.MAX_VALUE,
+        preparedConversationGroups: List<t.mma.hooks.items.conversationgroup.ConversationGroupPickerFilter>? = null
     ): DialogHandle {
         return show(activity, onDismiss) { close ->
             WindowDialog(
@@ -365,7 +366,7 @@ object VoiceForwardMiuixDialog {
                         contacts.flatMap { it.labels }.distinct().sortedWith(compareBy { it.lowercase(Locale.US) })
                     }
                     val conversationGroups = remember(activity, contacts) {
-                        ConversationGroupPickerSupport.filters(activity, contacts.map { it.id })
+                        preparedConversationGroups ?: ConversationGroupPickerSupport.filters(activity, contacts.map { it.id })
                     }
                     val filters = remember(contacts, showGroupFilter, labelNames, conversationGroups) {
                         buildList {
@@ -505,7 +506,7 @@ object VoiceForwardMiuixDialog {
                                         } else if (visibleAllSelected) {
                                             selectedIds - visibleIds
                                         } else {
-                                            selectedIds + visibleIds
+                                            (selectedIds + visibleIds).take(maxSelection).toSet()
                                         }
                                     },
                                     modifier = Modifier.weight(1f)

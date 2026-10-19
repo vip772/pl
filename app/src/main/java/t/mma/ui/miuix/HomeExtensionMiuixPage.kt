@@ -75,12 +75,21 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                     Text("区域上下顺序", modifier = Modifier.padding(20.dp), color = MiuixTheme.colorScheme.onSurface)
                     order.forEachIndexed { index, id ->
                         val label = mapOf("calendar" to "日历", "contacts" to "快捷联系人", "photo" to "首页照片")[id].orEmpty()
-                        Row(Modifier.fillMaxWidth()) {
-                            Text("${index + 1}. $label", modifier = Modifier.weight(1f).padding(16.dp), color = MiuixTheme.colorScheme.onSurface)
-                            Column(Modifier.weight(1f)) {
-                                if (index > 0) ActionRow("上移", "") { val next = order.toMutableList(); java.util.Collections.swap(next, index, index - 1); order = next; prefs.edit().putString(Settings.ORDER, next.joinToString(",")).apply() }
-                                if (index < order.lastIndex) ActionRow("下移", "") { val next = order.toMutableList(); java.util.Collections.swap(next, index, index + 1); order = next; prefs.edit().putString(Settings.ORDER, next.joinToString(",")).apply() }
-                            }
+                        ActionRow("${index + 1}. $label", "调整位置") {
+                            if (activity != null) VoiceForwardMiuixDialog.showChoices(
+                                activity = activity,
+                                title = "调整${label}位置",
+                                summary = "常用联系人和最近联系人共用同一个快捷联系人区域",
+                                choices = listOf("第一位" to "列表顶部", "第二位" to "中间", "第三位" to "列表底部"),
+                                onSelected = { target ->
+                                    val next = order.toMutableList()
+                                    next.remove(id)
+                                    next.add(target.coerceIn(0, next.size), id)
+                                    order = next
+                                    prefs.edit().putString(Settings.ORDER, next.joinToString(",")).apply()
+                                },
+                                onDismiss = {}
+                            )
                         }
                     }
                 } } }
@@ -103,21 +112,34 @@ private fun HomeExtensionSlider(context: Context, title: String, key: String, de
 }
 
 private fun pickHomeExtensionContacts(activity: Activity, selected: List<String>, onSelected: (List<String>) -> Unit) {
-    val loading = VoiceForwardMiuixDialog.showLoading(activity = activity, title = "常用联系人", message = "正在读取联系人和群聊…", onDismiss = {})
+    val active = java.util.concurrent.atomic.AtomicBoolean(true)
+    val loading = VoiceForwardMiuixDialog.showLoading(activity = activity, title = "常用联系人", message = "正在读取联系人和群聊…", onDismiss = { active.set(false) })
+    val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    val timeout = Runnable { if (active.compareAndSet(true, false)) { loading.close(); Toast.makeText(activity, "联系人读取超时，请稍后重试", Toast.LENGTH_SHORT).show() } }
+    handler.postDelayed(timeout, 15000)
     Thread({
         val result = runCatching {
             val api = checkNotNull(WeChatApis.contacts())
-            (api.getPickerContacts() + api.getPickerGroups()).distinctBy { it.wxId }.map {
+            val items = (api.getPickerContacts() + api.getPickerGroups()).distinctBy { it.wxId }.map {
                 VoiceForwardMiuixDialog.ContactItem(it.wxId, it.displayName(), it.isGroup(), it.avatarUrl, it.avatarBackupUrl)
             }
+            // Group resolution may query message tables and acquire group runtime locks.
+            // Keep it out of the Compose/UI thread entirely.
+            val filters = t.mma.hooks.items.conversationgroup.ConversationGroupPickerSupport.filters(activity, items.map { it.id })
+            items to filters
         }
         activity.runOnUiThread {
+            handler.removeCallbacks(timeout)
+            if (!active.compareAndSet(true, false)) return@runOnUiThread
             loading.close()
             if (!activity.isFinishing && !activity.isDestroyed) {
                 if (result.isFailure) Toast.makeText(activity, "联系人读取失败，请稍后重试", Toast.LENGTH_SHORT).show()
-                else VoiceForwardMiuixDialog.showContacts(activity = activity, contacts = result.getOrDefault(emptyList()),
+                else activity.window.decorView.post {
+                    if (activity.isFinishing || activity.isDestroyed) return@post
+                    VoiceForwardMiuixDialog.showContacts(activity = activity, contacts = result.getOrThrow().first, preparedConversationGroups = result.getOrThrow().second,
                     title = "选择常用联系人（最多8个）", confirmText = "保存", maxSelection = 8, initialSelectedIds = selected.toSet(), allowEmpty = true,
                     onConfirm = { items -> if (items.size > 8) Toast.makeText(activity, "最多选择8个，请重新选择", Toast.LENGTH_SHORT).show() else onSelected(items.map { it.id }) }, onDismiss = {})
+                }
             }
         }
     }, "Hchat-HomeContactPicker").apply { isDaemon = true }.start()

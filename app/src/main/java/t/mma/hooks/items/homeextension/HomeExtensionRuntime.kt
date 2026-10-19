@@ -55,9 +55,9 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         val owner = KavaReflector.loadClass("com.tencent.mm.ui.conversation.ConversationListView", context.hostClassLoader()) ?: return
         KavaReflector.findMethodRecursive(owner, "setAdapter", ListAdapter::class.java)?.let { method ->
             hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
+                override fun afterHookedMethod(param: MethodHookParam) {
                     val list = param.thisObject as? ListView ?: return
-                    if (owner.isInstance(list)) attach(list)
+                    if (owner.isInstance(list)) scheduleAttach(list)
                 }
             })
         }
@@ -65,7 +65,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val list = param.thisObject as? ListView ?: return
-                    if (owner.isInstance(list)) { attach(list); sessions[list]?.safeRender() }
+                    if (owner.isInstance(list)) scheduleAttach(list)
                 }
             })
         }
@@ -78,8 +78,19 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             })
         }
     }
+    private val pendingAttach = java.util.Collections.newSetFromMap(WeakHashMap<ListView, Boolean>())
+    private fun scheduleAttach(list: ListView) {
+        if (destroyed || !pendingAttach.add(list)) return
+        list.post {
+            pendingAttach.remove(list)
+            // Never change header indices while WeChat initializes its own title/task headers.
+            if (!destroyed && list.adapter != null && list.isAttachedToWindow) attach(list)
+        }
+    }
     private fun attach(list: ListView) {
-        if (destroyed || sessions.containsKey(list)) return
+        if (destroyed) return
+        sessions[list]?.let { it.safeRender(); return }
+        if (list.adapter == null) return
         runCatching {
             val session = Session(list)
             sessions[list] = session
@@ -103,9 +114,13 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     private inner class Session(list: ListView) {
         private val ctx = list.context
         val root = object : LinearLayout(ctx) {
+            override fun onWindowVisibilityChanged(visibility: Int) {
+                super.onWindowVisibilityChanged(visibility)
+                if (visibility != View.VISIBLE) media?.setPlayback(false) else updatePlayback()
+            }
             override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                 super.onWindowFocusChanged(hasWindowFocus)
-                media?.setPlayback(hasWindowFocus && isShown && getGlobalVisibleRect(android.graphics.Rect()))
+                updatePlayback()
                 if (hasWindowFocus) safeRender()
             }
         }.apply { orientation = LinearLayout.VERTICAL; tag = HomeExtensionSurface.TAG }
@@ -115,12 +130,18 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         private var loadedConfig = ""
         private var refreshing = false
         private var renderQueued = false
+        private var renderedSignature: String? = null
+        private var playbackFrame: View? = null
+        private fun updatePlayback() {
+            val frame = playbackFrame
+            media?.setPlayback(frame != null && frame.isShown && frame.hasWindowFocus() && frame.getGlobalVisibleRect(android.graphics.Rect()))
+        }
         private var scrollObserver: android.view.ViewTreeObserver? = null
         private var scrollListener: android.view.ViewTreeObserver.OnScrollChangedListener? = null
         fun dispose() { clearMedia() }
         private fun clearMedia() {
             scrollListener?.let { callback -> scrollObserver?.takeIf { it.isAlive }?.removeOnScrollChangedListener(callback) }
-            scrollListener = null; scrollObserver = null
+            scrollListener = null; scrollObserver = null; playbackFrame = null
             media?.dispose(); media = null
         }
         fun invalidateContacts() { loadedAt = 0L; safeRender() }
@@ -161,6 +182,14 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             if (destroyed) return
             val date = LocalDate.now()
             if (today != date) { today = date; week = date }
+            val signature = listOf(prefs.all.toSortedMap().toString(), today.toString(), cache.toString(),
+                ctx.resources.configuration.uiMode.toString(),
+                HomeSidePanelSettings.preferences(ctx).getLong(SidePanelAppearance.photoRevision(HomeExtensionSettings.PHOTO_SLOT), 0L).toString()).joinToString("|")
+            if (signature == renderedSignature) {
+                updatePlayback()
+                refreshContactsIfNeeded()
+                return
+            }
             generation++
             clearMedia()
             root.removeAllViews()
@@ -177,8 +206,14 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                     "photo" -> if (photo) renderPhoto()
                 }
             }
+            renderedSignature = signature
+            refreshContactsIfNeeded()
+        }
+        private fun refreshContactsIfNeeded() {
+            if (!prefs.getBoolean(HomeExtensionSettings.ENABLE, false)) return
+            if (!prefs.getBoolean(HomeExtensionSettings.FAVORITES, false) && !prefs.getBoolean(HomeExtensionSettings.RECENT, true)) return
             val config = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false).toString() + prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")
-            if (recent && !loading && (config != loadedConfig || System.currentTimeMillis() - loadedAt > 30_000)) loadContacts(config)
+            if (!loading && (config != loadedConfig || System.currentTimeMillis() - loadedAt > 30_000)) loadContacts(config)
         }
         private fun renderCalendar() {
             val panel = card(HomeExtensionSettings.CALENDAR_ALPHA)
@@ -253,6 +288,8 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             val view = SidePanelMediaView(ctx)
             media = view
             val frame = FrameLayout(ctx).apply {
+                background = GradientDrawable().apply { cornerRadius = dp(18).toFloat(); setColor(Color.TRANSPARENT) }
+                clipToOutline = true
                 addView(view, FrameLayout.LayoutParams(-1, -1))
                 alpha = prefs.getInt(HomeExtensionSettings.PHOTO_ALPHA, 100).coerceIn(0, 100) / 100f
             }
@@ -262,7 +299,8 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             if (width < 100) { holder.weightSum = 100f }
             root.addView(holder)
             view.load(file, HomeSidePanelSettings.preferences(ctx).getLong(SidePanelAppearance.photoRevision(HomeExtensionSettings.PHOTO_SLOT), 0L))
-            fun playback() { view.setPlayback(root.isShown && root.windowVisibility == View.VISIBLE && frame.getGlobalVisibleRect(android.graphics.Rect()) && root.hasWindowFocus()) }
+            playbackFrame = frame
+            fun playback() { runCatching { updatePlayback() }.onFailure { HLog.e("[Hchat:HomeExtension] 媒体播放状态更新失败", it) } }
             val callback = android.view.ViewTreeObserver.OnScrollChangedListener { playback() }
             scrollObserver = root.viewTreeObserver
             scrollListener = callback
