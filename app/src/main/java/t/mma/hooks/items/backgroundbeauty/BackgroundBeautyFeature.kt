@@ -1379,6 +1379,16 @@ private class BackgroundBeautyRuntime(
                             }
                             armWechatDiagnostics(state.activity, "write:${view.javaClass.name}")
                         }
+                        if (snapshot.slot == BackgroundBeautySettings.Slot.CONTACTS) {
+                            captureContactGeometry(view, snapshot)
+                            if (isContactIconSurface(view)) {
+                                snapshot.originalBackground = view.background
+                                snapshot.originalTintList = view.backgroundTintList
+                                snapshot.originalTintMode = view.backgroundTintMode
+                                snapshot.appliedBackground = null
+                                return@hookOnce
+                            }
+                        }
                         val applied = snapshot.appliedBackground
                         snapshot.originalBackground = view.background
                         snapshot.originalTintList = view.backgroundTintList
@@ -1443,28 +1453,58 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     private val listPreDraws = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
     private val touchFeedbackRows = WeakHashMap<View, View>()
     private val touchFeedbackOrigins = WeakHashMap<View, Pair<Float, Float>>()
-    // A ListView header can contain several independent contact actions.
+    // Resolve structural rows as well as clickable children: WeChat often handles
+    // clicks in its adapter, leaving the actual content container non-clickable.
     private fun contactTouchRegion(row: View, x: Float, y: Float): Rect? {
-        if (row !is ViewGroup) return null
+        val density = row.resources.displayMetrics.density
+        val minimumHeight = 40f * density
         var best: Rect? = null
         var bestArea = Long.MAX_VALUE
+        var visited = 0
         fun visit(group: ViewGroup, localX: Float, localY: Float) {
+            if (++visited > 80) return
             for (i in group.childCount - 1 downTo 0) {
                 val child = group.getChildAt(i)
                 val cx = localX + group.scrollX - child.left - child.translationX
                 val cy = localY + group.scrollY - child.top - child.translationY
                 if (child.visibility != View.VISIBLE || cx < 0 || cy < 0 || cx >= child.width || cy >= child.height) continue
-                if (child.isClickable && child.isEnabled && child.width >= row.width / 2) {
+                if (child is ViewGroup && child.isEnabled && child.width >= row.width * 0.75f && child.height >= minimumHeight && child.height <= 88f * density) {
                     val rect = Rect(0, 0, child.width, child.height)
-                    row.offsetDescendantRectToMyCoords(child, rect)
+                    (row as ViewGroup).offsetDescendantRectToMyCoords(child, rect)
                     val area = rect.width().toLong() * rect.height()
                     if (area < bestArea) { best = rect; bestArea = area }
                 }
                 if (child is ViewGroup) visit(child, cx, cy)
             }
         }
-        visit(row, x, y)
+        if (row is ViewGroup) visit(row, x, y)
+        // A normal leaf row needs no descendant. Never fall back to a tall
+        // compound header (friend requests, action entries or section labels).
+        if (best == null && row.height >= minimumHeight && row.height <= 88f * density) {
+            val hasHeader = row is ViewGroup && (0 until row.childCount).any {
+                val child = row.getChildAt(it)
+                child.visibility == View.VISIBLE && child.width >= row.width * 0.75f &&
+                    child.height > 0 && child.height < minimumHeight && child.top < minimumHeight / 2
+            }
+            if (!hasHeader) best = Rect(0, 0, row.width, row.height)
+        }
         return best
+    }
+    private fun isContactIconSurface(view: View): Boolean {
+        if (view is android.widget.ImageView) return true
+        val parent = view.parent as? View ?: return false
+        val maxIcon = 80f * view.resources.displayMetrics.density
+        // Preserve compact drawable-backed icon containers, not full-width rows.
+        return view.width > 0 && view.height > 0 && parent.width > 0 &&
+            view.width <= maxIcon && view.height <= maxIcon && view.width < parent.width / 2
+    }
+    private fun captureContactGeometry(view: View, snapshot: SurfaceSnapshot) {
+        snapshot.originalPaddingLeft = view.paddingLeft
+        snapshot.originalPaddingTop = view.paddingTop
+        snapshot.originalPaddingRight = view.paddingRight
+        snapshot.originalPaddingBottom = view.paddingBottom
+        snapshot.originalMinimumWidth = view.minimumWidth
+        snapshot.originalMinimumHeight = view.minimumHeight
     }
     private fun updateListRipple(list: ViewGroup, event: android.view.MotionEvent) {
         val slot = homeLists[list] ?: return
@@ -1483,7 +1523,10 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                             val region = if (slot == BackgroundBeautySettings.Slot.CONTACTS) contactTouchRegion(row, x, y) else null
                             ripple.setTouchRegion(region)
                             ripple.setHotspot(x, y)
-                            ripple.setTouchPressed(true)
+                            ripple.setTouchPressed(slot != BackgroundBeautySettings.Slot.CONTACTS || region != null)
+                            if (slot == BackgroundBeautySettings.Slot.CONTACTS && diagnosticCounts.computeIfAbsent("contact-region") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
+                                HLog.i("$TAG CONTACT region=$region row=${row.javaClass.name} size=${row.width}x${row.height} children=${(row as? ViewGroup)?.childCount ?: 0}")
+                            }
                             if (diagnosticCounts.computeIfAbsent("ripple:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
                                 HLog.i("$TAG DIAG ripple slot=${slot.key} row=${row.javaClass.name} hotspot=$x/$y")
                             }
@@ -2876,6 +2919,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         try {
             val snapshot = surfaceSnapshot(state, view)
             synchronizeExternalBackground(snapshot, view)
+            if (slot == BackgroundBeautySettings.Slot.CONTACTS) captureContactGeometry(view, snapshot)
             if (snapshot.slot == slot &&
                 snapshot.appliedBitmap === bitmap &&
                 snapshot.appliedOpacity == opacity &&
@@ -3005,6 +3049,23 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         preserveFeedback: Boolean = false
     ) {
         if (t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(view)) return
+        if (slot == BackgroundBeautySettings.Slot.CONTACTS && isContactIconSurface(view)) {
+            // A pre-layout pass may have treated an unmeasured icon as a surface.
+            state.surfaces[view]?.let { snapshot ->
+                if (snapshot.appliedBackground != null && view.background === snapshot.appliedBackground) {
+                    captureContactGeometry(view, snapshot)
+                    surfaceMutationDepth++
+                    try {
+                        view.background = snapshot.originalBackground
+                        view.backgroundTintList = snapshot.originalTintList
+                        view.backgroundTintMode = snapshot.originalTintMode
+                        restoreSurfaceGeometry(view, snapshot)
+                        snapshot.appliedBackground = null
+                    } finally { surfaceMutationDepth-- }
+                }
+            }
+            return
+        }
         // AppPanel containers cover the entire page. Only an AppGrid item root
         // owns feedback; propagated pressed states must not animate ancestors.
         var itemAncestor: View? = view
@@ -3023,6 +3084,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         try {
             val snapshot = surfaceSnapshot(state, view)
             synchronizeExternalBackground(snapshot, view)
+            if (slot == BackgroundBeautySettings.Slot.CONTACTS) captureContactGeometry(view, snapshot)
             if (snapshot.slot == slot &&
                 snapshot.appliedBitmap == null &&
                 snapshot.appliedBackground != null &&
@@ -3031,7 +3093,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 (!clearForeground || view.foreground === snapshot.appliedForeground)
             ) return
             val marker: Drawable = if (feedback) {
-                BackgroundBeautyFeedbackDrawable(manualOnly = slot == BackgroundBeautySettings.Slot.CONTACTS && !view.isClickable)
+                BackgroundBeautyFeedbackDrawable(manualOnly = slot == BackgroundBeautySettings.Slot.CONTACTS)
             } else BackgroundBeautyTransparentDrawable()
             view.backgroundTintList = null
             view.backgroundTintMode = null
