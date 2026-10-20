@@ -234,9 +234,22 @@ internal object HomeWeather {
                 val temp = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
                 temp.addView(text("${number("temperature_2m")}°",if(compact) 40f else 56f));temp.addView(text("体感 ${number("apparent_temperature")}°",12f,true))
                 body.addView(temp,LinearLayout.LayoutParams(0,-2,if(compact) 1f else 3f))
-                val sky = LinearLayout(context).apply { orientation=LinearLayout.VERTICAL; gravity=Gravity.CENTER }
-                sky.addView(text(icon,if(compact) 32f else 40f));sky.addView(text(condition,15f).apply { gravity=Gravity.CENTER })
-                body.addView(sky,LinearLayout.LayoutParams(0,-2,if(compact) 1f else 2f))
+val sky = LinearLayout(context).apply {
+                     orientation = LinearLayout.VERTICAL
+                     gravity = Gravity.CENTER
+                     setGravity(Gravity.CENTER)
+                 }
+                 sky.addView(text(icon,if(compact) 32f else 40f).apply {
+                     gravity = Gravity.CENTER
+                     textAlignment = android.view.View.TEXT_ALIGNMENT_CENTER
+                 }, LinearLayout.LayoutParams(-1,-2))
+                 sky.addView(text(condition,15f).apply {
+                     gravity = Gravity.CENTER
+                     textAlignment = android.view.View.TEXT_ALIGNMENT_CENTER
+                 }, LinearLayout.LayoutParams(-1,-2))
+                 body.addView(sky,LinearLayout.LayoutParams(0,-1,if(compact) 1f else 2f).apply {
+                     gravity = Gravity.CENTER_VERTICAL
+                 })
                 val feels = number("apparent_temperature")
                 val wind = current.getDouble("wind_speed_10m")
                 val clothing = when {
