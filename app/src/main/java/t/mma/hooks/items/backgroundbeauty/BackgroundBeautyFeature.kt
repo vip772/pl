@@ -96,11 +96,21 @@ private class BackgroundBeautyTransparentDrawable : Drawable() {
     override fun getOpacity(): Int = PixelFormat.TRANSPARENT
 }
 
-private class BackgroundBeautyFeedbackDrawable() : Drawable(), Drawable.Callback {
+private class BackgroundBeautyFeedbackDrawable(private val manualOnly: Boolean = false) : Drawable(), Drawable.Callback {
     private val ripple = android.graphics.drawable.RippleDrawable(
             ColorStateList.valueOf(0x40808080), null, ColorDrawable(Color.WHITE)
     ).apply { callback = this@BackgroundBeautyFeedbackDrawable }
-    override fun draw(canvas: Canvas) { ripple.bounds = bounds; ripple.draw(canvas) }
+    private var touchRegion: Rect? = null
+    fun setTouchRegion(region: Rect?) { touchRegion = region?.let { Rect(it) }; invalidateSelf() }
+    override fun draw(canvas: Canvas) {
+        val region = touchRegion
+        val clipped = if (region == null) bounds else Rect(bounds.left + region.left, bounds.top + region.top, bounds.left + region.right, bounds.top + region.bottom)
+        val save = canvas.save()
+        canvas.clipRect(clipped)
+        ripple.bounds = clipped
+        ripple.draw(canvas)
+        canvas.restoreToCount(save)
+    }
     override fun isStateful(): Boolean = true
     private var touchPressed = false
     private var hostState = intArrayOf()
@@ -115,7 +125,7 @@ private class BackgroundBeautyFeedbackDrawable() : Drawable(), Drawable.Callback
     }
     override fun onStateChange(state: IntArray): Boolean {
         hostState = state
-        ripple.state = if (touchPressed) state + intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed) else state
+        ripple.state = if (touchPressed) state + intArrayOf(android.R.attr.state_enabled, android.R.attr.state_pressed) else if (manualOnly) state.filter { it != android.R.attr.state_pressed }.toIntArray() else state
         invalidateSelf()
         return true
     }
@@ -1433,6 +1443,29 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     private val listPreDraws = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
     private val touchFeedbackRows = WeakHashMap<View, View>()
     private val touchFeedbackOrigins = WeakHashMap<View, Pair<Float, Float>>()
+    // A ListView header can contain several independent contact actions.
+    private fun contactTouchRegion(row: View, x: Float, y: Float): Rect? {
+        if (row !is ViewGroup) return null
+        var best: Rect? = null
+        var bestArea = Long.MAX_VALUE
+        fun visit(group: ViewGroup, localX: Float, localY: Float) {
+            for (i in group.childCount - 1 downTo 0) {
+                val child = group.getChildAt(i)
+                val cx = localX + group.scrollX - child.left - child.translationX
+                val cy = localY + group.scrollY - child.top - child.translationY
+                if (child.visibility != View.VISIBLE || cx < 0 || cy < 0 || cx >= child.width || cy >= child.height) continue
+                if (child.isClickable && child.isEnabled && child.width >= row.width / 2) {
+                    val rect = Rect(0, 0, child.width, child.height)
+                    row.offsetDescendantRectToMyCoords(child, rect)
+                    val area = rect.width().toLong() * rect.height()
+                    if (area < bestArea) { best = rect; bestArea = area }
+                }
+                if (child is ViewGroup) visit(child, cx, cy)
+            }
+        }
+        visit(row, x, y)
+        return best
+    }
     private fun updateListRipple(list: ViewGroup, event: android.view.MotionEvent) {
         val slot = homeLists[list] ?: return
         if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) return
@@ -1447,6 +1480,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                     if (row.visibility == View.VISIBLE && x >= 0 && y >= 0 && x < row.width && y < row.height) {
                         if (dirtyBoundRows.remove(row) == true || surfaceOwners[row] == null) applyBoundRow(list, row)
                         (row.background as? BackgroundBeautyFeedbackDrawable)?.let { ripple ->
+                            val region = if (slot == BackgroundBeautySettings.Slot.CONTACTS) contactTouchRegion(row, x, y) else null
+                            ripple.setTouchRegion(region)
                             ripple.setHotspot(x, y)
                             ripple.setTouchPressed(true)
                             if (diagnosticCounts.computeIfAbsent("ripple:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
@@ -1514,7 +1549,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         if (view is AbsListView) {
             if (!listSelectors.containsKey(view)) {
                 listSelectors[view] = view.selector
-                view.selector = BackgroundBeautyFeedbackDrawable()
+                view.selector = BackgroundBeautyFeedbackDrawable(manualOnly = homeLists[view] == BackgroundBeautySettings.Slot.CONTACTS)
             }
             val adapter = view.adapter ?: return
             if (listAdapters[view] === adapter) return
@@ -2996,7 +3031,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 (!clearForeground || view.foreground === snapshot.appliedForeground)
             ) return
             val marker: Drawable = if (feedback) {
-                BackgroundBeautyFeedbackDrawable()
+                BackgroundBeautyFeedbackDrawable(manualOnly = slot == BackgroundBeautySettings.Slot.CONTACTS && !view.isClickable)
             } else BackgroundBeautyTransparentDrawable()
             view.backgroundTintList = null
             view.backgroundTintMode = null

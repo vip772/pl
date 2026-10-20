@@ -40,6 +40,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     private val avatarWorker = Executors.newFixedThreadPool(3)
     // Accessed only on main; repeated requests share a single download.
     private val avatarRequests = mutableMapOf<String, MutableList<(Bitmap?) -> Unit>>()
+    private val avatarDisk by lazy { java.io.File(context.hostContext().cacheDir, "hchat_contact_avatars").apply { mkdirs() } }
     private val musicDataKeys = setOf("title", "artist", "url", "cover", "lyric", "source", "source_id", "music_favorites")
     private val hooks = mutableListOf<XC_MethodHook.Unhook>()
     private val sessions = WeakHashMap<ListView, Session>()
@@ -143,11 +144,14 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         avatarWorker.execute {
             val started = SystemClock.uptimeMillis()
             val result = runCatching {
+                val disk = java.io.File(avatarDisk, java.security.MessageDigest.getInstance("SHA-256").digest(url.toByteArray()).joinToString("") { "%02x".format(it) } + ".jpg")
+                val cached = if (disk.isFile) BitmapFactory.decodeFile(disk.path) else null
+                if (cached != null) return@runCatching cached
                 val address = URL(url)
                 require(address.protocol == "http" || address.protocol == "https")
                 val connection = address.openConnection() as HttpURLConnection
                 try {
-                    connection.connectTimeout = 1500; connection.readTimeout = 1500
+                    connection.connectTimeout = 4000; connection.readTimeout = 4000
                     connection.inputStream.use { input ->
                         val bytes = input.readBytesLimited(512 * 1024) ?: error("avatar too large")
                         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -155,7 +159,15 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                         var sample = 1
                         while (bounds.outWidth / sample > 128 || bounds.outHeight / sample > 128) sample *= 2
                         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-                            ?: error("avatar decode failed")
+                            ?.also { bitmap ->
+                                runCatching {
+                                    val temp = java.io.File(disk.path + ".tmp")
+                                    try { temp.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 90, it) }; temp.renameTo(disk) }
+                                    finally { temp.delete() }
+                                    // Bound disk use, retaining the most recently downloaded avatars.
+                                    avatarDisk.listFiles()?.filter { it.extension == "jpg" }?.sortedByDescending { it.lastModified() }?.drop(128)?.forEach { it.delete() }
+                                }
+                            } ?: error("avatar decode failed")
                     }
                 } finally { connection.disconnect() }
             }
@@ -170,7 +182,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         }
     }
 
-    private data class Contact(val id: String, val name: String, val avatar: String, val group: Boolean)
+    private data class Contact(val id: String, val name: String, val avatar: String, val group: Boolean, val fallbackAvatar: String)
     private inner class Session(list: ListView) {
         private val ctx = list.context
         val root: LinearLayout = object : LinearLayout(ctx), HomeExtensionSurface.Root {
@@ -181,7 +193,11 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                 super.onWindowFocusChanged(hasWindowFocus)
                 updatePlayback()
-                if (hasWindowFocus) safeRender()
+                if (hasWindowFocus) {
+                    retryMissingAvatars()
+                    if (missingAvatars.isNotEmpty()) loadedAt = 0L
+                    safeRender()
+                }
             }
         }.apply { orientation = LinearLayout.VERTICAL }
         private var week = LocalDate.now()
@@ -213,6 +229,9 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         private var cache = emptyList<Contact>()
         private var contactsPanel: View? = null
         private var contactsGeneration = 0
+        private val activeAvatarTargets = mutableSetOf<ImageView>()
+        private val missingAvatars = mutableSetOf<String>()
+        private val avatarTargets = mutableMapOf<String, Pair<WeakReference<ImageView>, List<String>>>()
         private var loadedAt = 0L
         private val textForegroundColor: Int get() = if (dark()) Color.WHITE else Color.rgb(35, 39, 45)
         private fun dark() = ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
@@ -351,6 +370,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             root.addView(panel)
         }
         private fun renderRecent() {
+            missingAvatars.clear(); avatarTargets.clear(); activeAvatarTargets.clear()
             val panel = card(HomeExtensionSettings.RECENT_ALPHA)
             val config = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false).toString() + prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")
             val contacts = if (loadedConfig == config) cache.take(8) else emptyList()
@@ -384,7 +404,10 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                         if (!opened) Toast.makeText(ctx, "暂时无法打开此会话", Toast.LENGTH_SHORT).show()
                     }
                     row.addView(column, LinearLayout.LayoutParams(dp(if (row is ContactOrbitRow) maxOf(72, row.avatarExtentDp + 6) else 72), -2))
-                    if (contact.avatar.isNotBlank()) loadAvatar(contact.avatar, avatar, token)
+                    val urls = listOf(contact.avatar, contact.fallbackAvatar).filter { it.isNotBlank() }.distinct()
+                    avatarTargets[contact.id] = WeakReference(avatar) to urls
+                    if (urls.isNotEmpty()) loadAvatar(urls.first(), avatar, token, fallback = urls.getOrNull(1))
+                    else missingAvatars += contact.id
                 }
                 panel.addView(HorizontalScrollView(ctx).apply { isHorizontalScrollBarEnabled = false; addView(row) })
             }
@@ -443,7 +466,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                     val ids = if (favorites) HomeExtensionSettings.favorites(config.removePrefix("true")) else conversations.getRecentConversationUsernames(200)
                     ids.asSequence().filter { favorites || contacts.isGroup(it) || contacts.isFriend(it) }.take(8).map { id ->
                         val group = contacts.isGroup(id)
-                        Contact(id, contacts.getDisplayName(id).orEmpty().ifBlank { id }, contacts.getAvatarUrl(id, false).orEmpty(), group)
+                        Contact(id, contacts.getDisplayName(id).orEmpty().ifBlank { id }, contacts.getAvatarUrl(id, false).orEmpty(), group, contacts.getAvatarUrl(id, true).orEmpty())
                     }.toList()
                 }
                 if (!destroyed) main.post {
@@ -453,7 +476,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                     result.onSuccess { next ->
                         val changed = next != cache || loadedConfig != config
                         cache = next; loadedConfig = config; loadedAt = System.currentTimeMillis()
-                        if (changed) updateContactsPanel()
+                        if (changed) updateContactsPanel() else retryMissingAvatars()
                     }.onFailure {
                         // Keep the last good list; allow another attempt after a short backoff.
                         loadedAt = System.currentTimeMillis() - 25_000L
@@ -477,16 +500,35 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 parent.addView(replacement, index, params)
             } finally { compactCard = previousCompact }
         }
-        private fun loadAvatar(url: String, target: ImageView, token: Int, attempt: Int = 0) {
-            avatars.get(url)?.let { target.setImageBitmap(it); return }
+        private fun retryMissingAvatars() {
+            for (id in missingAvatars.toList()) {
+                val entry = avatarTargets[id] ?: continue
+                val view = entry.first.get() ?: continue
+                val urls = entry.second
+                if (urls.isNotEmpty()) loadAvatar(urls.first(), view, contactsGeneration, fallback = urls.getOrNull(1))
+            }
+        }
+        private fun loadAvatar(url: String, target: ImageView, token: Int, attempt: Int = 0, fallback: String? = null) {
+            avatars.get(url)?.let { target.setImageBitmap(it); missingAvatars.removeAll { avatarTargets[it]?.first?.get() === target }; return }
+            if (!activeAvatarTargets.add(target)) return
+            val id = avatarTargets.entries.firstOrNull { it.value.first.get() === target }?.key
+            if (id != null) missingAvatars.add(id)
             val ref = WeakReference(target)
             requestAvatar(url) { bitmap ->
                 val view = ref.get()
+                if (view != null) activeAvatarTargets.remove(view)
                 if (!destroyed && contactsGeneration == token && view != null) {
-                    if (bitmap != null) view.setImageBitmap(bitmap)
-                    else if (attempt < 2) main.postDelayed({
-                        if (!destroyed && contactsGeneration == token) ref.get()?.let { loadAvatar(url, it, token, attempt + 1) }
-                    }, (attempt + 1) * 2000L)
+                    if (bitmap != null) { view.setImageBitmap(bitmap); if (id != null) missingAvatars.remove(id) }
+                    else if (fallback != null) loadAvatar(fallback, view, token, attempt)
+                    else if (attempt < 2) {
+                        activeAvatarTargets.add(view)
+                        main.postDelayed({
+                            ref.get()?.let {
+                                activeAvatarTargets.remove(it)
+                                if (!destroyed && contactsGeneration == token) loadAvatar(url, it, token, attempt + 1)
+                            }
+                        }, (attempt + 1) * 2000L)
+                    }
                 }
             }
         }
