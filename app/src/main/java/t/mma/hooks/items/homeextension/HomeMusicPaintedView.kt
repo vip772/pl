@@ -97,13 +97,13 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         if(decoration?.width!=width||decoration?.height!=height||decorationStyle!=style){decoration=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888).also{val bg=Canvas(it);if(style==2)graffiti(bg,w,h)else vinylBackground(bg,w,h)};decorationStyle=style};p.alpha=alpha;decoration?.let{canvas.drawBitmap(it,0f,0f,p)};p.alpha=255
         if(full){
             if(style==2){drawPortrait(canvas,112*sx,187*sy,51*sx);text(canvas,s.title,50*sx,524*sy,23*sx,83*sx,Color.BLACK);text(canvas,"${time(s.position)} / ${time(s.duration)}",50*sx,546*sy,12*sx,105*sx,Color.BLACK);spectrum(canvas,s,RectF(159*sx,501*sy,289*sx,546*sy));tools(canvas,384*sy,Color.BLACK)}
-            else{drawPortrait(canvas,180*sx,204*sy,70*sx);text(canvas,s.title,180*sx,408*sy,29*sx,290*sx,Color.WHITE,true);text(canvas,"${time(s.position)} / ${time(s.duration)}",180*sx,438*sy,15*sx,290*sx,Color.WHITE,true);lyrics(canvas,s);tools(canvas,682*sy,Color.WHITE)}
+            else{drawPortrait(canvas,180*sx,204*sy,vinylPortraitRadius());text(canvas,s.title,180*sx,408*sy,29*sx,290*sx,Color.WHITE,true);text(canvas,"${time(s.position)} / ${time(s.duration)}",180*sx,438*sy,15*sx,290*sx,Color.WHITE,true);lyrics(canvas,s);tools(canvas,682*sy,Color.WHITE)}
             icon(canvas,"⌕","search",326*sx,if(style==3)57*sy else 35*sy,23*sx,Color.WHITE)
             if(style==3)spectrum(canvas,s,RectF(18*sx,9*sy,342*sx,29*sy))
             val py=if(style==2)568*sy else 582*sy;drawProgress(canvas,s,43*sx,317*sx,py,style==2)
             val cy=if(style==2)605*sy else 634*sy;controls(canvas,s,cy,style==2)
         }else{
-            drawPortrait(canvas,if(style==2)89*sx else 93*sx,if(style==2)105*sy else 116*sy,if(style==2)32*sx else 34*sx)
+            drawPortrait(canvas,if(style==2)89*sx else 93*sx,if(style==2)105*sy else 116*sy,if(style==2)32*sx else vinylPortraitRadius())
             val left=if(style==2)143*sx else 171*sx;val top=if(style==2)86*sy else 87*sy
             text(canvas,s.title,left,top,if(style==2)15*sx else 17*sx,if(style==2)53*sx else 134*sx,if(style==2)Color.BLACK else Color.WHITE)
             text(canvas,"${time(s.position)} / ${time(s.duration)}",left,top+15*sx,9*sx,136*sx,if(style==2)Color.BLACK else Color.WHITE)
@@ -139,11 +139,18 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         val cx=if(full)180*sx else 93*sx;val cy=if(full)204*sy else 116*sy;val radius=if(full)min(153*sx,153*sy) else 68*sx
         p.shader=RadialGradient(cx,cy,radius,intArrayOf(0xFF343635.toInt(),0xFF070808.toInt(),0xFF333534.toInt(),0xFF060707.toInt()),floatArrayOf(0f,0.49f,0.73f,1f),Shader.TileMode.CLAMP);c.drawCircle(cx,cy,radius,p);p.shader=null
         p.style=Paint.Style.STROKE;p.strokeWidth=0.6f*sx;for(i in 0..68){p.color=if(i%3==0)0xFF424543.toInt()else 0xFF252827.toInt();c.drawCircle(cx,cy,radius*(0.48f+i*0.0073f),p)};p.style=Paint.Style.FILL
-        val tx=if(full)315*sx else 149*sx;val ty=if(full)91*sy else 61*sy;val arm=Path().apply{moveTo(tx,ty);lineTo(tx-2*sx,ty+27*sx);lineTo(tx-17*sx,ty+47*sx);lineTo(tx-24*sx,ty+68*sx)};stroke(c,arm,0xFF949694.toInt(),3*sx);p.color=0xFF686B68.toInt();c.drawCircle(tx,ty,5*sx,p)
+
         if(full){fill(c,RectF(34*sx,373*sy,326*sx,555*sy),0x773E4140,19*sx);p.color=0x447B817C;p.style=Paint.Style.STROKE;p.strokeWidth=sx;c.drawRoundRect(RectF(34*sx,373*sy,326*sx,555*sy),19*sx,19*sx,p);p.style=Paint.Style.FILL}
     }
     private fun texture(c:Canvas,w:Float,h:Float,color:Int){val r=java.util.Random(71);p.color=color;for(i in 0..1800){val x=r.nextFloat()*w;val y=r.nextFloat()*h;c.drawCircle(x,y,0.25f+0.35f*sx,p)}}
-    private fun drawPortrait(c:Canvas,x:Float,y:Float,r:Float){val save=c.save();c.clipPath(Path().apply{addCircle(x,y,r,Path.Direction.CW)});if(style==3)c.rotate(portraitAngle,x,y);val b=portrait;if(b!=null){val n=min(b.width,b.height);p.color=Color.WHITE;c.drawBitmap(b,Rect((b.width-n)/2,(b.height-n)/2,(b.width+n)/2,(b.height+n)/2),RectF(x-r,y-r,x+r,y+r),p)}else{p.color=0xFF535A57.toInt();c.drawCircle(x,y,r,p);p.color=0xFFB7C0BB.toInt();c.drawCircle(x,y-r*0.23f,r*0.25f,p);c.drawOval(RectF(x-r*0.55f,y+r*0.08f,x+r*0.55f,y+r*0.86f),p)};c.restoreToCount(save)}
+    // Keep the outer quarter of the disc radius visible around the larger photo.
+    private fun vinylPortraitRadius() = (if(full)min(153*sx,153*sy)else 68*sx)*0.75f
+    private fun drawVinylArm(c:Canvas){
+        val tx=if(full)315*sx else 149*sx;val ty=if(full)91*sy else 61*sy
+        val arm=Path().apply{moveTo(tx,ty);lineTo(tx-2*sx,ty+27*sx);lineTo(tx-17*sx,ty+47*sx);lineTo(tx-24*sx,ty+68*sx)}
+        stroke(c,arm,0xFF949694.toInt(),3*sx);p.color=0xFF686B68.toInt();c.drawCircle(tx,ty,5*sx,p)
+    }
+    private fun drawPortrait(c:Canvas,x:Float,y:Float,r:Float){val save=c.save();c.clipPath(Path().apply{addCircle(x,y,r,Path.Direction.CW)});if(style==3)c.rotate(portraitAngle,x,y);val b=portrait;if(b!=null){val n=min(b.width,b.height);p.color=Color.WHITE;c.drawBitmap(b,Rect((b.width-n)/2,(b.height-n)/2,(b.width+n)/2,(b.height+n)/2),RectF(x-r,y-r,x+r,y+r),p)}else{p.color=0xFF535A57.toInt();c.drawCircle(x,y,r,p);p.color=0xFFB7C0BB.toInt();c.drawCircle(x,y-r*0.23f,r*0.25f,p);c.drawOval(RectF(x-r*0.55f,y+r*0.08f,x+r*0.55f,y+r*0.86f),p)};c.restoreToCount(save);if(style==3)drawVinylArm(c)}
     private fun loadCover(url:String){
         if(custom)return
         // Cache lookup is immediate, even while the optional custom photo is checked.
