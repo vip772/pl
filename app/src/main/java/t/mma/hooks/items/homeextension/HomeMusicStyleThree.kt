@@ -14,7 +14,7 @@ internal class HomeMusicStyleThree(c:Context,private val full:Boolean,
     private val art=artwork(c,if(full)"player"else"card")
     private var portrait:Bitmap?=null
     private val dw=if(full)1080f else 2048f;private val dh=if(full)2048f else 1150f
-    private var scale=1f;private var ox=0f;private var oy=0f
+    private var scaleY=1f;private var scale=1f;private var ox=0f;private var oy=0f
     private var downX=0f;private var downY=0f;private var tracking=false
     private var sourceLyric="";private var lines=emptyList<Pair<Int,String>>()
     private var displayedIndex=-1;private var scrollIndex=-1f;private var lastPosition=-1
@@ -25,8 +25,8 @@ internal class HomeMusicStyleThree(c:Context,private val full:Boolean,
     override fun onDetachedFromWindow(){removeCallbacks(frame);portrait=null;super.onDetachedFromWindow()}
     override fun onMeasure(w:Int,h:Int){val width=MeasureSpec.getSize(w);setMeasuredDimension(width,if(full)MeasureSpec.getSize(h)else(width*dh/dw).toInt())}
     override fun onDraw(canvas:Canvas){
-        super.onDraw(canvas);scale=min(width/dw,height/dh);ox=(width-dw*scale)/2;oy=(height-dh*scale)/2
-        val save=canvas.save();canvas.translate(ox,oy);canvas.scale(scale,scale)
+        super.onDraw(canvas);scale=width/dw;scaleY=if(full)height/dh else scale;ox=0f;oy=0f
+        val save=canvas.save();canvas.translate(ox,oy);canvas.scale(scale,scaleY)
         paint.alpha=HomeExtensionSettings.preferences(context).getInt(HomeExtensionSettings.MUSIC_ALPHA,100).coerceIn(0,100)*255/100
         art?.let{canvas.drawBitmap(it,null,RectF(0f,0f,dw,dh),paint)};paint.alpha=255
         val cx=if(full)541f else 535f;val cy=if(full)577f else 638f;val radius=if(full)224f else 193f
@@ -63,10 +63,10 @@ internal class HomeMusicStyleThree(c:Context,private val full:Boolean,
     }
     private fun drawIcon(canvas:Canvas,key:String,x:Float,y:Float,size:Float){
         if(key=="shuffle"){paint.color=0xFFAAAAAA.toInt();paint.style=Paint.Style.STROKE;paint.strokeWidth=4f;val path=Path();path.moveTo(x-20,y-15);path.cubicTo(x-4,y-15,x+6,y+15,x+20,y+15);path.moveTo(x-20,y+15);path.cubicTo(x-4,y+15,x+6,y-15,x+20,y-15);canvas.drawPath(path,paint);paint.style=Paint.Style.FILL;return}
-        val icon=icons.getOrPut(key){MusicIcon(context,key)};icon.setTextColor(Color.WHITE);icon.layout(0,0,size.toInt(),size.toInt());val save=canvas.save();canvas.translate(x-size/2,y-size/2);icon.draw(canvas);canvas.restoreToCount(save)
+        val icon=icons.getOrPut(key){MusicIcon(context,key)};icon.setTextColor(Color.WHITE);val bounds=size/0.52f;icon.layout(0,0,bounds.toInt(),bounds.toInt());val save=canvas.save();canvas.translate(x-bounds/2,y-bounds/2);icon.draw(canvas);canvas.restoreToCount(save)
     }
     override fun onTouchEvent(e:MotionEvent):Boolean{
-        val x=(e.x-ox)/scale;val y=(e.y-oy)/scale;val py=if(full)1660f else 641f;val left=if(full)128f else 980f;val right=if(full)950f else 1802f
+        val x=(e.x-ox)/scale;val y=(e.y-oy)/scaleY;val py=if(full)1660f else 641f;val left=if(full)128f else 980f;val right=if(full)950f else 1802f
         fun jump(){seek(((x-left)/(right-left)).coerceIn(0f,1f))}
         when(e.actionMasked){
             MotionEvent.ACTION_DOWN->{downX=x;downY=y;tracking=x in left..right&&abs(y-py)<38;parent?.requestDisallowInterceptTouchEvent(tracking);return true}
@@ -83,8 +83,7 @@ internal class HomeMusicStyleThree(c:Context,private val full:Boolean,
     override fun performClick():Boolean{super.performClick();return true}
     private fun time(ms:Int)="%02d:%02d".format(ms.coerceAtLeast(0)/60000,ms.coerceAtLeast(0)/1000%60)
     companion object{
-        private val cache=mutableMapOf<String,Bitmap>()
-        @Synchronized private fun artwork(c:Context,name:String):Bitmap?=cache[name]?:runCatching{c.createPackageContext("t.mma",Context.CONTEXT_IGNORE_SECURITY).assets.open("music_style3/$name.webp").use{BitmapFactory.decodeStream(it)}}.getOrNull()?.also{cache[name]=it}
+        private fun artwork(c:Context,name:String)=HomeMusicArtwork.load(c,3,name)
     }
 }
 

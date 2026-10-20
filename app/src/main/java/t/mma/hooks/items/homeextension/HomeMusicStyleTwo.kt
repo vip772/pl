@@ -21,7 +21,7 @@ internal class HomeMusicStyleTwo(
     private var downX=0f;private var downY=0f;private var tracking=false
     private val designW=if(full)1150f else 2048f
     private val designH=if(full)2048f else 1150f
-    private var scale=1f;private var ox=0f;private var oy=0f
+    private var scaleY=1f;private var scale=1f;private var ox=0f;private var oy=0f
     private val icons=mutableMapOf<String,MusicIcon>()
     private val frame=object:Runnable{override fun run(){invalidate();if(isAttachedToWindow)postDelayed(this,33)}}
     init{isClickable=true;isFocusable=true;contentDescription=if(full)"样式2音乐播放器" else "样式2涂鸦音乐卡片"}
@@ -29,15 +29,15 @@ internal class HomeMusicStyleTwo(
     override fun onDetachedFromWindow(){removeCallbacks(frame);portrait=null;super.onDetachedFromWindow()}
     override fun onMeasure(w:Int,h:Int){val width=MeasureSpec.getSize(w);val height=if(full)MeasureSpec.getSize(h)else (width*designH/designW).toInt();setMeasuredDimension(width,height)}
     override fun onDraw(canvas:Canvas){
-        super.onDraw(canvas);scale=min(width/designW,height/designH);ox=(width-designW*scale)/2;oy=(height-designH*scale)/2
-        val save=canvas.save();canvas.translate(ox,oy);canvas.scale(scale,scale)
+        super.onDraw(canvas);scale=width/designW;scaleY=if(full)height/designH else scale;ox=0f;oy=0f
+        val save=canvas.save();canvas.translate(ox,oy);canvas.scale(scale,scaleY)
         val alpha=HomeExtensionSettings.preferences(context).getInt(HomeExtensionSettings.MUSIC_ALPHA,100).coerceIn(0,100)*255/100
         paint.alpha=alpha;art?.let{canvas.drawBitmap(it,null,RectF(0f,0f,designW,designH),paint)};paint.alpha=255
         val cx=if(full)329f else 516f;val cy=if(full)536f else 570f;val radius=if(full)149f else 181f
         portrait?.let{b->val n=canvas.save();val circle=Path().apply{addCircle(cx,cy,radius,Path.Direction.CW)};canvas.clipPath(circle);val side=min(b.width,b.height);val source=Rect((b.width-side)/2,(b.height-side)/2,(b.width+side)/2,(b.height+side)/2);canvas.drawBitmap(b,source,RectF(cx-radius,cy-radius,cx+radius,cy+radius),paint);canvas.restoreToCount(n)}
         val s=state();val left=if(full)225f else 817f;val titleY=if(full)1495f else 474f
-        paint.color=Color.BLACK;paint.typeface=Typeface.create("sans-serif",Typeface.BOLD);paint.textSize=if(full)66f else 82f
-        val title=android.text.TextUtils.ellipsize(s.title,android.text.TextPaint(paint),if(full)660f else 850f,android.text.TextUtils.TruncateAt.END).toString();canvas.drawText(title,left,titleY,paint)
+        paint.color=Color.BLACK;paint.typeface=Typeface.create("sans-serif",Typeface.BOLD);paint.textSize=if(full)57f else 70f
+        val title=android.text.TextUtils.ellipsize(s.title,android.text.TextPaint(paint),if(full)230f else 295f,android.text.TextUtils.TruncateAt.END).toString();canvas.drawText(title,left,titleY,paint)
         paint.typeface=Typeface.create("sans-serif",Typeface.NORMAL);paint.textSize=if(full)40f else 46f;canvas.drawText("${time(s.position)} / ${time(s.duration)}",left,titleY+56f,paint)
         val spectrum=if(full)RectF(466f,1422f,887f,1562f)else RectF(1115f,384f,1660f,558f)
         val barWidth=spectrum.width()/64
@@ -55,10 +55,10 @@ internal class HomeMusicStyleTwo(
     }
     private fun drawIcon(canvas:Canvas,key:String,x:Float,y:Float,size:Float,color:Int){
         if(key=="shuffle"){paint.color=color;paint.style=Paint.Style.STROKE;paint.strokeWidth=5f;paint.strokeCap=Paint.Cap.ROUND;val p=Path();p.moveTo(x-20,y-16);p.cubicTo(x-5,y-16,x+5,y+16,x+22,y+16);p.moveTo(x-20,y+16);p.cubicTo(x-5,y+16,x+5,y-16,x+22,y-16);canvas.drawPath(p,paint);paint.style=Paint.Style.FILL;return}
-        val v=icons.getOrPut(key){MusicIcon(context,key)};v.setTextColor(color);v.layout(0,0,size.toInt(),size.toInt());val save=canvas.save();canvas.translate(x-size/2,y-size/2);v.draw(canvas);canvas.restoreToCount(save)
+        val v=icons.getOrPut(key){MusicIcon(context,key)};v.setTextColor(color);val bounds=size/0.52f;v.layout(0,0,bounds.toInt(),bounds.toInt());val save=canvas.save();canvas.translate(x-bounds/2,y-bounds/2);v.draw(canvas);canvas.restoreToCount(save)
     }
     override fun onTouchEvent(event:MotionEvent):Boolean{
-        val x=(event.x-ox)/scale;val y=(event.y-oy)/scale
+        val x=(event.x-ox)/scale;val y=(event.y-oy)/scaleY
         val left=if(full)228f else 819f;val right=if(full)900f else 1681f;val progressY=if(full)1584f else 585f
         fun jump(){seek(((x-left)/(right-left)).coerceIn(0f,1f))}
         when(event.actionMasked){
@@ -75,7 +75,6 @@ internal class HomeMusicStyleTwo(
     override fun performClick():Boolean{super.performClick();return true}
     private fun time(ms:Int)="%02d:%02d".format((ms/60000).coerceAtLeast(0),(ms/1000).coerceAtLeast(0)%60)
     companion object{
-        private val cache=mutableMapOf<String,Bitmap>()
-        @Synchronized private fun artwork(c:Context,name:String):Bitmap?=cache[name]?:runCatching{c.createPackageContext("t.mma",Context.CONTEXT_IGNORE_SECURITY).assets.open("music_style2/$name.webp").use{BitmapFactory.decodeStream(it)}}.getOrNull()?.also{cache[name]=it}
+        private fun artwork(c:Context,name:String)=HomeMusicArtwork.load(c,2,name)
     }
 }
