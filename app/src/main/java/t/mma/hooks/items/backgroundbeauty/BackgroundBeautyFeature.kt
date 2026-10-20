@@ -422,6 +422,8 @@ private class BackgroundBeautyRuntime(
         }
         suppressedDynamicContainers.clear()
         restoreBounceColors(null)
+        contactOverlays.toMap().forEach { (row, overlay) -> row.overlay.remove(overlay) }
+        contactOverlays.clear()
         homeLists.clear()
         listAdapters.clear()
         surfaceOwners.clear()
@@ -1451,6 +1453,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     private val dirtyBoundRows = WeakHashMap<View, Boolean>()
     private val listSelectors = WeakHashMap<AbsListView, Drawable?>()
     private val listPreDraws = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
+    private val contactOverlays = WeakHashMap<View, BackgroundBeautyFeedbackDrawable>()
     private val touchFeedbackRows = WeakHashMap<View, View>()
     private val touchFeedbackOrigins = WeakHashMap<View, Pair<Float, Float>>()
     // Resolve structural rows as well as clickable children: WeChat often handles
@@ -1467,7 +1470,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 val child = group.getChildAt(i)
                 val cx = localX + group.scrollX - child.left - child.translationX
                 val cy = localY + group.scrollY - child.top - child.translationY
-                if (child.visibility != View.VISIBLE || cx < 0 || cy < 0 || cx >= child.width || cy >= child.height) continue
+                if (child.visibility != View.VISIBLE || cy < 0 || cy >= child.height) continue
                 if (child is ViewGroup && child.isEnabled && child.width >= row.width * 0.75f && child.height >= minimumHeight && child.height <= 88f * density) {
                     val rect = Rect(0, 0, child.width, child.height)
                     (row as ViewGroup).offsetDescendantRectToMyCoords(child, rect)
@@ -1488,12 +1491,18 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             }
             if (!hasHeader) best = Rect(0, 0, row.width, row.height)
         }
-        return best
+        // Horizontal text insets do not define the row: the avatar is its sibling.
+        return best?.apply { left = 0; right = row.width }
     }
     private fun isContactIconSurface(view: View): Boolean {
-        if (view is android.widget.ImageView) return true
+        // Native contact icons can be plain/custom Views with a background or
+        // foreground drawable, and may be visited before the first measurement.
+        if (view is ImageView) return true
         val parent = view.parent as? View ?: return false
         val maxIcon = 80f * view.resources.displayMetrics.density
+        val params = view.layoutParams
+        if (params != null && params.width > 0 && params.height > 0 &&
+            params.width <= maxIcon && params.height <= maxIcon) return true
         // Preserve compact drawable-backed icon containers, not full-width rows.
         return view.width > 0 && view.height > 0 && parent.width > 0 &&
             view.width <= maxIcon && view.height <= maxIcon && view.width < parent.width / 2
@@ -1523,7 +1532,19 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                             val region = if (slot == BackgroundBeautySettings.Slot.CONTACTS) contactTouchRegion(row, x, y) else null
                             ripple.setTouchRegion(region)
                             ripple.setHotspot(x, y)
-                            ripple.setTouchPressed(slot != BackgroundBeautySettings.Slot.CONTACTS || region != null)
+                            if (slot == BackgroundBeautySettings.Slot.CONTACTS) {
+                                contactOverlays.remove(row)?.let { row.overlay.remove(it) }
+                                ripple.setTouchPressed(false)
+                                if (region != null) {
+                                    val overlay = BackgroundBeautyFeedbackDrawable(manualOnly = true)
+                                    overlay.bounds = Rect(0, 0, row.width, row.height)
+                                    overlay.setTouchRegion(region)
+                                    row.overlay.add(overlay)
+                                    overlay.setHotspot(x, y)
+                                    overlay.setTouchPressed(true)
+                                    contactOverlays[row] = overlay
+                                }
+                            } else ripple.setTouchPressed(true)
                             if (slot == BackgroundBeautySettings.Slot.CONTACTS && diagnosticCounts.computeIfAbsent("contact-region") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
                                 HLog.i("$TAG CONTACT region=$region row=${row.javaClass.name} size=${row.width}x${row.height} children=${(row as? ViewGroup)?.childCount ?: 0}")
                             }
@@ -1546,7 +1567,16 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         }
     }
     private fun clearListRipple(list: View) {
-        (touchFeedbackRows.remove(list)?.background as? BackgroundBeautyFeedbackDrawable)?.setTouchPressed(false)
+        touchFeedbackRows.remove(list)?.let { row ->
+            (row.background as? BackgroundBeautyFeedbackDrawable)?.setTouchPressed(false)
+            contactOverlays[row]?.let { overlay ->
+                overlay.setTouchPressed(false)
+                main.postDelayed({
+                    row.overlay.remove(overlay)
+                    if (contactOverlays[row] === overlay) contactOverlays.remove(row)
+                }, 600)
+            }
+        }
         touchFeedbackOrigins.remove(list)
     }
     private fun installRecyclerBinding(view: View) {
@@ -1662,6 +1692,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
 
     private fun applyHomeRow(state: HostState, row: View, slot: BackgroundBeautySettings.Slot) {
         if (t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(row)) return
+        contactOverlays.remove(row)?.let { row.overlay.remove(it) }
         val started = android.os.SystemClock.uptimeMillis()
         state.surfaces[row]?.let { snapshot ->
             snapshot.originalPaddingLeft = row.paddingLeft
@@ -3050,8 +3081,16 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     ) {
         if (t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(view)) return
         if (slot == BackgroundBeautySettings.Slot.CONTACTS && isContactIconSurface(view)) {
+            if (diagnosticCounts.computeIfAbsent("contact-icon") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 16) {
+                HLog.i("$TAG CONTACT icon class=${view.javaClass.name} id=${view.id} size=${view.width}x${view.height} background=${view.background?.javaClass?.name} foreground=${view.foreground?.javaClass?.name} image=${(view as? ImageView)?.drawable?.javaClass?.name}")
+            }
             // A pre-layout pass may have treated an unmeasured icon as a surface.
             state.surfaces[view]?.let { snapshot ->
+                if (snapshot.appliedForeground != null && view.foreground === snapshot.appliedForeground) {
+                    surfaceMutationDepth++
+                    try { view.foreground = snapshot.originalForeground; snapshot.appliedForeground = null }
+                    finally { surfaceMutationDepth-- }
+                }
                 if (snapshot.appliedBackground != null && view.background === snapshot.appliedBackground) {
                     captureContactGeometry(view, snapshot)
                     surfaceMutationDepth++
