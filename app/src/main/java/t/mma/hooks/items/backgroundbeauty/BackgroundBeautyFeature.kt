@@ -1494,6 +1494,38 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         // Horizontal text insets do not define the row: the avatar is its sibling.
         return best?.apply { left = 0; right = row.width }
     }
+    // Profile headers contain independent actions; spacer/footer rows are not actions.
+    private fun meTouchRegion(row: View, x: Float, y: Float): Rect? {
+        val density = row.resources.displayMetrics.density
+        var visited = 0
+        fun hasLabel(view: View): Boolean {
+            if (++visited > 160 || view.visibility != View.VISIBLE || view.alpha <= 0f) return false
+            if (view is android.widget.TextView && view.text.isNotBlank()) return true
+            return view is ViewGroup && (0 until view.childCount).any { hasLabel(view.getChildAt(it)) }
+        }
+        if (!hasLabel(row)) return null
+        var best: Rect? = null
+        var bestArea = Long.MAX_VALUE
+        visited = 0
+        fun visit(view: View) {
+            if (++visited > 160 || view.visibility != View.VISIBLE || view.alpha <= 0f) return
+            val rect = Rect(0, 0, view.width, view.height)
+            if (view !== row) (row as? ViewGroup)?.offsetDescendantRectToMyCoords(view, rect)
+            if (!rect.contains(x.toInt(), y.toInt())) return
+            if (view.isEnabled && (view.isClickable || view.isLongClickable) &&
+                rect.width() > 0 && rect.height() > 0 && rect.height() <= 100f * density) {
+                val area = rect.width().toLong() * rect.height()
+                if (area < bestArea) { best = rect; bestArea = area }
+            }
+            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
+        }
+        visit(row)
+        if (best != null) return best
+        // Adapter menu rows need not be clickable themselves. Tall profile headers
+        // must never use this fallback, and empty adapter spacers were rejected above.
+        return if (row.height in (40f * density).toInt()..(100f * density).toInt())
+            Rect(0, 0, row.width, row.height) else null
+    }
     private fun isContactIconSurface(view: View): Boolean {
         // Native contact icons can be plain/custom Views with a background or
         // foreground drawable, and may be visited before the first measurement.
@@ -1529,10 +1561,14 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                     if (row.visibility == View.VISIBLE && x >= 0 && y >= 0 && x < row.width && y < row.height) {
                         if (dirtyBoundRows.remove(row) == true || surfaceOwners[row] == null) applyBoundRow(list, row)
                         (row.background as? BackgroundBeautyFeedbackDrawable)?.let { ripple ->
-                            val region = if (slot == BackgroundBeautySettings.Slot.CONTACTS) contactTouchRegion(row, x, y) else null
+                            val region = when (slot) {
+                                BackgroundBeautySettings.Slot.CONTACTS -> contactTouchRegion(row, x, y)
+                                BackgroundBeautySettings.Slot.ME -> meTouchRegion(row, x, y)
+                                else -> null
+                            }
                             ripple.setTouchRegion(region)
                             ripple.setHotspot(x, y)
-                            if (slot == BackgroundBeautySettings.Slot.CONTACTS) {
+                            if (slot == BackgroundBeautySettings.Slot.CONTACTS || slot == BackgroundBeautySettings.Slot.ME) {
                                 contactOverlays.remove(row)?.let { row.overlay.remove(it) }
                                 ripple.setTouchPressed(false)
                                 if (region != null) {
@@ -1619,7 +1655,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         if (view is AbsListView) {
             if (!listSelectors.containsKey(view)) {
                 listSelectors[view] = view.selector
-                view.selector = BackgroundBeautyFeedbackDrawable(manualOnly = homeLists[view] == BackgroundBeautySettings.Slot.CONTACTS)
+                view.selector = BackgroundBeautyFeedbackDrawable(manualOnly = homeLists[view] == BackgroundBeautySettings.Slot.CONTACTS || homeLists[view] == BackgroundBeautySettings.Slot.ME)
             }
             val adapter = view.adapter ?: return
             if (listAdapters[view] === adapter) return
@@ -3126,7 +3162,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 (!clearForeground || view.foreground === snapshot.appliedForeground)
             ) return
             val marker: Drawable = if (feedback) {
-                BackgroundBeautyFeedbackDrawable(manualOnly = slot == BackgroundBeautySettings.Slot.CONTACTS)
+                BackgroundBeautyFeedbackDrawable(manualOnly = slot == BackgroundBeautySettings.Slot.CONTACTS || slot == BackgroundBeautySettings.Slot.ME)
             } else BackgroundBeautyTransparentDrawable()
             view.backgroundTintList = null
             view.backgroundTintMode = null

@@ -96,8 +96,8 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         val alpha=HomeExtensionSettings.preferences(context).getInt(HomeExtensionSettings.MUSIC_ALPHA,100).coerceIn(0,100)*255/100
         if(decoration?.width!=width||decoration?.height!=height||decorationStyle!=style){decoration=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888).also{val bg=Canvas(it);if(style==2)graffiti(bg,w,h)else vinylBackground(bg,w,h)};decorationStyle=style};p.alpha=alpha;decoration?.let{canvas.drawBitmap(it,0f,0f,p)};p.alpha=255
         if(full){
-            if(style==2){drawPortrait(canvas,112*sx,187*sy,51*sx);text(canvas,s.title,50*sx,524*sy,23*sx,83*sx,Color.BLACK);text(canvas,"${time(s.position)} / ${time(s.duration)}",50*sx,546*sy,12*sx,105*sx,Color.BLACK);spectrum(canvas,s,RectF(159*sx,501*sy,289*sx,546*sy));tools(canvas,384*sy,Color.BLACK)}
-            else{drawPortrait(canvas,180*sx,204*sy,vinylPortraitRadius());text(canvas,s.title,180*sx,408*sy,29*sx,290*sx,Color.WHITE,true);text(canvas,"${time(s.position)} / ${time(s.duration)}",180*sx,438*sy,15*sx,290*sx,Color.WHITE,true);lyrics(canvas,s);tools(canvas,682*sy,Color.WHITE)}
+            if(style==2){drawPortrait(canvas,112*sx,187*sy,51*sx);text(canvas,s.title,50*sx,524*sy,23*sx,83*sx,Color.BLACK);text(canvas,"${time(s.position)} / ${time(s.duration)}",50*sx,546*sy,12*sx,105*sx,Color.BLACK);spectrum(canvas,s,RectF(159*sx,501*sy,289*sx,546*sy));tools(canvas,s,384*sy,Color.BLACK)}
+            else{drawPortrait(canvas,180*sx,204*sy,vinylPortraitRadius());text(canvas,s.title,180*sx,408*sy,29*sx,290*sx,Color.WHITE,true);text(canvas,"${time(s.position)} / ${time(s.duration)}",180*sx,438*sy,15*sx,290*sx,Color.WHITE,true);lyrics(canvas,s);tools(canvas,s,682*sy,Color.WHITE)}
             icon(canvas,"⌕","search",326*sx,if(style==3)57*sy else 35*sy,23*sx,Color.WHITE)
             if(style==3)spectrum(canvas,s,RectF(18*sx,9*sy,342*sx,29*sy))
             val py=if(style==2)568*sy else 582*sy;drawProgress(canvas,s,43*sx,317*sx,py,style==2)
@@ -143,11 +143,17 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         if(full){fill(c,RectF(34*sx,373*sy,326*sx,555*sy),0x773E4140,19*sx);p.color=0x447B817C;p.style=Paint.Style.STROKE;p.strokeWidth=sx;c.drawRoundRect(RectF(34*sx,373*sy,326*sx,555*sy),19*sx,19*sx,p);p.style=Paint.Style.FILL}
     }
     private fun texture(c:Canvas,w:Float,h:Float,color:Int){val r=java.util.Random(71);p.color=color;for(i in 0..1800){val x=r.nextFloat()*w;val y=r.nextFloat()*h;c.drawCircle(x,y,0.25f+0.35f*sx,p)}}
-    // Keep the outer quarter of the disc radius visible around the larger photo.
-    private fun vinylPortraitRadius() = (if(full)min(153*sx,153*sy)else 68*sx)*0.75f
+    // The retained upper arm ends at the first bend. Account for its round cap,
+    // then overlap its visible edge by 2 physical dp rather than scaled artwork units.
+    private fun vinylPortraitRadius():Float {
+        val cx=if(full)180*sx else 93*sx;val cy=if(full)204*sy else 116*sy
+        val ex=(if(full)315*sx else 149*sx)-2*sx
+        val ey=(if(full)91*sy else 61*sy)+27*sx
+        return hypot(ex-cx,ey-cy)-1.5f*sx+2f*resources.displayMetrics.density
+    }
     private fun drawVinylArm(c:Canvas){
         val tx=if(full)315*sx else 149*sx;val ty=if(full)91*sy else 61*sy
-        val arm=Path().apply{moveTo(tx,ty);lineTo(tx-2*sx,ty+27*sx);lineTo(tx-17*sx,ty+47*sx);lineTo(tx-24*sx,ty+68*sx)}
+        val arm=Path().apply{moveTo(tx,ty);lineTo(tx-2*sx,ty+27*sx)}
         stroke(c,arm,0xFF949694.toInt(),3*sx);p.color=0xFF686B68.toInt();c.drawCircle(tx,ty,5*sx,p)
     }
     private fun drawPortrait(c:Canvas,x:Float,y:Float,r:Float){val save=c.save();c.clipPath(Path().apply{addCircle(x,y,r,Path.Direction.CW)});if(style==3)c.rotate(portraitAngle,x,y);val b=portrait;if(b!=null){val n=min(b.width,b.height);p.color=Color.WHITE;c.drawBitmap(b,Rect((b.width-n)/2,(b.height-n)/2,(b.width+n)/2,(b.height+n)/2),RectF(x-r,y-r,x+r,y+r),p)}else{p.color=0xFF535A57.toInt();c.drawCircle(x,y,r,p);p.color=0xFFB7C0BB.toInt();c.drawCircle(x,y-r*0.23f,r*0.25f,p);c.drawOval(RectF(x-r*0.55f,y+r*0.08f,x+r*0.55f,y+r*0.86f),p)};c.restoreToCount(save);if(style==3)drawVinylArm(c)}
@@ -180,8 +186,28 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     private fun drawProgress(c:Canvas,s:MusicPaintState,left:Float,right:Float,y:Float,lime:Boolean){progress=RectF(left,y-12*sx,right,y+12*sx);p.color=0xFF777D79.toInt();c.drawRoundRect(RectF(left,y-sx,right,y+sx),sx,sx,p);val x=left+(right-left)*(if(s.duration>0)s.position.toFloat()/s.duration else 0f).coerceIn(0f,1f);p.color=if(lime)0xFFABFF00.toInt()else Color.WHITE;c.drawRoundRect(RectF(left,y-sx,x,y+sx),sx,sx,p);c.drawCircle(x,y,2.5f*sx,p);if(full){text(c,time(s.position),left,y+16*sx,9*sx,70*sx,Color.LTGRAY);text(c,time(s.duration),right-35*sx,y+16*sx,9*sx,45*sx,Color.LTGRAY)}}
     private fun icon(c:Canvas,key:String,act:String,x:Float,y:Float,size:Float,color:Int){val bounds=size/0.52f;val v=icons.getOrPut(key){MusicIcon(context,key)};v.setTextColor(color);if(v.width!=bounds.toInt()||v.height!=bounds.toInt())v.layout(0,0,bounds.toInt(),bounds.toInt());val save=c.save();c.translate(x-bounds/2,y-bounds/2);v.draw(c);c.restoreToCount(save);val hit=max(18*sx,size*0.7f);hits+=RectF(x-hit,y-hit,x+hit,y+hit) to act}
     private fun playIcon(c:Canvas,s:MusicPaintState,x:Float,y:Float,r:Float,dark:Boolean){p.color=if(dark)Color.BLACK else Color.WHITE;if(dark)c.drawCircle(x,y,r,p)else{p.style=Paint.Style.STROKE;p.strokeWidth=1.5f*sx;c.drawCircle(x,y,r,p);p.style=Paint.Style.FILL};icon(c,if(s.playing)"Ⅱ"else"▶","play",x,y,r*0.9f,if(dark)0xFFB4FF00.toInt()else Color.WHITE)}
-    private fun controls(c:Canvas,s:MusicPaintState,y:Float,dark:Boolean){val color=if(dark)Color.BLACK else Color.WHITE;icon(c,"|◀","previous",107*sx,y,25*sx,color);playIcon(c,s,180*sx,y,25*sx,dark);icon(c,"▶|","next",253*sx,y,25*sx,color);if(style==2)icon(c,"☰","favorites",294*sx,y,18*sx,color)}
-    private fun tools(c:Canvas,y:Float,color:Int){val xs=if(style==2)floatArrayOf(178f,216f,254f,292f)else floatArrayOf(72f,144f,216f,288f);arrayOf("☷","♫","◷","▤").forEachIndexed{i,key->icon(c,key,arrayOf("versions","quality","timer","lyrics")[i],xs[i]*sx,y,21*sx,color)}}
+    private fun favoriteIcon(c:Canvas,s:MusicPaintState,x:Float,y:Float,size:Float,color:Int){
+        icon(c,if(s.favorite)"♥" else "♡","favorite",x,y,size,if(s.favorite)Color.RED else color)
+    }
+    private fun controls(c:Canvas,s:MusicPaintState,y:Float,dark:Boolean){
+        val color=if(dark)Color.BLACK else Color.WHITE
+        icon(c,"|◀","previous",(if(style==2)64f else 107f)*sx,y,25*sx,color)
+        playIcon(c,s,(if(style==2)132f else 180f)*sx,y,25*sx,dark)
+        icon(c,"▶|","next",(if(style==2)200f else 253f)*sx,y,25*sx,color)
+        if(style==2){favoriteIcon(c,s,252*sx,y,21*sx,color);icon(c,"☰","favorites",300*sx,y,18*sx,color)}
+    }
+    private fun tools(c:Canvas,s:MusicPaintState,y:Float,color:Int){
+        if(style==2){
+            val xs=floatArrayOf(178f,216f,254f,292f)
+            arrayOf("☷","♫","◷","▤").forEachIndexed{i,key->icon(c,key,arrayOf("versions","quality","timer","lyrics")[i],xs[i]*sx,y,21*sx,color)}
+        }else{
+            val keys=arrayOf("☷","♫","♡","◷","▤")
+            val actions=arrayOf("versions","quality","favorite","timer","lyrics")
+            keys.forEachIndexed{i,key->val x=(60f+i*60f)*sx
+                if(actions[i]=="favorite")favoriteIcon(c,s,x,y,21*sx,color)else icon(c,key,actions[i],x,y,21*sx,color)
+            }
+        }
+    }
     private fun lyrics(c:Canvas,s:MusicPaintState){if(lyricSource!=s.lyric){lyricSource=s.lyric;lines=HomeMusicLyrics.parse(s.lyric);scroll=-1f;lastPosition=-1};val save=c.save();c.clipRect(43*sx,461*sy,317*sx,544*sy);if(lines.isEmpty())text(c,"暂无同步歌词",180*sx,495*sy,16*sx,260*sx,Color.LTGRAY,true)else{val index=HomeMusicLyrics.indexAt(lines,s.position);if(lastPosition<0||abs(lastPosition-s.position)>1500||index<scroll||!s.playing)scroll=index.toFloat()else scroll+=(index-scroll)*0.09f;lastPosition=s.position;for(i in max(0,floor(scroll).toInt()-1)..min(lines.lastIndex,ceil(scroll).toInt()+2))text(c,lines[i].second,180*sx,489*sy+(i-scroll)*35*sy,17*sx,263*sx,if(i==index)Color.WHITE else Color.LTGRAY,true)};c.restoreToCount(save)}
     override fun onTouchEvent(e:MotionEvent):Boolean{when(e.actionMasked){MotionEvent.ACTION_DOWN->{downX=e.x;downY=e.y;tracking=progress.contains(e.x,e.y);parent?.requestDisallowInterceptTouchEvent(tracking);return true};MotionEvent.ACTION_MOVE->{if(tracking)seek(((e.x-progress.left)/progress.width()).coerceIn(0f,1f));return true};MotionEvent.ACTION_CANCEL->{tracking=false;parent?.requestDisallowInterceptTouchEvent(false);return true};MotionEvent.ACTION_UP->{parent?.requestDisallowInterceptTouchEvent(false);if(tracking){seek(((e.x-progress.left)/progress.width()).coerceIn(0f,1f));tracking=false;return true};if(abs(e.x-downX)>12*sx||abs(e.y-downY)>12*sx)return true;performClick();val hit=hits.filter{it.first.contains(e.x,e.y)}.minByOrNull{val dx=e.x-it.first.centerX();val dy=e.y-it.first.centerY();dx*dx+dy*dy};if(hit!=null)action(hit.second)else if(!full)action("open");return true}};return true}
     override fun performClick():Boolean{super.performClick();return true}
@@ -192,4 +218,4 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         }
         private val worker=Executors.newFixedThreadPool(2){Thread(it,"Hchat-MusicCover").apply{isDaemon=true}}}
 }
-internal data class MusicPaintState(val title:String,val position:Int,val duration:Int,val playing:Boolean,val spectrum:FloatArray,val lyric:String="",val coverUrl:String="")
+internal data class MusicPaintState(val title:String,val position:Int,val duration:Int,val playing:Boolean,val spectrum:FloatArray,val lyric:String="",val coverUrl:String="",val favorite:Boolean=false)

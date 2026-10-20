@@ -44,7 +44,11 @@ internal object HomeMusic {
     private fun storeSong(c:Context,s:HomeMusicSong){prefs(c).edit().putString("title",s.title).putString("artist",s.artist).putString("url",s.playUrl).putString("cover",s.coverUrl).putString("lyric",s.lyric).putString("source",s.source).putString("source_id",s.sourceId).apply()}
     private fun load(c:Context):HomeMusicSong?=prefs(c).let{p->p.getString("url","").orEmpty().takeIf{it.isNotBlank()}?.let{HomeMusicSong(p.getString("title","音乐").orEmpty(),p.getString("artist","").orEmpty(),it,p.getString("cover","").orEmpty(),p.getString("lyric","").orEmpty(),p.getString("source","QQ音乐").orEmpty(),p.getString("source_id","").orEmpty())}}
     private fun favorites(c:Context):MutableList<HomeMusicSong>{val j=runCatching{org.json.JSONArray(prefs(c).getString("music_favorites","[]"))}.getOrDefault(org.json.JSONArray());return (0 until j.length()).mapNotNull{i->runCatching{val o=j.getJSONObject(i);HomeMusicSong(o.getString("title"),o.getString("artist"),o.getString("url"),o.optString("cover"),o.optString("lyric"),o.optString("source"),o.optString("id"))}.getOrNull()}.toMutableList()}
-    private fun saveFavorites(c:Context,list:List<HomeMusicSong>){val j=org.json.JSONArray();list.forEach{s->j.put(org.json.JSONObject().put("title",s.title).put("artist",s.artist).put("url",s.playUrl).put("cover",s.coverUrl).put("lyric",s.lyric).put("source",s.source).put("id",s.sourceId))};prefs(c).edit().putString("music_favorites",j.toString()).apply()}
+    private var favoriteRevision=0L
+    private var paintedFavoriteRevision=-1L
+    private var paintedFavoriteSong:HomeMusicSong?=null
+    private var paintedFavorite=false
+    private fun saveFavorites(c:Context,list:List<HomeMusicSong>){val j=org.json.JSONArray();list.forEach{s->j.put(org.json.JSONObject().put("title",s.title).put("artist",s.artist).put("url",s.playUrl).put("cover",s.coverUrl).put("lyric",s.lyric).put("source",s.source).put("id",s.sourceId))};prefs(c).edit().putString("music_favorites",j.toString()).apply();favoriteRevision++}
     private fun sameSong(a:HomeMusicSong,b:HomeMusicSong?)=b!=null&&a.source==b.source&&(if(a.sourceId.isNotBlank()&&b.sourceId.isNotBlank())a.sourceId==b.sourceId else a.title==b.title&&a.artist==b.artist)
     private fun isFavorite(c:Context,s:HomeMusicSong)=favorites(c).any{sameSong(it,s)}
     private fun toggleFavorite(c:Context,s:HomeMusicSong){val list=favorites(c);if(list.any{sameSong(it,s)})list.removeAll{sameSong(it,s)}else list.add(0,s);saveFavorites(c,list);changed()}
@@ -94,13 +98,18 @@ internal object HomeMusic {
             sampledDuration=if(preparing)0 else runCatching{mp?.duration?:0}.getOrDefault(0)
         }
         val song=current?:load(c)
-        return MusicPaintState(song?.title?:"音乐",sampledPosition,sampledDuration,playing,spectrum,song?.lyric.orEmpty(),song?.coverUrl.orEmpty())
+        if(paintedFavoriteRevision!=favoriteRevision||paintedFavoriteSong!=song){
+            paintedFavoriteSong=song;paintedFavoriteRevision=favoriteRevision
+            paintedFavorite=song!=null&&isFavorite(c,song)
+        }
+        return MusicPaintState(song?.title?:"音乐",sampledPosition,sampledDuration,playing,spectrum,song?.lyric.orEmpty(),song?.coverUrl.orEmpty(),paintedFavorite)
     }
     private fun styleTwo(c:Context,full:Boolean,host:LinearLayout):View=HomeMusicPaintedView(c,2,full,{
         paintState(c)
     },{key->val song=current?:load(c);when(key){
         "play"->if(song!=null)play(c,song)else searchSheet(c,host)
         "previous"->previous(c);"next"->next(c);"open"->showPlayer(c);"search"->searchSheet(c,host)
+        "favorite"->song?.let{toggleFavorite(c,it)}
         "favorites"->openSheet(c,favorites(c),"我的收藏");"versions"->versions(c);"quality"->quality(c,song);"timer"->timer(c);"lyrics"->toggleLyricWindow(c,song)
         "shuffle"->{shuffle=!shuffle;toast(c,if(shuffle)"随机播放已开启"else"顺序播放已开启")}
     }},{fraction->if(!preparing)runCatching{player?.let{if(it.duration>0){it.seekTo((it.duration*fraction).toInt());changed()}}}})
@@ -110,6 +119,7 @@ internal object HomeMusic {
     },{key->val song=current?:load(c);when(key){
         "play"->if(song!=null)play(c,song)else searchSheet(c,host)
         "previous"->previous(c);"next"->next(c);"open"->showPlayer(c);"search"->searchSheet(c,host)
+        "favorite"->song?.let{toggleFavorite(c,it)}
         "favorites"->openSheet(c,favorites(c),"我的收藏");"versions"->versions(c);"quality"->quality(c,song);"timer"->timer(c);"lyrics"->toggleLyricWindow(c,song)
         "shuffle"->{shuffle=!shuffle;toast(c,if(shuffle)"随机播放已开启"else"顺序播放已开启")}
     }},{fraction->if(!preparing)runCatching{player?.let{if(it.duration>0){it.seekTo((it.duration*fraction).toInt());changed()}}}})

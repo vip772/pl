@@ -152,35 +152,11 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             nativeTitles.clear()
         }
-        private fun bindNativeTitle(visible: Boolean) {
-            if (!visible || showProfile()) { restoreNativeTitle(); return }
-            val host = header?.parent as? ViewGroup ?: findActionBarContent(decor) ?: return
-            val titleId = hostResourceId("gp")
-            val titleRoot = host.findViewById<View>(titleId) ?: return
-            fun findTitleText(view: View): TextView? {
-                if (view is TextView && view.text.toString().trim().startsWith("微信")) return view
-                if (view is ViewGroup) for (i in 0 until view.childCount) {
-                    findTitleText(view.getChildAt(i))?.let { return it }
-                }
-                return null
-            }
-            val text = findTitleText(titleRoot)
-            val title = if (titleRoot is TextView) (titleRoot.parent as? ViewGroup ?: titleRoot) else titleRoot
-            effectContent = text ?: titleRoot
-            if (!nativeTitles.containsKey(title)) {
-                nativeTitles[title] = title.foreground
-            }
-            if (effectTarget !== title) {
-                avatarEffect?.stop()
-                avatarEffect = null
-                effectTarget = title
-            }
-        }
         private var effectPaused = false
         fun pauseEffect() { drawer.setActive(false); effectPaused = true; avatarEffect?.stop() }
         fun resumeEffect() { drawer.setActive(true); effectPaused = false; refreshEffect() }
         fun refreshEffect() {
-            val root = if (showProfile()) header else effectTarget
+            val root = header
             root ?: return
             val keys = t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings
             val show = attached && !effectPaused && root.isShown && root.hasWindowFocus() && !chatVisible && isWechatTab() &&
@@ -191,7 +167,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 if (root.foreground === avatarEffect) root.foreground = null
                 return
             }
-            val effect = avatarEffect ?: AvatarHeaderEffect(root, if (showProfile()) null else effectContent).also { avatarEffect = it }
+            val effect = avatarEffect ?: AvatarHeaderEffect(root).also { avatarEffect = it }
             if (root.foreground !== effect) root.foreground = effect
             effect.update(effectPrefs.getString(keys.KEY_AVATAR_COLOR,
                 t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),
@@ -264,14 +240,14 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val available = (right - dp(14)).coerceAtLeast(dp(48))
             val textWidth = kotlin.math.ceil(nick.paint.measureText(nick.text.toString()).toDouble()).toInt()
             val statusWidth = status?.let { kotlin.math.ceil(it.paint.measureText(it.text.toString()).toDouble()).toInt() } ?: 0
-            val desired = dp(48) + maxOf(textWidth, statusWidth) + dp(2)
+            val desired = root.paddingLeft + dp(38) + dp(10) + maxOf(textWidth, statusWidth) + root.paddingRight
             val width = minOf(desired, available)
             val lp = root.layoutParams
             if (lp is RelativeLayout.LayoutParams) {
                 lp.removeRule(RelativeLayout.CENTER_IN_PARENT)
                 lp.addRule(RelativeLayout.CENTER_VERTICAL)
                 lp.addRule(RelativeLayout.ALIGN_PARENT_START)
-                val left = ((host.width - width) / 2).coerceIn(dp(14), maxOf(dp(14), right - width))
+                val left = if (showProfile()) ((host.width - width) / 2).coerceIn(dp(14), maxOf(dp(14), right - width)) else dp(0)
                 if (lp.width != width || lp.marginStart != left) {
                     lp.width = width
                     lp.marginStart = left
@@ -332,11 +308,11 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (header != null && header?.parent == null) header = null
             val headerVisible = homeVisible && isWechatTab()
             if (headerVisible) ensureHeader()
-            val profileVisible = headerVisible && showProfile()
+            val profileVisible = headerVisible
             val targetVisibility = if (profileVisible) View.VISIBLE else View.GONE
             if (header?.visibility != targetVisibility) header?.visibility = targetVisibility
             updateTitleSpace(profileVisible)
-            bindNativeTitle(headerVisible)
+            restoreNativeTitle()
             if (profileVisible && effectTarget !== header) {
                 avatarEffect?.stop()
                 avatarEffect = null
