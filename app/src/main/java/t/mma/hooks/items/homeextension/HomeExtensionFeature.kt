@@ -27,6 +27,8 @@ object HomeExtensionSettings {
     const val MUSIC = "music"
     const val MUSIC_ALPHA = "music_alpha"
     const val MUSIC_STYLE = "music_style"
+    const val MUSIC_AVATAR_SLOT = "home_music_avatar"
+    const val MUSIC_THREE_AVATAR_SLOT = "home_music_three_avatar"
     const val PHOTO = "photo"
     const val PHOTO_SLOT = "home_extension_photo"
     const val PHOTO_HEIGHT = "photo_height"

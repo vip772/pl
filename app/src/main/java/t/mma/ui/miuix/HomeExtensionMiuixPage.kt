@@ -40,7 +40,7 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
     var weatherSearching by remember { mutableStateOf(false) }
     var photo by remember { mutableStateOf(prefs.getBoolean(Settings.PHOTO, false)) }
     var music by remember { mutableStateOf(prefs.getBoolean(Settings.MUSIC, false)) }
-    var musicStyle by remember { mutableStateOf(prefs.getInt(Settings.MUSIC_STYLE, 1)) }
+    var musicStyle by remember { mutableStateOf(prefs.getInt(Settings.MUSIC_STYLE, 1).let { if(it in 2..3) it else 1 }) }
     var customLayout by remember { mutableStateOf(prefs.getBoolean(Settings.CUSTOM_LAYOUT, false)) }
     var layoutRows by remember { mutableStateOf(t.mma.hooks.items.homeextension.HomeCardLayout.rows(prefs.getString(Settings.LAYOUT_ROWS, null), Settings.order(prefs.getString(Settings.ORDER, null)))) }
     val cardNames = mapOf("calendar" to "日历", "contacts" to "快捷联系人", "photo" to "首页照片", "weather" to "首页天气", "music" to "首页音乐")
@@ -149,8 +149,16 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                 item { SettingsCard { Column {
                     SwitchRow(music, "首页音乐", "音乐卡片、搜索歌曲与播放控制") { music = it; prefs.edit().putBoolean(Settings.MUSIC, it).apply() }
                     if (music) {
-                        ActionRow("音乐卡片样式", if (musicStyle == 1) "样式1 · 唱片卡片" else "样式4 · 主题卡片") {
-                            if (activity != null) VoiceForwardMiuixDialog.showChoices(activity, "选择音乐卡片样式", "选择后返回首页生效", listOf("样式1" to "唱片卡片", "样式4" to "主题卡片"), onSelected = { index -> musicStyle = if(index == 0) 1 else 4; prefs.edit().putInt(Settings.MUSIC_STYLE, musicStyle).apply() }, onDismiss = {})
+                        ActionRow("音乐卡片样式", when(musicStyle) { 2 -> "样式2 · 涂鸦玻璃卡片"; 3 -> "样式3 · 黑胶唱片"; else -> "样式1 · 唱片卡片" }) {
+                            if (activity != null) VoiceForwardMiuixDialog.showChoices(activity, "选择音乐卡片样式", "选择后返回首页生效", listOf("样式1" to "唱片卡片", "样式2" to "涂鸦玻璃卡片", "样式3" to "黑胶唱片"), onSelected = { index -> musicStyle = index + 1; prefs.edit().putInt(Settings.MUSIC_STYLE, musicStyle).apply() }, onDismiss = {})
+                        }
+                        if (musicStyle == 2) {
+                            ActionRow("自定义头像照片", "替换样式2首页和二级页面的圆形照片") { if(activity != null) SidePanelImagePicker.launch(activity, Settings.MUSIC_AVATAR_SLOT) }
+                            ActionRow("恢复默认头像", "使用参考图中的默认照片") { SidePanelImages.clear(context, Settings.MUSIC_AVATAR_SLOT) }
+                        }
+                        if (musicStyle == 3) {
+                            ActionRow("自定义样式3头像", "替换首页和二级页面黑胶中央照片") { if(activity != null) SidePanelImagePicker.launch(activity, Settings.MUSIC_THREE_AVATAR_SLOT) }
+                            ActionRow("恢复样式3默认头像", "不影响样式2的自定义照片") { SidePanelImages.clear(context, Settings.MUSIC_THREE_AVATAR_SLOT) }
                         }
                         HomeExtensionSlider(context, "背景透明度", Settings.MUSIC_ALPHA, 100, 0f..100f, true)
                     }

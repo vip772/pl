@@ -55,7 +55,7 @@ internal object SidePanelImages {
     fun saveFromUri(context: Context, key: String, uri: Uri): Boolean {
         if(SidePanelAppearance.isPhoto(key)) return savePhoto(context,key,uri)
         return runCatching {
-        require(key == "photo" || key == "background")
+        require(key == "photo" || key == "background" || key == "home_music_avatar" || key == "home_music_three_avatar")
         val target = file(context, key)
         target.parentFile?.mkdirs()
         val source = File(target.parentFile, "$key.source")
