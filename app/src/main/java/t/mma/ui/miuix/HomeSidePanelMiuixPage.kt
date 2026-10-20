@@ -46,7 +46,7 @@ internal fun HomeSidePanelMiuixPage(
             .putString(HomeSidePanelSettings.KEY_SIGNATURE, normalizedSignature)
             .putString(
                 HomeSidePanelSettings.KEY_SHORTCUTS,
-                selected.distinct().take(3).joinToString(",") { it.id }
+                selected.distinct().take(HomeSidePanelSettings.MAX_SHORTCUTS).joinToString(",") { it.id }
             )
             .apply()
         Toast.makeText(context, "首页侧边栏设置已保存", Toast.LENGTH_SHORT).show()
@@ -110,7 +110,7 @@ internal fun HomeSidePanelMiuixPage(
                             summary = shortcut.subtitle,
                             onCheckedChange = { checked ->
                                 selected = if (checked) {
-                                    (selected + shortcut).distinct().take(3)
+                                    (selected + shortcut).distinct().take(HomeSidePanelSettings.MAX_SHORTCUTS)
                                 } else {
                                     selected.filterNot { it == shortcut }
                                 }

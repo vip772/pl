@@ -49,9 +49,9 @@ object HomeSidePanelSettings {
             ?.trim()?.takeIf { it.isNotEmpty() } ?: DEFAULT_SIGNATURE
 
     fun shortcuts(context: Context): List<Shortcut> {
-        val raw = preferences(context).getString(KEY_SHORTCUTS, null).orEmpty()
+        val raw = preferences(context).getString(KEY_SHORTCUTS, null) ?: return Shortcut.defaultOrder
         val parsed = raw.split(',').mapNotNull(Shortcut::fromId).distinct().take(MAX_SHORTCUTS)
-        return parsed.ifEmpty { Shortcut.defaultOrder }
+        return parsed
     }
 
     fun saveSignature(context: Context, value: String) {

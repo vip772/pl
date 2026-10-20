@@ -47,7 +47,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     private val prefs = HomeSidePanelSettings.preferences(context.hostContext())
     private val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == HomeSidePanelSettings.KEY_SHOW_PROFILE || key == HomeSidePanelSettings.KEY_ENABLE || key == HomeSidePanelSettings.KEY_SIGNATURE || key == HomeSidePanelSettings.KEY_SHORTCUTS) {
-            handler.post { sessions.values.toList().forEach { it.refresh() } }
+            handler.post { sessions.values.toList().forEach { if (key == HomeSidePanelSettings.KEY_SHORTCUTS) it.refreshShortcuts(); it.refresh() } }
         }
     }
 
@@ -152,11 +152,12 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             nativeTitles.clear()
         }
+        fun refreshShortcuts() { drawer.refreshShortcuts() }
         private var effectPaused = false
         fun pauseEffect() { drawer.setActive(false); effectPaused = true; avatarEffect?.stop() }
         fun resumeEffect() { drawer.setActive(true); effectPaused = false; refreshEffect() }
         fun refreshEffect() {
-            val root = header
+            val root = header?.findViewWithTag<View>("hchat_home_avatar_effect")
             root ?: return
             val keys = t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings
             val show = attached && !effectPaused && root.isShown && root.hasWindowFocus() && !chatVisible && isWechatTab() &&
@@ -173,7 +174,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),
                 effectPrefs.getInt(keys.KEY_AVATAR_SPEED, 2400),
                 effectPrefs.getFloat(keys.KEY_AVATAR_WIDTH, 1.4f),
-                effectPrefs.getBoolean(keys.KEY_AVATAR_LIGHTNING, false))
+                effectPrefs.getBoolean(keys.KEY_AVATAR_LIGHTNING, false), avatarInsetDp = ((root.width / activity.resources.displayMetrics.density - 38f) / 2f - 3f).coerceAtLeast(0f))
         }
         private val replacedTitles = WeakHashMap<View, Int>()
         private val scrollTitles = WeakHashMap<View, Int>()
@@ -232,6 +233,14 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private fun sizeHeader() {
             val root = header ?: return
             val host = root.parent as? ViewGroup ?: return
+            val verticalPadding = ((host.height - dp(58)) / 2).coerceIn(0, dp(9))
+            if (root.paddingTop != verticalPadding) root.setPadding(dp(13), verticalPadding, dp(18), verticalPadding)
+            header?.findViewWithTag<View>("hchat_home_avatar_effect")?.let { wrap ->
+                val side = minOf(dp(58), host.height).coerceAtLeast(dp(38))
+                if (wrap.layoutParams.width != side || wrap.layoutParams.height != side) {
+                    wrap.layoutParams = LinearLayout.LayoutParams(side, side)
+                }
+            }
             val nick = name ?: return
             if (host.width <= 0) return
             val buttonsId = hostResourceId("coz")
@@ -240,14 +249,14 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val available = (right - dp(14)).coerceAtLeast(dp(48))
             val textWidth = kotlin.math.ceil(nick.paint.measureText(nick.text.toString()).toDouble()).toInt()
             val statusWidth = status?.let { kotlin.math.ceil(it.paint.measureText(it.text.toString()).toDouble()).toInt() } ?: 0
-            val desired = root.paddingLeft + dp(38) + dp(10) + maxOf(textWidth, statusWidth) + root.paddingRight
+            val desired = root.paddingLeft + dp(58) + dp(10) + maxOf(textWidth, statusWidth) + root.paddingRight
             val width = minOf(desired, available)
             val lp = root.layoutParams
             if (lp is RelativeLayout.LayoutParams) {
                 lp.removeRule(RelativeLayout.CENTER_IN_PARENT)
                 lp.addRule(RelativeLayout.CENTER_VERTICAL)
                 lp.addRule(RelativeLayout.ALIGN_PARENT_START)
-                val left = if (showProfile()) ((host.width - width) / 2).coerceIn(dp(14), maxOf(dp(14), right - width)) else dp(0)
+                val left = ((host.width - width) / 2).coerceIn(dp(14), maxOf(dp(14), right - width))
                 if (lp.width != width || lp.marginStart != left) {
                     lp.width = width
                     lp.marginStart = left
@@ -308,7 +317,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (header != null && header?.parent == null) header = null
             val headerVisible = homeVisible && isWechatTab()
             if (headerVisible) ensureHeader()
-            val profileVisible = headerVisible
+            val profileVisible = headerVisible && showProfile()
             val targetVisibility = if (profileVisible) View.VISIBLE else View.GONE
             if (header?.visibility != targetVisibility) header?.visibility = targetVisibility
             updateTitleSpace(profileVisible)
@@ -392,7 +401,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (old is ViewGroup) { header = old; collect(old); return }
             val root = LinearLayout(activity).apply {
                 tag = "hchat_home_avatar_header"
-                minimumHeight = dp(56)
+                minimumHeight = 0
+                clipChildren = false; clipToPadding = false
                 setPadding(dp(13), dp(9), dp(18), dp(9))
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
@@ -407,7 +417,12 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 outlineProvider = ViewOutlineProvider.BACKGROUND
             }
             retainedAvatar?.takeUnless { it.isRecycled }?.let(iv::setImageBitmap)
-            root.addView(iv, LinearLayout.LayoutParams(dp(38), dp(38)))
+            val avatarWrap = android.widget.FrameLayout(activity).apply {
+                tag = "hchat_home_avatar_effect"
+                clipChildren = false; clipToPadding = false
+            }
+            avatarWrap.addView(iv, android.widget.FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER))
+            root.addView(avatarWrap, LinearLayout.LayoutParams(dp(58), dp(58)))
             val text = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(10), 0, 0, 0) }
             val nick = TextView(activity).apply {
                 tag = "hchat_home_avatar_name"

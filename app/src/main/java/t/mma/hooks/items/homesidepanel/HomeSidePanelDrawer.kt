@@ -139,6 +139,11 @@ internal class HomeSidePanelDrawer(
         if (!value && opened) close(false)
     }
 
+    fun refreshShortcuts() {
+        if (opened && !settingsPage) renderPage()
+        else renderedShortcuts = null
+    }
+    private var renderedShortcuts: List<HomeSidePanelSettings.Shortcut>? = null
     fun isOpen(): Boolean = opened
     fun toggle() { if (opened) close(true) else show(true) }
 
@@ -159,7 +164,7 @@ internal class HomeSidePanelDrawer(
         scrim.animate().cancel()
         opened = true
         refreshLunar()
-        if (renderedNight != night()) renderPage()
+        if (renderedNight != night() || renderedShortcuts != HomeSidePanelSettings.shortcuts(activity)) renderPage()
         updateEffects()
         resizeRoot(open = true)
         edge.visibility = View.GONE
@@ -453,6 +458,7 @@ internal class HomeSidePanelDrawer(
     private val SHORTCUT_TAG get() = 0x7f0f6e11
     private fun shortcutCard(body: LinearLayout) {
         val values=HomeSidePanelSettings.shortcuts(activity)
+        renderedShortcuts = values
         values.chunked(4).forEachIndexed { rowIndex,items ->
             val row=LinearLayout(activity).apply { orientation=LinearLayout.HORIZONTAL }
             items.forEachIndexed { index,item ->
@@ -535,7 +541,7 @@ internal class HomeSidePanelDrawer(
             fun update() { check.text = if (shortcut in selected) "✓" else "" }
             update()
             line.setOnClickListener {
-                if (shortcut in selected) { if (selected.size > 1) selected.remove(shortcut) else toast("至少保留 1 个快捷") }
+                if (shortcut in selected) { selected.remove(shortcut) }
                 else if (selected.size < HomeSidePanelSettings.MAX_SHORTCUTS) selected.add(shortcut) else toast("最多选择 ${HomeSidePanelSettings.MAX_SHORTCUTS} 项")
                 update()
             }
@@ -626,7 +632,7 @@ internal class HomeSidePanelDrawer(
     private fun settleOpen() {
         opened = true
         refreshLunar()
-        if (renderedNight != night()) renderPage()
+        if (renderedNight != night() || renderedShortcuts != HomeSidePanelSettings.shortcuts(activity)) renderPage()
         updateEffects()
         scrim.visibility = View.VISIBLE
         panel.animate().translationX(0f).setDuration(200L).setInterpolator(PathInterpolator(.4f, 0f, .2f, 1f)).start()

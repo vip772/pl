@@ -1365,7 +1365,23 @@ private class BackgroundBeautyRuntime(
                 installed = hookOnce(method, after = { param ->
                     if (surfaceMutationDepth != 0 || Looper.myLooper() != Looper.getMainLooper()) return@hookOnce
                     val view = param.thisObject as? View ?: return@hookOnce
-                    val state = surfaceOwners[view] ?: return@hookOnce
+                    val state = surfaceOwners[view] ?: run {
+// Only inspect untracked writes while the contacts page is active.
+                        val active = WeChatApis.currentActivity()?.currentActivity() ?: return@hookOnce
+                        if (resolveTarget(active) != BackgroundBeautySettings.Slot.CONTACTS) return@hookOnce
+                        // Header children can be replaced without an adapter bind.
+                        var ancestor = view.parent as? View
+                        var depth = 0
+                        while (ancestor != null && depth++ < 12) {
+                            val parent = ancestor.parent as? View
+                            if (parent != null && homeLists[parent] == BackgroundBeautySettings.Slot.CONTACTS) {
+                                dirtyBoundRows[ancestor] = true
+                                break
+                            }
+                            ancestor = parent
+                        }
+                        return@hookOnce
+                    }
                     val snapshot = state.surfaces[view] ?: return@hookOnce
                     // DecorView.getBackground is not View.mBackground; never reenter its outer update here.
                     if (view === state.activity.window.decorView) return@hookOnce
@@ -1641,7 +1657,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                         prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) {
                         for (index in 0 until view.childCount) {
                             val row = view.getChildAt(index)
-                            if (dirtyBoundRows.remove(row) == true || owner.surfaces[row] == null) {
+                            if (dirtyBoundRows.remove(row) == true || owner.surfaces[row] == null ||
+                                (slot == BackgroundBeautySettings.Slot.CONTACTS && row.background !== owner.surfaces[row]?.appliedBackground)) {
                                 applyHomeRow(owner, row, slot)
                             }
                         }
@@ -1897,6 +1914,13 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             if (pendingRefreshes.containsKey(activity)) return@synchronized null
             Runnable {
                 synchronized(pendingRefreshes) { pendingRefreshes.remove(activity) }
+                // Resume/focus refreshes revisit prepared header rows once, including
+                // preference descendants replaced without an adapter bind.
+                homeLists.entries.toList().forEach { (list, slot) ->
+                    if (slot == BackgroundBeautySettings.Slot.CONTACTS && findActivity(list) === activity && list is ViewGroup) {
+                        for (i in 0 until list.childCount) dirtyBoundRows[list.getChildAt(i)] = true
+                    }
+                }
                 val started = android.os.SystemClock.uptimeMillis()
                 applyForActivity(activity)
                 val elapsed = android.os.SystemClock.uptimeMillis() - started
