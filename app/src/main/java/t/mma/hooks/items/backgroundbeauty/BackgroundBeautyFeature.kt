@@ -1762,7 +1762,10 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             if (t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(child)) continue
             if (isComposeSurface(child) || isBottomBar(child) || isWechatTaskSurface(child)) continue
             if (child is ViewGroup) {
-                if (child.background != null) setTransparentSurface(state, child, slot, preserveFeedback = true)
+                // Register background-less contacts containers too: native code can
+                // give them a background after resume without rebinding the row.
+                if (child.background != null || slot == BackgroundBeautySettings.Slot.CONTACTS)
+                    setTransparentSurface(state, child, slot, preserveFeedback = true)
                 for (i in 0 until child.childCount) queue.add(child.getChildAt(i))
             }
         }

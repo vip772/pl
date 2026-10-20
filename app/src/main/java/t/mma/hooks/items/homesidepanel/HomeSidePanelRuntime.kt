@@ -152,12 +152,31 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             nativeTitles.clear()
         }
+        private fun bindNativeTitle(visible: Boolean) {
+            if (!visible || showProfile()) { restoreNativeTitle(); return }
+            val host = header?.parent as? ViewGroup ?: findActionBarContent(decor) ?: return
+            val titleRoot = host.findViewById<View>(hostResourceId("gp")) ?: return
+            fun titleText(view: View): TextView? {
+                if (view is TextView && view.text.toString().trim().startsWith("微信")) return view
+                if (view is ViewGroup) for (i in 0 until view.childCount) titleText(view.getChildAt(i))?.let { return it }
+                return null
+            }
+            val text = titleText(titleRoot) ?: return
+            val target = if (titleRoot is TextView) titleRoot.parent as? ViewGroup ?: titleRoot else titleRoot
+            if (effectTarget !== target) {
+                restoreNativeTitle()
+                avatarEffect?.stop(); avatarEffect = null
+                effectTarget = target
+            }
+            effectContent = text
+            if (!nativeTitles.containsKey(target)) nativeTitles[target] = target.foreground
+        }
         fun refreshShortcuts() { drawer.refreshShortcuts() }
         private var effectPaused = false
         fun pauseEffect() { drawer.setActive(false); effectPaused = true; avatarEffect?.stop() }
         fun resumeEffect() { drawer.setActive(true); effectPaused = false; refreshEffect() }
         fun refreshEffect() {
-            val root = header?.findViewWithTag<View>("hchat_home_avatar_effect")
+            val root = if (showProfile()) header?.findViewWithTag<View>("hchat_home_avatar_effect") else effectTarget
             root ?: return
             val keys = t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings
             val show = attached && !effectPaused && root.isShown && root.hasWindowFocus() && !chatVisible && isWechatTab() &&
@@ -168,13 +187,13 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 if (root.foreground === avatarEffect) root.foreground = null
                 return
             }
-            val effect = avatarEffect ?: AvatarHeaderEffect(root).also { avatarEffect = it }
+            val effect = avatarEffect ?: AvatarHeaderEffect(root, if (showProfile()) null else effectContent).also { avatarEffect = it }
             if (root.foreground !== effect) root.foreground = effect
             effect.update(effectPrefs.getString(keys.KEY_AVATAR_COLOR,
                 t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),
                 effectPrefs.getInt(keys.KEY_AVATAR_SPEED, 2400),
                 effectPrefs.getFloat(keys.KEY_AVATAR_WIDTH, 1.4f),
-                effectPrefs.getBoolean(keys.KEY_AVATAR_LIGHTNING, false), avatarInsetDp = ((root.width / activity.resources.displayMetrics.density - 38f) / 2f - 3f).coerceAtLeast(0f))
+                effectPrefs.getBoolean(keys.KEY_AVATAR_LIGHTNING, false), avatarInsetDp = if (showProfile()) ((root.width / activity.resources.displayMetrics.density - 38f) / 2f - 3f).coerceAtLeast(0f) else null)
         }
         private val replacedTitles = WeakHashMap<View, Int>()
         private val scrollTitles = WeakHashMap<View, Int>()
@@ -321,7 +340,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val targetVisibility = if (profileVisible) View.VISIBLE else View.GONE
             if (header?.visibility != targetVisibility) header?.visibility = targetVisibility
             updateTitleSpace(profileVisible)
-            restoreNativeTitle()
+            bindNativeTitle(headerVisible)
             if (profileVisible && effectTarget !== header) {
                 avatarEffect?.stop()
                 avatarEffect = null
