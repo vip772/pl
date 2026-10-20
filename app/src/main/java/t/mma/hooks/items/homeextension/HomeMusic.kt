@@ -82,9 +82,9 @@ internal object HomeMusic {
             },minOf(30000,android.media.audiofx.Visualizer.getMaxCaptureRate()),false,true);effect.enabled=true
         }catch(e:Exception){releaseSpectrum();if(!spectrumWarned){spectrumWarned=true;toast(c,"当前设备未允许捕获播放频谱，真实律动暂不可用")}}
     }
-    private fun styleTwo(c:Context,full:Boolean,host:LinearLayout):View=HomeMusicStyleTwo(c,full,{
+    private fun styleTwo(c:Context,full:Boolean,host:LinearLayout):View=HomeMusicPaintedView(c,2,full,{
         val p=player;val position=if(preparing)0 else runCatching{p?.currentPosition?:0}.getOrDefault(0);val duration=if(preparing)0 else runCatching{p?.duration?:0}.getOrDefault(0)
-        HomeMusicStyleTwo.State((current?:load(c))?.title?:"Tag Radio",position,duration,playing,spectrum)
+        MusicPaintState((current?:load(c))?.title?:"音乐",position,duration,playing,spectrum,coverUrl=(current?:load(c))?.coverUrl.orEmpty())
     },{key->val song=current?:load(c);when(key){
         "play"->if(song!=null)play(c,song)else searchSheet(c,host)
         "previous"->previous(c);"next"->next(c);"open"->showPlayer(c);"search"->searchSheet(c,host)
@@ -92,9 +92,9 @@ internal object HomeMusic {
         "shuffle"->{shuffle=!shuffle;toast(c,if(shuffle)"随机播放已开启"else"顺序播放已开启")}
     }},{fraction->if(!preparing)runCatching{player?.let{if(it.duration>0)it.seekTo((it.duration*fraction).toInt())}}})
     private fun showStyleTwoPlayer(c:Context){if(playing&&visualizer==null)player?.let{captureSpectrum(c,it)};val dialog=Dialog(c);dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);val host=LinearLayout(c).apply{setBackgroundColor(0xFF242625.toInt());gravity=Gravity.CENTER};host.addView(styleTwo(c,true,host),LinearLayout.LayoutParams(-1,-1));dialog.setContentView(host);dialog.show();dialog.window?.setBackgroundDrawableResource(android.R.color.transparent);dialog.window?.setLayout(-1,-1)}
-    private fun styleThree(c:Context,full:Boolean,host:LinearLayout):View=HomeMusicStyleThree(c,full,{
+    private fun styleThree(c:Context,full:Boolean,host:LinearLayout):View=HomeMusicPaintedView(c,3,full,{
         val song=current?:load(c);val p=player
-        HomeMusicStyleThree.State(song?.title?:"Street Quiet",if(preparing)0 else runCatching{p?.currentPosition?:0}.getOrDefault(0),if(preparing)0 else runCatching{p?.duration?:0}.getOrDefault(0),playing,spectrum,song?.lyric.orEmpty())
+        MusicPaintState(song?.title?:"Street Quiet",if(preparing)0 else runCatching{p?.currentPosition?:0}.getOrDefault(0),if(preparing)0 else runCatching{p?.duration?:0}.getOrDefault(0),playing,spectrum,song?.lyric.orEmpty(),song?.coverUrl.orEmpty())
     },{key->val song=current?:load(c);when(key){
         "play"->if(song!=null)play(c,song)else searchSheet(c,host)
         "previous"->previous(c);"next"->next(c);"open"->showPlayer(c);"search"->searchSheet(c,host)
