@@ -88,8 +88,21 @@ internal object SidePanelImages {
         } finally { source.delete(); temporary.delete() }
     }.getOrElse { HLog.e("[Hchat:HomeSidePanel] 图片导入失败", it); false }
     }
+    private val musicPortraits = object : android.util.LruCache<String, Bitmap>(4 * 1024 * 1024) {
+        override fun sizeOf(key: String, value: Bitmap) = value.byteCount
+    }
+    fun hasImage(context: Context, key: String) = file(context, key).isFile
     fun load(context: Context, key: String): Bitmap? = runCatching {
-        BitmapFactory.decodeFile(file(context, key).path)
+        val image = file(context, key)
+        if (key != "home_music_avatar" && key != "home_music_three_avatar") return@runCatching BitmapFactory.decodeFile(image.path)
+        if (!image.isFile) return@runCatching null
+        val version = "${image.path}:${image.lastModified()}:${image.length()}"
+        musicPortraits.get(version)?.let { return@runCatching it }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(image.path, bounds)
+        var sample = 1
+        while (bounds.outWidth / sample > 768 || bounds.outHeight / sample > 768) sample *= 2
+        BitmapFactory.decodeFile(image.path, BitmapFactory.Options().apply { inSampleSize = sample })?.also { musicPortraits.put(version, it) }
     }.getOrNull()
     fun clear(context: Context, key: String) {
         file(context, key).delete()

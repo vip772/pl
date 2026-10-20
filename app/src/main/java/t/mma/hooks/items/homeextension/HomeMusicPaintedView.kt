@@ -23,6 +23,7 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     private val visibleRect=Rect()
     private var scheduled=false
     private var needsRefresh=true
+    private var customGeneration=0
     private var customLoading=false
     private var cachedState:MusicPaintState?=null
     private val textPaint=android.text.TextPaint()
@@ -49,22 +50,33 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         super.onAttachedToWindow()
         HomeMusic.setListener(changed)
         observer=viewTreeObserver.also{it.addOnScrollChangedListener(scrollListener)}
-        val slot=if(style==2)HomeExtensionSettings.MUSIC_AVATAR_SLOT else HomeExtensionSettings.MUSIC_THREE_AVATAR_SLOT
-        customLoading=true;custom=false;coverKey="";val request=++generation
-        worker.execute{
-            val bitmap=runCatching{SidePanelImages.load(context,slot)}.getOrNull()
-            post{if(isAttachedToWindow&&generation==request){portrait=bitmap;custom=bitmap!=null;customLoading=false;needsRefresh=true;resumeFrames()}}
-        }
+        loadCustomPortrait()
         resumeFrames()
+    }
+    private fun loadCustomPortrait(attempt:Int=0){
+        val slot=if(style==2)HomeExtensionSettings.MUSIC_AVATAR_SLOT else HomeExtensionSettings.MUSIC_THREE_AVATAR_SLOT
+        customLoading=true
+        val request=++customGeneration
+        worker.execute{
+            val exists=SidePanelImages.hasImage(context,slot)
+            val bitmap=runCatching{SidePanelImages.load(context,slot)}.getOrNull()
+            post{
+                if(!isAttachedToWindow||customGeneration!=request)return@post
+                if(bitmap!=null){portrait=bitmap;custom=true;coverKey=""}
+                else if(!exists){custom=false;portrait=null;coverKey=""}
+                customLoading=false;needsRefresh=true;resumeFrames()
+                if(exists&&bitmap==null&&attempt<2)postDelayed({if(isAttachedToWindow&&customGeneration==request)loadCustomPortrait(attempt+1)},1000L*(attempt+1))
+            }
+        }
     }
     override fun onDetachedFromWindow(){
         HomeMusic.removeListener(changed)
         observer?.takeIf{it.isAlive}?.removeOnScrollChangedListener(scrollListener);observer=null
-        removeCallbacks(frame);scheduled=false;generation++;portrait=null;cachedState=null;decoration=null
+        removeCallbacks(frame);scheduled=false;generation++;customGeneration++;customLoading=false;cachedState=null;decoration=null
         super.onDetachedFromWindow()
     }
     override fun onLayout(changed:Boolean,left:Int,top:Int,right:Int,bottom:Int){super.onLayout(changed,left,top,right,bottom);resumeFrames()}
-    override fun onWindowFocusChanged(hasWindowFocus:Boolean){super.onWindowFocusChanged(hasWindowFocus);resumeFrames()}
+    override fun onWindowFocusChanged(hasWindowFocus:Boolean){super.onWindowFocusChanged(hasWindowFocus);if(hasWindowFocus&&isAttachedToWindow&&!customLoading)loadCustomPortrait();resumeFrames()}
     override fun onWindowVisibilityChanged(visibility:Int){super.onWindowVisibilityChanged(visibility);resumeFrames()}
     override fun onVisibilityChanged(changedView:View,visibility:Int){super.onVisibilityChanged(changedView,visibility);if(isAttachedToWindow)post{resumeFrames()}}
     override fun onMeasure(w:Int,h:Int){val width=MeasureSpec.getSize(w);val desired=(width*0.58f).toInt();setMeasuredDimension(width,if(full)MeasureSpec.getSize(h)else resolveSize(desired,h))}
@@ -125,7 +137,7 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     }
     private fun texture(c:Canvas,w:Float,h:Float,color:Int){val r=java.util.Random(71);p.color=color;for(i in 0..1800){val x=r.nextFloat()*w;val y=r.nextFloat()*h;c.drawCircle(x,y,0.25f+0.35f*sx,p)}}
     private fun drawPortrait(c:Canvas,x:Float,y:Float,r:Float){val save=c.save();c.clipPath(Path().apply{addCircle(x,y,r,Path.Direction.CW)});val b=portrait;if(b!=null){val n=min(b.width,b.height);p.color=Color.WHITE;c.drawBitmap(b,Rect((b.width-n)/2,(b.height-n)/2,(b.width+n)/2,(b.height+n)/2),RectF(x-r,y-r,x+r,y+r),p)}else{p.color=0xFF535A57.toInt();c.drawCircle(x,y,r,p);p.color=0xFFB7C0BB.toInt();c.drawCircle(x,y-r*0.23f,r*0.25f,p);c.drawOval(RectF(x-r*0.55f,y+r*0.08f,x+r*0.55f,y+r*0.86f),p)};c.restoreToCount(save)}
-    private fun loadCover(url:String){if(customLoading||custom||url==coverKey)return;coverKey=url;portrait=null;val request=++generation;if(url.isBlank())return;worker.execute{val bitmap=runCatching{val conn=URL(url).openConnection() as HttpURLConnection;try{conn.connectTimeout=8000;conn.readTimeout=8000;conn.inputStream.use{BitmapFactory.decodeStream(it)}}finally{conn.disconnect()}}.getOrNull();post{if(generation==request&&!custom){portrait=bitmap;invalidate()}}}}
+    private fun loadCover(url:String){if(customLoading||custom||url==coverKey)return;coverKey=url;val request=++generation;if(url.isBlank())return;worker.execute{val bitmap=runCatching{val conn=URL(url).openConnection() as HttpURLConnection;try{conn.connectTimeout=8000;conn.readTimeout=8000;conn.inputStream.use{BitmapFactory.decodeStream(it)}}finally{conn.disconnect()}}.getOrNull();post{if(generation==request&&!custom){if(bitmap!=null)portrait=bitmap;invalidate()}}}}
     private fun text(c:Canvas,s:String,x:Float,y:Float,size:Float,max:Float,color:Int,center:Boolean=false){p.shader=null;p.color=color;p.typeface=boldTypeface;p.textSize=size;textPaint.set(p);val t=android.text.TextUtils.ellipsize(s,textPaint,max,android.text.TextUtils.TruncateAt.END).toString();c.drawText(t,if(center)x-p.measureText(t)/2 else x,y,p)}
     private fun spectrum(c:Canvas,s:MusicPaintState,area:RectF){p.shader=LinearGradient(area.left,0f,area.right,0f,if(style==2)intArrayOf(0xFFFF109A.toInt(),0xFF08F6DE.toInt())else intArrayOf(0xFFC2FF00.toInt(),0xFF00FFD9.toInt(),0xFFFF139C.toInt()),null,Shader.TileMode.CLAMP);for(i in 0..63){val value=if(s.playing)s.spectrum.getOrElse(i){0f}else 0f;val bw=area.width()/64;val hh=max(sx,value*area.height());c.drawRect(area.left+i*bw,area.bottom-hh,area.left+(i+0.65f)*bw,area.bottom,p)};p.shader=null}
     private fun drawProgress(c:Canvas,s:MusicPaintState,left:Float,right:Float,y:Float,lime:Boolean){progress=RectF(left,y-12*sx,right,y+12*sx);p.color=0xFF777D79.toInt();c.drawRoundRect(RectF(left,y-sx,right,y+sx),sx,sx,p);val x=left+(right-left)*(if(s.duration>0)s.position.toFloat()/s.duration else 0f).coerceIn(0f,1f);p.color=if(lime)0xFFABFF00.toInt()else Color.WHITE;c.drawRoundRect(RectF(left,y-sx,x,y+sx),sx,sx,p);c.drawCircle(x,y,2.5f*sx,p);if(full){text(c,time(s.position),left,y+16*sx,9*sx,70*sx,Color.LTGRAY);text(c,time(s.duration),right-35*sx,y+16*sx,9*sx,45*sx,Color.LTGRAY)}}

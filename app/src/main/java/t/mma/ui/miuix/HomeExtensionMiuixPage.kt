@@ -40,6 +40,7 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
     var weatherSearching by remember { mutableStateOf(false) }
     var photo by remember { mutableStateOf(prefs.getBoolean(Settings.PHOTO, false)) }
     var music by remember { mutableStateOf(prefs.getBoolean(Settings.MUSIC, false)) }
+    var lyricColor by remember { mutableStateOf(prefs.getString(Settings.LYRIC_COLOR, "#FFFFFF,#FFFFFF,#FFFFFF").orEmpty()) }
     var musicStyle by remember { mutableStateOf(prefs.getInt(Settings.MUSIC_STYLE, 1).let { if(it in 2..3) it else 1 }) }
     var customLayout by remember { mutableStateOf(prefs.getBoolean(Settings.CUSTOM_LAYOUT, false)) }
     var layoutRows by remember { mutableStateOf(t.mma.hooks.items.homeextension.HomeCardLayout.rows(prefs.getString(Settings.LAYOUT_ROWS, null), Settings.order(prefs.getString(Settings.ORDER, null)))) }
@@ -161,6 +162,12 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                             ActionRow("样式3使用歌曲封面", "移除自定义照片，恢复当前歌曲封面") { SidePanelImages.clear(context, Settings.MUSIC_THREE_AVATAR_SLOT) }
                         }
                         HomeExtensionSlider(context, "背景透明度", Settings.MUSIC_ALPHA, 100, 0f..100f, true)
+                        ColorPickerRow("悬浮歌词颜色", "分别编辑起始色、中间色、结束色；歌词窗口可自由拖动", lyricColor,
+                            threeColorGradient = true, onReset = {
+                                lyricColor = "#FFFFFF,#FFFFFF,#FFFFFF"
+                                prefs.edit().putString(Settings.LYRIC_COLOR, lyricColor).apply()
+                            }) { lyricColor = it; prefs.edit().putString(Settings.LYRIC_COLOR, it).apply() }
+                        HomeExtensionSlider(context, "悬浮歌词背景透明度", Settings.LYRIC_ALPHA, 40, 0f..100f, true)
                     }
                 } } }
                 item { SmallTitle(text = "首页照片") }

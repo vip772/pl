@@ -1545,9 +1545,6 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                                     contactOverlays[row] = overlay
                                 }
                             } else ripple.setTouchPressed(true)
-                            if (slot == BackgroundBeautySettings.Slot.CONTACTS && diagnosticCounts.computeIfAbsent("contact-region") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
-                                HLog.i("$TAG CONTACT region=$region row=${row.javaClass.name} size=${row.width}x${row.height} children=${(row as? ViewGroup)?.childCount ?: 0}")
-                            }
                             if (diagnosticCounts.computeIfAbsent("ripple:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
                                 HLog.i("$TAG DIAG ripple slot=${slot.key} row=${row.javaClass.name} hotspot=$x/$y")
                             }
@@ -3081,9 +3078,6 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     ) {
         if (t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(view)) return
         if (slot == BackgroundBeautySettings.Slot.CONTACTS && isContactIconSurface(view)) {
-            if (diagnosticCounts.computeIfAbsent("contact-icon") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 16) {
-                HLog.i("$TAG CONTACT icon class=${view.javaClass.name} id=${view.id} size=${view.width}x${view.height} background=${view.background?.javaClass?.name} foreground=${view.foreground?.javaClass?.name} image=${(view as? ImageView)?.drawable?.javaClass?.name}")
-            }
             // A pre-layout pass may have treated an unmeasured icon as a surface.
             state.surfaces[view]?.let { snapshot ->
                 if (snapshot.appliedForeground != null && view.foreground === snapshot.appliedForeground) {

@@ -160,7 +160,55 @@ internal object HomeMusic {
         render();setListener(render);dialog.setOnDismissListener{removeListener(render)};dialog.setContentView(page);dialog.show();dialog.window?.setLayout(-1,-1)
     }
     private fun timer(c:Context){val options=arrayOf("关闭定时","5分钟","10分钟","15分钟","30分钟","45分钟","60分钟");AlertDialog.Builder(c).setTitle("停止播放倒计时").setItems(options){_,i->timerTask?.let{main.removeCallbacks(it)};timerTask=null;if(i>0){val r=Runnable{runCatching{player?.pause()};playing=false;changed();toast(c,"定时结束，已停止播放")};timerTask=r;toast(c,"将在${options[i]}后停止播放");main.postDelayed(r,intArrayOf(0,5,10,15,30,45,60)[i]*60_000L)}}.show()}
-    private fun toggleLyricWindow(c:Context,s:HomeMusicSong?){if(lyricView!=null){runCatching{lyricWindow?.removeView(lyricView)};lyricView=null;main.removeCallbacks(lyricTick);toast(c,"悬浮歌词已关闭");return};if(!Settings.canDrawOverlays(c)){val intent=Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:${c.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);runCatching{c.startActivity(intent)};toast(c,"请授予悬浮窗权限后再次点击歌词");return};val wm=c.getSystemService(Context.WINDOW_SERVICE) as WindowManager;val view=TextView(c).apply{text=s?.lyric?.lineSequence()?.firstOrNull{it.isNotBlank()}?:"暂无歌词";textSize=16f;setTextColor(Color.WHITE);gravity=Gravity.CENTER;setPadding(dp(c,18),dp(c,8),dp(c,18),dp(c,8));background=rounded(c,0x66000000,18);isSingleLine=true;ellipsize=android.text.TextUtils.TruncateAt.MARQUEE;marqueeRepeatLimit=-1;isSelected=true};val type=WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;val lp=WindowManager.LayoutParams(-1,dp(c,44),type,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,-3).apply{gravity=Gravity.TOP or Gravity.CENTER_HORIZONTAL;y=dp(c,28)};runCatching{wm.addView(view,lp);lyricWindow=wm;lyricView=view;main.post(lyricTick)}.onFailure{toast(c,"悬浮歌词窗口无法显示")}}
+    private fun toggleLyricWindow(c:Context,s:HomeMusicSong?){
+        if(lyricView!=null){runCatching{lyricWindow?.removeView(lyricView)};lyricView=null;lyricWindow=null;main.removeCallbacks(lyricTick);toast(c,"悬浮歌词已关闭");return}
+        if(!Settings.canDrawOverlays(c)){
+            val intent=Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION,Uri.parse("package:${c.packageName}")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            runCatching{c.startActivity(intent)};toast(c,"请授予悬浮窗权限后再次点击歌词");return
+        }
+        val wm=c.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        val view=FloatingMusicLyricView(c).apply{
+            text=s?.title?:"暂无歌词";textSize=16f;gravity=Gravity.CENTER
+            setPadding(dp(c,18),dp(c,8),dp(c,18),dp(c,8));isSingleLine=true
+            ellipsize=android.text.TextUtils.TruncateAt.MARQUEE;marqueeRepeatLimit=-1;isSelected=true
+        }
+        val display=android.graphics.Point().also{wm.defaultDisplay.getSize(it)}
+        val density=c.resources.displayMetrics.density
+        val lp=WindowManager.LayoutParams((display.x*0.8f).toInt().coerceAtLeast(1),dp(c,44),WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,android.graphics.PixelFormat.TRANSLUCENT).apply{
+            gravity=Gravity.TOP or Gravity.LEFT
+            x=(prefs(c).getInt(HomeExtensionSettings.LYRIC_X,16)*density).toInt()
+            y=(prefs(c).getInt(HomeExtensionSettings.LYRIC_Y,28)*density).toInt()
+        }
+        fun clamp(){
+            wm.defaultDisplay.getSize(display)
+            lp.width=(display.x*0.8f).toInt().coerceAtLeast(1)
+            lp.x=lp.x.coerceIn(0,(display.x-lp.width).coerceAtLeast(0))
+            lp.y=lp.y.coerceIn(0,(display.y-lp.height).coerceAtLeast(0))
+        }
+        clamp()
+        var startX=0;var startY=0;var touchX=0f;var touchY=0f
+        view.setOnTouchListener{_,event->
+            when(event.actionMasked){
+                android.view.MotionEvent.ACTION_DOWN->{startX=lp.x;startY=lp.y;touchX=event.rawX;touchY=event.rawY;true}
+                android.view.MotionEvent.ACTION_MOVE->{
+                    lp.x=startX+(event.rawX-touchX).toInt();lp.y=startY+(event.rawY-touchY).toInt();clamp()
+                    runCatching{wm.updateViewLayout(view,lp)};true
+                }
+                android.view.MotionEvent.ACTION_UP,android.view.MotionEvent.ACTION_CANCEL->{
+                    prefs(c).edit().putInt(HomeExtensionSettings.LYRIC_X,(lp.x/density).toInt())
+                        .putInt(HomeExtensionSettings.LYRIC_Y,(lp.y/density).toInt()).apply();true
+                }
+                else->true
+            }
+        }
+        view.addOnLayoutChangeListener{_,_,_,_,_,_,_,_,_->
+            val oldX=lp.x;val oldY=lp.y;val oldWidth=lp.width;clamp()
+            if(oldX!=lp.x||oldY!=lp.y||oldWidth!=lp.width)runCatching{wm.updateViewLayout(view,lp)}
+        }
+        runCatching{wm.addView(view,lp);lyricWindow=wm;lyricView=view;main.post(lyricTick)}.onFailure{toast(c,"悬浮歌词窗口无法显示")}
+    }
+
     private val lyricTick=object:Runnable{override fun run(){val view=lyricView?:return;val song=current;val position=runCatching{player?.currentPosition?:0}.getOrDefault(0);val lines=mutableListOf<Pair<Int,String>>();song?.lyric?.lineSequence()?.forEach{line->val matches=Regex("\\[(\\d+):(\\d+(?:\\.\\d+)?)\\]").findAll(line).toList();val text=line.replace(Regex("\\[[^]]*\\]"),"").trim();matches.forEach{m->lines+=(m.groupValues[1].toInt()*60000+(m.groupValues[2].toDouble()*1000).toInt()) to text}};view.text=lines.sortedBy{it.first}.lastOrNull{it.first<=position}?.second?:if(lines.isEmpty())"${song?.title?:"音乐"} · 暂无同步歌词" else song?.title;main.postDelayed(this,250)}}
     private fun updateLyric(s:HomeMusicSong){main.removeCallbacks(lyricTick);if(lyricView!=null)main.post(lyricTick)}
 }

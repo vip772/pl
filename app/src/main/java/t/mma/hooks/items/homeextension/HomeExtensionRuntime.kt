@@ -41,7 +41,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     // Accessed only on main; repeated requests share a single download.
     private val avatarRequests = mutableMapOf<String, MutableList<(Bitmap?) -> Unit>>()
     private val avatarDisk by lazy { java.io.File(context.hostContext().cacheDir, "hchat_contact_avatars").apply { mkdirs() } }
-    private val musicDataKeys = setOf("title", "artist", "url", "cover", "lyric", "source", "source_id", "music_favorites")
+    private val musicDataKeys = setOf("title", "artist", "url", "cover", "lyric", "source", "source_id", "music_favorites", HomeExtensionSettings.LYRIC_X, HomeExtensionSettings.LYRIC_Y, HomeExtensionSettings.LYRIC_COLOR, HomeExtensionSettings.LYRIC_ALPHA)
     private val hooks = mutableListOf<XC_MethodHook.Unhook>()
     private val sessions = WeakHashMap<ListView, Session>()
     private val avatars = object : LruCache<String, Bitmap>(4 * 1024 * 1024) {
