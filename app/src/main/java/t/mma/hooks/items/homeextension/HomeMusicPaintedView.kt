@@ -20,19 +20,62 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     private var decoration:Bitmap?=null;private var decorationStyle=0;private var portrait:Bitmap?=null;private var custom=false;private var coverKey="";private var generation=0
     private var lyricSource="";private var lines=emptyList<Pair<Int,String>>();private var scroll=-1f;private var lastPosition=-1
     private var sx=1f;private var sy=1f
-    private val frame=object:Runnable{override fun run(){if(visibility==VISIBLE)invalidate();if(isAttachedToWindow)postDelayed(this,33)}}
+    private val visibleRect=Rect()
+    private var scheduled=false
+    private var needsRefresh=true
+    private var customLoading=false
+    private var cachedState:MusicPaintState?=null
+    private val textPaint=android.text.TextPaint()
+    private val boldTypeface=Typeface.create("sans-serif",Typeface.BOLD)
+    private val changed:()->Unit={needsRefresh=true;resumeFrames()}
+    private val scrollListener=android.view.ViewTreeObserver.OnScrollChangedListener{resumeFrames()}
+    private var observer:android.view.ViewTreeObserver?=null
+    private fun visibleForFrames()=isAttachedToWindow&&isShown&&windowVisibility==VISIBLE&&hasWindowFocus()&&getGlobalVisibleRect(visibleRect)
+    private val frame=object:Runnable{
+        override fun run(){
+            scheduled=false
+            if(!visibleForFrames())return
+            val snapshot=state();cachedState=snapshot
+            invalidate();needsRefresh=false
+            if(snapshot.playing){scheduled=true;postDelayed(this,33)}
+        }
+    }
+    private fun resumeFrames(){
+        if(!visibleForFrames()){removeCallbacks(frame);scheduled=false;return}
+        if(!scheduled){scheduled=true;postOnAnimation(frame)}
+    }
     init{isClickable=true;isFocusable=true;contentDescription="样式${style}音乐播放器"}
-    override fun onAttachedToWindow(){super.onAttachedToWindow();val slot=if(style==2)HomeExtensionSettings.MUSIC_AVATAR_SLOT else HomeExtensionSettings.MUSIC_THREE_AVATAR_SLOT;portrait=SidePanelImages.load(context,slot);custom=portrait!=null;coverKey="";post(frame)}
-    override fun onDetachedFromWindow(){removeCallbacks(frame);generation++;portrait=null;decoration?.recycle();decoration=null;super.onDetachedFromWindow()}
+    override fun onAttachedToWindow(){
+        super.onAttachedToWindow()
+        HomeMusic.setListener(changed)
+        observer=viewTreeObserver.also{it.addOnScrollChangedListener(scrollListener)}
+        val slot=if(style==2)HomeExtensionSettings.MUSIC_AVATAR_SLOT else HomeExtensionSettings.MUSIC_THREE_AVATAR_SLOT
+        customLoading=true;custom=false;coverKey="";val request=++generation
+        worker.execute{
+            val bitmap=runCatching{SidePanelImages.load(context,slot)}.getOrNull()
+            post{if(isAttachedToWindow&&generation==request){portrait=bitmap;custom=bitmap!=null;customLoading=false;needsRefresh=true;resumeFrames()}}
+        }
+        resumeFrames()
+    }
+    override fun onDetachedFromWindow(){
+        HomeMusic.removeListener(changed)
+        observer?.takeIf{it.isAlive}?.removeOnScrollChangedListener(scrollListener);observer=null
+        removeCallbacks(frame);scheduled=false;generation++;portrait=null;cachedState=null;decoration=null
+        super.onDetachedFromWindow()
+    }
+    override fun onLayout(changed:Boolean,left:Int,top:Int,right:Int,bottom:Int){super.onLayout(changed,left,top,right,bottom);resumeFrames()}
+    override fun onWindowFocusChanged(hasWindowFocus:Boolean){super.onWindowFocusChanged(hasWindowFocus);resumeFrames()}
+    override fun onWindowVisibilityChanged(visibility:Int){super.onWindowVisibilityChanged(visibility);resumeFrames()}
+    override fun onVisibilityChanged(changedView:View,visibility:Int){super.onVisibilityChanged(changedView,visibility);if(isAttachedToWindow)post{resumeFrames()}}
     override fun onMeasure(w:Int,h:Int){val width=MeasureSpec.getSize(w);val desired=(width*0.58f).toInt();setMeasuredDimension(width,if(full)MeasureSpec.getSize(h)else resolveSize(desired,h))}
     private fun fill(canvas:Canvas,rect:RectF,color:Int,r:Float=0f){p.shader=null;p.style=Paint.Style.FILL;p.color=color;if(r>0)canvas.drawRoundRect(rect,r,r,p)else canvas.drawRect(rect,p)}
     private fun stroke(canvas:Canvas,path:Path,color:Int,width:Float){p.shader=null;p.style=Paint.Style.STROKE;p.strokeCap=Paint.Cap.ROUND;p.strokeJoin=Paint.Join.ROUND;p.strokeWidth=width;p.color=color;canvas.drawPath(path,p);p.style=Paint.Style.FILL}
     override fun onDraw(canvas:Canvas){
         super.onDraw(canvas);val w=width.toFloat();val h=height.toFloat();if(w<=0||h<=0)return
         // Normalised layout only positions components. Glyphs, discs and portraits always use one scale.
-        sx=w/360f;sy=h/(if(full)720f else 209f);hits.clear();val s=state();loadCover(s.coverUrl)
+        sx=w/360f;sy=h/(if(full)720f else 209f);hits.clear();val s=cachedState?.takeUnless{needsRefresh}?:state().also{cachedState=it};loadCover(s.coverUrl)
         val alpha=HomeExtensionSettings.preferences(context).getInt(HomeExtensionSettings.MUSIC_ALPHA,100).coerceIn(0,100)*255/100
-        if(decoration?.width!=width||decoration?.height!=height||decorationStyle!=style){decoration?.recycle();decoration=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888).also{val bg=Canvas(it);if(style==2)graffiti(bg,w,h)else vinylBackground(bg,w,h)};decorationStyle=style};p.alpha=alpha;decoration?.let{canvas.drawBitmap(it,0f,0f,p)};p.alpha=255
+        if(decoration?.width!=width||decoration?.height!=height||decorationStyle!=style){decoration=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888).also{val bg=Canvas(it);if(style==2)graffiti(bg,w,h)else vinylBackground(bg,w,h)};decorationStyle=style};p.alpha=alpha;decoration?.let{canvas.drawBitmap(it,0f,0f,p)};p.alpha=255
         if(full){
             if(style==2){drawPortrait(canvas,112*sx,187*sy,51*sx);text(canvas,s.title,50*sx,524*sy,23*sx,83*sx,Color.BLACK);text(canvas,"${time(s.position)} / ${time(s.duration)}",50*sx,546*sy,12*sx,105*sx,Color.BLACK);spectrum(canvas,s,RectF(159*sx,501*sy,289*sx,546*sy));tools(canvas,384*sy,Color.BLACK)}
             else{drawPortrait(canvas,180*sx,204*sy,70*sx);text(canvas,s.title,180*sx,408*sy,29*sx,290*sx,Color.WHITE,true);text(canvas,"${time(s.position)} / ${time(s.duration)}",180*sx,438*sy,15*sx,290*sx,Color.WHITE,true);lyrics(canvas,s);tools(canvas,682*sy,Color.WHITE)}
@@ -82,11 +125,11 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     }
     private fun texture(c:Canvas,w:Float,h:Float,color:Int){val r=java.util.Random(71);p.color=color;for(i in 0..1800){val x=r.nextFloat()*w;val y=r.nextFloat()*h;c.drawCircle(x,y,0.25f+0.35f*sx,p)}}
     private fun drawPortrait(c:Canvas,x:Float,y:Float,r:Float){val save=c.save();c.clipPath(Path().apply{addCircle(x,y,r,Path.Direction.CW)});val b=portrait;if(b!=null){val n=min(b.width,b.height);p.color=Color.WHITE;c.drawBitmap(b,Rect((b.width-n)/2,(b.height-n)/2,(b.width+n)/2,(b.height+n)/2),RectF(x-r,y-r,x+r,y+r),p)}else{p.color=0xFF535A57.toInt();c.drawCircle(x,y,r,p);p.color=0xFFB7C0BB.toInt();c.drawCircle(x,y-r*0.23f,r*0.25f,p);c.drawOval(RectF(x-r*0.55f,y+r*0.08f,x+r*0.55f,y+r*0.86f),p)};c.restoreToCount(save)}
-    private fun loadCover(url:String){if(custom||url==coverKey)return;coverKey=url;portrait=null;val request=++generation;if(url.isBlank())return;worker.execute{val bitmap=runCatching{val conn=URL(url).openConnection() as HttpURLConnection;try{conn.connectTimeout=8000;conn.readTimeout=8000;conn.inputStream.use{BitmapFactory.decodeStream(it)}}finally{conn.disconnect()}}.getOrNull();post{if(generation==request&&!custom){portrait=bitmap;invalidate()}}}}
-    private fun text(c:Canvas,s:String,x:Float,y:Float,size:Float,max:Float,color:Int,center:Boolean=false){p.shader=null;p.color=color;p.typeface=Typeface.create("sans-serif",Typeface.BOLD);p.textSize=size;val t=android.text.TextUtils.ellipsize(s,android.text.TextPaint(p),max,android.text.TextUtils.TruncateAt.END).toString();c.drawText(t,if(center)x-p.measureText(t)/2 else x,y,p)}
+    private fun loadCover(url:String){if(customLoading||custom||url==coverKey)return;coverKey=url;portrait=null;val request=++generation;if(url.isBlank())return;worker.execute{val bitmap=runCatching{val conn=URL(url).openConnection() as HttpURLConnection;try{conn.connectTimeout=8000;conn.readTimeout=8000;conn.inputStream.use{BitmapFactory.decodeStream(it)}}finally{conn.disconnect()}}.getOrNull();post{if(generation==request&&!custom){portrait=bitmap;invalidate()}}}}
+    private fun text(c:Canvas,s:String,x:Float,y:Float,size:Float,max:Float,color:Int,center:Boolean=false){p.shader=null;p.color=color;p.typeface=boldTypeface;p.textSize=size;textPaint.set(p);val t=android.text.TextUtils.ellipsize(s,textPaint,max,android.text.TextUtils.TruncateAt.END).toString();c.drawText(t,if(center)x-p.measureText(t)/2 else x,y,p)}
     private fun spectrum(c:Canvas,s:MusicPaintState,area:RectF){p.shader=LinearGradient(area.left,0f,area.right,0f,if(style==2)intArrayOf(0xFFFF109A.toInt(),0xFF08F6DE.toInt())else intArrayOf(0xFFC2FF00.toInt(),0xFF00FFD9.toInt(),0xFFFF139C.toInt()),null,Shader.TileMode.CLAMP);for(i in 0..63){val value=if(s.playing)s.spectrum.getOrElse(i){0f}else 0f;val bw=area.width()/64;val hh=max(sx,value*area.height());c.drawRect(area.left+i*bw,area.bottom-hh,area.left+(i+0.65f)*bw,area.bottom,p)};p.shader=null}
     private fun drawProgress(c:Canvas,s:MusicPaintState,left:Float,right:Float,y:Float,lime:Boolean){progress=RectF(left,y-12*sx,right,y+12*sx);p.color=0xFF777D79.toInt();c.drawRoundRect(RectF(left,y-sx,right,y+sx),sx,sx,p);val x=left+(right-left)*(if(s.duration>0)s.position.toFloat()/s.duration else 0f).coerceIn(0f,1f);p.color=if(lime)0xFFABFF00.toInt()else Color.WHITE;c.drawRoundRect(RectF(left,y-sx,x,y+sx),sx,sx,p);c.drawCircle(x,y,2.5f*sx,p);if(full){text(c,time(s.position),left,y+16*sx,9*sx,70*sx,Color.LTGRAY);text(c,time(s.duration),right-35*sx,y+16*sx,9*sx,45*sx,Color.LTGRAY)}}
-    private fun icon(c:Canvas,key:String,act:String,x:Float,y:Float,size:Float,color:Int){val bounds=size/0.52f;val v=icons.getOrPut(key){MusicIcon(context,key)};v.setTextColor(color);v.layout(0,0,bounds.toInt(),bounds.toInt());val save=c.save();c.translate(x-bounds/2,y-bounds/2);v.draw(c);c.restoreToCount(save);val hit=max(18*sx,size*0.7f);hits+=RectF(x-hit,y-hit,x+hit,y+hit) to act}
+    private fun icon(c:Canvas,key:String,act:String,x:Float,y:Float,size:Float,color:Int){val bounds=size/0.52f;val v=icons.getOrPut(key){MusicIcon(context,key)};v.setTextColor(color);if(v.width!=bounds.toInt()||v.height!=bounds.toInt())v.layout(0,0,bounds.toInt(),bounds.toInt());val save=c.save();c.translate(x-bounds/2,y-bounds/2);v.draw(c);c.restoreToCount(save);val hit=max(18*sx,size*0.7f);hits+=RectF(x-hit,y-hit,x+hit,y+hit) to act}
     private fun playIcon(c:Canvas,s:MusicPaintState,x:Float,y:Float,r:Float,dark:Boolean){p.color=if(dark)Color.BLACK else Color.WHITE;if(dark)c.drawCircle(x,y,r,p)else{p.style=Paint.Style.STROKE;p.strokeWidth=1.5f*sx;c.drawCircle(x,y,r,p);p.style=Paint.Style.FILL};icon(c,if(s.playing)"Ⅱ"else"▶","play",x,y,r*0.9f,if(dark)0xFFB4FF00.toInt()else Color.WHITE)}
     private fun controls(c:Canvas,s:MusicPaintState,y:Float,dark:Boolean){val color=if(dark)Color.BLACK else Color.WHITE;icon(c,"|◀","previous",107*sx,y,25*sx,color);playIcon(c,s,180*sx,y,25*sx,dark);icon(c,"▶|","next",253*sx,y,25*sx,color);if(style==2)icon(c,"☰","favorites",294*sx,y,18*sx,color)}
     private fun tools(c:Canvas,y:Float,color:Int){val xs=if(style==2)floatArrayOf(178f,216f,254f,292f)else floatArrayOf(72f,144f,216f,288f);arrayOf("☷","♫","◷","▤").forEachIndexed{i,key->icon(c,key,arrayOf("versions","quality","timer","lyrics")[i],xs[i]*sx,y,21*sx,color)}}

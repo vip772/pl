@@ -66,6 +66,11 @@ internal class ContactOrbitRow(context: Context) : LinearLayout(context) {
         removeCallbacks(frame); scheduled = false
         super.onDetachedFromWindow()
     }
+    override fun onWindowVisibilityChanged(visibility: Int) {
+        super.onWindowVisibilityChanged(visibility)
+        if (visibility == VISIBLE) refresh()
+        else { removeCallbacks(frame); scheduled = false }
+    }
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
         super.onWindowFocusChanged(hasWindowFocus)
         if (hasWindowFocus) { updateColors(); refresh() }

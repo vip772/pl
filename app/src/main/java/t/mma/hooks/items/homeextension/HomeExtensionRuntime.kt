@@ -21,6 +21,8 @@ import t.mma.utils.HLog
 import t.mma.utils.KavaReflector
 import java.lang.ref.WeakReference
 import java.net.URL
+import java.net.HttpURLConnection
+import android.os.SystemClock
 import t.mma.hooks.items.homesidepanel.SidePanelMediaView
 import t.mma.hooks.items.homesidepanel.SidePanelImages
 import t.mma.hooks.items.homesidepanel.HomeSidePanelSettings
@@ -35,14 +37,18 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     private val prefs = HomeExtensionSettings.preferences(context.hostContext())
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
+    private val avatarWorker = Executors.newFixedThreadPool(3)
+    // Accessed only on main; repeated requests share a single download.
+    private val avatarRequests = mutableMapOf<String, MutableList<(Bitmap?) -> Unit>>()
+    private val musicDataKeys = setOf("title", "artist", "url", "cover", "lyric", "source", "source_id", "music_favorites")
     private val hooks = mutableListOf<XC_MethodHook.Unhook>()
     private val sessions = WeakHashMap<ListView, Session>()
     private val avatars = object : LruCache<String, Bitmap>(4 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
     @Volatile private var destroyed = false
-    private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        main.post { sessions.values.toList().forEach { it.safeRender() } }
+    private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == null || key !in musicDataKeys) main.post { sessions.values.toList().forEach { it.safeRender() } }
     }
     private var changeSubscription: t.mma.hooks.api.conversation.WeChatConversationChangeApi.Subscription? = null
     private val updateRecent = Runnable { if (!destroyed) sessions.values.toList().forEach { it.invalidateContacts() } }
@@ -126,8 +132,44 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         sessions.toList().forEach { (list, session) -> session.dispose(); list.removeHeaderView(session.root) }
         sessions.clear()
         worker.shutdownNow()
+        avatarWorker.shutdownNow()
+        avatarRequests.clear()
         avatars.evictAll()
     }
+    private fun requestAvatar(url: String, callback: (Bitmap?) -> Unit) {
+        avatars.get(url)?.let { callback(it); return }
+        avatarRequests[url]?.let { it.add(callback); return }
+        avatarRequests[url] = mutableListOf(callback)
+        avatarWorker.execute {
+            val started = SystemClock.uptimeMillis()
+            val result = runCatching {
+                val address = URL(url)
+                require(address.protocol == "http" || address.protocol == "https")
+                val connection = address.openConnection() as HttpURLConnection
+                try {
+                    connection.connectTimeout = 1500; connection.readTimeout = 1500
+                    connection.inputStream.use { input ->
+                        val bytes = input.readBytesLimited(512 * 1024) ?: error("avatar too large")
+                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+                        var sample = 1
+                        while (bounds.outWidth / sample > 128 || bounds.outHeight / sample > 128) sample *= 2
+                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
+                            ?: error("avatar decode failed")
+                    }
+                } finally { connection.disconnect() }
+            }
+            if (!destroyed) main.post {
+                val callbacks = avatarRequests.remove(url).orEmpty()
+                if (!destroyed) {
+                    result.getOrNull()?.let { avatars.put(url, it) }
+                    result.exceptionOrNull()?.let { HLog.e("[Hchat:HomeExtension] 头像加载失败，耗时=${SystemClock.uptimeMillis() - started}ms", it) }
+                    callbacks.forEach { it(result.getOrNull()) }
+                }
+            }
+        }
+    }
+
     private data class Contact(val id: String, val name: String, val avatar: String, val group: Boolean)
     private inner class Session(list: ListView) {
         private val ctx = list.context
@@ -167,9 +209,10 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             photoHolder = null; photoSignature = null
         }
         fun invalidateContacts() { loadedAt = 0L; safeRender() }
-        private var generation = 0
         private var loading = false
         private var cache = emptyList<Contact>()
+        private var contactsPanel: View? = null
+        private var contactsGeneration = 0
         private var loadedAt = 0L
         private val textForegroundColor: Int get() = if (dark()) Color.WHITE else Color.rgb(35, 39, 45)
         private fun dark() = ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
@@ -195,8 +238,13 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 renderQueued = false
                 if (!destroyed && !refreshing) {
                     refreshing = true
+                    val started = SystemClock.uptimeMillis()
                     try { render() } catch (error: Throwable) { HLog.e("[Hchat:HomeExtension] 刷新失败", error) }
-                    finally { refreshing = false }
+                    finally {
+                        refreshing = false
+                        val elapsed = SystemClock.uptimeMillis() - started
+                        if (elapsed > 100) HLog.e("[Hchat:HomeExtension] 首页刷新耗时=${elapsed}ms")
+                    }
                 }
             }
         }
@@ -204,7 +252,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             if (destroyed) return
             val date = LocalDate.now()
             if (today != date) { today = date; week = date }
-            val signature = listOf(prefs.all.toSortedMap().toString(), today.toString(), cache.toString(),
+            val signature = listOf(prefs.all.filterKeys { it !in musicDataKeys }.toSortedMap().toString(), today.toString(),
                 (if (prefs.getBoolean(HomeExtensionSettings.WEATHER, false)) System.currentTimeMillis() / (30*60_000L) else 0L).toString(),
                 ctx.resources.configuration.uiMode.toString(),
                 HomeSidePanelSettings.preferences(ctx).getLong(SidePanelAppearance.photoRevision(HomeExtensionSettings.PHOTO_SLOT), 0L).toString()).joinToString("|")
@@ -213,8 +261,9 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 refreshContactsIfNeeded()
                 return
             }
-            generation++
+            contactsGeneration++
             root.removeAllViews()
+            contactsPanel = null
             val enabled = prefs.getBoolean(HomeExtensionSettings.ENABLE, false)
             val calendar = enabled && prefs.getBoolean(HomeExtensionSettings.CALENDAR, true)
             val recent = enabled && (prefs.getBoolean(HomeExtensionSettings.FAVORITES, false) || prefs.getBoolean(HomeExtensionSettings.RECENT, true))
@@ -309,7 +358,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             else {
                 val orbitEnabled = prefs.getBoolean(HomeExtensionSettings.AVATAR_ORBIT, true)
                 val row = if (orbitEnabled) ContactOrbitRow(ctx) else LinearLayout(ctx)
-                val token = generation
+                val token = ++contactsGeneration
                 contacts.forEach { contact ->
                     val column = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER; setPadding(dp(3), dp(5), dp(3), dp(4)) }
                     val avatar = ImageView(ctx).apply {
@@ -339,6 +388,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 }
                 panel.addView(HorizontalScrollView(ctx).apply { isHorizontalScrollBarEnabled = false; addView(row) })
             }
+            contactsPanel = panel
             root.addView(panel)
         }
         private fun renderPhoto() {
@@ -389,39 +439,54 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 val result = runCatching {
                     val contacts = WeChatApis.contacts() ?: error("联系人 API 未就绪")
                     val conversations = WeChatApis.conversations() ?: error("会话 API 未就绪")
-                    val favorites = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false)
-                    val ids = if (favorites) HomeExtensionSettings.favorites(prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")) else conversations.getRecentConversationUsernames(200)
-                    ids.filter { favorites || contacts.isGroup(it) || contacts.isFriend(it) }.take(8).map { id ->
+                    val favorites = config.startsWith("true")
+                    val ids = if (favorites) HomeExtensionSettings.favorites(config.removePrefix("true")) else conversations.getRecentConversationUsernames(200)
+                    ids.asSequence().filter { favorites || contacts.isGroup(it) || contacts.isFriend(it) }.take(8).map { id ->
                         val group = contacts.isGroup(id)
                         Contact(id, contacts.getDisplayName(id).orEmpty().ifBlank { id }, contacts.getAvatarUrl(id, false).orEmpty(), group)
-                    }
+                    }.toList()
                 }
                 if (!destroyed) main.post {
                     loading = false
-                    if (!destroyed) { cache = result.getOrDefault(emptyList()); loadedConfig = config; loadedAt = System.currentTimeMillis(); safeRender() }
+                    val currentConfig = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false).toString() + prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")
+                    if (currentConfig != config) { refreshContactsIfNeeded(); return@post }
+                    result.onSuccess { next ->
+                        val changed = next != cache || loadedConfig != config
+                        cache = next; loadedConfig = config; loadedAt = System.currentTimeMillis()
+                        if (changed) updateContactsPanel()
+                    }.onFailure {
+                        // Keep the last good list; allow another attempt after a short backoff.
+                        loadedAt = System.currentTimeMillis() - 25_000L
+                        HLog.e("[Hchat:HomeExtension] 联系人刷新失败，保留缓存", it)
+                    }
                 }
             }
         }
-        private fun loadAvatar(url: String, target: ImageView, token: Int) {
+        private fun updateContactsPanel() {
+            val old = contactsPanel ?: return
+            val parent = old.parent as? android.view.ViewGroup ?: return
+            val index = parent.indexOfChild(old)
+            val params = old.layoutParams
+            val previousCompact = compactCard
+            compactCard = parent is HomeCardRow
+            try {
+                renderRecent()
+                val replacement = contactsPanel ?: return
+                root.removeView(replacement)
+                parent.removeView(old)
+                parent.addView(replacement, index, params)
+            } finally { compactCard = previousCompact }
+        }
+        private fun loadAvatar(url: String, target: ImageView, token: Int, attempt: Int = 0) {
             avatars.get(url)?.let { target.setImageBitmap(it); return }
             val ref = WeakReference(target)
-            worker.execute {
-                val bitmap = runCatching {
-                    val address = URL(url)
-                    if (address.protocol !in listOf("https", "http")) return@runCatching null
-                    val connection = address.openConnection().apply { connectTimeout = 1500; readTimeout = 1500 }
-                    connection.getInputStream().use { input ->
-                        val bytes = input.readBytesLimited(512 * 1024) ?: return@use null
-                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-                        var sample = 1
-                        while (bounds.outWidth / sample > 128 || bounds.outHeight / sample > 128) sample *= 2
-                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-                    }
-                }.getOrNull()
-                if (bitmap != null && !destroyed) {
-                    avatars.put(url, bitmap)
-                    main.post { if (!destroyed && generation == token) ref.get()?.setImageBitmap(bitmap) }
+            requestAvatar(url) { bitmap ->
+                val view = ref.get()
+                if (!destroyed && contactsGeneration == token && view != null) {
+                    if (bitmap != null) view.setImageBitmap(bitmap)
+                    else if (attempt < 2) main.postDelayed({
+                        if (!destroyed && contactsGeneration == token) ref.get()?.let { loadAvatar(url, it, token, attempt + 1) }
+                    }, (attempt + 1) * 2000L)
                 }
             }
         }
