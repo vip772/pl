@@ -70,7 +70,7 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
             post{
                 if(!isAttachedToWindow||customGeneration!=request)return@post
                 if(bitmap!=null){portrait=bitmap;custom=true;coverKey=""}
-                else if(!exists){custom=false;portrait=null;coverKey=""}
+                else if(!exists&&custom){custom=false;portrait=null;coverKey=""}
                 customLoading=false;needsRefresh=true;resumeFrames()
                 if(exists&&bitmap==null&&attempt<2)postDelayed({if(isAttachedToWindow&&customGeneration==request)loadCustomPortrait(attempt+1)},1000L*(attempt+1))
             }
@@ -79,7 +79,7 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     override fun onDetachedFromWindow(){
         HomeMusic.removeListener(changed)
         observer?.takeIf{it.isAlive}?.removeOnScrollChangedListener(scrollListener);observer=null
-        removeCallbacks(frame);scheduled=false;rotationFrameAt=0L;generation++;customGeneration++;customLoading=false;cachedState=null;decoration=null
+        removeCallbacks(frame);scheduled=false;rotationFrameAt=0L;generation++;customGeneration++;customLoading=false;coverKey="";cachedState=null;decoration=null
         super.onDetachedFromWindow()
     }
     override fun onLayout(changed:Boolean,left:Int,top:Int,right:Int,bottom:Int){super.onLayout(changed,left,top,right,bottom);resumeFrames()}
@@ -144,7 +144,30 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     }
     private fun texture(c:Canvas,w:Float,h:Float,color:Int){val r=java.util.Random(71);p.color=color;for(i in 0..1800){val x=r.nextFloat()*w;val y=r.nextFloat()*h;c.drawCircle(x,y,0.25f+0.35f*sx,p)}}
     private fun drawPortrait(c:Canvas,x:Float,y:Float,r:Float){val save=c.save();c.clipPath(Path().apply{addCircle(x,y,r,Path.Direction.CW)});if(style==3)c.rotate(portraitAngle,x,y);val b=portrait;if(b!=null){val n=min(b.width,b.height);p.color=Color.WHITE;c.drawBitmap(b,Rect((b.width-n)/2,(b.height-n)/2,(b.width+n)/2,(b.height+n)/2),RectF(x-r,y-r,x+r,y+r),p)}else{p.color=0xFF535A57.toInt();c.drawCircle(x,y,r,p);p.color=0xFFB7C0BB.toInt();c.drawCircle(x,y-r*0.23f,r*0.25f,p);c.drawOval(RectF(x-r*0.55f,y+r*0.08f,x+r*0.55f,y+r*0.86f),p)};c.restoreToCount(save)}
-    private fun loadCover(url:String){if(customLoading||custom||url==coverKey)return;coverKey=url;val request=++generation;if(url.isBlank())return;worker.execute{val bitmap=runCatching{val conn=URL(url).openConnection() as HttpURLConnection;try{conn.connectTimeout=8000;conn.readTimeout=8000;conn.inputStream.use{BitmapFactory.decodeStream(it)}}finally{conn.disconnect()}}.getOrNull();post{if(generation==request&&!custom){if(bitmap!=null)portrait=bitmap;invalidate()}}}}
+    private fun loadCover(url:String){
+        if(custom)return
+        // Cache lookup is immediate, even while the optional custom photo is checked.
+        // This lets a new player window draw the existing album art on its first frame.
+        covers.get(url)?.let{bitmap->
+            if(!custom){portrait=bitmap;coverKey=url}
+            return
+        }
+        if(customLoading||url==coverKey)return
+        coverKey=url
+        val request=++generation
+        if(url.isBlank())return
+        worker.execute{
+            val bitmap=runCatching{
+                val conn=URL(url).openConnection() as HttpURLConnection
+                try{conn.connectTimeout=8000;conn.readTimeout=8000;conn.inputStream.use{BitmapFactory.decodeStream(it)}}
+                finally{conn.disconnect()}
+            }.getOrNull()
+            // Publish before posting to the original view, which may already be detached.
+            if(bitmap!=null)covers.put(url,bitmap)
+            post{if(isAttachedToWindow&&generation==request&&!custom){if(bitmap!=null)portrait=bitmap;invalidate()}}
+        }
+    }
+
     private fun text(c:Canvas,s:String,x:Float,y:Float,size:Float,max:Float,color:Int,center:Boolean=false){p.shader=null;p.color=color;p.typeface=boldTypeface;p.textSize=size;textPaint.set(p);val t=android.text.TextUtils.ellipsize(s,textPaint,max,android.text.TextUtils.TruncateAt.END).toString();c.drawText(t,if(center)x-p.measureText(t)/2 else x,y,p)}
     private fun spectrum(c:Canvas,s:MusicPaintState,area:RectF){p.shader=LinearGradient(area.left,0f,area.right,0f,if(style==2)intArrayOf(0xFFFF109A.toInt(),0xFF08F6DE.toInt())else intArrayOf(0xFFC2FF00.toInt(),0xFF00FFD9.toInt(),0xFFFF139C.toInt()),null,Shader.TileMode.CLAMP);for(i in 0..63){val value=if(s.playing)s.spectrum.getOrElse(i){0f}else 0f;val bw=area.width()/64;val hh=max(sx,value*area.height());c.drawRect(area.left+i*bw,area.bottom-hh,area.left+(i+0.65f)*bw,area.bottom,p)};p.shader=null}
     private fun drawProgress(c:Canvas,s:MusicPaintState,left:Float,right:Float,y:Float,lime:Boolean){progress=RectF(left,y-12*sx,right,y+12*sx);p.color=0xFF777D79.toInt();c.drawRoundRect(RectF(left,y-sx,right,y+sx),sx,sx,p);val x=left+(right-left)*(if(s.duration>0)s.position.toFloat()/s.duration else 0f).coerceIn(0f,1f);p.color=if(lime)0xFFABFF00.toInt()else Color.WHITE;c.drawRoundRect(RectF(left,y-sx,x,y+sx),sx,sx,p);c.drawCircle(x,y,2.5f*sx,p);if(full){text(c,time(s.position),left,y+16*sx,9*sx,70*sx,Color.LTGRAY);text(c,time(s.duration),right-35*sx,y+16*sx,9*sx,45*sx,Color.LTGRAY)}}
@@ -156,6 +179,10 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     override fun onTouchEvent(e:MotionEvent):Boolean{when(e.actionMasked){MotionEvent.ACTION_DOWN->{downX=e.x;downY=e.y;tracking=progress.contains(e.x,e.y);parent?.requestDisallowInterceptTouchEvent(tracking);return true};MotionEvent.ACTION_MOVE->{if(tracking)seek(((e.x-progress.left)/progress.width()).coerceIn(0f,1f));return true};MotionEvent.ACTION_CANCEL->{tracking=false;parent?.requestDisallowInterceptTouchEvent(false);return true};MotionEvent.ACTION_UP->{parent?.requestDisallowInterceptTouchEvent(false);if(tracking){seek(((e.x-progress.left)/progress.width()).coerceIn(0f,1f));tracking=false;return true};if(abs(e.x-downX)>12*sx||abs(e.y-downY)>12*sx)return true;performClick();val hit=hits.filter{it.first.contains(e.x,e.y)}.minByOrNull{val dx=e.x-it.first.centerX();val dy=e.y-it.first.centerY();dx*dx+dy*dy};if(hit!=null)action(hit.second)else if(!full)action("open");return true}};return true}
     override fun performClick():Boolean{super.performClick();return true}
     private fun time(ms:Int)="%02d:%02d".format(ms.coerceAtLeast(0)/60000,ms.coerceAtLeast(0)/1000%60)
-    companion object{private val worker=Executors.newFixedThreadPool(2){Thread(it,"Hchat-MusicCover").apply{isDaemon=true}}}
+    companion object{
+        private val covers=object:android.util.LruCache<String,Bitmap>(12*1024*1024){
+            override fun sizeOf(key:String,value:Bitmap)=value.byteCount
+        }
+        private val worker=Executors.newFixedThreadPool(2){Thread(it,"Hchat-MusicCover").apply{isDaemon=true}}}
 }
 internal data class MusicPaintState(val title:String,val position:Int,val duration:Int,val playing:Boolean,val spectrum:FloatArray,val lyric:String="",val coverUrl:String="")
