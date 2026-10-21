@@ -310,6 +310,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private class HostState(val activity: Activity) {
+        val inputUnderlay = ChatInputMessageUnderlay()
         val surfaces = IdentityHashMap<View, SurfaceSnapshot>()
         val nativeImages = IdentityHashMap<ImageView, NativeImageSnapshot>()
         val loadedBitmaps = LinkedHashMap<BackgroundBeautySettings.Slot, LoadedBitmap>(4, 0.75f, true)
@@ -2552,6 +2553,25 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 }
             })
         }
+        // ss.xml: the native vertical LinearLayout reserves a separate footer region.
+        val scrollClass = KavaReflector.loadClass(ChatInputMessageUnderlay.SCROLL, context.hostClassLoader())
+        findWechatVerifiedMethod(scrollClass, "onLayout", Boolean::class.javaPrimitiveType!!,
+            Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
+            Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { method ->
+            hookOnce(method, after = { param ->
+                val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
+                val activity = findActivity(scroll) ?: return@hookOnce
+                val state = states[activity] ?: return@hookOnce
+                try {
+                    val enabled = !destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT &&
+                        hasConfiguredBackground(activity) && WeChatApis.version()?.current()?.versionName == "8.0.78"
+                    if (enabled) state.inputUnderlay.apply(scroll) else state.inputUnderlay.restore(scroll)
+                } catch (e: Throwable) {
+                    state.inputUnderlay.restore(scroll)
+                    HLog.e("$TAG 输入栏消息穿透布局失败", e)
+                }
+            })
+        }
         listOf("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", "com.tencent.mm.pluginsdk.ui.chat.ChatFooter").forEach { className ->
             val clazz = KavaReflector.loadClass(className, context.hostClassLoader()) ?: return@forEach
             val apply: (XC_MethodHook.MethodHookParam) -> Unit = { param ->
@@ -3270,6 +3290,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     }
 
     private fun restoreSlot(state: HostState, slot: BackgroundBeautySettings.Slot) {
+        if (slot == BackgroundBeautySettings.Slot.CHAT) state.inputUnderlay.restoreAll()
         preparedRoots.entries.removeAll { it.value.first === state }
         state.loadedBitmaps.remove(slot)
         state.surfaces.entries.toList().forEach { (view, snapshot) ->
@@ -3448,6 +3469,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     }
 
     private fun restoreState(state: HostState) {
+        state.inputUnderlay.restoreAll()
         preparedRoots.entries.removeAll { it.value.first === state }
         state.surfaces.entries.toList().forEach { (view, snapshot) ->
             restoreSurface(view, snapshot)
