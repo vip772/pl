@@ -49,10 +49,10 @@ internal class FloatingChatHeaderCapsule {
             return if (id == 0) null else header.findViewById<View>(id)
         }
         val nativeBack = named("actionbar_up_indicator") ?: return fail(header)
-        val nativeTitle = header.findViewById<TextView>(android.R.id.text1) ?: return fail(header)
+        val nativeTitle = named("obn") as? TextView ?: return fail(header)
         val menu = named("coy") as? ViewGroup ?: return fail(header)
         val actions = mutableListOf<View>()
-        collectActions(menu, actions)
+        collectMenuActions(menu, actions)
         val nativeMore = actions.singleOrNull() ?: return fail(header)
         if (!nativeBack.isClickable || nativeBack.visibility != View.VISIBLE || nativeTitle.text.isNullOrBlank()) return fail(header)
         val state = states[header] ?: create(header).also { states[header] = it }
@@ -77,7 +77,9 @@ internal class FloatingChatHeaderCapsule {
             state.avatar.setImageDrawable(null)
         }
         val rawTitle = nativeTitle.text.toString()
-        val title = rawTitle
+        // ba.xml stores the trailing count/status text separately in obr.
+        val suffix = (named("obr") as? TextView)?.takeIf { it.visibility == View.VISIBLE }?.text?.toString().orEmpty()
+        val title = rawTitle + suffix
         if (state.title.text.toString() != title) state.title.text = title
         state.avatar.contentDescription = title
         if (talker.isNotBlank()) loadAvatar(header, state, talker)
@@ -194,10 +196,10 @@ internal class FloatingChatHeaderCapsule {
         if (workerStarted) worker.shutdownNow()
         main.removeCallbacksAndMessages(null); cache.evictAll()
     }
-    private fun collectActions(view: View, output: MutableList<View>) {
+    private fun collectMenuActions(view: View, output: MutableList<View>) {
         if (view.visibility != View.VISIBLE || !view.isEnabled) return
-        if (view.isClickable) { output += view; return }
-        if (view is ViewGroup) for (i in 0 until view.childCount) collectActions(view.getChildAt(i), output)
+        if (view.javaClass.name == "com.tencent.mm.ui.widget.WXActionMenuView" && view.isClickable) { output += view; return }
+        if (view is ViewGroup) for (i in 0 until view.childCount) collectMenuActions(view.getChildAt(i), output)
     }
     private fun clickableAncestor(view: View, boundary: View): View? {
         var current: View? = view

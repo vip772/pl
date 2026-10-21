@@ -57,7 +57,7 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
                 else if (handles.isNotEmpty()) true
                 else try {
                     val t = EmojiAtLocator(context).locate()
-                    installTargets(t); targets = t; HLog.d("[Hchat:表情艾特] 安装成功 send=${t.send} storage=${t.storage} scene=${t.scene} serialize=${t.serialize}"); true
+                    installTargets(t); targets = t; true
                 } catch (e: Throwable) {
                     handles.forEach { HookRegistry.get().unhook(it) }; handles.clear(); storageHandle?.close(); storageHandle = null
                     targets = null; pending.clear(); requests.clear()
@@ -98,7 +98,6 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
                     synchronized(requests) {
                         if (requests.size >= 128) requests.remove(requests.keys.first())
                         requests[item] = Request(source, SystemClock.elapsedRealtime())
-                        HLog.d("[Hchat:表情艾特] 已绑定上行请求 msgId=$id")
                     }
                 } catch (e: Throwable) { report("绑定上行名单失败", e); notice("表情已按原流程发送，艾特名单绑定失败") }
             }
@@ -125,7 +124,6 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
                 if (!enabled || param.hasThrowable()) return
                 val id = (param.result as? Number)?.toLong() ?: return
                 pending.put(send.talker, id, source)
-                HLog.d("[Hchat:表情艾特] 已关联表情入库 msgId=$id count=${send.users.size}")
             }
         })
         // Install interception last, after every downstream hook exists.
@@ -171,7 +169,6 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
         val previous = scope.get()
         scope.set(Send(talker, users))
         try {
-            HLog.d("[Hchat:表情艾特] 恢复发送 withAt=${users.isNotEmpty()} count=${users.size}")
             R.invokeOrThrow(t.send, receiver, *args)
         }
         catch (e: Throwable) { report("恢复原发送失败", e); notice("表情发送失败，请重试") }

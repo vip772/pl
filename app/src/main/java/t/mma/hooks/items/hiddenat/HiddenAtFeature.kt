@@ -53,23 +53,17 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == HiddenAtSettings.ENABLE) {
             enabled = prefs.getBoolean(key, false)
-            HLog.d("[Hchat:隐藏艾特] 配置变更 enabled=$enabled")
             if (enabled) schedule() else stop()
         }
     }
     fun install() {
         prefs.registerOnSharedPreferenceChangeListener(listener)
-        HLog.d("[Hchat:隐藏艾特] 初始化 enabled=$enabled process=${context.loadPackageParam().processName}")
         if (enabled) schedule()
     }
     private fun call(message: Any, name: String, vararg args: Any?): Any? {
         val method = KavaReflector.findMethodRecursive(message.javaClass, name, *args.map { it?.javaClass ?: Any::class.java }.toTypedArray())
             ?: error("消息方法缺失: $name")
         return KavaReflector.invokeOrThrow(method, message, *args)
-    }
-    private var observed = 0
-    private fun diagnostic(stage: String) {
-        if (observed++ < 40) HLog.d("[Hchat:隐藏艾特] $stage")
     }
     private fun schedule() {
         val epoch = generation
@@ -103,7 +97,6 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                                 // d4.doScene uses nonempty a(message) directly for AppMsg field index 11.
                                 // Only exact replacement (talker, localId) records enter this branch.
                                 param.result = HiddenAtSource.merge(param.result as? String, users)
-                                HLog.d("[Hchat:隐藏艾特] 上行source名单已补入 msgId=$id count=${users.size}")
                             } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 上行source补入失败，未确认提醒", e) }
                         }
                     })
@@ -128,7 +121,6 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                                     val verified = HiddenAtText.users((KavaReflector.readField(field, message) as? String).orEmpty()
                                         .toByteArray(Charsets.UTF_8), "").toSet() == scope.users.toSet()
                                     check(verified) { "替代消息本地名单写入校验失败" }
-                                    HLog.d("[Hchat:隐藏艾特] 替代入库前本地名单已补齐 count=${scope.users.size} beforeCount=${HiddenAtText.users(before.orEmpty().toByteArray(Charsets.UTF_8), "").size}")
                                 } catch (e: Throwable) {
                                     // Stop this replacement before insertion; outer text send retains its original message.
                                     param.result = -1L
@@ -141,17 +133,16 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                                 val talker = call(message, "N0") as? String ?: error("talker非字符串")
                                 val type = (call(message, "getType") as? Number)?.toInt() ?: error("type非数字")
                                 val direction = (call(message, "z0") as? Number)?.toInt() ?: error("isSend非数字")
-                                diagnostic("入库观察 type=$type direction=$direction group=${talker.endsWith("@chatroom")}")
                                 if (!talker.endsWith("@chatroom") || type != 1 || direction != 1) return
                                 val content = call(message, "j") as? String ?: error("正文非字符串")
-                                if ('@' !in content) { diagnostic("跳过: 正文无艾特符号 length=${content.length}"); return }
+                                if ('@' !in content) return
                                 val sourceField = KavaReflector.findFieldRecursive(message.javaClass, "G") ?: error("MsgSource字段缺失")
                                 val source = KavaReflector.readField(sourceField, message) as? String
-                                if (source.isNullOrBlank()) { HLog.d("[Hchat:隐藏艾特] 跳过: 原生消息无MsgSource"); return }
+                                if (source.isNullOrBlank()) return
                                 val self = WeChatApis.contact().account()?.selfWxId().orEmpty()
-                                if (self.isBlank()) { HLog.d("[Hchat:隐藏艾特] 跳过: 当前账号未就绪"); return }
+                                if (self.isBlank()) return
                                 val users = HiddenAtText.users(source.toByteArray(Charsets.UTF_8), self)
-                                if (users.isEmpty()) { HLog.d("[Hchat:隐藏艾特] 跳过: MsgSource无可用艾特名单"); return }
+                                if (users.isEmpty()) return
                                 val names = linkedSetOf<String>()
                                 // Never enumerate all group members; look up only actual recipients, with a bounded synchronous budget.
                                 if (users.size <= 16) {
@@ -163,14 +154,10 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                                     }
                                 }
                                 val result = HiddenAtText.match(content, users.size, names)
-                                if (result == null) {
-                                    val separators = content.filter { it in "\u2005\u200B\u2009\u200D\u2060" }.groupingBy { "U+%04X".format(it.code) }.eachCount()
-                                    HLog.d("[Hchat:隐藏艾特] 跳过: 无可信艾特片段 count=${users.size} names=${names.size} separators=$separators")
-                                    return
-                                }
+                                if (result == null) return
                                 val cleaned = result.text
                                 val api = WeChatApis.messages() ?: return
-                                if (!api.canSendXml()) { HLog.d("[Hchat:隐藏艾特] XML发送API未就绪，保留原文"); return }
+                                if (!api.canSendXml()) return
                                 replacement.set(Replacement(talker, users))
                                 replacing.set(true)
                                 val id = try { api.sendAppMsgXmlWithLocalId(talker, HiddenAtText.xml(cleaned, source)) }
@@ -178,7 +165,6 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                                 if (id > 0) {
                                     // Bb returns the actual replacement row ID; original native text is never modified.
                                     param.result = id
-                                    HLog.d("[Hchat:隐藏艾特] Type57本地替代成功（非提醒确认） msgId=$id count=${users.size} removed=${result.removed}")
                                 } else HLog.e("[Hchat:隐藏艾特] Type57未返回有效ID，保留原消息", IllegalStateException("AppMsg localId=$id"))
                             } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 原生消息处理失败", e) }
                         }
@@ -193,25 +179,10 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                                 if (id <= 0) return
                                 // Bb completes before k0.M queues d4, so bind before any network task starts.
                                 pending.put(talker, id, scope.users)
-                                val field = KavaReflector.findFieldRecursive(message.javaClass, "G") ?: error("MsgSource字段缺失")
-                                val source = KavaReflector.readField(field, message) as? String
-                                val stored = HiddenAtText.users(source.orEmpty().toByteArray(Charsets.UTF_8), "").toSet() == scope.users.toSet()
-                                HLog.d("[Hchat:隐藏艾特] 替代入库已关联 msgId=$id count=${scope.users.size} localSourceVerified=$stored")
-                                // Read the inserted record through the same native lookup used by d4.doScene.
-                                val owner = KavaReflector.loadClass("ex0.k0", context.hostClassLoader()) ?: error("原生消息读取类缺失")
-                                val lookup = KavaReflector.findMethodRecursive(owner, "yi", String::class.java, java.lang.Long.TYPE)
-                                    ?: error("原生消息读取方法缺失")
-                                val loaded = KavaReflector.invokeOrThrow(lookup, null, talker, id) ?: error("替代消息读取为空")
-                                check((call(loaded, "getMsgId") as? Number)?.toLong() == id && call(loaded, "N0") == talker)
-                                val loadedField = KavaReflector.findFieldRecursive(loaded.javaClass, "G") ?: error("读取消息MsgSource缺失")
-                                val loadedSource = KavaReflector.readField(loadedField, loaded) as? String
-                                val loadedVerified = HiddenAtText.users(loadedSource.orEmpty().toByteArray(Charsets.UTF_8), "").toSet() == scope.users.toSet()
-                                HLog.d("[Hchat:隐藏艾特] 替代消息原生读取校验 msgId=$id count=${scope.users.size} reloadedSourceVerified=$loadedVerified")
-                                check(loadedVerified) { "替代消息读取后名单不一致" }
                             } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 替代入库关联失败", e) }
                         }
                     })
-                    HLog.d("[Hchat:隐藏艾特] 安装成功 entry=$method"); true
+                    true
                 } catch (e: Throwable) {
                     handle?.close(); handle = null
                     sourceHook?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) }; sourceHook = null
