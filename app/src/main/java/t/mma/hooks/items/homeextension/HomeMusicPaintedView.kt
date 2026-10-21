@@ -115,7 +115,8 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
             icon(canvas,"▶|","next",if(style==2)253*sx else 288*sx,y,19*sx,color)
             if(style==2)icon(canvas,"☰","favorites",281*sx,y,15*sx,color)
             else {
-                icon(canvas,"▤","lyrics",192*sx,184*sy,17*sx,color)
+                icon(canvas,"▤","lyrics",204*sx,184*sy,17*sx,color)
+                favoriteIcon(canvas,s,246*sx,184*sy,17*sx,color)
                 icon(canvas,"☰","favorites",288*sx,184*sy,17*sx,color)
             }
         }

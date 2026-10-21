@@ -94,9 +94,9 @@ var dotSpeed by remember { mutableStateOf(sp.getInt(DynamicBadgeSettings.KEY_DOT
             if (enabled) {
                 item { SmallTitle(text = "动效样式") }
                 item { SettingsCard {
-                    listOf("现有效果", "闪电环绕", "蝌蚪环绕").forEachIndexed { index, label ->
-                        OptionChoiceRow(item = OptionItem(label, index, ""), selected = motionStyle == index, onClick = { motionStyle = index })
-                    }
+                    PopupChoiceRow("特效样式", "选择动态显示效果",
+                        listOf(PopupChoice("现有效果", "0"), PopupChoice("闪电环绕", "1"), PopupChoice("蝌蚪环绕", "2")),
+                        motionStyle.toString(), { value -> motionStyle = value.toInt() })
                 } }
                 item { SwitchRow(numberEnabled, "数字角标", "数字和填充保持原样，仅绘制旋转渐变描边", onCheckedChange = { numberEnabled = it }) }
                 if (numberEnabled) {

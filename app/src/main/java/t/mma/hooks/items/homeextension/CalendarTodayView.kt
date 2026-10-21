@@ -68,8 +68,8 @@ internal class CalendarTodayView(context: Context, private val effectEnabled: Bo
         super.onDraw(canvas)
         if (!effectEnabled) return
         val density = resources.displayMetrics.density
-        val inset = 4f * density
-        border.set(inset, inset, width - inset, height - inset)
+        val gap = 2f * density
+        border.set(-gap, -gap, width + gap, height + gap)
         if (border.width() <= 0 || border.height() <= 0) return
         val now = SystemClock.uptimeMillis()
         val phase = (now % 3000L) / 3000f

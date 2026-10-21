@@ -341,16 +341,16 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         }
         private var compactCard = false
         private fun renderCalendar() {
-            val panel = card(HomeExtensionSettings.CALENDAR_ALPHA)
+            val panel = card(HomeExtensionSettings.CALENDAR_ALPHA).apply { clipChildren = false; clipToPadding = false }
             val title = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL; if(compactCard) orientation = LinearLayout.VERTICAL }
             title.addView(text(week.format(DateTimeFormatter.ofPattern("yyyy年 M月")), if(compactCard) 13f else 18f).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }, if(compactCard) LinearLayout.LayoutParams(-1, dp(26)) else LinearLayout.LayoutParams(0, dp(40), 1f))
             title.addView(text(prefs.getString(HomeExtensionSettings.GREETING, HomeExtensionSettings.DEFAULT_GREETING).orEmpty()).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; maxLines = 2 }, if(compactCard) LinearLayout.LayoutParams(-1, dp(32)) else LinearLayout.LayoutParams(0, dp(40), 1.5f))
             panel.addView(title)
-            val days = LinearLayout(ctx)
+            val days = LinearLayout(ctx).apply { clipChildren = false; clipToPadding = false }
             val monday = week.minusDays((week.dayOfWeek.value - 1).toLong())
             repeat(7) { index ->
                 val date = monday.plusDays(index.toLong())
-                val column = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
+                val column = LinearLayout(ctx).apply { clipChildren = false; clipToPadding = false; orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
                 column.addView(text(listOf("一", "二", "三", "四", "五", "六", "日")[index], 12f), LinearLayout.LayoutParams(-1, dp(24)))
                 val dayView = if (date == today) CalendarTodayView(ctx,
                     prefs.getBoolean(HomeExtensionSettings.CALENDAR_EFFECT, false),

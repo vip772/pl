@@ -97,11 +97,11 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                     if (calendar) {
                         SwitchRow(calendarEffect, "动态特效", "仅为当前日期绘制动态环绕效果") { calendarEffect = it; prefs.edit().putBoolean(Settings.CALENDAR_EFFECT, it).apply() }
                         if (calendarEffect) {
-                            listOf("动态角标", "闪电特效", "蝌蚪环绕").forEachIndexed { index, label ->
-                                OptionChoiceRow(item = OptionItem(label, index, ""), selected = calendarEffectStyle == index, onClick = {
-                                    calendarEffectStyle = index; prefs.edit().putInt(Settings.CALENDAR_EFFECT_STYLE, index).apply()
+                            PopupChoiceRow("特效样式", "选择当前日期的动态效果",
+                                listOf(PopupChoice("动态角标", "0"), PopupChoice("闪电特效", "1"), PopupChoice("蝌蚪环绕", "2")),
+                                calendarEffectStyle.toString(), { value ->
+                                    calendarEffectStyle = value.toInt(); prefs.edit().putInt(Settings.CALENDAR_EFFECT_STYLE, calendarEffectStyle).apply()
                                 })
-                            }
                         }
                         HomeExtensionSlider(context, "背景透明度", Settings.CALENDAR_ALPHA, 75, 0f..100f, true)
                         InputRow(title = "问候语", summary = "显示在年月右侧，最多120字", value = greeting, onValueChange = { greeting = it.take(120); prefs.edit().putString(Settings.GREETING, greeting).apply() })
@@ -160,9 +160,9 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                 item { SettingsCard { Column {
                     SwitchRow(music, "首页音乐", "音乐卡片、搜索歌曲与播放控制") { music = it; prefs.edit().putBoolean(Settings.MUSIC, it).apply() }
                     if (music) {
-                        ActionRow("音乐卡片样式", when(musicStyle) { 2 -> "样式2 · 涂鸦玻璃卡片"; 3 -> "样式3 · 黑胶唱片"; else -> "样式1 · 唱片卡片" }) {
-                            if (activity != null) VoiceForwardMiuixDialog.showChoices(activity, "选择音乐卡片样式", "选择后返回首页生效", listOf("样式1" to "唱片卡片", "样式2" to "涂鸦玻璃卡片", "样式3" to "黑胶唱片"), onSelected = { index -> musicStyle = index + 1; prefs.edit().putInt(Settings.MUSIC_STYLE, musicStyle).apply() }, onDismiss = {})
-                        }
+                        PopupChoiceRow("音乐卡片样式", "选择首页和播放器的显示样式",
+                            listOf(PopupChoice("样式1 · 唱片卡片", "1"), PopupChoice("样式2 · 涂鸦玻璃卡片", "2"), PopupChoice("样式3 · 黑胶唱片", "3")),
+                            musicStyle.toString(), { value -> musicStyle = value.toInt(); prefs.edit().putInt(Settings.MUSIC_STYLE, musicStyle).apply() })
                         if (musicStyle == 2) {
                             ActionRow("自定义头像照片", "替换样式2首页和二级页面的圆形照片") { if(activity != null) SidePanelImagePicker.launch(activity, Settings.MUSIC_AVATAR_SLOT) }
                             ActionRow("使用歌曲封面", "移除自定义照片，恢复当前歌曲封面") { SidePanelImages.clear(context, Settings.MUSIC_AVATAR_SLOT) }

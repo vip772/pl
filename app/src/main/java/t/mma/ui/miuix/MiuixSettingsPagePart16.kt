@@ -1565,9 +1565,9 @@ internal fun AntiRecallMiuixPage(
             }
             if (dynamicRecall) {
                 item { SettingsCard {
-                    listOf("现有效果", "闪电环绕", "蝌蚪环绕").forEachIndexed { index, label ->
-                        OptionChoiceRow(item = OptionItem(label, index, ""), selected = dynamicStyle == index, onClick = { dynamicStyle = index })
-                    }
+                    PopupChoiceRow("特效样式", "选择动态显示效果",
+                        listOf(PopupChoice("现有效果", "0"), PopupChoice("闪电环绕", "1"), PopupChoice("蝌蚪环绕", "2")),
+                        dynamicStyle.toString(), { value -> dynamicStyle = value.toInt() })
                 } }
                 item {
                     ColorPickerRow("渐变颜色", "断点描边三色渐变", dynamicColor,
