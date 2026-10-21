@@ -45,6 +45,10 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
     private var handle: java.io.Closeable? = null
     private var generation = 0
     private val replacing = ThreadLocal<Boolean>()
+    private data class Replacement(val talker: String, val users: List<String>)
+    private val replacement = ThreadLocal<Replacement>()
+    private val pending = HiddenAtPending { android.os.SystemClock.elapsedRealtime() }
+    private var sourceHook: de.robv.android.xposed.XC_MethodHook.Unhook? = null
     private var appRouteHook: de.robv.android.xposed.XC_MethodHook.Unhook? = null
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == HiddenAtSettings.ENABLE) {
@@ -81,12 +85,31 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                     appRouteHook = t.mma.hooks.core.HookRegistry.get().hook(route, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: MethodHookParam) {
                             // This exact call scope belongs only to our replacement; all ordinary sends keep their route.
-                            if (replacing.get() == true) param.result = false
+                            if (alive && enabled && epoch == generation && replacing.get() == true) param.result = false
+                        }
+                    })
+                    val sourceOwner = KavaReflector.loadClass("vu1.d1", context.hostClassLoader()) ?: error("上行source owner缺失")
+                    val sourceMethod = KavaReflector.findMethodRecursive(sourceOwner, "a", method.parameterTypes[0]) ?: error("上行source入口缺失")
+                    check(sourceMethod.returnType == String::class.java && !KavaReflector.isAbstract(sourceMethod))
+                    sourceHook = t.mma.hooks.core.HookRegistry.get().hook(sourceMethod, object : XC_MethodHook() {
+                        override fun afterHookedMethod(param: MethodHookParam) {
+                            if (!alive || !enabled || epoch != generation || param.hasThrowable()) return
+                            try {
+                                val message = param.args[0] ?: return
+                                val talker = call(message, "N0") as? String ?: return
+                                val id = (call(message, "getMsgId") as? Number)?.toLong() ?: return
+                                val users = pending.get(talker, id) ?: return
+                                check(talker.endsWith("@chatroom") && (call(message, "z0") as? Number)?.toInt() == 1)
+                                // d4.doScene uses nonempty a(message) directly for AppMsg field index 11.
+                                // Only exact replacement (talker, localId) records enter this branch.
+                                param.result = HiddenAtSource.merge(param.result as? String, users)
+                                HLog.d("[Hchat:隐藏艾特] 上行source名单已补入 msgId=$id count=${users.size}")
+                            } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 上行source补入失败，未确认提醒", e) }
                         }
                     })
                     handle = t.mma.hooks.api.message.OutgoingAtMessageHook.register(method, "hidden_at", object : t.mma.hooks.api.message.OutgoingAtMessageHook.Observer {
                         override fun before(param: XC_MethodHook.MethodHookParam) {
-                            if (!enabled || replacing.get() == true) return
+                            if (!alive || !enabled || epoch != generation || replacing.get() == true) return
                             val message = param.args.firstOrNull() ?: return
                             try {
                                 // Use throwing reflection: invokeMethod used to turn lookup/invocation failures into silent null.
@@ -123,26 +146,54 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                                 val cleaned = result.text
                                 val api = WeChatApis.messages() ?: return
                                 if (!api.canSendXml()) { HLog.d("[Hchat:隐藏艾特] XML发送API未就绪，保留原文"); return }
+                                replacement.set(Replacement(talker, users))
                                 replacing.set(true)
                                 val id = try { api.sendAppMsgXmlWithLocalId(talker, HiddenAtText.xml(cleaned, source)) }
-                                    finally { replacing.remove() }
+                                    finally { replacing.remove(); replacement.remove() }
                                 if (id > 0) {
                                     // Bb returns the actual replacement row ID; original native text is never modified.
                                     param.result = id
-                                    HLog.d("[Hchat:隐藏艾特] Type57替代成功 msgId=$id count=${users.size} removed=${result.removed}")
+                                    HLog.d("[Hchat:隐藏艾特] Type57本地替代成功（非提醒确认） msgId=$id count=${users.size} removed=${result.removed}")
                                 } else HLog.e("[Hchat:隐藏艾特] Type57未返回有效ID，保留原消息", IllegalStateException("AppMsg localId=$id"))
                             } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 原生消息处理失败", e) }
+                        }
+                        override fun after(param: XC_MethodHook.MethodHookParam) {
+                            val scope = replacement.get() ?: return
+                            if (!enabled || !alive || epoch != generation || param.hasThrowable()) return
+                            try {
+                                val message = param.args.firstOrNull() ?: return
+                                val talker = call(message, "N0") as? String ?: return
+                                if (talker != scope.talker || (call(message, "getType") as? Number)?.toInt()?.and(0xffff) != 49) return
+                                val id = (param.result as? Number)?.toLong() ?: return
+                                if (id <= 0) return
+                                // Bb completes before k0.M queues d4, so bind before any network task starts.
+                                pending.put(talker, id, scope.users)
+                                val field = KavaReflector.findFieldRecursive(message.javaClass, "G") ?: error("MsgSource字段缺失")
+                                val source = KavaReflector.readField(field, message) as? String
+                                val stored = HiddenAtText.users(source.orEmpty().toByteArray(Charsets.UTF_8), "").toSet() == scope.users.toSet()
+                                HLog.d("[Hchat:隐藏艾特] 替代入库已关联 msgId=$id count=${scope.users.size} localSourceVerified=$stored")
+                            } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 替代入库关联失败", e) }
                         }
                     })
                     HLog.d("[Hchat:隐藏艾特] 安装成功 entry=$method"); true
                 } catch (e: Throwable) {
                     handle?.close(); handle = null
+                    sourceHook?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) }; sourceHook = null
+                    pending.clear()
                     appRouteHook?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) }; appRouteHook = null
                     HLog.e("[Hchat:隐藏艾特] 8.0.78入口适配失败", e); false
                 }
             }
         }
     }
-    @Synchronized private fun stop() { generation++; handle?.close(); handle = null; appRouteHook?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) }; appRouteHook = null }
+    @Synchronized private fun stop() {
+        generation++
+        handle?.close(); handle = null
+        sourceHook?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) }; sourceHook = null
+        appRouteHook?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) }; appRouteHook = null
+        pending.clear()
+        replacement.remove()
+        replacing.remove()
+    }
     fun destroy() { alive = false; enabled = false; prefs.unregisterOnSharedPreferenceChangeListener(listener); stop() }
 }

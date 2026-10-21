@@ -17,4 +17,16 @@
 
 - 提供的geek.apk：GhostAt核心OOoo00o0O0oOoO0O.oOoooOoOoO0OOO0O构造`<title>...<type>57</type>`并调用AppMsg；O000OOOOOoOooo0o数据库分支处理key_ghost_at_on，成功后取消原插入。此结论来自单类反编译和字符串解码；未全量反编译微信。
 - k0.smali:1764为M，1849调用U(s0)；true分支返回Pair(0,null)，未提供真实ID；false分支继续构造消息、p8经ma.o写入r3。同步分支返回Pair(code,localId)。本功能仅自身ThreadLocal作用域令U返回false，普通发送不变。
-- ev/j.smali:959读取e9.G并在966写入AppMsg原型；源代码上下文包括显式source与assembler两分支。当前实现通过公共API的p8携带原source，不直接Hook通用protobuf.set。
+- ev/j.smali:959读取e9.G并在966写入AppMsg原型；源代码上下文包括显式source与assembler两分支。此处仅证明存在读G分支，不能证明同步type57实际路径保留名单。此前“通过p8携带完整source”的结论已撤销，参数语义错误，见下节。
+
+## 17:59无提醒后的定向核查与修复
+- k0.M:1764完整13参数描述符，K/L短重载最终给M.p12传null；1845将p12传入s0，2075-2105非空p12直接r3写G。p8则经ma.o写G。
+- b41/ma.smali:415 I(String)包装为sec_msg_node/uuid，2771 o(String)在外层包msgsource。故p8不是完整MsgSource参数。
+- k0.M:2298调用yb，yb委托Bb；3221-3236创建并排队d4，之后才返回Pair。故Bb after能在上行排队前登记真实消息ID。
+- k0.p:8324（type57分支）返回0x31000031，低16位为49；替代入库关联按低16位AppMsg校验，不错误要求getType()==57。
+- d4.smali:1298-1304从d.a.a获取pc5.c66；1525-1556调用vu1.d1.a(e9)，非空返回直接set索引11，空返回才走ma.a(G)。2275-2285 getCustom(1)/getString(11)读取实际请求MsgSource，随后2305 dispatch。
+- smali_classes11/vu1/d1.smali:20 a(e9)，普通分支传null调用ma.f；ma.f:2192起自行组装MsgSource，不等于原消息G。只修本地p12不足以证明名单上行。
+- f4.smali:565-596同样调用vu1.d1.a，非空结果直接写索引11；1449-1464读取请求getCustom(1)/getString(11)。两个已确认场景共用此组装入口，避免全局Hook序列化。
+- 当前Hook只对模块替代记录(talker,localId)匹配后合并atuserlist，读取不消费以支持重试；不全局注入、不输出名单。
+
+上述证据为静态Smali和本地夹具依据，不是实际服务端送达、收件端提醒或Hook成功的证明。其他版本未验证。

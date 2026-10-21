@@ -900,14 +900,14 @@ public final class WeChatMessageApi {
         }
 
         try {
-            Method sendMethod = dexFinder.sendXmlAppMsgMethod;
+            String msgSource = extractMsgSource(xml);
+            Method sendMethod = explicitAppMsgMethod(dexFinder.sendXmlAppMsgMethod, msgSource);
             Object appMessage = parseAppMessage(sendMethod.getParameterTypes()[0], xml);
             if (appMessage == null) {
                 log("发送XML失败: 微信解析AppMsg失败");
                 return null;
             }
 
-            String msgSource = extractMsgSource(xml);
             Object[] args = buildSendAppMsgArgs(sendMethod, appMessage, talker, xml, msgSource);
             Class<?>[] parameterTypes = sendMethod.getParameterTypes();
             for (int i = 0; i < parameterTypes.length; i++) {
@@ -926,7 +926,7 @@ public final class WeChatMessageApi {
             }
             return result;
         } catch (Throwable e) {
-            log("发送XML异常: " + e.getMessage());
+            t.mma.utils.HLog.e("[Hchat:消息API] AppMsg解析/参数构造/调用失败", e);
             return null;
         }
     }
@@ -979,7 +979,8 @@ public final class WeChatMessageApi {
         args[5] = cachedThumbData(xml);
         args[6] = "Hchat_xml_" + System.currentTimeMillis();
         args[7] = "";
-        args[8] = msgSource != null ? msgSource : "";
+        // 8.0.78 k0.M p8 is sec_msg_node.uuid, NOT a complete MsgSource.
+        args[8] = "";
 
         for (int i = 9; i < params.length; i++) {
             Class<?> type = params[i];
@@ -995,7 +996,46 @@ public final class WeChatMessageApi {
                 throw new IllegalArgumentException("不支持的AppMsgLogic参数: index=" + i + " type=" + type.getName());
             }
         }
+        if (msgSource != null && !msgSource.isEmpty()) {
+            requireExplicitAppMsgSignature(method);
+            args[12] = msgSource;
+        }
         return args;
+    }
+
+    private Method explicitAppMsgMethod(Method selected, String source) {
+        if (source == null || source.isEmpty()) return selected;
+        if (WeChatApis.version() == null || !"8.0.78".equals(WeChatApis.version().versionName())) {
+            throw new IllegalStateException("完整AppMsg MsgSource参数仅已核实8.0.78，拒绝猜测其他版本");
+        }
+        // K/L short overloads supply null for M.p12. Select the verified full overload,
+        // not a method by arity alone, and do not alter the cached generic send entry.
+        Method found = null;
+        for (Method candidate : KavaReflector.declaredMethods(selected.getDeclaringClass())) {
+            if (!"M".equals(candidate.getName())) continue;
+            requireExplicitAppMsgSignature(candidate);
+            if (found != null) throw new IllegalStateException("AppMsg显式source入口不唯一");
+            found = candidate;
+        }
+        if (found == null) throw new IllegalStateException("8.0.78 AppMsg显式source入口缺失");
+        return found;
+    }
+
+    private void requireExplicitAppMsgSignature(Method method) {
+        String[] expected = {"dx0.r", "java.lang.String", "java.lang.String", "java.lang.String",
+                "java.lang.String", "[B", "java.lang.String", "java.lang.String", "java.lang.String",
+                "com.tencent.mm.plugin.msg.MsgIdTalker", "boolean", "java.lang.String", "java.lang.String"};
+        Class<?>[] types = method.getParameterTypes();
+        if (!"com.tencent.mm.pluginsdk.model.app.k0".equals(method.getDeclaringClass().getName())
+                || !"M".equals(method.getName()) || !KavaReflector.isStatic(method)
+                || method.getReturnType() != Pair.class || types.length != expected.length) {
+            throw new IllegalStateException("AppMsg显式source描述符不符: " + method);
+        }
+        for (int i = 0; i < expected.length; i++) {
+            if (!expected[i].equals(types[i].getName())) {
+                throw new IllegalStateException("AppMsg显式source参数不符 index=" + i + " method=" + method);
+            }
+        }
     }
 
     private Object newMsgIdTalker(Class<?> clazz, String talker) {

@@ -978,6 +978,9 @@ dist/Hchat-release-signed.apk
 
 自动缓存内部实现已改为微信原生图片场景、视频完整接收及附件下载场景，不使用独立 CDN 副本。当前逆向依据、定位缓存与兼容边界详见 [AUTO_CACHE.md](AUTO_CACHE.md)。此内部实现不新增脚本接口。
 
+### AppMsg显式MsgSource参数修正（8.0.78）
+XML有非空顶层MsgSource时，选择已核实的k0.M完整13参数签名，p8（安全消息UUID）留空，p12接收完整MsgSource；K/L短重载最终给p12传null，不能继续用于显式source。无MsgSource保持原选定重载和返回语义。含MsgSource但版本或完整签名未经确认时在调用前失败，不猜测其他版本参数位置。此修正只保证显式元数据传入；普通同步AppMsg上行还会重新组装source，隐藏艾特仅在自己记录关联的组装入口补名单，不能把公共API返回有效ID当成提醒成功。
+
 ### AppMsg真实本地消息ID
 
 `WeChatApis.messages().sendAppMsgXmlWithLocalId(talker, xml)`复用XML解析与发送参数构造，返回成功结果Pair中的数值本地ID；失败或无数值ID返回-1。正数表示本地记录，不代表服务端送达；调用可能产生发送副作用，返回-1不能自动重试。原sendXml的布尔结果仍按原Pair成功判断。隐藏艾特仅在其已验证同步路由作用域内使用本接口。
