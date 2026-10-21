@@ -5,7 +5,7 @@
 
 - 8.0.78 公共AppMsg API对非空MsgSource严格选择k0.M完整13参数签名，p8安全消息UUID留空，p12传完整MsgSource。K/L短重载最终把p12设为null，不能用于显式source。无source保持既有重载；未知版本或签名在调用前失败。
 - 普通同步上行d4.doScene调用vu1.d1.a(e9)；普通群聊分支会通过ma.f(null)重新生成source，不保证保留本地G名单。因此只改p12仍不够。
-- 替代消息Bb after返回正数ID后，在网络任务排队前按(talker,localId)关联名单，校验本地消息类型低16位为49。type57在此版本实际存储类型为0x31000031。
+- 替代消息进入Bb前，按(talker,localId)在 type57 对象上调用微信原生 r3(String) 合并 atuserlist，利用原生 convertTo/parseBuff 写入并读取 lvbuffer；type57 在此版本实际存储类型为0x31000031。Bb after 返回正数 ID 后再用原生 ex0.k0.yi(talker,localId) 重读，确认持久化后的 G 字段仍含名单。失败时阻止替代入库，保留原文字消息。
 - 仅对关联命中的自己发送群聊消息，在vu1.d1.a返回后合并顶层atuserlist，保留原生返回值的其他节点。d4/f4两个已核实场景均将非空返回值直接写入AppMsg请求字段索引11；不Hook通用protobuf.set、不修改表情艾特。
 - 缓存最多128条、单调时钟120秒过期；读取不消费以允许重试，合并幂等。关闭、销毁和安装失败清理自身Hook及关联；回调校验安装代次。
 - 日志分开记录“替代入库已关联/localSourceVerified”“Type57本地替代成功（非提醒确认）”“上行source名单已补入”。最后一条只证明组装函数返回内容已校验包含名单，不代表服务端接受或收件端提醒。不记录正文、群ID、完整名单。

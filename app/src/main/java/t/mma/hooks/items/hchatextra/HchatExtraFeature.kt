@@ -11,7 +11,7 @@ import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.Typeface
-import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.GradientDrawable
 import android.text.Editable
 import android.text.InputType
 import android.text.TextUtils
@@ -1542,9 +1542,17 @@ private class HchatExtraHooker(
         val textColor = messageDetailsResolvedTextColor(label.context)
         if (label.currentTextColor != textColor) label.setTextColor(textColor)
         val bgColor = messageDetailsResolvedBgColor(label.context)
-        val currentBgColor = (label.background as? ColorDrawable)?.color
-        if (currentBgColor != bgColor && !(currentBgColor == null && bgColor == Color.TRANSPARENT)) {
-            label.setBackgroundColor(bgColor)
+        val radius = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 4f, label.resources.displayMetrics)
+        val background = label.background as? GradientDrawable
+        if (background == null) {
+            label.background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = radius
+                setColor(bgColor)
+            }
+        } else {
+            if (background.color?.defaultColor != bgColor) background.setColor(bgColor)
+            if (background.cornerRadius != radius) background.cornerRadius = radius
         }
     }
 

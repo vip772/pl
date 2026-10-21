@@ -109,8 +109,33 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                     })
                     handle = t.mma.hooks.api.message.OutgoingAtMessageHook.register(method, "hidden_at", object : t.mma.hooks.api.message.OutgoingAtMessageHook.Observer {
                         override fun before(param: XC_MethodHook.MethodHookParam) {
-                            if (!alive || !enabled || epoch != generation || replacing.get() == true) return
+                            if (!alive || !enabled || epoch != generation) return
                             val message = param.args.firstOrNull() ?: return
+                            if (replacing.get() == true) {
+                                val scope = replacement.get() ?: return
+                                try {
+                                    val talker = call(message, "N0") as? String ?: return
+                                    val type = (call(message, "getType") as? Number)?.toInt() ?: return
+                                    val direction = (call(message, "z0") as? Number)?.toInt() ?: return
+                                    if (talker != scope.talker || type != 0x31000031 || direction != 1) return
+                                    val field = KavaReflector.findFieldRecursive(message.javaClass, "G") ?: error("MsgSource字段缺失")
+                                    val before = KavaReflector.readField(field, message) as? String
+                                    val merged = HiddenAtSource.merge(before, scope.users)
+                                    val setter = KavaReflector.findMethodRecursive(message.javaClass, "r3", String::class.java)
+                                        ?: error("MsgSource原生setter缺失")
+                                    // Run before Bb's source handlers and native convertTo/lvbuffer serialization.
+                                    KavaReflector.invokeOrThrow(setter, message, merged)
+                                    val verified = HiddenAtText.users((KavaReflector.readField(field, message) as? String).orEmpty()
+                                        .toByteArray(Charsets.UTF_8), "").toSet() == scope.users.toSet()
+                                    check(verified) { "替代消息本地名单写入校验失败" }
+                                    HLog.d("[Hchat:隐藏艾特] 替代入库前本地名单已补齐 count=${scope.users.size} beforeCount=${HiddenAtText.users(before.orEmpty().toByteArray(Charsets.UTF_8), "").size}")
+                                } catch (e: Throwable) {
+                                    // Stop this replacement before insertion; outer text send retains its original message.
+                                    param.result = -1L
+                                    HLog.e("[Hchat:隐藏艾特] 本地名单补齐失败，阻止替代入库", e)
+                                }
+                                return
+                            }
                             try {
                                 // Use throwing reflection: invokeMethod used to turn lookup/invocation failures into silent null.
                                 val talker = call(message, "N0") as? String ?: error("talker非字符串")
@@ -172,6 +197,17 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                                 val source = KavaReflector.readField(field, message) as? String
                                 val stored = HiddenAtText.users(source.orEmpty().toByteArray(Charsets.UTF_8), "").toSet() == scope.users.toSet()
                                 HLog.d("[Hchat:隐藏艾特] 替代入库已关联 msgId=$id count=${scope.users.size} localSourceVerified=$stored")
+                                // Read the inserted record through the same native lookup used by d4.doScene.
+                                val owner = KavaReflector.loadClass("ex0.k0", context.hostClassLoader()) ?: error("原生消息读取类缺失")
+                                val lookup = KavaReflector.findMethodRecursive(owner, "yi", String::class.java, java.lang.Long.TYPE)
+                                    ?: error("原生消息读取方法缺失")
+                                val loaded = KavaReflector.invokeOrThrow(lookup, null, talker, id) ?: error("替代消息读取为空")
+                                check((call(loaded, "getMsgId") as? Number)?.toLong() == id && call(loaded, "N0") == talker)
+                                val loadedField = KavaReflector.findFieldRecursive(loaded.javaClass, "G") ?: error("读取消息MsgSource缺失")
+                                val loadedSource = KavaReflector.readField(loadedField, loaded) as? String
+                                val loadedVerified = HiddenAtText.users(loadedSource.orEmpty().toByteArray(Charsets.UTF_8), "").toSet() == scope.users.toSet()
+                                HLog.d("[Hchat:隐藏艾特] 替代消息原生读取校验 msgId=$id count=${scope.users.size} reloadedSourceVerified=$loadedVerified")
+                                check(loadedVerified) { "替代消息读取后名单不一致" }
                             } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 替代入库关联失败", e) }
                         }
                     })

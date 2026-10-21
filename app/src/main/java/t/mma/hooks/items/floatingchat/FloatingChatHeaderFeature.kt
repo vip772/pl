@@ -47,6 +47,7 @@ class FloatingChatHeaderFeature : BaseFeature() {
 
 private class HeaderRuntime(private val context: FeatureContext) {
     private val hooked = HashSet<Member>()
+    private val capsule = FloatingChatHeaderCapsule()
     private val states = WeakHashMap<View, HeaderState>()
     private val headersByLayout = WeakHashMap<View, View>()
     private val headerZoneStates = WeakHashMap<View, HeaderZoneState>()
@@ -236,11 +237,12 @@ private class HeaderRuntime(private val context: FeatureContext) {
         tipsCardBottoms.remove(layout)
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
-        val elevation = dp(ELEVATION_DP).toFloat()
+        val split = (header as? ViewGroup)?.let { capsule.apply(it) } == true
+        val elevation = if (split) 0f else dp(ELEVATION_DP).toFloat()
         if (header.elevation != elevation) header.elevation = elevation
         header.outlineProvider = FloatingHeaderOutlineProvider
-        header.clipToOutline = true
-        FloatingChatCardVisuals.apply(header, CORNER_RADIUS_DP)
+        header.clipToOutline = !split
+        if (!split) FloatingChatCardVisuals.apply(header, CORNER_RADIUS_DP)
         header.bringToFront()
         header.invalidateOutline()
         (header.parent as? View)?.invalidate()
@@ -695,6 +697,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
     }
     private fun restoreView(view: View) {
+        (view as? ViewGroup)?.let(capsule::restore)
         val state = states.remove(view) ?: return
         runCatching {
             if (state.reparented) {
@@ -715,6 +718,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }.onFailure { HLog.e("[Hchat:$TAG] 恢复微信标题栏结构失败", it) }
     }
     fun destroy() {
+        capsule.destroy()
         states.keys.toList().forEach(::restoreView)
         headerZoneStates.keys.toList().forEach { layout -> restore(layout as? ViewGroup ?: return@forEach) }
         statusWrapperBackgrounds.entries.toList().forEach { (view, background) ->
