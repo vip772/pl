@@ -127,6 +127,8 @@ object FeatureRegistry {
             .register(SendSecureMessageFeature())
             .register(UploadTransparentAvatarFeature())
             .register(SpecialMessageFeature())
+            .register(t.mma.hooks.items.hiddenat.HiddenAtFeature())
+            .register(t.mma.hooks.items.emojiat.EmojiAtFeature())
             .register(FloatingShortcutFeature())
             .register(FloatingChatHeaderFeature())
             .register(FloatingChatFooterFeature())

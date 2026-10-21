@@ -202,7 +202,14 @@ internal object HomeWeather {
             swipePage = { next -> weekPage=next; render(data,stale) }
             panel.removeAllViews()
             val heading = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; if(compact) orientation=LinearLayout.VERTICAL }
-            heading.addView(text("⌖ ${name.substringBefore("·").trim().ifBlank { "请选择天气城市" }}", 14f), if(compact) LinearLayout.LayoutParams(-1,-2) else LinearLayout.LayoutParams(0,-2,1f))
+            val cityLabel = text(name.substringBefore("·").trim().ifBlank { "请选择天气城市" }, 14f).apply {
+                val pin = WeatherLocationDrawable(currentTextColor)
+                pin.setBounds(0, 0, dp(16), dp(18))
+                setCompoundDrawablesRelative(pin, null, null, null)
+                compoundDrawablePadding = dp(5)
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            heading.addView(cityLabel, if(compact) LinearLayout.LayoutParams(-1,-2) else LinearLayout.LayoutParams(0,-2,1f))
             val stamp = if (data != null) java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(data.getLong("saved"))) else "--:--"
             heading.addView(text(if(stale) "更新失败 · $stamp" else "更新于 $stamp", 11f, true))
             panel.addView(heading)
@@ -369,4 +376,35 @@ val sky = LinearLayout(context).apply {
         }
         return panel
     }
+}
+/** Static vector pin; tint follows the city label rather than font-specific glyphs. */
+internal class WeatherLocationDrawable(color: Int) : android.graphics.drawable.Drawable() {
+    private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        this.color = color
+        style = android.graphics.Paint.Style.STROKE
+        strokeWidth = 1.65f
+        strokeCap = android.graphics.Paint.Cap.ROUND
+        strokeJoin = android.graphics.Paint.Join.ROUND
+    }
+    private val outline = android.graphics.Path().apply {
+        moveTo(8f, 16.3f)
+        cubicTo(6.2f, 14.2f, 2.8f, 10.5f, 2.8f, 7f)
+        cubicTo(2.8f, 4.1f, 5.1f, 1.8f, 8f, 1.8f)
+        cubicTo(10.9f, 1.8f, 13.2f, 4.1f, 13.2f, 7f)
+        cubicTo(13.2f, 10.5f, 9.8f, 14.2f, 8f, 16.3f)
+        close()
+    }
+    override fun draw(canvas: android.graphics.Canvas) {
+        if (bounds.isEmpty) return
+        val save = canvas.save()
+        canvas.translate(bounds.left.toFloat(), bounds.top.toFloat())
+        canvas.scale(bounds.width() / 16f, bounds.height() / 18f)
+        canvas.drawPath(outline, paint)
+        canvas.drawCircle(8f, 7f, 1.8f, paint)
+        canvas.restoreToCount(save)
+    }
+    override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }
+    override fun setColorFilter(filter: android.graphics.ColorFilter?) { paint.colorFilter = filter; invalidateSelf() }
+    @Deprecated("Drawable opacity is deprecated")
+    override fun getOpacity() = android.graphics.PixelFormat.TRANSLUCENT
 }
