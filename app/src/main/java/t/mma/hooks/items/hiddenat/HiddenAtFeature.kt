@@ -47,10 +47,24 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == HiddenAtSettings.ENABLE) {
             enabled = prefs.getBoolean(key, false)
+            HLog.d("[Hchat:隐藏艾特] 配置变更 enabled=$enabled")
             if (enabled) schedule() else stop()
         }
     }
-    fun install() { prefs.registerOnSharedPreferenceChangeListener(listener); if (enabled) schedule() }
+    fun install() {
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        HLog.d("[Hchat:隐藏艾特] 初始化 enabled=$enabled process=${context.loadPackageParam().processName}")
+        if (enabled) schedule()
+    }
+    private fun call(message: Any, name: String, vararg args: Any?): Any? {
+        val method = KavaReflector.findMethodRecursive(message.javaClass, name, *args.map { it?.javaClass ?: Any::class.java }.toTypedArray())
+            ?: error("消息方法缺失: $name")
+        return KavaReflector.invokeOrThrow(method, message, *args)
+    }
+    private var observed = 0
+    private fun diagnostic(stage: String) {
+        if (observed++ < 40) HLog.d("[Hchat:隐藏艾特] $stage")
+    }
     private fun schedule() {
         val epoch = generation
         t.mma.hooks.core.DexInstallScheduler.schedule("hidden_at_$epoch", "隐藏艾特") {
@@ -63,23 +77,49 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                             if (!enabled) return
                             val message = param.args.firstOrNull() ?: return
                             try {
-                                val talker = KavaReflector.invokeMethod(message, "N0") as? String ?: return
-                                if (!talker.endsWith("@chatroom") || (KavaReflector.invokeMethod(message, "getType") as? Number)?.toInt() != 1 ||
-                                    (KavaReflector.invokeMethod(message, "z0") as? Number)?.toInt() != 1) return
-                                val content = KavaReflector.invokeMethod(message, "j") as? String ?: return
-                                if ('@' !in content) return
-                                val source = KavaReflector.readField(message, "G") as? String
+                                // Use throwing reflection: invokeMethod used to turn lookup/invocation failures into silent null.
+                                val talker = call(message, "N0") as? String ?: error("talker非字符串")
+                                val type = (call(message, "getType") as? Number)?.toInt() ?: error("type非数字")
+                                val direction = (call(message, "z0") as? Number)?.toInt() ?: error("isSend非数字")
+                                diagnostic("入库观察 type=$type direction=$direction group=${talker.endsWith("@chatroom")}")
+                                if (!talker.endsWith("@chatroom") || type != 1 || direction != 1) return
+                                val content = call(message, "j") as? String ?: error("正文非字符串")
+                                if ('@' !in content) { diagnostic("跳过: 正文无艾特符号 length=${content.length}"); return }
+                                val sourceField = KavaReflector.findFieldRecursive(message.javaClass, "G") ?: error("MsgSource字段缺失")
+                                val source = KavaReflector.readField(sourceField, message) as? String
                                 if (source.isNullOrBlank()) { HLog.d("[Hchat:隐藏艾特] 跳过: 原生消息无MsgSource"); return }
                                 val self = WeChatApis.contact().account()?.selfWxId().orEmpty()
                                 if (self.isBlank()) { HLog.d("[Hchat:隐藏艾特] 跳过: 当前账号未就绪"); return }
                                 val users = HiddenAtText.users(source.toByteArray(Charsets.UTF_8), self)
                                 if (users.isEmpty()) { HLog.d("[Hchat:隐藏艾特] 跳过: MsgSource无可用艾特名单"); return }
-                                val cleaned = HiddenAtText.clean(content, users.size)
-                                if (cleaned == null) { HLog.d("[Hchat:隐藏艾特] 跳过: 艾特片段不匹配 count=${users.size}"); return }
+                                val names = linkedSetOf<String>()
+                                // Never enumerate all group members; look up only actual recipients, with a bounded synchronous budget.
+                                if (users.size <= 16) {
+                                    val contacts = WeChatApis.contact().contacts()
+                                    for (id in users) {
+                                        if (id == "notify@all") continue
+                                        contacts?.getGroupMemberDisplayName(talker, id)?.takeIf { it.isNotEmpty() && it != id }?.let { names += it }
+                                        contacts?.getDisplayName(id)?.takeIf { it.isNotEmpty() && it != id }?.let { names += it }
+                                    }
+                                }
+                                val result = HiddenAtText.match(content, users.size, names)
+                                if (result == null) {
+                                    val separators = content.filter { it in "\u2005\u200B\u2009\u200D\u2060" }.groupingBy { "U+%04X".format(it.code) }.eachCount()
+                                    HLog.d("[Hchat:隐藏艾特] 跳过: 无可信艾特片段 count=${users.size} names=${names.size} separators=$separators")
+                                    return
+                                }
+                                val cleaned = result.text
                                 val setter = KavaReflector.findMethodRecursive(message.javaClass, "b1", String::class.java) ?: error("正文setter缺失")
-                                KavaReflector.invokeOrThrow(setter, message, cleaned)
-                                check(KavaReflector.invokeMethod(message, "j") == cleaned)
-                                HLog.d("[Hchat:隐藏艾特] 原生正文清理成功 count=${users.size} MsgSource保持原样")
+                                try {
+                                    KavaReflector.invokeOrThrow(setter, message, cleaned)
+                                    check(call(message, "j") == cleaned) { "正文setter读回不符" }
+                                    check(KavaReflector.readField(sourceField, message) == source) { "MsgSource发生变化" }
+                                } catch (e: Throwable) {
+                                    try { KavaReflector.invokeOrThrow(setter, message, content) }
+                                    catch (restore: Throwable) { e.addSuppressed(restore) }
+                                    throw e
+                                }
+                                HLog.d("[Hchat:隐藏艾特] 原生正文清理成功 count=${users.size} removed=${result.removed} exact=${result.exact} MsgSource保持原样")
                             } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 原生消息处理失败", e) }
                         }
                     })
