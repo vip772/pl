@@ -884,9 +884,19 @@ public final class WeChatMessageApi {
     }
 
     private boolean sendAppMsgXml(String talker, String xml) {
+        return isSuccessfulPair(sendAppMsgXmlResult(talker, xml));
+    }
+    /** Real synchronous local ID only; asynchronous acceptance is not a replacement ID. */
+    public long sendAppMsgXmlWithLocalId(String talker, String xml) {
+        Object result = sendAppMsgXmlResult(talker, xml);
+        if (!isSuccessfulPair(result)) return -1L;
+        Object id = ((Pair<?, ?>) result).second;
+        return id instanceof Number ? ((Number) id).longValue() : -1L;
+    }
+    private Object sendAppMsgXmlResult(String talker, String xml) {
         if (!canSendXml()) {
             log("发送XML失败: AppMsgLogic API 未就绪");
-            return false;
+            return null;
         }
 
         try {
@@ -894,7 +904,7 @@ public final class WeChatMessageApi {
             Object appMessage = parseAppMessage(sendMethod.getParameterTypes()[0], xml);
             if (appMessage == null) {
                 log("发送XML失败: 微信解析AppMsg失败");
-                return false;
+                return null;
             }
 
             String msgSource = extractMsgSource(xml);
@@ -904,20 +914,20 @@ public final class WeChatMessageApi {
                 if ("com.tencent.mm.plugin.msg.MsgIdTalker".equals(parameterTypes[i].getName())
                         && args[i] == null) {
                     log("发送XML失败: MsgIdTalker参数创建失败 index=" + i);
-                    return false;
+                    return null;
                 }
             }
-            Object result = KavaReflector.invoke(sendMethod, null, args);
+            Object result = KavaReflector.invokeOrThrow(sendMethod, null, args);
             boolean success = isSuccessfulPair(result);
             if (!success) {
                 log("发送XML失败: AppMsgLogic返回 " + pairToString(result));
             } else {
                 dispatchLocalSend(talker, xml, MESSAGE_TYPE_APP_XML, msgSource);
             }
-            return success;
+            return result;
         } catch (Throwable e) {
             log("发送XML异常: " + e.getMessage());
-            return false;
+            return null;
         }
     }
 

@@ -977,3 +977,7 @@ dist/Hchat-release-signed.apk
 ## 自动缓存使用的原生下载链路
 
 自动缓存内部实现已改为微信原生图片场景、视频完整接收及附件下载场景，不使用独立 CDN 副本。当前逆向依据、定位缓存与兼容边界详见 [AUTO_CACHE.md](AUTO_CACHE.md)。此内部实现不新增脚本接口。
+
+### AppMsg真实本地消息ID
+
+`WeChatApis.messages().sendAppMsgXmlWithLocalId(talker, xml)`复用XML解析与发送参数构造，返回成功结果Pair中的数值本地ID；失败或无数值ID返回-1。正数表示本地记录，不代表服务端送达；调用可能产生发送副作用，返回-1不能自动重试。原sendXml的布尔结果仍按原Pair成功判断。隐藏艾特仅在其已验证同步路由作用域内使用本接口。

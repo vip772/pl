@@ -27,9 +27,9 @@ internal object HiddenAtText {
             }
             // Only the observed WeChat delimiter terminates an unknown name, not zero-width/thin spaces.
             var end = i + 1
-            while (end < content.length && content[end] != '\u2005' && content[end] != '\n' && content[end] != '\r' && content[end] != '@') end++
+            while (end < content.length && content[end] != '\u2005' && content[end] != '@') end++
             val token = content.substring(i + 1, end)
-            if (content.getOrNull(end) == '\u2005' && token.isNotEmpty() && token.none { it == '.' || it == ' ' || it == '\t' } &&
+            if (content.getOrNull(end) == '\u2005' && token.isNotEmpty() && !token.contains(Regex("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+")) &&
                 (i == 0 || !emailChar(content[i - 1]))) {
                 i = end + 1; removed++; continue
             }
@@ -38,6 +38,8 @@ internal object HiddenAtText {
         if (removed == 0 || (exact == 0 && removed < count)) return null
         return Match(out.toString().ifBlank { "\u200B" }, removed, exact)
     }
+    fun xml(title: String, source: String): String =
+        "<msg><appmsg><title>${title.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")}</title><type>57</type></appmsg>$source</msg>"
     fun clean(content: String, count: Int): String? = match(content, count)?.text
     private fun emailChar(c: Char) = c.isLetterOrDigit() || c in "._%+-"
     private fun boundary(c: Char) = c.isWhitespace() || c in "\u2005\u00A0，。！？：；、,.!?;:()（）[]【】"

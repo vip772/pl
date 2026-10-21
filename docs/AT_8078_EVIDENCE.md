@@ -12,3 +12,9 @@
 - `smali_classes12/v51/r0.smali:950`：文本构造设置MsgSource；1131行调用Bb；1805行后doScene读取消息j并写入pc5.pr4.e，随后调用source assembler。
 
 这些证据支持入口、消息时序、正文设置与表情协议字段的当前版本适配。收件端是否接受隐藏艾特仍须双端确认；未据此声明其他微信版本适配。运行时日志只记录阶段、数量和消息ID，不输出正文、群ID或成员名单。
+
+## Type57补充依据
+
+- 提供的geek.apk：GhostAt核心OOoo00o0O0oOoO0O.oOoooOoOoO0OOO0O构造`<title>...<type>57</type>`并调用AppMsg；O000OOOOOoOooo0o数据库分支处理key_ghost_at_on，成功后取消原插入。此结论来自单类反编译和字符串解码；未全量反编译微信。
+- k0.smali:1764为M，1849调用U(s0)；true分支返回Pair(0,null)，未提供真实ID；false分支继续构造消息、p8经ma.o写入r3。同步分支返回Pair(code,localId)。本功能仅自身ThreadLocal作用域令U返回false，普通发送不变。
+- ev/j.smali:959读取e9.G并在966写入AppMsg原型；源代码上下文包括显式source与assembler两分支。当前实现通过公共API的p8携带原source，不直接Hook通用protobuf.set。
