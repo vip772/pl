@@ -9,5 +9,5 @@
 验证：Android SDK和API依赖桩定向编译，接入及恢复源码检查。未执行Gradle完整构建或微信实机视觉、点击验收。此前隐藏艾特和消息时间圆角本地修改保持不变。
 ## 定向定位修正
 上一版误用通用Activity的android.R.id.text1。聊天组件smali_classes11/com/tencent/mm/ui/chatting/component/fg.smali的I0在4072行加载0x7f0e0068（ba.xml）；该布局实际使用obn（0x7f0a6b16）显示标题，obr显示尾部文字，osp显示返回未读数，不包含android.R.id.text1。当前删除错误定位，拼接可见obr以保留原生人数。
-菜单依据：smali_classes16/com/tencent/mm/ui/ha.smali:4876/5140加载0x7f0e006a（bc.xml），取得WXActionMenuView并调用a绑定；该类构造器163行在自身安装点击监听。当前只收集coy内可见、启用且可点击的该具体类，唯一命中才转发，不按任意clickable猜测。
+菜单依据：smali_classes16/com/tencent/mm/ui/ha.smali:4876/5140加载0x7f0e006a（bc.xml），取得WXActionMenuView并调用a绑定；该类构造器163行在自身安装点击监听。fg.Y0(IIILandroid/view/MenuItem$OnMenuItemClickListener;)经Z0传递菜单ID、图标资源和点击监听；8.0.78设置项使用string/cm与raw/actionbar_setting_icon。运行时仅从coy内收集可见、启用且可点击的WXActionMenuView，并要求文字或图标资源核验唯一后转发。
 验证：scripts/check_floating_header_8078.py交叉核查Smali/XML与生产定位，Android SDK依赖桩编译通过。未进行新包实机视觉或点击验收，不声明已验证实际显示。

@@ -12,6 +12,8 @@ internal class ChatInputMessageUnderlay {
         var basePadding = list.paddingBottom
         var appliedPadding = list.paddingBottom
         var overlap = 0
+        var appliedMargin = margin
+        var appliedClip = clip
     }
     private val states = WeakHashMap<ViewGroup, State>()
 
@@ -23,7 +25,7 @@ internal class ChatInputMessageUnderlay {
         }
         val content = named("bki") ?: return
         val footer = named("k52") ?: return
-        val strip = named("blr") ?: return
+        val strip = named("bfp") ?: return
         val wrapper = named("bm6") ?: return
         if (content.parent !== scroll || footer.parent !== scroll ||
             content.javaClass.name != "com.tencent.mm.pluginsdk.ui.chat.ChattingContent" ||
@@ -36,19 +38,40 @@ internal class ChatInputMessageUnderlay {
             restore(scroll)
             State(content, list, lp.bottomMargin, list.clipToPadding).also { states[scroll] = it }
         }
-        // t8.xml: blr contains input controls; bl8 below it contains emoji/AppPanel.
-        // Never overlap the panel or keyboard height, and never use a fixed dp height.
-        val overlap = if (footer.visibility == View.VISIBLE && strip.visibility == View.VISIBLE)
-            strip.height.coerceAtMost(footer.height).coerceAtLeast(0) else 0
+        // t8.xml: the outer bfp is the actual input+panel container; ssr is the input row.
+        // bfp owns @color/a9e. Its actual measured height includes the input, AppPanel and mode changes.
+        // The independent emoji panel stays in place above the overlapped input strip.
+        val input = named("ssr") ?: return
+        val panel = named("bkc") ?: return
+        // bfp itself is the solid outer surface; ssr supplies the row height, while bkc contains
+        // the independently positioned AppPanel. Overlap only the opaque strip above that panel.
+        val panelVisible = panel.visibility == View.VISIBLE && panel.height > 0
+        fun topInAncestor(view: View, ancestor: View): Int? {
+            var current: View = view
+            var top = 0
+            while (current !== ancestor) {
+                top += current.top
+                current = current.parent as? View ?: return null
+            }
+            return top
+        }
+        val inputTop = topInAncestor(input, strip) ?: return
+        val panelTop = topInAncestor(panel, strip)
+        val stripBottom = if (panelVisible) panelTop ?: return else inputTop + input.height
+        val overlap = if (footer.visibility == View.VISIBLE && input.visibility == View.VISIBLE)
+            (stripBottom - inputTop).coerceIn(0, strip.height) else 0
+
         if (list.paddingBottom != state.appliedPadding) state.basePadding = list.paddingBottom
         val padding = state.basePadding + overlap
         if (list.paddingBottom != padding) {
             list.setPadding(list.paddingLeft, list.paddingTop, list.paddingRight, padding)
         }
         state.appliedPadding = padding
-        list.clipToPadding = if (overlap > 0) false else state.clip
-        if (lp.bottomMargin != state.margin - overlap) {
-            lp.bottomMargin = state.margin - overlap
+        state.appliedClip = if (overlap > 0) false else state.clip
+        if (list.clipToPadding != state.appliedClip) list.clipToPadding = state.appliedClip
+        state.appliedMargin = state.margin - overlap
+        if (lp.bottomMargin != state.appliedMargin) {
+            lp.bottomMargin = state.appliedMargin
             content.layoutParams = lp
         }
         state.overlap = overlap
@@ -57,7 +80,7 @@ internal class ChatInputMessageUnderlay {
     fun restore(scroll: ViewGroup) {
         val state = states.remove(scroll) ?: return
         val lp = state.content.layoutParams as? LinearLayout.LayoutParams
-        if (lp != null && lp.bottomMargin == state.margin - state.overlap) {
+        if (lp != null && lp.bottomMargin == state.appliedMargin) {
             lp.bottomMargin = state.margin
             state.content.layoutParams = lp
         }
@@ -65,7 +88,7 @@ internal class ChatInputMessageUnderlay {
         if (list.paddingBottom == state.appliedPadding) {
             list.setPadding(list.paddingLeft, list.paddingTop, list.paddingRight, state.basePadding)
         }
-        list.clipToPadding = state.clip
+        if (list.clipToPadding == state.appliedClip) list.clipToPadding = state.clip
     }
 
     fun restoreAll() { states.keys.toList().forEach(::restore) }

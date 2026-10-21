@@ -2553,25 +2553,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 }
             })
         }
-        // ss.xml: the native vertical LinearLayout reserves a separate footer region.
-        val scrollClass = KavaReflector.loadClass(ChatInputMessageUnderlay.SCROLL, context.hostClassLoader())
-        findWechatVerifiedMethod(scrollClass, "onLayout", Boolean::class.javaPrimitiveType!!,
-            Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
-            Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { method ->
-            hookOnce(method, after = { param ->
-                val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
-                val activity = findActivity(scroll) ?: return@hookOnce
-                val state = states[activity] ?: return@hookOnce
-                try {
-                    val enabled = !destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT &&
-                        hasConfiguredBackground(activity) && WeChatApis.version()?.current()?.versionName == "8.0.78"
-                    if (enabled) state.inputUnderlay.apply(scroll) else state.inputUnderlay.restore(scroll)
-                } catch (e: Throwable) {
-                    state.inputUnderlay.restore(scroll)
-                    HLog.e("$TAG 输入栏消息穿透布局失败", e)
-                }
-            })
-        }
+        // Input overlap geometry is updated once from the existing chat chrome refresh path.
+
         listOf("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", "com.tencent.mm.pluginsdk.ui.chat.ChatFooter").forEach { className ->
             val clazz = KavaReflector.loadClass(className, context.hostClassLoader()) ?: return@forEach
             val apply: (XC_MethodHook.MethodHookParam) -> Unit = { param ->
@@ -2635,6 +2618,11 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         applySpeechSurfaces(state, layout ?: root)
         applyChatVoiceSurfaces(state, layout ?: root)
         applyChatFooterTransparency(state, layout ?: root)
+        if (WeChatApis.version()?.versionName() == "8.0.78") {
+            val scroll = findVisibleDescendant(layout ?: root, ChatInputMessageUnderlay.SCROLL) as? ViewGroup
+            if (scroll != null) runCatching { state.inputUnderlay.apply(scroll) }
+                .onFailure { state.inputUnderlay.restore(scroll); HLog.e("$TAG 输入栏消息穿透布局失败", it) }
+        }
     }
     private fun applyChatFooterTransparency(state: HostState, root: View) {
         val footer = when {

@@ -32,6 +32,7 @@ internal class FloatingChatHeaderCapsule {
         var loading = false
     }
     private val states = WeakHashMap<ViewGroup, State>()
+    private val failCounts = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
     private val main = Handler(Looper.getMainLooper())
     private val worker by lazy { Executors.newSingleThreadExecutor() }
     private var workerStarted = false
@@ -41,20 +42,20 @@ internal class FloatingChatHeaderCapsule {
     @Volatile private var closed = false
 
     fun apply(header: ViewGroup): Boolean {
-        if (closed || header.width <= 0 || header.height <= 0) return false
-        // Obfuscated resource names below are verified only against the supplied 8.0.78 XML.
-        if (WeChatApis.version()?.versionName() != "8.0.78") return fail(header)
+        if (closed) return false
+        if (header.width <= 0 || header.height <= 0) return fail(header, "header_unmeasured")
+        val version = WeChatApis.version()?.versionName()
+        if (version != "8.0.78") return fail(header, "unsupported_version_${version ?: "unknown"}")
         fun named(name: String): View? {
             val id = header.resources.getIdentifier(name, "id", header.context.packageName)
             return if (id == 0) null else header.findViewById<View>(id)
         }
-        val nativeBack = named("actionbar_up_indicator") ?: return fail(header)
-        val nativeTitle = named("obn") as? TextView ?: return fail(header)
-        val menu = named("coy") as? ViewGroup ?: return fail(header)
-        val actions = mutableListOf<View>()
-        collectMenuActions(menu, actions)
-        val nativeMore = actions.singleOrNull() ?: return fail(header)
-        if (!nativeBack.isClickable || nativeBack.visibility != View.VISIBLE || nativeTitle.text.isNullOrBlank()) return fail(header)
+        val nativeBack = named("actionbar_up_indicator") ?: return fail(header, "back_missing")
+        val nativeTitle = named("obn") as? TextView ?: return fail(header, "title_obn_missing")
+        val menu = named("coy") as? ViewGroup ?: return fail(header, "menu_coy_missing")
+        val nativeMore = findVerifiedMore(menu, header) ?: return fail(header, "more_menu_missing")
+        if (!nativeBack.isClickable || nativeBack.visibility != View.VISIBLE) return fail(header, "back_not_ready")
+        if (nativeTitle.text.isNullOrBlank()) return fail(header, "title_empty")
         val state = states[header] ?: create(header).also { states[header] = it }
         state.back.setOnClickListener { nativeBack.performClick() }
         state.more.setOnClickListener { nativeMore.performClick() }
@@ -94,7 +95,34 @@ internal class FloatingChatHeaderCapsule {
         state.row.bringToFront()
         return true
     }
-    private fun fail(header: ViewGroup): Boolean { restore(header); return false }
+    private fun fail(header: ViewGroup, reason: String = "unknown"): Boolean {
+        if (failCounts.computeIfAbsent(reason) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
+            HLog.i("[Hchat:悬浮标题栏] 胶囊未应用 reason=$reason root=${header.javaClass.name} size=${header.width}x${header.height}")
+        }
+        restore(header); return false
+    }
+    private fun findVerifiedMore(menu: ViewGroup, header: ViewGroup): View? {
+        val candidates = mutableListOf<View>()
+        collectMenuActions(menu, candidates)
+        val settingText = runCatching { header.context.getString(header.resources.getIdentifier("cm", "string", header.context.packageName)) }.getOrNull()
+        val settingRaw = header.resources.getIdentifier("actionbar_setting_icon", "raw", header.context.packageName)
+        val settingIcon = runCatching {
+            header.context.resources.getDrawable(settingRaw, header.context.theme)
+        }.getOrNull()
+        val verified = candidates.filter { view ->
+            val title = (view.findViewById<TextView>(android.R.id.text1)?.text ?: view.contentDescription)?.toString()
+            val icon = view.findViewById<ImageView>(android.R.id.icon)?.drawable
+            (settingText != null && title == settingText) ||
+                (settingRaw != 0 && settingIcon != null && icon?.constantState == settingIcon.constantState)
+        }
+        if (verified.size == 1) return verified.single()
+        if (verified.size > 1) {
+            HLog.i("[Hchat:悬浮标题栏] 更多候选不唯一 count=${verified.size} all=${candidates.size}")
+        } else if (failCounts.computeIfAbsent("more_candidates") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
+            HLog.i("[Hchat:悬浮标题栏] 更多候选未命中 all=${candidates.size} settingText=$settingText")
+        }
+        return null
+    }
     private fun create(header: ViewGroup): State {
         val ctx = header.context
         val size = minOf(dp(header, 48), header.height - dp(header, 4)).coerceAtLeast(dp(header, 32))
