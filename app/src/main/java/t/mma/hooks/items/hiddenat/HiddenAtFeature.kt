@@ -1,13 +1,11 @@
 package t.mma.hooks.items.hiddenat
 
-import android.content.ContentValues
 import android.content.Context
 import android.content.SharedPreferences
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
-import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
 import t.mma.ui.FeatureSettingsProvider
 import t.mma.ui.SimpleFeatureSettingsProvider
@@ -39,75 +37,57 @@ class HiddenAtFeature : BaseFeature() {
     override fun onFeatureDestroy(context: FeatureContext) { runtime?.destroy(); runtime = null }
 }
 
-/** Only intercept inserts; status updates must never trigger a second send. */
+/** Modify the original native text object before insert; no second send and no fabricated lvbuffer. */
 internal class HiddenAtRuntime(private val context: FeatureContext) {
     private val prefs = HiddenAtSettings.preferences(context.hostContext())
     @Volatile private var enabled = prefs.getBoolean(HiddenAtSettings.ENABLE, false)
-    private val handles = mutableListOf<XC_MethodHook.Unhook>()
-    private data class Sending(val talker: String, val title: String, val users: List<String>, var rowId: Long = 0)
-    private val sending = ThreadLocal<Sending>()
+    @Volatile private var alive = true
+    private var handle: java.io.Closeable? = null
+    private var generation = 0
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == HiddenAtSettings.ENABLE) {
-            enabled = prefs.getBoolean(HiddenAtSettings.ENABLE, false)
-            if (enabled) installHooks() else uninstallHooks()
+            enabled = prefs.getBoolean(key, false)
+            if (enabled) schedule() else stop()
         }
     }
-    fun install() { prefs.registerOnSharedPreferenceChangeListener(listener); if (enabled) installHooks() }
-    @Synchronized private fun installHooks() {
-        if (handles.isNotEmpty()) return
-        try {
-            val database = KavaReflector.loadClass("com.tencent.wcdb.database.SQLiteDatabase", context.hostClassLoader()) ?: error("微信 WCDB 类不可用")
-            val method = KavaReflector.findMethodRecursive(database, "insertWithOnConflict", String::class.java, String::class.java, ContentValues::class.java, Int::class.javaPrimitiveType!!) ?: error("WCDB insertWithOnConflict 签名不可用")
-            handles += HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (param.args[0] != "message") return
-                    val values = param.args[2] as? ContentValues ?: return
-                    val active = sending.get()
-                    if (active != null) {
-                        if (matchesReplacement(values, active)) values.put("lvbuffer", HiddenAtText.buffer(active.users))
-                        return
-                    }
-                    if (!enabled) return
-                    try { convert(values, param) } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 转换失败，保留原消息", e) }
-                }
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    if (param.args[0] != "message" || param.hasThrowable()) return
-                    val active = sending.get() ?: return
-                    val values = param.args[2] as? ContentValues ?: return
-                    if (matchesReplacement(values, active)) active.rowId = (param.result as? Number)?.toLong()?.takeIf { it > 0 } ?: active.rowId
-                }
-            })
-        } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 安装失败，未修改消息；宿主=${context.hostContext().packageName}", e) }
+    fun install() { prefs.registerOnSharedPreferenceChangeListener(listener); if (enabled) schedule() }
+    private fun schedule() {
+        val epoch = generation
+        t.mma.hooks.core.DexInstallScheduler.schedule("hidden_at_$epoch", "隐藏艾特") {
+            synchronized(this) {
+                if (!alive || !enabled || epoch != generation || handle != null) true
+                else try {
+                    val method = t.mma.hooks.api.message.OutgoingAtMessageHook.locate(context)
+                    handle = t.mma.hooks.api.message.OutgoingAtMessageHook.register(method, "hidden_at", object : t.mma.hooks.api.message.OutgoingAtMessageHook.Observer {
+                        override fun before(param: XC_MethodHook.MethodHookParam) {
+                            if (!enabled) return
+                            val message = param.args.firstOrNull() ?: return
+                            try {
+                                val talker = KavaReflector.invokeMethod(message, "N0") as? String ?: return
+                                if (!talker.endsWith("@chatroom") || (KavaReflector.invokeMethod(message, "getType") as? Number)?.toInt() != 1 ||
+                                    (KavaReflector.invokeMethod(message, "z0") as? Number)?.toInt() != 1) return
+                                val content = KavaReflector.invokeMethod(message, "j") as? String ?: return
+                                if ('@' !in content) return
+                                val source = KavaReflector.readField(message, "G") as? String
+                                if (source.isNullOrBlank()) { HLog.d("[Hchat:隐藏艾特] 跳过: 原生消息无MsgSource"); return }
+                                val self = WeChatApis.contact().account()?.selfWxId().orEmpty()
+                                if (self.isBlank()) { HLog.d("[Hchat:隐藏艾特] 跳过: 当前账号未就绪"); return }
+                                val users = HiddenAtText.users(source.toByteArray(Charsets.UTF_8), self)
+                                if (users.isEmpty()) { HLog.d("[Hchat:隐藏艾特] 跳过: MsgSource无可用艾特名单"); return }
+                                val cleaned = HiddenAtText.clean(content, users.size)
+                                if (cleaned == null) { HLog.d("[Hchat:隐藏艾特] 跳过: 艾特片段不匹配 count=${users.size}"); return }
+                                val setter = KavaReflector.findMethodRecursive(message.javaClass, "b1", String::class.java) ?: error("正文setter缺失")
+                                KavaReflector.invokeOrThrow(setter, message, cleaned)
+                                check(KavaReflector.invokeMethod(message, "j") == cleaned)
+                                HLog.d("[Hchat:隐藏艾特] 原生正文清理成功 count=${users.size} MsgSource保持原样")
+                            } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 原生消息处理失败", e) }
+                        }
+                    })
+                    HLog.d("[Hchat:隐藏艾特] 安装成功 entry=$method"); true
+                } catch (e: Throwable) { HLog.e("[Hchat:隐藏艾特] 8.0.78入口适配失败", e); false }
+            }
+        }
     }
-    private fun matchesReplacement(v: ContentValues, active: Sending): Boolean =
-        v.getAsString("talker") == active.talker && v.getAsInteger("isSend") == 1 && v.getAsInteger("type") != 1 &&
-            v.getAsString("content")?.let { it.contains("<type>57</type>") && it.contains("<title>${escape(active.title)}</title>") } == true
-    private fun escape(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    private fun convert(v: ContentValues, param: XC_MethodHook.MethodHookParam) {
-        if (v.getAsInteger("isSend") != 1 || v.getAsInteger("type") != 1) return
-        val talker = v.getAsString("talker")?.takeIf { it.endsWith("@chatroom") } ?: return
-        val content = v.getAsString("content")?.takeIf { '@' in it } ?: return
-        val buffer = v.getAsByteArray("lvbuffer") ?: return
-        val self = WeChatApis.contact().account()?.selfWxId()?.takeIf { it.isNotBlank() } ?: return
-        val users = HiddenAtText.users(buffer, self)
-        if (users.isEmpty()) return
-        val title = HiddenAtText.clean(content, users.size) ?: return
-        val api = WeChatApis.messages() ?: return
-        if (!api.canSendXml()) return
-        val active = Sending(talker, title, users)
-        sending.set(active)
-        try {
-            val accepted = api.sendXml(talker, HiddenAtText.xml(title, users))
-            if (accepted && active.rowId > 0) param.result = active.rowId
-            else if (accepted) HLog.e("[Hchat:隐藏艾特] 发送接口已接受但未捕获替代消息写库，保留原消息；需实机核查发送时序", IllegalStateException("replacement row missing"))
-        } finally { sending.remove() }
-    }
-    @Synchronized private fun uninstallHooks() {
-        handles.forEach { HookRegistry.get().unhook(it) }; handles.clear()
-    }
-    fun destroy() {
-        enabled = false; prefs.unregisterOnSharedPreferenceChangeListener(listener)
-        uninstallHooks()
-        sending.remove()
-    }
+    @Synchronized private fun stop() { generation++; handle?.close(); handle = null }
+    fun destroy() { alive = false; enabled = false; prefs.unregisterOnSharedPreferenceChangeListener(listener); stop() }
 }

@@ -20,14 +20,4 @@ internal object HiddenAtText {
         if (removed != count) return null
         return out.toString().trim().ifEmpty { "\u200B" }
     }
-    private fun escape(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-    fun xml(title: String, ids: List<String>): String = "<msg><appmsg><title>${escape(title)}</title><type>57</type></appmsg><msgsource><atuserlist><![CDATA[${ids.joinToString(",")}]]></atuserlist></msgsource></msg>"
-    fun buffer(ids: List<String>): ByteArray {
-        val source = "<msgsource><atuserlist><![CDATA[${ids.joinToString(",")}]]></atuserlist></msgsource>".toByteArray(Charsets.UTF_8)
-        return ByteArray(source.size + 74).apply {
-            this[0] = 0x7B; val n = source.size
-            for (i in 0..3) this[5+i] = (n ushr (24-i*8)).toByte()
-            source.copyInto(this,9); this[lastIndex] = 0x7D
-        }
-    }
 }

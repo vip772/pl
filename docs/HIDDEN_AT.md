@@ -1,11 +1,15 @@
 # 内置隐藏艾特
 
-入口位于增强分组和新功能聚合，共用同一 Provider 和 Miuix 页面。配置为 `Hchat_hidden_at_config/enable`，默认关闭，即时保存；关闭时卸载本功能 Hook。仅安装于微信主进程，不依赖 ScriptPluginRuntime、BeanShell 或脚本开关。
+入口为增强功能和新功能，共用 hidden_at Provider，配置 Hchat_hidden_at_config/enable，默认关闭。
 
-在 WCDB `insertWithOnConflict(String,String,ContentValues,int)` 的 message 插入入口识别自己发出的群聊文字消息。仅名单与微信软分隔符艾特片段数量一致时转换为 type 57 AppMsg；邮箱、换行、正文空格不做全局替换。过滤自身、系统账号和重复成员，上限为 200。账号或 XML 发送 API 未就绪时不转换。
+## 微信8.0.78修复
 
-复用 `WeChatApis.messages().sendXml` 的既有 msgsource 参数能力，XML 中携带 atuserlist，不再沿用脚本的混淆发送任务/protobuf 字段 Hook。ThreadLocal 只在当前发送调用作用域内有效；只给同会话、同标题的嵌套 AppMsg 写入 lvbuffer。发送接口确认接受且观察到替代记录写入后，返回真实替代记录 ID，阻止原文字插入；不 Hook update，避免状态更新再次发送。
+旧版WCDB insertWithOnConflict拦截、type57替代发送、手工lvbuffer封装和同线程替代记录匹配已删除。现在与表情艾特共用 OutgoingAtMessageHook，仅安装一次真实入库核心 f9.Bb(e9, boolean)。功能只处理自己发出的群聊type1文字，从原生消息G字段读取MsgSource，按名单和微信软分隔符清理正文，再调用b1设置正文；原消息ID、类型和MsgSource沿原发送链路保留，不二次发送。
 
-限制：当前实现要求发送 API 在当前线程完成替代记录插入。若 API 接受请求后异步写库或重新序列化标题导致匹配失败，则保留原消息并记录错误，此时可能同时出现原消息和转换消息。尚未有双端实机和多版本 APK 验证，不能宣称收件端艾特提醒、并发或事务异常恢复已通过。需覆盖普通/多人艾特、空正文、长群昵称、连续跨群发送、关闭脚本系统、发送失败与重试；不要与原隐藏艾特脚本同时开启。
+已确认文字构造器v51.r0在调用Bb前设置r3(MsgSource)，doScene在读取原消息j()后写入pc5.pr4.e，名单继续由微信原生source assembler处理。需要双端确认接收端艾特提醒是否保留。
 
-已验证：运行时代码基于 Android SDK 加依赖桩的定向 Kotlin 编译；11 项文本/XML/元数据回归。未运行完整 Gradle 构建、设置页 Compose 编译和微信实际发送测试。
+安装使用DexMethodCache当前runtime key和DexInstallScheduler，关闭时注销自身Observer，不影响表情艾特。日志包含安装成功、无MsgSource/账号未就绪/名单为空/正文片段不匹配等阶段，不输出正文与成员名单。无法确认片段时保留原样；重复提及同一成员、截断名单等数量不一致情况仍保守跳过。
+
+仅已确认8.0.78（versionCode3180）的APK和Smali。其他版本不沿用混淆字段，明确失败关闭。Android SDK依赖桩定向编译与文本/缓存回归通过；未执行Gradle、完整Compose构建或微信双端测试。
+
+设置页按用户要求仅保留功能名称、独立开关与返回入口，开关副标题和说明卡片已移除；技术依据保留在文档。

@@ -13,7 +13,8 @@ internal class EmojiAtLocator(private val context: FeatureContext) {
     data class Targets(val send: Method, val storage: Method, val scene: Constructor<*>, val serialize: Method)
     fun locate(): Targets {
         val loader = context.hostClassLoader()
-        val cache = DexMethodCache.prefs(context.hostContext(), "Hchat_emoji_at_dex")
+        val storage = t.mma.hooks.api.message.OutgoingAtMessageHook.locate(context)
+        val cache = DexMethodCache.prefs(context.hostContext(), "Hchat_emoji_at_dex_v2")
         val key = DexMethodCache.runtimeKey(context.hostContext(), loader)
         fun owners(anchors: List<String>): List<Class<*>> = anchors.flatMap { anchor ->
             val matcher = ClassMatcher().apply { usingStrings(listOf(anchor)) }
@@ -30,12 +31,6 @@ internal class EmojiAtLocator(private val context: FeatureContext) {
             val p = it.parameterTypes
             !R.isStatic(it) && !R.isAbstract(it) && it.returnType == Void.TYPE && p.size == 6 && p[0] == String::class.java && p[5] == Integer.TYPE
         }
-        val storage = method("storage", listOf("MsgInfo processAddMsg insert db error")) {
-            !R.isStatic(it) && !R.isAbstract(it) && it.returnType == java.lang.Long.TYPE && it.parameterTypes.size == 1 &&
-                listOf("N0", "getType", "z0").all { n -> R.findMethodRecursive(it.parameterTypes[0], n) != null } &&
-                R.findMethodRecursive(it.parameterTypes[0], "r3", String::class.java) != null &&
-                R.findFieldRecursive(it.parameterTypes[0], "G")?.type == String::class.java
-        }
         fun validScene(c: Constructor<*>): Boolean {
             val p = c.parameterTypes
             return p.size == 6 && p[0] == String::class.java && p[1] == String::class.java && p[3] == java.lang.Long.TYPE && p[4] == Integer.TYPE && p[5] == Integer.TYPE
@@ -45,12 +40,8 @@ internal class EmojiAtLocator(private val context: FeatureContext) {
                 .flatMap { R.declaredConstructors(it) }.filter(::validScene).distinct().singleOrNull()
                     ?.also { DexMethodCache.saveConstructor(cache, key, "scene", it) }
             ?: error("scene 定位结果不唯一或缺失")
-        var body: Class<*> = scene.declaringClass
-        for (name in listOf("d", "a", "a")) body = R.findFieldRecursive(body, name)?.type ?: error("request.$name 不存在")
-        val items = R.findFieldRecursive(body, "e") ?: error("request.items 不存在")
-        require(List::class.java.isAssignableFrom(items.type))
-        val itemType = (items.genericType as? java.lang.reflect.ParameterizedType)?.actualTypeArguments?.singleOrNull() as? Class<*>
-            ?: error("请求项类型元数据不可用，禁止猜测")
+        // 8.0.78 c72.y creates pc5.kk0 then appends to raw h27.e; no generic Signature exists.
+        val itemType = R.loadClass("pc5.kk0", loader) ?: error("8.0.78表情请求项缺失")
         require(R.findFieldRecursive(itemType, "p")?.type == String::class.java) { "MsgSource 字段签名不符" }
         val serialize = R.declaredMethods(itemType).singleOrNull {
             it.name == "op" && !R.isStatic(it) && !R.isAbstract(it) && it.returnType == Integer.TYPE &&

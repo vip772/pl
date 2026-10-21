@@ -7,6 +7,7 @@ import android.content.SharedPreferences
 import android.widget.Toast
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.api.message.OutgoingAtMessageHook
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
@@ -24,6 +25,7 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "Hchat-EmojiAt-Members").apply { isDaemon = true } }
     private val handles = mutableListOf<XC_MethodHook.Unhook>()
+    private var storageHandle: java.io.Closeable? = null
     private val pending = EmojiAtPending { SystemClock.elapsedRealtime() }
     private data class Request(val source: String, val created: Long)
     private val requests = Collections.synchronizedMap(WeakHashMap<Any, Request>())
@@ -55,9 +57,9 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
                 else if (handles.isNotEmpty()) true
                 else try {
                     val t = EmojiAtLocator(context).locate()
-                    installTargets(t); targets = t; true
+                    installTargets(t); targets = t; HLog.d("[Hchat:表情艾特] 安装成功 send=${t.send} storage=${t.storage} scene=${t.scene} serialize=${t.serialize}"); true
                 } catch (e: Throwable) {
-                    handles.forEach { HookRegistry.get().unhook(it) }; handles.clear()
+                    handles.forEach { HookRegistry.get().unhook(it) }; handles.clear(); storageHandle?.close(); storageHandle = null
                     targets = null; pending.clear(); requests.clear()
                     report("适配检查或安装失败，保留原发送流程", e); false
                 }
@@ -96,12 +98,13 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
                     synchronized(requests) {
                         if (requests.size >= 128) requests.remove(requests.keys.first())
                         requests[item] = Request(source, SystemClock.elapsedRealtime())
+                        HLog.d("[Hchat:表情艾特] 已绑定上行请求 msgId=$id")
                     }
                 } catch (e: Throwable) { report("绑定上行名单失败", e); notice("表情已按原流程发送，艾特名单绑定失败") }
             }
         })
-        hook(t.storage, object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
+        storageHandle = OutgoingAtMessageHook.register(t.storage, "emoji_at", object : OutgoingAtMessageHook.Observer {
+            override fun before(param: XC_MethodHook.MethodHookParam) {
                 val send = scope.get() ?: return
                 if (!enabled || send.users.isEmpty()) return
                 val message = param.args.firstOrNull() ?: return
@@ -115,13 +118,14 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
                     send.records[message] = source
                 } catch (e: Throwable) { report("入库名单写入失败", e) }
             }
-            override fun afterHookedMethod(param: MethodHookParam) {
+            override fun after(param: XC_MethodHook.MethodHookParam) {
                 val send = scope.get() ?: return
                 val message = param.args.firstOrNull() ?: return
                 val source = send.records.remove(message) ?: return
                 if (!enabled || param.hasThrowable()) return
                 val id = (param.result as? Number)?.toLong() ?: return
                 pending.put(send.talker, id, source)
+                HLog.d("[Hchat:表情艾特] 已关联表情入库 msgId=$id count=${send.users.size}")
             }
         })
         // Install interception last, after every downstream hook exists.
@@ -166,13 +170,16 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
         if (!alive || !enabled || epoch != generation) return
         val previous = scope.get()
         scope.set(Send(talker, users))
-        try { R.invokeOrThrow(t.send, receiver, *args) }
+        try {
+            HLog.d("[Hchat:表情艾特] 恢复发送 withAt=${users.isNotEmpty()} count=${users.size}")
+            R.invokeOrThrow(t.send, receiver, *args)
+        }
         catch (e: Throwable) { report("恢复原发送失败", e); notice("表情发送失败，请重试") }
         finally { if (previous == null) scope.remove() else scope.set(previous) }
     }
     @Synchronized private fun stop() {
         generation++
-        handles.forEach { HookRegistry.get().unhook(it) }; handles.clear()
+        handles.forEach { HookRegistry.get().unhook(it) }; handles.clear(); storageHandle?.close(); storageHandle = null
         targets = null; pending.clear(); requests.clear()
     }
     fun destroy() {
