@@ -1,6 +1,7 @@
 package t.mma.hooks.items.antirecall
 
 object AntiRecallSettings {
+    const val KEY_DYNAMIC_STYLE = "dynamic_recall_style"
     const val PREFS_NAME = "Hchat_anti_recall_config"
     const val KEY_DYNAMIC_ENABLE = "dynamic_recall_enable"
     const val KEY_DYNAMIC_COLOR = "dynamic_recall_color"

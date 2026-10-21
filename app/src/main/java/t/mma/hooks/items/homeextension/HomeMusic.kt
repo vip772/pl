@@ -54,9 +54,18 @@ internal object HomeMusic {
     private fun toggleFavorite(c:Context,s:HomeMusicSong){val list=favorites(c);if(list.any{sameSong(it,s)})list.removeAll{sameSong(it,s)}else list.add(0,s);saveFavorites(c,list);changed()}
     private fun loadCover(v:ImageView,url:String){if(url.isBlank())return;worker.execute{runCatching{URL(url).openStream().use{BitmapFactory.decodeStream(it)}}.getOrNull()?.let{b->main.post{v.setImageBitmap(b)}}}}
     private fun qqSong(t:QQMusicTrack)=HomeMusicSong(t.title,t.singer,t.playUrl,t.coverUrl,t.lyric,"QQ音乐",t.mid)
+    private fun searchSource(query:String,source:String,done:(List<HomeMusicSong>)->Unit){
+        worker.execute{
+            val songs=runCatching{
+                if(source=="QQ音乐") (qq.search(query) as? QQMusicSearchResult.Success)?.track?.let{listOf(qqSong(it))}?:emptyList()
+                else HomeMusicSources.searchMany(query,source)
+            }.getOrDefault(emptyList()).filter{it.source==source}.distinctBy{it.sourceId.ifBlank{it.title+"\u0000"+it.artist}}
+            main.post{done(songs)}
+        }
+    }
     private fun searchAll(query:String,done:(List<HomeMusicSong>)->Unit){
-        val result=java.util.Collections.synchronizedList(mutableListOf<HomeMusicSong>());val pending=java.util.concurrent.atomic.AtomicInteger(3)
-        listOf<()->List<HomeMusicSong>>({(qq.search(query) as? QQMusicSearchResult.Success)?.track?.let{listOf(qqSong(it))}?:emptyList()}, {HomeMusicSources.searchMany(query,"网易云")},{HomeMusicSources.searchMany(query,"酷我")}).forEach{task->worker.execute{runCatching{result.addAll(task())};if(pending.decrementAndGet()==0){val songs=result.toList().distinctBy{it.source+it.sourceId}.sortedBy{if(it.source=="QQ音乐")0 else 1};main.post{done(songs)}}}}
+        val result=java.util.Collections.synchronizedList(mutableListOf<HomeMusicSong>());val pending=java.util.concurrent.atomic.AtomicInteger(4)
+        listOf<()->List<HomeMusicSong>>({(qq.search(query) as? QQMusicSearchResult.Success)?.track?.let{listOf(qqSong(it))}?:emptyList()}, {HomeMusicSources.searchMany(query,"网易云")},{HomeMusicSources.searchMany(query,"酷我")},{HomeMusicSources.searchMany(query,"咪咕")}).forEach{task->worker.execute{runCatching{result.addAll(task())};if(pending.decrementAndGet()==0){val songs=result.toList().distinctBy{it.source+it.sourceId}.sortedBy{if(it.source=="QQ音乐")0 else 1};main.post{done(songs)}}}}
     }
     fun search(c:Context,query:String,callback:(HomeMusicSong?)->Unit)=searchAll(query){songs->songs.firstOrNull()?.let{storeSong(c,it)};callback(songs.firstOrNull())}
     private fun play(c:Context,s:HomeMusicSong){val request=++selection;if(s.playUrl.isBlank()){toast(c,"正在获取播放地址…");worker.execute{val resolved=HomeMusicSources.resolve(s);main.post{if(request!=selection)return@post;if(resolved==null)toast(c,"该歌曲暂无可用播放地址")else play(c,resolved)}};return};if(sameSong(s,current)&&player!=null){if(preparing)return;runCatching{if(playing){player?.pause();playing=false}else if(player?.isPlaying==false){player?.start();playing=true;if(visualizer==null)player?.let{captureSpectrum(c,it)}};changed()}.onFailure{toast(c,"播放器正在准备，请稍后再试")};return};releaseSpectrum();runCatching{player?.release()};current=s;storeSong(c,s);changed();val qi=queue.indexOfFirst{sameSong(it,s)};if(qi<0)queue.add(s)else queue[qi]=s;playing=false;preparing=true;val mp=MediaPlayer();player=mp;runCatching{if(Build.VERSION.SDK_INT>=21)mp.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());mp.setDataSource(s.playUrl);mp.setOnSeekCompleteListener{if(player===it)changed()};mp.setOnPreparedListener{if(player!==it)return@setOnPreparedListener;preparing=false;it.start();playing=true;captureSpectrum(c,it);changed();updateLyric(s)};mp.setOnCompletionListener{releaseSpectrum();playing=false;changed();if(queue.size>1)next(c)};mp.setOnErrorListener{failed,_,_->if(player!==failed)return@setOnErrorListener true;preparing=false;playing=false;releaseSpectrum();player?.release();player=null;changed();toast(c,"该音源暂时无法播放");true};mp.prepareAsync()}.onFailure{preparing=false;player=null;mp.release();toast(c,"播放地址失效或网络不可用")}}
@@ -138,15 +147,96 @@ internal object HomeMusic {
     }
     private fun time(ms:Int):String{val t=(ms/1000).coerceAtLeast(0);return "%02d:%02d".format(t/60,t%60)}
     private fun openSheet(c:Context,songs:List<HomeMusicSong>,title:String){val dialog=Dialog(c);dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);val root=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(c,18),dp(c,16),dp(c,18),dp(c,20));background=rounded(c,0xFF102330.toInt(),22)};val head=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL};head.addView(txt(c,title,20f),LinearLayout.LayoutParams(0,-2,1f));head.addView(iconButton(c,"×"){dialog.dismiss()},LinearLayout.LayoutParams(dp(c,44),dp(c,44)));root.addView(head);val list=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL};if(songs.isEmpty())list.addView(txt(c,"暂无歌曲",15f,0xFFB7C2C9.toInt()));songs.forEach{song->val row=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(c,8),dp(c,10),dp(c,8),dp(c,10));setOnClickListener{storeSong(c,song);queue=songs.toMutableList();play(c,song);dialog.dismiss()}};val text=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL};text.addView(txt(c,song.title,16f));text.addView(txt(c,"${song.artist} · ${song.source}",12f,0xFFB7C2C9.toInt()));row.addView(text,LinearLayout.LayoutParams(0,-2,1f));row.addView(txt(c,"▶",20f));list.addView(row)};root.addView(ScrollView(c).apply{addView(list)},LinearLayout.LayoutParams(-1,0,1f));dialog.setContentView(root);dialog.show();dialog.window?.setBackgroundDrawableResource(android.R.color.transparent);dialog.window?.setLayout(-1,(c.resources.displayMetrics.heightPixels*0.82f).toInt());dialog.window?.setGravity(Gravity.BOTTOM);dialog.window?.attributes=dialog.window?.attributes?.apply{windowAnimations=android.R.style.Animation_InputMethod}}
+    private class SearchSongAction(c:Context,private val song:HomeMusicSong,private val favorite:Boolean):View(c){
+        private val ink=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        private val shape=android.graphics.Path()
+        private var active=false
+        private val refresh:()->Unit={
+            val next=if(favorite)isFavorite(context,song) else sameSong(song,current)&&playing&&!preparing&&player!=null
+            if(active!=next){active=next;invalidate()}
+            contentDescription=if(favorite){if(active)"取消收藏" else "收藏"}else{if(active)"暂停" else "播放"}
+        }
+        init{isFocusable=true;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_YES;refresh()}
+        override fun onAttachedToWindow(){super.onAttachedToWindow();setListener(refresh);refresh()}
+        override fun onDetachedFromWindow(){removeListener(refresh);super.onDetachedFromWindow()}
+        override fun onSizeChanged(w:Int,h:Int,oldw:Int,oldh:Int){
+            super.onSizeChanged(w,h,oldw,oldh)
+            shape.reset()
+            if(favorite){
+                shape.moveTo(0f,8f);shape.cubicTo(-2f,5f,-11f,0f,-10f,-5f)
+                shape.cubicTo(-9f,-11f,-3f,-12f,0f,-6f)
+                shape.cubicTo(3f,-12f,9f,-11f,10f,-5f)
+                shape.cubicTo(11f,0f,2f,5f,0f,8f);shape.close()
+            }else{shape.moveTo(-6f,-10f);shape.lineTo(10f,0f);shape.lineTo(-6f,10f);shape.close()}
+        }
+        override fun onDraw(canvas:android.graphics.Canvas){
+            super.onDraw(canvas)
+            val save=canvas.save();canvas.translate(width/2f,height/2f);val unit=resources.displayMetrics.density;canvas.scale(unit,unit)
+            ink.color=if(favorite&&active)Color.RED else Color.WHITE
+            ink.style=if(favorite&&!active)android.graphics.Paint.Style.STROKE else android.graphics.Paint.Style.FILL
+            ink.strokeWidth=1.8f;ink.strokeJoin=android.graphics.Paint.Join.ROUND
+            if(!favorite&&active){canvas.drawRoundRect(-8f,-10f,-3f,10f,1f,1f,ink);canvas.drawRoundRect(3f,-10f,8f,10f,1f,1f,ink)}else canvas.drawPath(shape,ink)
+            canvas.restoreToCount(save)
+        }
+    }
+    private fun searchSongRow(c:Context,song:HomeMusicSong,songs:List<HomeMusicSong>):View{
+        val startPlayback={queue=songs.toMutableList();play(c,if(sameSong(song,current)&&player!=null)current!! else song)}
+        return LinearLayout(c).apply{
+            gravity=Gravity.CENTER_VERTICAL;setPadding(dp(c,12),dp(c,10),dp(c,6),dp(c,10));background=rounded(c,0xFF203744.toInt(),12)
+            val info=LinearLayout(c).apply{
+                orientation=LinearLayout.VERTICAL
+                addView(txt(c,song.title,15f))
+                addView(txt(c,"${song.artist} · ${song.source}",12f,0xFFB7C2C9.toInt()).apply{setPadding(0,dp(c,4),0,0)})
+                setOnClickListener{startPlayback()}
+            }
+            addView(info,LinearLayout.LayoutParams(0,-2,1f))
+            addView(SearchSongAction(c,song,false).apply{setOnClickListener{startPlayback()}},LinearLayout.LayoutParams(dp(c,44),dp(c,48)).apply{leftMargin=dp(c,4)})
+            addView(SearchSongAction(c,song,true).apply{setOnClickListener{toggleFavorite(c,if(sameSong(song,current))current!! else song)}},LinearLayout.LayoutParams(dp(c,44),dp(c,48)).apply{leftMargin=dp(c,4)})
+        }
+    }
     private fun searchSheet(c:Context,host:LinearLayout){
         val dialog=Dialog(c);dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val page=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(c,18),dp(c,16),dp(c,18),dp(c,18));background=rounded(c,0xFF102330.toInt(),22)}
-        val input=EditText(c).apply{hint="搜索歌曲或歌手";setSingleLine();setTextColor(Color.WHITE);setHintTextColor(0xFF9AAAB3.toInt());background=rounded(c,0xFF203744.toInt(),24);setPadding(dp(c,16),dp(c,10),dp(c,16),dp(c,10))}
-        val searchButton=iconButton(c,"⌕"){};val bar=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL};bar.addView(input,LinearLayout.LayoutParams(0,dp(c,48),1f));bar.addView(searchButton,LinearLayout.LayoutParams(dp(c,52),dp(c,48)));page.addView(bar)
-        val status=txt(c,"搜索将同时查询 QQ 音乐、网易云和酷我",13f,0xFFB7C2C9.toInt()).apply{setPadding(0,dp(c,12),0,dp(c,8))};page.addView(status)
+        val sourceKeys=listOf("QQ音乐","网易云","酷我","咪咕")
+        val sourceLabels=listOf("QQ音乐","网易云音乐","酷我音乐","咪咕音乐")
+        var selectedSource=0
+        val sourceRow=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL}
+        val sourceButtons=sourceLabels.mapIndexed { index,label ->
+            txt(c,label,12f).apply{
+                gravity=Gravity.CENTER;setPadding(dp(c,2),0,dp(c,2),0)
+                sourceRow.addView(this,LinearLayout.LayoutParams(0,dp(c,42),1f).apply{if(index>0)leftMargin=dp(c,8)})
+            }
+        }
+        fun updateSourceButtons(){sourceButtons.forEachIndexed{index,button->
+            val active=index==selectedSource
+            button.isSelected=active
+            button.background=rounded(c,if(active)0xFF35677F.toInt() else 0xFF203744.toInt(),12)
+            button.setTextColor(if(active)Color.WHITE else 0xFFB7C2C9.toInt())
+        }}
+        updateSourceButtons()
+        page.addView(sourceRow,LinearLayout.LayoutParams(-1,dp(c,42)).apply{bottomMargin=dp(c,12)})
+        val input=EditText(c).apply{hint="搜索歌曲或歌手";setSingleLine();setTextColor(Color.WHITE);setHintTextColor(0xFF9AAAB3.toInt());background=null;setPadding(dp(c,16),dp(c,10),dp(c,4),dp(c,10));imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH}
+        val searchButton=object:View(c){
+            private val iconPaint=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply{color=Color.WHITE;style=android.graphics.Paint.Style.STROKE;strokeWidth=dp(c,2).toFloat();strokeCap=android.graphics.Paint.Cap.ROUND}
+            override fun onDraw(canvas:android.graphics.Canvas){
+                super.onDraw(canvas)
+                val unit=resources.displayMetrics.density;val cx=width/2f-2*unit;val cy=height/2f-2*unit
+                canvas.drawCircle(cx,cy,7*unit,iconPaint)
+                canvas.drawLine(cx+5*unit,cy+5*unit,cx+12*unit,cy+12*unit,iconPaint)
+            }
+        }.apply{contentDescription="搜索";isFocusable=true;importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_YES}
+        val bar=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL;background=rounded(c,0xFF203744.toInt(),24)}
+        bar.addView(input,LinearLayout.LayoutParams(0,dp(c,48),1f))
+        bar.addView(searchButton,LinearLayout.LayoutParams(dp(c,48),dp(c,48)))
+        page.addView(bar,LinearLayout.LayoutParams(-1,dp(c,48)))
+        val status=txt(c,"搜索 QQ音乐 的歌曲",13f,0xFFB7C2C9.toInt()).apply{setPadding(0,dp(c,12),0,dp(c,8))};page.addView(status)
         val results=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL};page.addView(ScrollView(c).apply{addView(results)},LinearLayout.LayoutParams(-1,0,1f))
         var generation=0
-        val doSearch={val request=++generation;val q=input.text.toString().trim();if(q.isBlank()){input.error="请输入歌曲名或歌手"}else{status.text="正在搜索多个音源…";results.removeAllViews();searchAll(q){songs->if(!dialog.isShowing||request!=generation)return@searchAll;status.text=if(songs.isEmpty())"没有可用结果" else "${songs.size} 个音源结果，选择一首播放";songs.forEach{song->val row=TextView(c).apply{text="${song.title}\n${song.artist} · ${song.source}${if(song.playUrl.isBlank()) " · 播放地址待解析" else ""}";textSize=15f;setTextColor(Color.WHITE);setPadding(dp(c,12),dp(c,12),dp(c,12),dp(c,12));background=rounded(c,0xFF203744.toInt(),12);setOnClickListener{storeSong(c,song);queue=songs.toMutableList();play(c,song);dialog.dismiss()}};val lp=LinearLayout.LayoutParams(-1,-2).apply{setMargins(0,dp(c,4),0,dp(c,4))};results.addView(row,lp)}}}}
+        sourceButtons.forEachIndexed{index,button->button.setOnClickListener{
+            if(selectedSource!=index){selectedSource=index;generation++;updateSourceButtons();results.removeAllViews();status.text="搜索 ${sourceLabels[index]} 的歌曲"}
+        }}
+        dialog.setOnDismissListener{generation++}
+        val doSearch={val request=++generation;val source=sourceKeys[selectedSource];val label=sourceLabels[selectedSource];val q=input.text.toString().trim();if(q.isBlank()){input.error="请输入歌曲名或歌手"}else{status.text="正在搜索 $label…";results.removeAllViews();searchSource(q,source){songs->if(!dialog.isShowing||request!=generation)return@searchSource;status.text=if(songs.isEmpty())"没有可用结果" else "$label · ${songs.size} 首歌曲，选择一首播放";songs.forEach{song->val row=searchSongRow(c,song,songs);val lp=LinearLayout.LayoutParams(-1,-2).apply{setMargins(0,dp(c,4),0,dp(c,4))};results.addView(row,lp)}}}}
         searchButton.setOnClickListener{doSearch()};input.setOnEditorActionListener{_,_,_->doSearch();true}
         dialog.setContentView(page);dialog.show();dialog.window?.setBackgroundDrawableResource(android.R.color.transparent);dialog.window?.setLayout(-1,(c.resources.displayMetrics.heightPixels*0.88f).toInt());dialog.window?.setGravity(Gravity.BOTTOM);dialog.window?.attributes=dialog.window?.attributes?.apply{windowAnimations=android.R.style.Animation_InputMethod}
     }

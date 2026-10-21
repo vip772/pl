@@ -32,6 +32,7 @@ internal fun DynamicBadgeMiuixPage(
 ) {
     val sp = remember { HchatStorage.preferences(context, DynamicBadgeSettings.PREFS_NAME) }
     var enabled by remember { mutableStateOf(sp.getBoolean(DynamicBadgeSettings.KEY_ENABLE, false)) }
+    var motionStyle by remember { mutableStateOf(sp.getInt(DynamicBadgeSettings.KEY_STYLE, 0).coerceIn(0, 2)) }
     var numberEnabled by remember { mutableStateOf(sp.getBoolean(DynamicBadgeSettings.KEY_NUMBER_ENABLE, true)) }
     var dotEnabled by remember { mutableStateOf(sp.getBoolean(DynamicBadgeSettings.KEY_DOT_ENABLE, true)) }
     var numberColor by remember {
@@ -67,6 +68,7 @@ var dotSpeed by remember { mutableStateOf(sp.getInt(DynamicBadgeSettings.KEY_DOT
         bottomBar = { BottomActionBar("保存设置", {
             val editor = sp.edit()
                 .putBoolean(DynamicBadgeSettings.KEY_ENABLE, enabled)
+                .putInt(DynamicBadgeSettings.KEY_STYLE, motionStyle)
                 .putBoolean(DynamicBadgeSettings.KEY_NUMBER_ENABLE, numberEnabled)
                 .putBoolean(DynamicBadgeSettings.KEY_DOT_ENABLE, dotEnabled)
                 .putInt(DynamicBadgeSettings.KEY_NUMBER_SPEED, numberSpeed)
@@ -90,6 +92,12 @@ var dotSpeed by remember { mutableStateOf(sp.getInt(DynamicBadgeSettings.KEY_DOT
         ) {
             item { SwitchRow(enabled, "动态角标", "启用主界面未读角标动态效果", onCheckedChange = { enabled = it }) }
             if (enabled) {
+                item { SmallTitle(text = "动效样式") }
+                item { SettingsCard {
+                    listOf("现有效果", "闪电环绕", "蝌蚪环绕").forEachIndexed { index, label ->
+                        OptionChoiceRow(item = OptionItem(label, index, ""), selected = motionStyle == index, onClick = { motionStyle = index })
+                    }
+                } }
                 item { SwitchRow(numberEnabled, "数字角标", "数字和填充保持原样，仅绘制旋转渐变描边", onCheckedChange = { numberEnabled = it }) }
                 if (numberEnabled) {
                     item {

@@ -203,6 +203,8 @@ internal class DynamicRecallRuntime(private val context: Context) {
         private val segment = Path()
         private val measure = PathMeasure()
         private val gradientMatrix = Matrix()
+        private val selectableEffect = t.mma.hooks.items.dynamicbadge.SelectableBorderEffect()
+        private var motionStyle = 0
         private var gradient: SweepGradient? = null
         private var perimeter = 0f
         private var dashCount = 1
@@ -218,6 +220,7 @@ internal class DynamicRecallRuntime(private val context: Context) {
             }
         }
         fun update() {
+            motionStyle = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_STYLE, 0).coerceIn(0, 2)
             setBounds(0, 0, host.width, host.height)
             val density = view.resources.displayMetrics.density
             paint.strokeWidth = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
@@ -270,7 +273,9 @@ internal class DynamicRecallRuntime(private val context: Context) {
             val saved = canvas.save()
             canvas.translate((contentLocation[0] - hostLocation[0]).toFloat(),
                 (contentLocation[1] - hostLocation[1]).toFloat())
-            canvas.drawPath(segment, paint)
+            if (motionStyle == 0) canvas.drawPath(segment, paint)
+            else selectableEffect.draw(canvas, paint, rect, minOf(12f * view.resources.displayMetrics.density, rect.height() / 2f),
+                motionStyle, progress, view.resources.displayMetrics.density, SystemClock.uptimeMillis(), period)
             canvas.restoreToCount(saved)
             paint.shader = null
         }

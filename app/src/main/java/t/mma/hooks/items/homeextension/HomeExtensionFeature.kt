@@ -11,6 +11,8 @@ object HomeExtensionSettings {
     const val PREFS = "Hchat_home_extension_config"
     const val ENABLE = "enable"
     const val CALENDAR = "calendar"
+    const val CALENDAR_EFFECT = "calendar_effect"
+    const val CALENDAR_EFFECT_STYLE = "calendar_effect_style"
     const val RECENT = "recent"
     const val CALENDAR_ALPHA = "calendar_alpha"
     const val ORBIT_COLOR = "orbit_color"

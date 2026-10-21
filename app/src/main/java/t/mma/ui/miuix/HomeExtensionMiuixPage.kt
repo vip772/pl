@@ -26,6 +26,8 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
     val prefs = remember { Settings.preferences(context) }
     var enabled by remember { mutableStateOf(prefs.getBoolean(Settings.ENABLE, false)) }
     var calendar by remember { mutableStateOf(prefs.getBoolean(Settings.CALENDAR, true)) }
+    var calendarEffect by remember { mutableStateOf(prefs.getBoolean(Settings.CALENDAR_EFFECT, false)) }
+    var calendarEffectStyle by remember { mutableStateOf(prefs.getInt(Settings.CALENDAR_EFFECT_STYLE, 0).coerceIn(0, 2)) }
     var favorites by remember { mutableStateOf(prefs.getBoolean(Settings.FAVORITES, false)) }
     var recent by remember { mutableStateOf(!favorites && prefs.getBoolean(Settings.RECENT, true)) }
     var orbit by remember { mutableStateOf(prefs.getBoolean(Settings.AVATAR_ORBIT, true)) }
@@ -93,6 +95,14 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                 item { SettingsCard { Column {
                     SwitchRow(calendar, "首页日历", "日期下方显示对应农历") { calendar = it; prefs.edit().putBoolean(Settings.CALENDAR, it).apply() }
                     if (calendar) {
+                        SwitchRow(calendarEffect, "动态特效", "仅为当前日期绘制动态环绕效果") { calendarEffect = it; prefs.edit().putBoolean(Settings.CALENDAR_EFFECT, it).apply() }
+                        if (calendarEffect) {
+                            listOf("动态角标", "闪电特效", "蝌蚪环绕").forEachIndexed { index, label ->
+                                OptionChoiceRow(item = OptionItem(label, index, ""), selected = calendarEffectStyle == index, onClick = {
+                                    calendarEffectStyle = index; prefs.edit().putInt(Settings.CALENDAR_EFFECT_STYLE, index).apply()
+                                })
+                            }
+                        }
                         HomeExtensionSlider(context, "背景透明度", Settings.CALENDAR_ALPHA, 75, 0f..100f, true)
                         InputRow(title = "问候语", summary = "显示在年月右侧，最多120字", value = greeting, onValueChange = { greeting = it.take(120); prefs.edit().putString(Settings.GREETING, greeting).apply() })
                     }

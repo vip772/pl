@@ -1,6 +1,7 @@
 package t.mma.hooks.items.dynamicbadge
 
 object DynamicBadgeSettings {
+    const val KEY_STYLE = "motion_style"
     const val ID = "dynamic_badge"
     const val PREFS_NAME = "Hchat_dynamic_badge_config"
     const val KEY_ENABLE = "dynamic_badge_enable"

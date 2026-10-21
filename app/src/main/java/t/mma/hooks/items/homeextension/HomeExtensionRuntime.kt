@@ -352,7 +352,14 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 val date = monday.plusDays(index.toLong())
                 val column = LinearLayout(ctx).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER }
                 column.addView(text(listOf("一", "二", "三", "四", "五", "六", "日")[index], 12f), LinearLayout.LayoutParams(-1, dp(24)))
-                column.addView(text(date.dayOfMonth.toString(), if(compactCard) 14f else 19f).apply {
+                val dayView = if (date == today) CalendarTodayView(ctx,
+                    prefs.getBoolean(HomeExtensionSettings.CALENDAR_EFFECT, false),
+                    prefs.getInt(HomeExtensionSettings.CALENDAR_EFFECT_STYLE, 0).coerceIn(0, 2)
+                ).apply {
+                    text = date.dayOfMonth.toString(); textSize = if(compactCard) 14f else 19f
+                    gravity = Gravity.CENTER; importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                } else text(date.dayOfMonth.toString(), if(compactCard) 14f else 19f)
+                column.addView(dayView.apply {
                     contentDescription = date.toString()
                     if (date == today) {
                         setTextColor(Color.WHITE)

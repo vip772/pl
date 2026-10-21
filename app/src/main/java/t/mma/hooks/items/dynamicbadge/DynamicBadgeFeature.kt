@@ -431,6 +431,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     )
 
     private fun isBadge(view: View): Boolean {
+        if (view is t.mma.hooks.items.homeextension.CalendarTodayView) return false
         if (view.visibility != View.VISIBLE || view.width <= 0 || view.height <= 0) return false
         if (view.id == NUMBER_BADGE_ID) return true
         if (view.id == DOT_BADGE_ID) return true
@@ -446,6 +447,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     }
 
     private fun collectViews(root: View, into: MutableList<View>) {
+        if (root is t.mma.hooks.items.homeextension.CalendarTodayView) return
         into += root
         if (root is ViewGroup) for (index in 0 until root.childCount) collectViews(root.getChildAt(index), into)
     }
@@ -627,6 +629,13 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     ) : Drawable() {
         private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         private val rect = RectF()
+        private val selectableEffect = SelectableBorderEffect()
+        private val motionMatrix = android.graphics.Matrix()
+        private var motionShader: android.graphics.SweepGradient? = null
+        private var shaderStart = 0
+        private var shaderEnd = 0
+        private var shaderX = Float.NaN
+        private var shaderY = Float.NaN
         private val frame = object : Runnable {
             override fun run() {
                 if (!running) return
@@ -676,7 +685,16 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             val stroke = strokeDp * density
             val gap = 2f * density
             rect.set(bounds.left - gap - stroke / 2f, bounds.top - gap - stroke / 2f, bounds.right + gap + stroke / 2f, bounds.bottom + gap + stroke / 2f)
-            if (number) {
+            val motionStyle = prefs.getInt(DynamicBadgeSettings.KEY_STYLE, 0).coerceIn(0, 2)
+            if (motionStyle != 0) {
+                if (motionShader == null || shaderStart != start || shaderEnd != end || shaderX != rect.centerX() || shaderY != rect.centerY()) {
+                    shaderStart = start; shaderEnd = end; shaderX = rect.centerX(); shaderY = rect.centerY()
+                    motionShader = android.graphics.SweepGradient(shaderX, shaderY, intArrayOf(start, end, start), floatArrayOf(0f, .5f, 1f))
+                }
+                motionMatrix.setRotate(phase, rect.centerX(), rect.centerY()); motionShader?.setLocalMatrix(motionMatrix)
+                paint.shader = motionShader; paint.strokeWidth = stroke; paint.alpha = 255
+                selectableEffect.draw(canvas, paint, rect, rect.height() / 2f, motionStyle, phase / 360f, density, SystemClock.uptimeMillis(), duration)
+            } else if (number) {
                 paint.style = Paint.Style.STROKE
                 paint.strokeWidth = stroke
                 RotatingGradientStroke.draw(canvas, paint, rect, rect.height() / 2f, start, end, phase)

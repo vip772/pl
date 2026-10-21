@@ -112,7 +112,12 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
             val y=if(style==2)133*sy else 145*sy;val color=if(style==2)Color.BLACK else Color.WHITE
             icon(canvas,"|◀","previous",if(style==2)187*sx else 204*sx,y,19*sx,color)
             val x=if(style==2)220*sx else 246*sx;playIcon(canvas,s,x,y,if(style==2)20*sx else 18*sx,style==2)
-            icon(canvas,"▶|","next",if(style==2)253*sx else 288*sx,y,19*sx,color);icon(canvas,"☰","favorites",if(style==2)281*sx else 317*sx,y,15*sx,color)
+            icon(canvas,"▶|","next",if(style==2)253*sx else 288*sx,y,19*sx,color)
+            if(style==2)icon(canvas,"☰","favorites",281*sx,y,15*sx,color)
+            else {
+                icon(canvas,"▤","lyrics",192*sx,184*sy,17*sx,color)
+                icon(canvas,"☰","favorites",288*sx,184*sy,17*sx,color)
+            }
         }
     }
     private fun graffiti(c:Canvas,w:Float,h:Float){

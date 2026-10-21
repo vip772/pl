@@ -1440,6 +1440,7 @@ internal fun AntiRecallMiuixPage(
             ) ?: AntiRecallSettings.DEFAULT_NOTICE_TIME_FORMAT
         )
     }
+    var dynamicStyle by remember { mutableStateOf(sp.getInt(AntiRecallSettings.KEY_DYNAMIC_STYLE, 0).coerceIn(0, 2)) }
     var dynamicRecall by remember { mutableStateOf(sp.getBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, false)) }
     var dynamicColor by remember { mutableStateOf(sp.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
         t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty()) }
@@ -1479,6 +1480,7 @@ internal fun AntiRecallMiuixPage(
                         }
                         sp.edit()
                             .putBoolean(AntiRecallSettings.KEY_DYNAMIC_ENABLE, dynamicRecall)
+                            .putInt(AntiRecallSettings.KEY_DYNAMIC_STYLE, dynamicStyle)
                             .putString(AntiRecallSettings.KEY_DYNAMIC_COLOR, dynamicColor)
                             .putBoolean(AntiRecallSettings.KEY_MARKER_ENABLE, recallMarkerEnabled)
                             .putInt(AntiRecallSettings.KEY_DYNAMIC_SPEED, dynamicSpeed)
@@ -1562,6 +1564,11 @@ internal fun AntiRecallMiuixPage(
                     onCheckedChange = { dynamicRecall = it })
             }
             if (dynamicRecall) {
+                item { SettingsCard {
+                    listOf("现有效果", "闪电环绕", "蝌蚪环绕").forEachIndexed { index, label ->
+                        OptionChoiceRow(item = OptionItem(label, index, ""), selected = dynamicStyle == index, onClick = { dynamicStyle = index })
+                    }
+                } }
                 item {
                     ColorPickerRow("渐变颜色", "断点描边三色渐变", dynamicColor,
                         threeColorGradient = true,
