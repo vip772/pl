@@ -2633,20 +2633,29 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             HLog.i("$TAG CHROMEINPUT footerMissing root=${root.javaClass.name}")
             return
         }
-        applySpeechSurfaces(state, footer)
-        applyChatVoiceSurfaces(state, footer)
-        HLog.i("$TAG CHROMEINPUT footerFound ${wechatProbeView(footer, state.activity)}")
+        // ChatFooter is a large host containing the input row and app panel. Clearing it
+        // recursively changes the panel surface and measured geometry. Restrict this pass
+        // to t8.xml's bfp input surface; bkc keeps its native background and bounds.
+        val inputSurface = footer.findViewById<View>(resourceId("bfp")) as? ViewGroup
+        if (inputSurface == null) {
+            HLog.i("$TAG CHROMEINPUT inputSurfaceMissing footer=${wechatProbeView(footer, state.activity)}")
+            return
+        }
+        applySpeechSurfaces(state, inputSurface)
+        applyChatVoiceSurfaces(state, inputSurface)
+        HLog.i("$TAG CHROMEINPUT footerFound ${wechatProbeView(footer, state.activity)} inputSurface=${wechatProbeView(inputSurface, state.activity)}")
         val queue = ArrayDeque<View>()
-        queue.add(footer)
+        queue.add(inputSurface)
         var visited = 0
         while (queue.isNotEmpty() && visited++ < 240) {
             val view = queue.removeFirst()
+            if (view !== inputSurface && view.id == resourceId("bkc")) continue
             if (view is android.widget.EditText) {
                 val snapshot = surfaceSnapshot(state, view)
                 val dark = isWechatDark(view)
                 val strokeColor = if (dark) Color.WHITE else Color.BLACK
-                val strokeWidth = chatInputStrokeWidth(footer)
-                val icon = footer.findViewById<ImageView>(resourceId("bqr"))
+                val strokeWidth = chatInputStrokeWidth(inputSurface)
+                val icon = inputSurface.findViewById<ImageView>(resourceId("bqr"))
                 val ink = icon?.let { measuredIconStrokes[it] }
                 val style = listOf(strokeColor, strokeWidth, icon, icon?.drawable, ink?.top, ink?.bottom)
                 if (snapshot.slot == BackgroundBeautySettings.Slot.CHAT && inputOutlineStyles[view] == style &&

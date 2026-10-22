@@ -106,6 +106,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
         installTipsGroupTracking()?.let { count += it }
         installed = count > 0
+        HLog.i("[Hchat:$TAG] 标题栏功能安装结果 installed=$installed hooks=$count target=$layoutClass header=$headerClass")
         if (!installed) HLog.e("[Hchat:$TAG] 功能未生效: 未找到 ChattingUILayout 生命周期方法")
         return installed
     }

@@ -60,7 +60,6 @@ internal class ChatInputMessageUnderlay {
         val stripBottom = if (panelVisible) panelTop ?: return else inputTop + input.height
         val overlap = if (footer.visibility == View.VISIBLE && input.visibility == View.VISIBLE)
             (stripBottom - inputTop).coerceIn(0, strip.height) else 0
-
         if (list.paddingBottom != state.appliedPadding) state.basePadding = list.paddingBottom
         val padding = state.basePadding + overlap
         if (list.paddingBottom != padding) {
