@@ -109,11 +109,18 @@ internal class FloatingChatHeaderCapsule {
         val settingIcon = runCatching {
             header.context.resources.getDrawable(settingRaw, header.context.theme)
         }.getOrNull()
+        // MMActivityController writes fb.b (the menu icon resource ID) to id/nwr.
+        // Drawable constantState is unreliable after WeChat wraps/tints the icon.
+        val iconTagId = header.resources.getIdentifier("nwr", "id", header.context.packageName)
+        val fqId = header.resources.getIdentifier("fq", "id", header.context.packageName)
         val verified = candidates.filter { view ->
             val title = (view.findViewById<TextView>(android.R.id.text1)?.text ?: view.contentDescription)?.toString()
             val icon = (view as? ImageView)?.drawable
                 ?: view.findViewById<ImageView>(android.R.id.icon)?.drawable
-            (settingText != null && title == settingText) ||
+            val nativeSettingTag = iconTagId != 0 && fqId != 0 && view.id == fqId &&
+                view.javaClass.name == "com.tencent.mm.ui.widget.imageview.WeImageView" &&
+                settingRaw != 0 && view.getTag(iconTagId) == settingRaw
+            nativeSettingTag || (settingText != null && title == settingText) ||
                 (settingRaw != 0 && settingIcon != null && icon?.constantState == settingIcon.constantState)
         }
         if (verified.size == 1) return verified.single()
@@ -131,11 +138,14 @@ internal class FloatingChatHeaderCapsule {
             val name = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("-")
             val lp = view.layoutParams
             val icon = (view as? ImageView)?.drawable
+            val tagId = view.resources.getIdentifier("nwr", "id", view.context.packageName)
+            val iconTag = if (tagId != 0) view.getTag(tagId) as? Int else null
+            val iconResource = iconTag?.let { runCatching { view.resources.getResourceName(it) }.getOrNull() }
             return "${view.javaClass.name}#$name id=${view.id} size=${view.width}x${view.height} " +
                 "pos=${view.left},${view.top} visibility=${view.visibility} shown=${view.isShown} " +
                 "enabled=${view.isEnabled} clickable=${view.isClickable} listeners=${view.hasOnClickListeners()} " +
                 "alpha=${view.alpha} lp=${lp?.javaClass?.name}:${lp?.width}x${lp?.height} " +
-                "icon=${icon?.javaClass?.name} iconState=${icon?.constantState?.javaClass?.name} " +
+                "icon=${icon?.javaClass?.name} iconState=${icon?.constantState?.javaClass?.name} iconTag=$iconTag iconResource=$iconResource " +
                 "descriptionPresent=${!view.contentDescription.isNullOrEmpty()}"
         }
         val rows = ArrayList<String>()

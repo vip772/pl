@@ -57,3 +57,17 @@ assert 'view.javaClass.name == "com.tencent.mm.ui.widget.imageview.WeImageView"'
 assert '(view as? ImageView)?.drawable' in source
 assert 'state.more.setOnClickListener { nativeMore.performClick() }' in source
 print('PASS: fq native icon-menu listener/description evidence and original click delegation')
+
+# fb.b is the icon resource, not the menu ID: controller.i receives icon as p2.
+start = ha.index('.method public final i(IILjava/lang/String;Z')
+end = ha.index('.end method', start)
+assert 'iput p2, v0, Lcom/tencent/mm/ui/fb;->b:I' in ha[start:end]
+start = ha.index('    :cond_37\n    :goto_11')
+end = ha.index('    :cond_38', start)
+tag_binding = ha[start:end]
+assert 'Lcom/tencent/mm/ui/fb;->b:I' in tag_binding
+assert '0x7f0a6816' in tag_binding and 'setTag(ILjava/lang/Object;)' in tag_binding
+assert 'name="nwr" id="0x7f0a6816"' in (decoded / 'res/values/public.xml').read_text()
+assert 'view.getTag(iconTagId) == settingRaw' in source
+assert 'nativeSettingTag ||' in source
+print('PASS: native icon resource tag nwr validates settings independently of drawable wrappers')
