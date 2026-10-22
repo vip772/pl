@@ -111,7 +111,8 @@ internal class FloatingChatHeaderCapsule {
         }.getOrNull()
         val verified = candidates.filter { view ->
             val title = (view.findViewById<TextView>(android.R.id.text1)?.text ?: view.contentDescription)?.toString()
-            val icon = view.findViewById<ImageView>(android.R.id.icon)?.drawable
+            val icon = (view as? ImageView)?.drawable
+                ?: view.findViewById<ImageView>(android.R.id.icon)?.drawable
             (settingText != null && title == settingText) ||
                 (settingRaw != 0 && settingIcon != null && icon?.constantState == settingIcon.constantState)
         }
@@ -252,7 +253,16 @@ internal class FloatingChatHeaderCapsule {
     }
     private fun collectMenuActions(view: View, output: MutableList<View>) {
         if (view.visibility != View.VISIBLE || !view.isEnabled) return
-        if (view.javaClass.name == "com.tencent.mm.ui.widget.WXActionMenuView" && view.isClickable) { output += view; return }
+        // 8.0.78 has two native option-menu renderers. Runtime uses fq inside coy;
+        // MMActivityController stores it in U and binds the option click/description.
+        val fq = view.resources.getIdentifier("fq", "id", view.context.packageName)
+        val isNativeIcon = fq != 0 && view.id == fq &&
+            view.javaClass.name == "com.tencent.mm.ui.widget.imageview.WeImageView"
+        val isActionMenu = view.javaClass.name == "com.tencent.mm.ui.widget.WXActionMenuView"
+        if ((isNativeIcon || isActionMenu) && view.isClickable && view.hasOnClickListeners()) {
+            output += view
+            return
+        }
         if (view is ViewGroup) for (i in 0 until view.childCount) collectMenuActions(view.getChildAt(i), output)
     }
     private fun clickableAncestor(view: View, boundary: View): View? {

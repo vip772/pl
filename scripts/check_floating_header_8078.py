@@ -42,3 +42,18 @@ assert 'pending.put(talker, id, scope.users)' in hidden
 assert 'KavaReflector.invokeOrThrow(setter, message, merged)' in hidden
 assert 'HiddenAtSource.merge(param.result as? String, users)' in hidden
 print('PASS: temporary at-feature diagnostics removed; native source setter, pending association and uplink merge retained')
+
+# Actual 8.0.78 icon-menu path: fq -> controller.U -> original listener/description.
+assert 'const v13, 0x7f0a0109' in ha
+assert 'iput-object v3, v0, Lcom/tencent/mm/ui/ha;->U:Lcom/tencent/mm/ui/widget/imageview/WeImageView;' in ha
+start = ha.index('    :cond_37\n    :goto_11')
+end = ha.index('    iget v9, v8, Lcom/tencent/mm/ui/fb;->b:I', start)
+binding = ha[start:end]
+assert 'setOnClickListener' in binding and 'setContentDescription' in binding
+assert 'Lcom/tencent/mm/ui/fb;->h:Ljava/lang/String;' in binding
+assert '0x7f1000b6' in fg and '0x7f11001f' in fg
+assert 'view.id == fq' in source and 'view.hasOnClickListeners()' in source
+assert 'view.javaClass.name == "com.tencent.mm.ui.widget.imageview.WeImageView"' in source
+assert '(view as? ImageView)?.drawable' in source
+assert 'state.more.setOnClickListener { nativeMore.performClick() }' in source
+print('PASS: fq native icon-menu listener/description evidence and original click delegation')
