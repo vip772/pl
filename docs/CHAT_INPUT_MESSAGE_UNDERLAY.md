@@ -31,3 +31,9 @@
 现保持原生margin：onLayout前恢复模块扩大的内容测量值（若已有新原生测量则保留），onLayout后仅对ChattingContent重新精确测量并扩展布局高度，使列表子树向下延伸，而footer及面板的布局和触摸边界保持原生。关闭时恢复内容高度及列表padding/clipToPadding。
 footer内结构性ViewGroup统一禁用整块按压反馈，避免原生pressed状态传播到宿主而绘制整块灰色遮罩；实际AppGrid条目及图标按钮仍保留各自反馈。此规则在透明背景公共入口生效，防止其他透明扫描重新覆盖。
 回归模拟原生LinearLayout多轮根据measuredHeight安放footer，检查footer不漂移、内容不累加扩大；同时覆盖窗口重新测量、面板高度变化、多行、隐藏和恢复。真实Android SDK编译与模型回归通过不等于实机绘制验收。
+
+## 2026-10-22 11:52 底部残留带
+本次42条快照中scroll底部始终3120，ssr底部始终3094；扩展后content/list也只到3094，少覆盖26px。该区是输入行下方仍在viewport内的footer尾部，不是ssr内背景。现有诊断仅采集list/footer交叠区，不能据此宣称尾部每个drawable已逐一确认。
+对比悬浮输入框：reparentPanel将ChatFooterBottom移出输入列并隐藏，随后用悬浮margin重排；本方案不采用该结构修改。
+修复按scroll/footer屏幕交集补齐行下窄尾部，尾部必须小于一个输入行高度，避免将展开的整块面板纳入消息覆盖；不硬编码26px或用户估计的3dp。原生footer位置、margin、触摸边界和透明策略不变。
+模型回归覆盖26px尾部、多轮原生布局、面板展开与收回、恢复；仍须区分模型/SDK编译和完整APK、实机绘制验收。

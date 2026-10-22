@@ -63,7 +63,13 @@ internal class ChatInputMessageUnderlay {
         // t8.xml: blr is ABOVE bl8/ssr, not the input row. Runtime logs show
         // blr.height=0 while ssr.height=171. Reserve only footer-top..row-bottom;
         // bkc/AppPanel below ssr must never contribute to this overlap.
-        val overlap = inputRowOverlap(footer, strip)
+        val rowOverlap = inputRowOverlap(footer, strip)
+        // Native footer includes an offscreen panel. Cover the short visible tail
+        // below ssr as well, but never extend through an opened panel.
+        val visibleFooter = intersectionRect(scroll.screenRect(), footer.screenRect())
+        val tail = (visibleFooter.bottom - stripRect.bottom).coerceAtLeast(0)
+        val bottomTail = if (rowOverlap > 0 && tail < strip.height) tail else 0
+        val overlap = rowOverlap + bottomTail
         if (list.paddingBottom != state.appliedPadding) state.basePadding = list.paddingBottom
         val padding = state.basePadding + overlap
         if (list.paddingBottom != padding) {

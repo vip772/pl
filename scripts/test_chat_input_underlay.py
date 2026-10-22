@@ -27,7 +27,7 @@ open class View {
  var paddingLeft=0;var paddingTop=0;var paddingRight=0;var paddingBottom=0
  val resources=Resources();val context=Context()
  fun setPadding(l:Int,t:Int,r:Int,b:Int){paddingLeft=l;paddingTop=t;paddingRight=r;paddingBottom=b}
- fun getLocationOnScreen(out:IntArray){out[0]=0;out[1]=top}
+ fun getLocationOnScreen(out:IntArray){out[0]=left;out[1]=top;var p=parent as? View;while(p!=null){out[0]+=p.left;out[1]+=p.top;p=p.parent as? View}}
  fun getGlobalVisibleRect(out:android.graphics.Rect)=true
  open fun <T:View> findViewById(id:Int):T? { @Suppress("UNCHECKED_CAST") return if(this.id==id)this as T else null }
  companion object {const val VISIBLE=0;const val GONE=8;const val NO_ID=-1}
@@ -95,6 +95,24 @@ fun main(){
  list.setPadding(5,9,6,11);controller.apply(scroll);check(list.paddingBottom==182 && list.paddingTop==9)
  controller.restoreAll();check(content.height==2637 && list.paddingBottom==11 && lp.bottomMargin==3 && list.clipToPadding)
  controller.apply(scroll);controller.restoreAll();controller.restoreAll();check(content.height==2637)
+ // Real 11:52 geometry: ssr ends 26px before the clipped viewport bottom.
+ scroll.layout(0,0,1440,2834)
+ controller.apply(scroll)
+ check(content.height==2834 && list.paddingBottom==208 && footer.top==2637)
+ repeat(5){
+  controller.beforeLayout(scroll)
+  check(content.measuredHeight==2637)
+  content.layout(0,0,1440,2637)
+  controller.apply(scroll)
+  check(content.height==2834 && footer.top==2637 && list.paddingBottom==208)
+ }
+ // A genuinely visible panel is not mistaken for the narrow bottom tail.
+ scroll.height=3500;controller.apply(scroll)
+ check(content.height==2808 && list.paddingBottom==182)
+ scroll.height=2808;controller.apply(scroll)
+ check(content.height==2808 && list.paddingBottom==182)
+ controller.restoreAll();check(content.height==2637 && list.paddingBottom==11)
+ scroll.height=0
  // A fresh native measurement (keyboard/window resize) takes priority over old expanded height.
  controller.apply(scroll);content.measure(1440,1700);controller.beforeLayout(scroll)
  check(content.measuredHeight==1700)
