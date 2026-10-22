@@ -745,7 +745,10 @@ private class FooterRuntime(private val context: FeatureContext) {
                 RelativeLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     state.panelLayoutParams.height
-                ).also { it.topMargin = -(state.panelLayoutParams.height.takeIf { h -> h > 0 } ?: dp(MAX_PANEL_HEIGHT_DP)) }
+                ).also {
+                    val panelHeight = state.panelLayoutParams.height.takeIf { h -> h > 0 } ?: dp(MAX_PANEL_HEIGHT_DP)
+                    it.topMargin = state.root.height - panelHeight
+                }
             )
             panel.visibility = View.GONE
             for (index in 0 until state.root.childCount) {
@@ -810,9 +813,11 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (lp.height != target || (lp is ViewGroup.MarginLayoutParams && lp.topMargin != -target)) {
             lp.height = target
             // The panel is hosted inside the floating card's RelativeLayout.
-            // Offset it upward by its own measured height so it overlays above
-            // the input row instead of increasing ChatFooter's measured height.
-            if (lp is ViewGroup.MarginLayoutParams) lp.topMargin = -target
+            // Align the panel bottom with the floating input root bottom.
+            // Using -target placed the whole panel above the root, outside the
+            // visible chat area when the root height was only the input row.
+            if (lp is ViewGroup.MarginLayoutParams) lp.topMargin = panel.parent
+                .let { (it as? View)?.height ?: footer.resources.displayMetrics.heightPixels } - target
             panel.layoutParams = lp
         }
         val group = panel as? ViewGroup ?: return

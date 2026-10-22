@@ -9,10 +9,11 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.ImageButton
 import java.util.WeakHashMap
 import t.mma.utils.HLog
 
-/** Own only native input backgrounds, never icon drawables or the detached emoji panel. */
+/** Own native input/button backgrounds, never icon drawables or the detached emoji panel. */
 internal object FloatingFooterInputSurfaces {
     private class Surface(val view: View) {
         val background: Drawable? = view.background
@@ -58,7 +59,7 @@ internal object FloatingFooterInputSurfaces {
         while (queue.isNotEmpty() && visited++ < 120) {
             val view = queue.removeFirst()
             if (view.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom") continue
-            val input = view is EditText || view is Button
+            val input = view is EditText || view is Button || view is ImageButton
             val container = view is ViewGroup
             if (input || container) {
                 val surface = tracked.firstOrNull { it.view === view } ?: Surface(view).also {
