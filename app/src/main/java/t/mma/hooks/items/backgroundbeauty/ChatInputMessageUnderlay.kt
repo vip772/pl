@@ -4,7 +4,6 @@ import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.view.View
 import android.view.ViewGroup
-import android.view.ViewParent
 import android.widget.EditText
 import android.widget.LinearLayout
 import t.mma.utils.HLog
@@ -120,7 +119,7 @@ internal class ChatInputMessageUnderlay {
             resources.getResourceEntryName(id)
         }.getOrDefault("?")
         val bounds = screenRect()
-        val identity = IdentityHashMap<ViewParent, Boolean>()
+        val identity = IdentityHashMap<View, Boolean>()
         var node: View? = this
         var parentClip = true
         while (node is View) {

@@ -16,7 +16,7 @@ object HLog{fun i(s:String){}}
 ''',
 'View.kt': '''package android.view
 interface ViewParent
-open class View : ViewParent {
+open class View {
  var parent:ViewParent?=null; var visibility=0; var height=0; var width=0; var id=0; var top=0; var elevation=0f; var z=0f; var isShown=true; var alpha=1f
  var layoutParams:Any?=null
  var background:Any?=null
@@ -28,7 +28,7 @@ open class View : ViewParent {
  open fun <T:View> findViewById(id:Int):T? { @Suppress("UNCHECKED_CAST") return if(this.id==id)this as T else null }
  companion object {const val VISIBLE=0;const val GONE=8;const val NO_ID=-1}
 }
-open class ViewGroup:View(){var clipToPadding=true;var clipChildren=true;var foreground:Any?=null;val children=mutableListOf<View>();val childCount get()=children.size;fun getChildAt(i:Int)=children[i];fun add(v:View){children.add(v);v.parent=this}
+open class ViewGroup:View(),ViewParent{var clipToPadding=true;var clipChildren=true;var foreground:Any?=null;val children=mutableListOf<View>();val childCount get()=children.size;fun getChildAt(i:Int)=children[i];fun add(v:View){children.add(v);v.parent=this}
  override fun <T:View> findViewById(id:Int):T? {super.findViewById<T>(id)?.let{return it};for(c in children)c.findViewById<T>(id)?.let{return it};return null}}
 class Resources{fun getIdentifier(n:String,t:String,p:String)=n.hashCode().let{if(it==0)1 else it};fun getResourceEntryName(id:Int)=id.toString()}
 class Context{val packageName="com.tencent.mm"}
