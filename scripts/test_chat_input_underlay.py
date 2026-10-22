@@ -5,23 +5,36 @@ import subprocess, tempfile
 root=Path(__file__).resolve().parents[1]
 lib=Path('/tmp/pl-kotlin-libs')
 files={
+'Rect.kt': '''package android.graphics
+data class Rect(var left:Int,var top:Int,var right:Int,var bottom:Int){fun width()=right-left;fun height()=bottom-top;companion object{fun intersects(a:Rect,b:Rect)=a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom}}
+''',
+'Color.kt': '''package android.graphics.drawable
+class ColorDrawable(val color:Int)
+''',
+'Log.kt': '''package t.mma.utils
+object HLog{fun i(s:String){}}
+''',
 'View.kt': '''package android.view
-open class View {
- var parent:View?=null; var visibility=0; var height=0; var id=0; var top=0
+interface ViewParent
+open class View : ViewParent {
+ var parent:ViewParent?=null; var visibility=0; var height=0; var width=0; var id=0; var top=0; var elevation=0f; var z=0f; var isShown=true; var alpha=1f
  var layoutParams:Any?=null
  var background:Any?=null
  var paddingLeft=0;var paddingTop=0;var paddingRight=0;var paddingBottom=0
  val resources=Resources();val context=Context()
  fun setPadding(l:Int,t:Int,r:Int,b:Int){paddingLeft=l;paddingTop=t;paddingRight=r;paddingBottom=b}
+ fun getLocationOnScreen(out:IntArray){out[0]=0;out[1]=top}
+ fun getGlobalVisibleRect(out:android.graphics.Rect)=true
  open fun <T:View> findViewById(id:Int):T? { @Suppress("UNCHECKED_CAST") return if(this.id==id)this as T else null }
- companion object {const val VISIBLE=0;const val GONE=8}
+ companion object {const val VISIBLE=0;const val GONE=8;const val NO_ID=-1}
 }
-open class ViewGroup:View(){var clipToPadding=true;val children=mutableListOf<View>();fun add(v:View){children.add(v);v.parent=this}
+open class ViewGroup:View(){var clipToPadding=true;var clipChildren=true;var foreground:Any?=null;val children=mutableListOf<View>();val childCount get()=children.size;fun getChildAt(i:Int)=children[i];fun add(v:View){children.add(v);v.parent=this}
  override fun <T:View> findViewById(id:Int):T? {super.findViewById<T>(id)?.let{return it};for(c in children)c.findViewById<T>(id)?.let{return it};return null}}
-class Resources{fun getIdentifier(n:String,t:String,p:String)=n.hashCode().let{if(it==0)1 else it}}
+class Resources{fun getIdentifier(n:String,t:String,p:String)=n.hashCode().let{if(it==0)1 else it};fun getResourceEntryName(id:Int)=id.toString()}
 class Context{val packageName="com.tencent.mm"}
 ''',
 'Linear.kt':'''package android.widget
+open class EditText:android.view.View()
 open class LinearLayout:android.view.ViewGroup(){class LayoutParams{var bottomMargin=0}}
 ''',
 'Native.kt':'''package com.tencent.mm.pluginsdk.ui.chat
