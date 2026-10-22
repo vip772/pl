@@ -59,6 +59,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
 
     private val diagnosedStatusWrappers = WeakHashMap<View, Boolean>()
     private val statusLayerDiagnostics = WeakHashMap<ViewGroup, Boolean>()
+    private val chatTopPaddings = WeakHashMap<ViewGroup, Int>()
     private val tipsGroups = WeakHashMap<View, View>()
     private val tipsAttachListeners = WeakHashMap<View, View.OnAttachStateChangeListener>()
     private val tipsLayoutListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
@@ -95,6 +96,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         KavaReflector.findMethodRecursive(clazz, "onDetachedFromWindow")?.let {
             count += hook(it) { param ->
                 (param.thisObject as? ViewGroup)?.let { layout ->
+                    if (layout.javaClass.name == layoutClass) restore(layout)
                     disposeLayoutTracker(layout)
                 }
             }
@@ -235,12 +237,16 @@ private class HeaderRuntime(private val context: FeatureContext) {
             restore(layout)
             return
         }
-        applyChatStatusWrapper(layout)
-        diagnoseStatusLayers(layout, header)
         val state = states[header] ?: createState(header) ?: return
         if (isWindowBar(header, layout)) {
             enableWindowOverlay(header)
         } else if (!state.reparented && !reparentHeader(layout, header, state)) return
+        // ss.xml stacks the native bar above bqh. Reparenting removes that bar's
+        // height, but fitSystemWindows still leaves a status-bar-sized top pad.
+        // Remove that remaining reservation only after the bar is an overlay.
+        applyChatTopInset(layout)
+        applyChatStatusWrapper(layout)
+        diagnoseStatusLayers(layout, header)
         val marginLp = header.layoutParams as? ViewGroup.MarginLayoutParams ?: return
         val side = dp(SIDE_MARGIN_DP)
         val left = side
@@ -626,6 +632,21 @@ private class HeaderRuntime(private val context: FeatureContext) {
         return lp.height == ViewGroup.LayoutParams.WRAP_CONTENT || vertical == android.view.Gravity.TOP
     }
 
+    private fun applyChatTopInset(layout: ViewGroup) {
+        if (!chatTopPaddings.containsKey(layout)) chatTopPaddings[layout] = layout.paddingTop
+        // Insets may be dispatched again after rotation/keyboard changes. Retain
+        // the latest nonzero native value for restoration, without accumulating it.
+        if (layout.paddingTop != 0) {
+            chatTopPaddings[layout] = layout.paddingTop
+            layout.setPadding(layout.paddingLeft, 0, layout.paddingRight, layout.paddingBottom)
+        }
+    }
+    private fun restoreChatTopInset(layout: ViewGroup) {
+        val originalTop = chatTopPaddings.remove(layout) ?: return
+        if (layout.paddingTop == 0 && originalTop != 0) {
+            layout.setPadding(layout.paddingLeft, originalTop, layout.paddingRight, layout.paddingBottom)
+        }
+    }
     private fun applyChatStatusWrapper(layout: ViewGroup) {
         var current: View? = layout
         var wrapper: View? = null
@@ -740,6 +761,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun restore(layout: ViewGroup) {
+        restoreChatTopInset(layout)
         restoreChatStatusWrapper(layout)
         headersByLayout.remove(layout)?.let(::restoreView)
         headerZoneStates.remove(layout)?.originalMargins?.forEach { (view, margins) ->
@@ -775,6 +797,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
     fun destroy() {
         capsule.destroy()
+        chatTopPaddings.keys.toList().forEach(::restoreChatTopInset)
         states.keys.toList().forEach(::restoreView)
         headerZoneStates.keys.toList().forEach { layout -> restore(layout as? ViewGroup ?: return@forEach) }
         statusWrapperBackgrounds.entries.toList().forEach { (view, background) ->
