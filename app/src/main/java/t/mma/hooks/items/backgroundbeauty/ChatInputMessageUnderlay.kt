@@ -6,7 +6,7 @@ import android.widget.LinearLayout
 import t.mma.utils.KavaReflector
 import java.util.WeakHashMap
 
-/** 8.0.78 ss.xml/t8.xml: keep native footer/panel hierarchy and overlap only the input strip. */
+/** 8.0.78 ss.xml/t8.xml: preserve native footer and overlap its verified blr input region. */
 internal class ChatInputMessageUnderlay {
     private class State(val content: View, val list: ViewGroup, val margin: Int, val clip: Boolean) {
         var basePadding = list.paddingBottom
@@ -25,7 +25,7 @@ internal class ChatInputMessageUnderlay {
         }
         val content = named("bki") ?: return
         val footer = named("k52") ?: return
-        val strip = named("bfp") ?: return
+        val strip = named("blr") ?: return
         val wrapper = named("bm6") ?: return
         if (content.parent !== scroll || footer.parent !== scroll ||
             content.javaClass.name != "com.tencent.mm.pluginsdk.ui.chat.ChattingContent" ||
@@ -38,28 +38,10 @@ internal class ChatInputMessageUnderlay {
             restore(scroll)
             State(content, list, lp.bottomMargin, list.clipToPadding).also { states[scroll] = it }
         }
-        // t8.xml: the outer bfp is the actual input+panel container; ssr is the input row.
-        // bfp owns @color/a9e. Its actual measured height includes the input, AppPanel and mode changes.
-        // The independent emoji panel stays in place above the overlapped input strip.
-        val input = named("ssr") ?: return
-        val panel = named("bkc") ?: return
-        // bfp itself is the solid outer surface; ssr supplies the row height, while bkc contains
-        // the independently positioned AppPanel. Overlap only the opaque strip above that panel.
-        val panelVisible = panel.visibility == View.VISIBLE && panel.height > 0
-        fun topInAncestor(view: View, ancestor: View): Int? {
-            var current: View = view
-            var top = 0
-            while (current !== ancestor) {
-                top += current.top
-                current = current.parent as? View ?: return null
-            }
-            return top
-        }
-        val inputTop = topInAncestor(input, strip) ?: return
-        val panelTop = topInAncestor(panel, strip)
-        val stripBottom = if (panelVisible) panelTop ?: return else inputTop + input.height
-        val overlap = if (footer.visibility == View.VISIBLE && input.visibility == View.VISIBLE)
-            (stripBottom - inputTop).coerceIn(0, strip.height) else 0
+        // dd6383f/eb6e056 verified the reserved footer region as blr in t8.xml.
+        // Use its measured height, capped by the host footer, so panel/keyboard height is excluded.
+        val overlap = if (footer.visibility == View.VISIBLE && strip.visibility == View.VISIBLE)
+            strip.height.coerceAtMost(footer.height).coerceAtLeast(0) else 0
         if (list.paddingBottom != state.appliedPadding) state.basePadding = list.paddingBottom
         val padding = state.basePadding + overlap
         if (list.paddingBottom != padding) {

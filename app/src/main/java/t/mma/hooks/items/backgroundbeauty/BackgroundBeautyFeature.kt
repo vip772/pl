@@ -2553,8 +2553,25 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 }
             })
         }
-        // Input overlap geometry is updated once from the existing chat chrome refresh path.
-
+        // Reapply overlap after every native scroll layout; this is the verified dd6383f path.
+        val scrollClass = KavaReflector.loadClass(ChatInputMessageUnderlay.SCROLL, context.hostClassLoader())
+        findWechatVerifiedMethod(scrollClass, "onLayout", Boolean::class.javaPrimitiveType!!,
+            Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
+            Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { method ->
+            hookOnce(method, after = { param ->
+                val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
+                val activity = findActivity(scroll) ?: return@hookOnce
+                val state = states[activity] ?: return@hookOnce
+                try {
+                    val enabled = !destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT &&
+                        hasConfiguredBackground(activity) && WeChatApis.version()?.current()?.versionName == "8.0.78"
+                    if (enabled) state.inputUnderlay.apply(scroll) else state.inputUnderlay.restore(scroll)
+                } catch (e: Throwable) {
+                    state.inputUnderlay.restore(scroll)
+                    HLog.e("$TAG 输入栏消息穿透布局失败", e)
+                }
+            })
+        }
         listOf("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", "com.tencent.mm.pluginsdk.ui.chat.ChatFooter").forEach { className ->
             val clazz = KavaReflector.loadClass(className, context.hostClassLoader()) ?: return@forEach
             val apply: (XC_MethodHook.MethodHookParam) -> Unit = { param ->
@@ -2633,19 +2650,19 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             HLog.i("$TAG CHROMEINPUT footerMissing root=${root.javaClass.name}")
             return
         }
-        // ChatFooter is a large host containing the input row and app panel. Clearing it
-        // recursively changes the panel surface and measured geometry. Restrict this pass
-        // to t8.xml's bfp input surface; bkc keeps its native background and bounds.
-        val inputSurface = footer.findViewById<View>(resourceId("bfp")) as? ViewGroup
-        if (inputSurface == null) {
-            HLog.i("$TAG CHROMEINPUT inputSurfaceMissing footer=${wechatProbeView(footer, state.activity)}")
+        // t8.xml's bfp is the full-height ChatFooter root, not the input row.
+        // ssr contains only the input controls; bkc/AppPanel is a sibling branch and
+        // must keep its native opaque background when the plus menu is open.
+        val inputRow = footer.findViewById<View>(resourceId("ssr")) as? ViewGroup
+        if (inputRow == null) {
+            HLog.i("$TAG CHROMEINPUT inputRowMissing footer=${wechatProbeView(footer, state.activity)}")
             return
         }
-        applySpeechSurfaces(state, inputSurface)
-        applyChatVoiceSurfaces(state, inputSurface)
-        HLog.i("$TAG CHROMEINPUT footerFound ${wechatProbeView(footer, state.activity)} inputSurface=${wechatProbeView(inputSurface, state.activity)}")
+        applySpeechSurfaces(state, inputRow)
+        applyChatVoiceSurfaces(state, inputRow)
+        HLog.i("$TAG CHROMEINPUT footerFound ${wechatProbeView(footer, state.activity)} inputRow=${wechatProbeView(inputRow, state.activity)}")
         val queue = ArrayDeque<View>()
-        queue.add(inputSurface)
+        queue.add(inputRow)
         var visited = 0
         while (queue.isNotEmpty() && visited++ < 240) {
             val view = queue.removeFirst()
@@ -2654,8 +2671,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 val snapshot = surfaceSnapshot(state, view)
                 val dark = isWechatDark(view)
                 val strokeColor = if (dark) Color.WHITE else Color.BLACK
-                val strokeWidth = chatInputStrokeWidth(inputSurface)
-                val icon = inputSurface.findViewById<ImageView>(resourceId("bqr"))
+                val strokeWidth = chatInputStrokeWidth(inputRow)
+                val icon = inputRow.findViewById<ImageView>(resourceId("bqr"))
                 val ink = icon?.let { measuredIconStrokes[it] }
                 val style = listOf(strokeColor, strokeWidth, icon, icon?.drawable, ink?.top, ink?.bottom)
                 if (snapshot.slot == BackgroundBeautySettings.Slot.CHAT && inputOutlineStyles[view] == style &&
@@ -2706,6 +2723,11 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         while (queue.isNotEmpty() && visited++ < MAX_SCAN_NODES) {
             val view = queue.removeFirst()
             val name = view.javaClass.name
+            if (slot == BackgroundBeautySettings.Slot.CHAT &&
+                (name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooter" ||
+                    name == "com.tencent.mm.pluginsdk.ui.chat.AppPanel" ||
+                    findAncestor(view, "com.tencent.mm.pluginsdk.ui.chat.AppPanel") != null)
+            ) continue
             if (view !== root && isBottomBar(view)) continue
             if (view !== root && isComposeSurface(view)) continue
             if (isWechatTaskSurface(view)) {
