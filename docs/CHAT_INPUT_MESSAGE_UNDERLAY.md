@@ -25,3 +25,9 @@
 ## 2026-10-22 实机定位
 `Hchat-runtime-20261022-105631.log`的57条诊断均显示`blr.height=0`、消息内容与footer重叠为0；可见`ssr`范围为y=2923..3094（171px）。恢复历史`blr.height`计算不能产生覆盖量。现改用可见`ssr`在footer内的底部坐标；诊断排除隐藏/零尺寸EditText，保留消息列表边界快照以供实机验收。回归新增零高度blr、171px输入行、父级偏移/隐藏及面板扩展场景。
 真实Android SDK编译检查：`python3 scripts/check_chat_input_sdk.py`。完整Gradle/APK和实机绘制结果仍须分别验收。
+
+## 2026-10-22 贴底回归修正
+11:20实机日志显示ssr从2923..3094变为2752..2923，footer上移171px，恰好等于负bottomMargin覆盖量。纵向LinearLayout在现有布局路径下将负margin传导给后续footer位置。
+现保持原生margin：onLayout前恢复模块扩大的内容测量值（若已有新原生测量则保留），onLayout后仅对ChattingContent重新精确测量并扩展布局高度，使列表子树向下延伸，而footer及面板的布局和触摸边界保持原生。关闭时恢复内容高度及列表padding/clipToPadding。
+footer内结构性ViewGroup统一禁用整块按压反馈，避免原生pressed状态传播到宿主而绘制整块灰色遮罩；实际AppGrid条目及图标按钮仍保留各自反馈。此规则在透明背景公共入口生效，防止其他透明扫描重新覆盖。
+回归模拟原生LinearLayout多轮根据measuredHeight安放footer，检查footer不漂移、内容不累加扩大；同时覆盖窗口重新测量、面板高度变化、多行、隐藏和恢复。真实Android SDK编译与模型回归通过不等于实机绘制验收。

@@ -18,6 +18,10 @@ object HLog{fun i(s:String){}}
 interface ViewParent
 open class View {
  var parent:ViewParent?=null; var visibility=0; var height=0; var width=0; var id=0; var top=0; var elevation=0f; var z=0f; var isShown=true; var alpha=1f
+ var left=0; var measuredHeight=0; var measuredWidth=0
+ open fun measure(w:Int,h:Int){measuredWidth=w;measuredHeight=h}
+ open fun layout(l:Int,t:Int,r:Int,b:Int){left=l;top=t;width=r-l;height=b-t}
+ object MeasureSpec {const val EXACTLY=0;fun makeMeasureSpec(s:Int,m:Int)=s}
  var layoutParams:Any?=null
  var background:Any?=null
  var paddingLeft=0;var paddingTop=0;var paddingRight=0;var paddingBottom=0
@@ -50,52 +54,54 @@ class MMChattingListView(val list:android.view.ViewGroup):android.view.ViewGroup
 'Reflect.kt':'''package t.mma.utils
 object KavaReflector{fun findMethodRecursive(c:Class<*>,n:String)=c.methods.find{it.name==n};fun invokeOrThrow(m:java.lang.reflect.Method,o:Any)=m.invoke(o)}
 ''',
-'Main.kt':'''package t.mma.hooks.items.backgroundbeauty
+ 'Main.kt':'''package t.mma.hooks.items.backgroundbeauty
 import android.view.*
 import android.widget.LinearLayout
 import com.tencent.mm.pluginsdk.ui.chat.*
 import com.tencent.mm.ui.chatting.view.MMChattingListView
 fun main(){
- try {
- val scroll=ChattingScrollLayout();val content=ChattingContent();content.id="bki".hashCode()
+ val scroll=ChattingScrollLayout()
+ val content=ChattingContent();content.id="bki".hashCode()
  val lp=LinearLayout.LayoutParams();lp.bottomMargin=3;content.layoutParams=lp
- val footer=ChatFooter();footer.id="k52".hashCode();footer.height=356
- val strip=ViewGroup();strip.id="blr".hashCode();strip.height=56;footer.add(strip)
- val bl8=ViewGroup();bl8.id="bl8".hashCode();footer.add(bl8)
- val inputRow=ViewGroup();inputRow.id="ssr".hashCode();inputRow.height=56;bl8.add(inputRow)
- val panel=com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom();panel.id="bkc".hashCode();panel.height=300;panel.visibility=View.GONE;panel.background="native-panel"
- val appPanel=com.tencent.mm.pluginsdk.ui.chat.AppPanel();appPanel.background="native-app-panel";panel.add(appPanel);bl8.add(panel)
+ content.layout(0,0,1440,2637);content.measure(1440,2637)
+ val footer=ChatFooter();footer.id="k52".hashCode();footer.layout(0,2637,1440,4141)
+ val upper=ViewGroup();upper.id="blr".hashCode();upper.height=0;footer.add(upper)
+ val host=ViewGroup();host.id="bl8".hashCode();footer.add(host)
+ val row=ViewGroup();row.id="ssr".hashCode();row.height=171;host.add(row)
+ val panel=ChatFooterBottom();panel.height=1333;host.add(panel)
  val list=ViewGroup();list.setPadding(1,2,3,7)
  val wrapper=MMChattingListView(list);wrapper.id="bm6".hashCode();wrapper.add(list);content.add(wrapper)
  scroll.add(content);scroll.add(footer)
- val controller=ChatInputMessageUnderlay();controller.apply(scroll)
- check(lp.bottomMargin == -53 && list.paddingBottom==63 && !list.clipToPadding)
- check(panel.background == "native-panel" && appPanel.background == "native-app-panel")
- repeat(20){controller.apply(scroll)};check(lp.bottomMargin == -53 && list.paddingBottom==63)
- // Expanded panel/keyboard height does not enter the visible ssr overlap.
- panel.visibility=View.VISIBLE;panel.height=700;footer.height=1200;controller.apply(scroll);check(lp.bottomMargin == -53 && list.paddingBottom==63)
- // Multiline input updates the actual visible input row.
- inputRow.height=104;controller.apply(scroll);check(lp.bottomMargin == -101 && list.paddingBottom==111)
- // Runtime regression: empty upper branch must not disable the visible ssr overlap.
- strip.height=0;inputRow.height=171;controller.apply(scroll)
- check(lp.bottomMargin == -168 && list.paddingBottom==178)
- // Row offset within footer is reserved, while expanded panel height is excluded.
- inputRow.top=12;controller.apply(scroll);check(lp.bottomMargin == -180 && list.paddingBottom==190)
- inputRow.top=0
- bl8.top=20;controller.apply(scroll);check(lp.bottomMargin == -188 && list.paddingBottom==198)
- bl8.visibility=View.GONE;controller.apply(scroll);check(lp.bottomMargin==3 && list.paddingBottom==7)
- bl8.visibility=View.VISIBLE;bl8.top=0;inputRow.height=104;controller.apply(scroll)
- // Native top/side padding changes are retained; native bottom replacement becomes the new base.
- list.setPadding(5,9,6,11);controller.apply(scroll);check(list.paddingTop==9 && list.paddingBottom==115)
- footer.visibility=View.GONE;controller.apply(scroll);check(lp.bottomMargin==3 && list.clipToPadding)
- footer.visibility=View.VISIBLE;inputRow.height=48;controller.apply(scroll);controller.restoreAll()
- check(lp.bottomMargin==3 && list.paddingBottom==11 && list.paddingLeft==5 && list.clipToPadding)
- // Reenable starts from clean geometry; restore is idempotent.
- controller.apply(scroll);controller.restoreAll();controller.restoreAll();check(list.paddingBottom==11)
- // Wrong parent structure must not be mutated.
- val wrong=ChattingScrollLayout();wrong.add(wrapper);controller.apply(wrong);check(list.paddingBottom==11)
- println("PASS: production controller: overlap, idempotence, panel exclusion, zero-height blr, nested row offsets/visibility, multiline sizing, native padding changes, hidden footer, restore/re-enable and wrong structure")
- } catch (e: Throwable) { e.printStackTrace(); throw e }
+ val controller=ChatInputMessageUnderlay()
+ controller.apply(scroll)
+ check(content.height==2808 && footer.top==2637 && footer.height==1504 && lp.bottomMargin==3)
+ check(list.paddingBottom==178 && !list.clipToPadding)
+ repeat(20){controller.apply(scroll)}
+ check(content.height==2808 && footer.top==2637 && lp.bottomMargin==3)
+ // Simulate LinearLayout placing footer after content: original measured height must be restored first.
+ repeat(5){
+  controller.beforeLayout(scroll)
+  check(content.measuredHeight==2637)
+  content.layout(0,0,1440,content.measuredHeight)
+  footer.layout(0,content.measuredHeight,1440,content.measuredHeight+1504)
+  controller.apply(scroll)
+  check(content.height==2808 && footer.top==2637)
+ }
+ panel.height=2500;controller.apply(scroll);check(content.height==2808 && list.paddingBottom==178)
+ row.height=250;controller.apply(scroll);check(content.height==2887 && list.paddingBottom==257)
+ host.top=20;controller.apply(scroll);check(content.height==2907 && list.paddingBottom==277)
+ host.visibility=View.GONE;controller.apply(scroll);check(content.height==2637 && list.paddingBottom==7)
+ host.visibility=View.VISIBLE;host.top=0;row.height=171
+ list.setPadding(5,9,6,11);controller.apply(scroll);check(list.paddingBottom==182 && list.paddingTop==9)
+ controller.restoreAll();check(content.height==2637 && list.paddingBottom==11 && lp.bottomMargin==3 && list.clipToPadding)
+ controller.apply(scroll);controller.restoreAll();controller.restoreAll();check(content.height==2637)
+ // A fresh native measurement (keyboard/window resize) takes priority over old expanded height.
+ controller.apply(scroll);content.measure(1440,1700);controller.beforeLayout(scroll)
+ check(content.measuredHeight==1700)
+ content.layout(0,0,1440,1700);footer.layout(0,1700,1440,3204);controller.apply(scroll)
+ check(content.height==1871 && footer.top==1700)
+ controller.restoreAll();check(content.height==1700)
+ println("PASS: native footer position preserved, no negative margin, zero-height blr, repeated native layouts, panel exclusion, multiline, offsets, visibility, padding, restore, native resize")
 }
 '''
 }

@@ -2558,7 +2558,11 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         findWechatVerifiedMethod(scrollClass, "onLayout", Boolean::class.javaPrimitiveType!!,
             Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
             Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { method ->
-            hookOnce(method, after = { param ->
+            hookOnce(method, before = { param ->
+                val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
+                val activity = findActivity(scroll) ?: return@hookOnce
+                states[activity]?.inputUnderlay?.beforeLayout(scroll)
+            }, after = { param ->
                 val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
                 val activity = findActivity(scroll) ?: return@hookOnce
                 val state = states[activity] ?: return@hookOnce
@@ -2690,7 +2694,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                     HLog.i("$TAG CHROMEINPUT outlineApplied ${wechatProbeView(view, state.activity)}")
                 } finally { surfaceMutationDepth-- }
             } else if (view is ViewGroup) {
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = appGridItems[view] == true)
                 for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
             } else if (view.javaClass == View::class.java && findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null) {
                 // ew_.xml: SpeechInputLayout.m and .o are independent solid View backgrounds.
@@ -3201,7 +3205,12 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         }
         val inAppPanel = itemAncestor != null ||
             findAncestor(view, "com.tencent.mm.pluginsdk.ui.chat.AppPanel") != null
-        val feedback = preserveFeedback && (slot != BackgroundBeautySettings.Slot.CHAT ||
+        // Footer hosts span input + offscreen panel. A propagated pressed state must
+        // never paint a full-width rectangle; actual app-grid items keep feedback.
+        val footerHost = slot == BackgroundBeautySettings.Slot.CHAT && view is ViewGroup &&
+            appGridItems[view] != true &&
+            findAncestor(view, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") != null
+        val feedback = preserveFeedback && !footerHost && (slot != BackgroundBeautySettings.Slot.CHAT ||
             !inAppPanel || appGridItems[view] == true)
         if (slot == BackgroundBeautySettings.Slot.CHAT && state.surfaces[view]?.let {
                 it.slot == slot && it.appliedBitmap != null && view.background === it.appliedBackground

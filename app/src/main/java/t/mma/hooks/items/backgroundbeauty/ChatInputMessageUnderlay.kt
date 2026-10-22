@@ -19,6 +19,11 @@ internal class ChatInputMessageUnderlay {
         var overlap = 0
         var appliedMargin = margin
         var appliedClip = clip
+        var nativeHeight = -1
+        var expandedHeight = -1
+        var nativeWidth = 0
+        var nativeLeft = 0
+        var nativeTop = 0
         var lastDiagnostic = ""
     }
     private val states = WeakHashMap<ViewGroup, State>()
@@ -67,12 +72,37 @@ internal class ChatInputMessageUnderlay {
         state.appliedPadding = padding
         state.appliedClip = if (overlap > 0) false else state.clip
         if (list.clipToPadding != state.appliedClip) list.clipToPadding = state.appliedClip
-        state.appliedMargin = state.margin - overlap
-        if (lp.bottomMargin != state.appliedMargin) {
-            lp.bottomMargin = state.appliedMargin
-            content.layoutParams = lp
+        // Never change LinearLayout margins: they also move the following footer.
+        // Enlarge only the content AFTER native layout, leaving footer bounds/hit area intact.
+        if (state.expandedHeight < 0 || content.height != state.expandedHeight) {
+            state.nativeHeight = content.height
+            state.nativeWidth = content.width
+            state.nativeLeft = content.left
+            state.nativeTop = content.top
         }
+        val height = state.nativeHeight + overlap
+        if (content.height != height) resizeContent(state, height)
+        state.expandedHeight = height
         state.overlap = overlap
+    }
+
+    private fun resizeContent(state: State, height: Int) {
+        state.content.measure(
+            View.MeasureSpec.makeMeasureSpec(state.nativeWidth, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+        )
+        state.content.layout(state.nativeLeft, state.nativeTop,
+            state.nativeLeft + state.nativeWidth, state.nativeTop + height)
+    }
+
+    // Called before native onLayout: native measurement/placement must never consume
+    // our enlarged measured height, otherwise footer placement drifts on the next pass.
+    fun beforeLayout(scroll: ViewGroup) {
+        val state = states[scroll] ?: return
+        if (state.expandedHeight >= 0 && state.content.measuredHeight == state.expandedHeight) {
+            resizeContent(state, state.nativeHeight)
+        }
+        state.expandedHeight = -1
     }
 
     private fun inputRowOverlap(footer: ViewGroup, row: View): Int {
@@ -163,6 +193,9 @@ internal class ChatInputMessageUnderlay {
 
     fun restore(scroll: ViewGroup) {
         val state = states.remove(scroll) ?: return
+        if (state.expandedHeight >= 0 && state.content.height == state.expandedHeight) {
+            resizeContent(state, state.nativeHeight)
+        }
         val lp = state.content.layoutParams as? LinearLayout.LayoutParams
         if (lp != null && lp.bottomMargin == state.appliedMargin) {
             lp.bottomMargin = state.margin
