@@ -61,10 +61,10 @@ fun main(){
  val lp=LinearLayout.LayoutParams();lp.bottomMargin=3;content.layoutParams=lp
  val footer=ChatFooter();footer.id="k52".hashCode();footer.height=356
  val strip=ViewGroup();strip.id="blr".hashCode();strip.height=56;footer.add(strip)
- val inputRow=ViewGroup();inputRow.id="ssr".hashCode();inputRow.height=56;strip.add(inputRow)
- val bl8=ViewGroup();bl8.id="bl8".hashCode();strip.add(bl8)
+ val bl8=ViewGroup();bl8.id="bl8".hashCode();footer.add(bl8)
+ val inputRow=ViewGroup();inputRow.id="ssr".hashCode();inputRow.height=56;bl8.add(inputRow)
  val panel=com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom();panel.id="bkc".hashCode();panel.height=300;panel.visibility=View.GONE;panel.background="native-panel"
- val appPanel=com.tencent.mm.pluginsdk.ui.chat.AppPanel();appPanel.background="native-app-panel";panel.add(appPanel);footer.add(panel)
+ val appPanel=com.tencent.mm.pluginsdk.ui.chat.AppPanel();appPanel.background="native-app-panel";panel.add(appPanel);bl8.add(panel)
  val list=ViewGroup();list.setPadding(1,2,3,7)
  val wrapper=MMChattingListView(list);wrapper.id="bm6".hashCode();wrapper.add(list);content.add(wrapper)
  scroll.add(content);scroll.add(footer)
@@ -72,20 +72,29 @@ fun main(){
  check(lp.bottomMargin == -53 && list.paddingBottom==63 && !list.clipToPadding)
  check(panel.background == "native-panel" && appPanel.background == "native-app-panel")
  repeat(20){controller.apply(scroll)};check(lp.bottomMargin == -53 && list.paddingBottom==63)
- // Expanded panel/keyboard height does not replace the verified blr region height.
+ // Expanded panel/keyboard height does not enter the visible ssr overlap.
  panel.visibility=View.VISIBLE;panel.height=700;footer.height=1200;controller.apply(scroll);check(lp.bottomMargin == -53 && list.paddingBottom==63)
- // Multiline input updates blr's measured height, which remains the reserved overlap contract.
- strip.height=104;controller.apply(scroll);check(lp.bottomMargin == -101 && list.paddingBottom==111)
+ // Multiline input updates the actual visible input row.
+ inputRow.height=104;controller.apply(scroll);check(lp.bottomMargin == -101 && list.paddingBottom==111)
+ // Runtime regression: empty upper branch must not disable the visible ssr overlap.
+ strip.height=0;inputRow.height=171;controller.apply(scroll)
+ check(lp.bottomMargin == -168 && list.paddingBottom==178)
+ // Row offset within footer is reserved, while expanded panel height is excluded.
+ inputRow.top=12;controller.apply(scroll);check(lp.bottomMargin == -180 && list.paddingBottom==190)
+ inputRow.top=0
+ bl8.top=20;controller.apply(scroll);check(lp.bottomMargin == -188 && list.paddingBottom==198)
+ bl8.visibility=View.GONE;controller.apply(scroll);check(lp.bottomMargin==3 && list.paddingBottom==7)
+ bl8.visibility=View.VISIBLE;bl8.top=0;inputRow.height=104;controller.apply(scroll)
  // Native top/side padding changes are retained; native bottom replacement becomes the new base.
  list.setPadding(5,9,6,11);controller.apply(scroll);check(list.paddingTop==9 && list.paddingBottom==115)
  footer.visibility=View.GONE;controller.apply(scroll);check(lp.bottomMargin==3 && list.clipToPadding)
- footer.visibility=View.VISIBLE;strip.height=48;controller.apply(scroll);controller.restoreAll()
+ footer.visibility=View.VISIBLE;inputRow.height=48;controller.apply(scroll);controller.restoreAll()
  check(lp.bottomMargin==3 && list.paddingBottom==11 && list.paddingLeft==5 && list.clipToPadding)
  // Reenable starts from clean geometry; restore is idempotent.
  controller.apply(scroll);controller.restoreAll();controller.restoreAll();check(list.paddingBottom==11)
  // Wrong parent structure must not be mutated.
  val wrong=ChattingScrollLayout();wrong.add(wrapper);controller.apply(wrong);check(list.paddingBottom==11)
- println("PASS: production controller: overlap, idempotence, panel exclusion, multiline sizing, native padding changes, hidden footer, restore/re-enable and wrong structure")
+ println("PASS: production controller: overlap, idempotence, panel exclusion, zero-height blr, nested row offsets/visibility, multiline sizing, native padding changes, hidden footer, restore/re-enable and wrong structure")
  } catch (e: Throwable) { e.printStackTrace(); throw e }
 }
 '''

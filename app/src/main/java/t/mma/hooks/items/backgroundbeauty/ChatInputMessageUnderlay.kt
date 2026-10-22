@@ -11,7 +11,7 @@ import t.mma.utils.KavaReflector
 import java.util.IdentityHashMap
 import java.util.WeakHashMap
 
-/** 8.0.78 ss.xml/t8.xml: preserve native footer and overlap its verified blr input region. */
+/** 8.0.78 ss.xml/t8.xml: preserve native footer and overlap the visible ssr input row, excluding the app panel. */
 internal class ChatInputMessageUnderlay {
     private class State(val content: View, val list: ViewGroup, val margin: Int, val clip: Boolean) {
         var basePadding = list.paddingBottom
@@ -30,7 +30,7 @@ internal class ChatInputMessageUnderlay {
         }
         val content = named("bki") ?: return
         val footer = (named("k52") as? ViewGroup) ?: return
-        val strip = named("blr") ?: return
+        val strip = named("ssr") ?: return
         val wrapper = named("bm6") ?: return
         if (content.parent !== scroll || footer.parent !== scroll ||
             content.javaClass.name != "com.tencent.mm.pluginsdk.ui.chat.ChattingContent" ||
@@ -55,10 +55,10 @@ internal class ChatInputMessageUnderlay {
             HLog.i("[Hchat:沉浸式背景] CHROMEINPUT_DIAG $snapshot")
             state.lastDiagnostic = snapshot
         }
-        // dd6383f/eb6e056 verified the reserved footer region as blr in t8.xml.
-        // Use its measured height, capped by the host footer, so panel/keyboard height is excluded.
-        val overlap = if (footer.visibility == View.VISIBLE && strip.visibility == View.VISIBLE)
-            strip.height.coerceAtMost(footer.height).coerceAtLeast(0) else 0
+        // t8.xml: blr is ABOVE bl8/ssr, not the input row. Runtime logs show
+        // blr.height=0 while ssr.height=171. Reserve only footer-top..row-bottom;
+        // bkc/AppPanel below ssr must never contribute to this overlap.
+        val overlap = inputRowOverlap(footer, strip)
         if (list.paddingBottom != state.appliedPadding) state.basePadding = list.paddingBottom
         val padding = state.basePadding + overlap
         if (list.paddingBottom != padding) {
@@ -75,12 +75,26 @@ internal class ChatInputMessageUnderlay {
         state.overlap = overlap
     }
 
+    private fun inputRowOverlap(footer: ViewGroup, row: View): Int {
+        if (footer.visibility != View.VISIBLE || !row.isShown || row.height <= 0) return 0
+        var node: View = row
+        var bottom = row.height
+        var depth = 0
+        while (node !== footer && depth++ < 24) {
+            bottom += node.top
+            val parent = node.parent as? View ?: return 0
+            if (parent.visibility != View.VISIBLE) return 0
+            node = parent
+        }
+        return if (node === footer) bottom.coerceIn(0, footer.height.coerceAtLeast(0)) else 0
+    }
+
     private fun findEditText(root: View): EditText? {
         val queue = ArrayDeque<View>()
         queue.add(root)
         while (queue.isNotEmpty()) {
             val view = queue.removeFirst()
-            if (view is EditText) return view
+            if (view is EditText && view.isShown && view.width > 0 && view.height > 0) return view
             if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
         }
         return null
