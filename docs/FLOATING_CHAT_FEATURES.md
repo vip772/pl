@@ -25,3 +25,18 @@ footer 原每帧从 rootView 深搜 ChattingContent，现缓存当前 scroll 下
 头像旧路径失败后依赖后续布局且间隔30秒；现每个会话代次最多三次尝试、失败后2秒主动重试，仍校验代次与控件状态。HEADER_AVATAR_RESULT / HEADER_AVATAR_HTTP 分别限量3条，仅记录源数量/尝试次数/HTTP状态。现有日志未给出本次头像偶发失败的最终原因，不将重试机制修正等同于头像问题已实机验收。
 
 验证：真实Android36 SDK下标题栏与footer定向编译（项目辅助API使用桩）、原生绑定静态检查、输入栏布局回归、生产footer padding JVM回归通过。完整工程 compileDebugKotlin 停留编译阶段并等待超时，未获得成功结果；实际画面、滚动性能与头像联网结果仍待实机验收。
+
+
+## 2026-10-22：首帧、运行时开关与性能分项取证
+
+日志：floating_header 主线程19/22/22ms；头像连续三次 sources=0，未进入有效地址下载，不能归因于HTTP失败。
+
+标题 preDraw 在重排、清除顶部占位后原来仍返回 true，导致旧bounds与新层级同帧显示。现在检测聊天布局及父层的待布局状态，最多三轮取消中间帧并重新调度，避免无限阻止绘制。聊天内容查找由rootView全树收集改为当前ChattingUILayout内bki定位；轮廓与裁剪按变化更新。
+
+两个功能原来关闭时被FeatureManager跳过安装，运行时没有偏好监听。现在始终安装有开关守卫的生命周期钩子，直接监听Hchat_global_config中的对应开关，在主线程刷新现存可见布局；销毁时注销监听。配置通知回调同时保留。
+
+背景的ChattingUILayout/ChatFooter生命周期处理原通过view.post排队设置描边。现改为原生布局结束后同步准备footer透明与描边，不再在此路径重复全聊天根透明及underlay处理（完整刷新和scroll布局路径仍保留）。state尚未建立时仍通过scheduleRefresh建立，不宣称已覆盖所有延迟来源。
+
+PerformanceSample新增floating_header_cards、floating_header_capsule、chat_input_transparency，沿用启动180秒内慢调用每类最多3条；结合floating_footer与floating_footer_predraw区分耗时，不输出消息文字。头像诊断增加contactsReady/group两项布尔值；现有证据不足以确认img_flag空地址是数据缺失还是会话/服务时序，不替换未核实的数据源。
+
+验证：真实Android36 SDK标题栏及footer定向编译（项目依赖使用桩）、输入栏透底/列表padding/顶部占位回归、8.0.78原生绑定检查通过。完整工程compileDebugKotlin等待超时，未获得成功结果；首帧、动态开关、描边与性能改善尚未实机验收。

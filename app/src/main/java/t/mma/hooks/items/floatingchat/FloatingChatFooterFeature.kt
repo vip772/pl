@@ -26,6 +26,11 @@ import kotlin.math.roundToInt
 
 class FloatingChatFooterFeature : BaseFeature() {
     private var runtime: FooterRuntime? = null
+    // Install lifecycle hooks even while disabled; runtime checks gate mutations.
+    override fun isEnabled(context: FeatureContext): Boolean = true
+    override fun onConfigChanged(context: FeatureContext, key: String?) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post { runtime?.refreshVisible() }
+    }
     override fun featureId(): String = ID
     override fun name(): String = "悬浮输入框"
     override fun onFeatureInit(context: FeatureContext) {
@@ -42,6 +47,12 @@ class FloatingChatFooterFeature : BaseFeature() {
     companion object { const val ID = "floating_chat_footer" }
 }
 private class FooterRuntime(private val context: FeatureContext) {
+    private val livePrefs = t.mma.preferences.HchatStorage.preferences(context.hostContext(), "Hchat_global_config")
+    private val configHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val liveListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "floating_chat_footer_enabled") configHandler.post { refreshVisible() }
+    }
+    init { livePrefs.registerOnSharedPreferenceChangeListener(liveListener) }
     private val hooked = HashSet<Member>()
     private val states = WeakHashMap<View, FooterState>()
     private val newMessageMargins = WeakHashMap<View, Int>()
@@ -59,6 +70,15 @@ private class FooterRuntime(private val context: FeatureContext) {
     private var switchPanelMethod: Method? = null
     private var installed = false
 
+    fun refreshVisible() {
+        footerTrackers.keys.toList().forEach { if (isEnabled()) requestFooterApply(it) else disposeFooter(it) }
+        val root = t.mma.hooks.api.core.WeChatApis.currentActivity()?.currentActivity()?.window?.decorView ?: return
+        fun visit(view: View) {
+            if (view.javaClass.name == FOOTER_CLASS) { if (isEnabled()) trackFooter(view) }
+            else if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
+        }
+        visit(root)
+    }
     @Synchronized
     fun install(): Boolean {
         if (installed) return true
@@ -93,6 +113,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             count += hookScrollContent(method)
         }
         installed = count >= REQUIRED_HOOK_COUNT
+        if (installed) configHandler.post { refreshVisible() }
         if (!installed) {
             HLog.e(
                 "[Hchat:$TAG] 功能未生效: 入口不完整 count=$count/$REQUIRED_HOOK_COUNT " +
@@ -876,6 +897,8 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
 
     fun destroy() {
+        livePrefs.unregisterOnSharedPreferenceChangeListener(liveListener)
+        configHandler.removeCallbacksAndMessages(null)
         footerTrackers.keys.toList().forEach(::disposeFooter)
         footerTrackers.clear()
         states.keys.toList().forEach(::restore)

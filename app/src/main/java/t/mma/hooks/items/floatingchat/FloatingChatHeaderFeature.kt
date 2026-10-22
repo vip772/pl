@@ -29,6 +29,11 @@ import kotlin.math.roundToInt
 
 class FloatingChatHeaderFeature : BaseFeature() {
     private var runtime: HeaderRuntime? = null
+    // Install lifecycle hooks even while disabled; runtime checks gate mutations.
+    override fun isEnabled(context: FeatureContext): Boolean = true
+    override fun onConfigChanged(context: FeatureContext, key: String?) {
+        android.os.Handler(android.os.Looper.getMainLooper()).post { runtime?.refreshVisible() }
+    }
     override fun featureId(): String = ID
     override fun name(): String = "悬浮标题栏"
     override fun onFeatureInit(context: FeatureContext) {
@@ -46,6 +51,12 @@ class FloatingChatHeaderFeature : BaseFeature() {
 }
 
 private class HeaderRuntime(private val context: FeatureContext) {
+    private val livePrefs = t.mma.preferences.HchatStorage.preferences(context.hostContext(), "Hchat_global_config")
+    private val configHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val liveListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == "floating_chat_header_enabled") configHandler.post { refreshVisible() }
+    }
+    init { livePrefs.registerOnSharedPreferenceChangeListener(liveListener) }
     private val hooked = HashSet<Member>()
     private val capsule = FloatingChatHeaderCapsule()
     private val states = WeakHashMap<View, HeaderState>()
@@ -78,6 +89,15 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val headerClass = "androidx.appcompat.widget.ActionBarContainer"
     private val layoutClass = "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout"
 
+    fun refreshVisible() {
+        layoutTrackers.keys.toList().forEach { if (isEnabled()) scheduleApply(it) else restore(it) }
+        val root = t.mma.hooks.api.core.WeChatApis.currentActivity()?.currentActivity()?.window?.decorView ?: return
+        fun visit(view: View) {
+            if (view.javaClass.name == layoutClass && view is ViewGroup) scheduleApply(view)
+            else if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
+        }
+        visit(root)
+    }
     fun install(): Boolean {
         if (installed) return true
         val clazz = KavaReflector.loadClass(layoutClass, context.hostClassLoader())
@@ -109,6 +129,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
         installTipsGroupTracking()?.let { count += it }
         installed = count > 0
+        if (installed) configHandler.post { refreshVisible() }
         HLog.i("[Hchat:$TAG] 标题栏功能安装结果 installed=$installed hooks=$count target=$layoutClass header=$headerClass")
         if (!installed) HLog.e("[Hchat:$TAG] 功能未生效: 未找到 ChattingUILayout 生命周期方法")
         return installed
@@ -196,6 +217,15 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 if (observer.isAlive) observer.removeOnPreDrawListener(this)
                 if (tracker.preDraw === this) tracker.preDraw = null
                 if (layout.isAttachedToWindow && layout.isShown) apply(layout) else restore(layout)
+                // Reparenting, top inset and capsule creation request another layout.
+                // Never expose the old bounds in the same frame as these mutations.
+                val pendingLayout = layout.isLayoutRequested || (layout.parent as? View)?.isLayoutRequested == true
+                if (pendingLayout && tracker.settlePasses < 3) {
+                    tracker.settlePasses++
+                    scheduleApply(layout)
+                    return false
+                }
+                tracker.settlePasses = 0
                 return true
             }
         }
@@ -258,15 +288,19 @@ private class HeaderRuntime(private val context: FeatureContext) {
             marginLp.topMargin = top
             header.layoutParams = marginLp
         }
+        val cardsStarted = t.mma.utils.PerformanceSample.start()
         applyHeaderZoneCards(layout, header)
         tipsCardBottoms.remove(layout)
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
+        t.mma.utils.PerformanceSample.finish("floating_header_cards", cardsStarted)
+        val capsuleStarted = t.mma.utils.PerformanceSample.start()
         val split = (header as? ViewGroup)?.let { capsule.apply(it) } == true
+        t.mma.utils.PerformanceSample.finish("floating_header_capsule", capsuleStarted)
         val elevation = if (split) 0f else dp(ELEVATION_DP).toFloat()
         if (header.elevation != elevation) header.elevation = elevation
-        header.outlineProvider = FloatingHeaderOutlineProvider
-        header.clipToOutline = !split
+        if (header.outlineProvider !== FloatingHeaderOutlineProvider) header.outlineProvider = FloatingHeaderOutlineProvider
+        if (header.clipToOutline != !split) header.clipToOutline = !split
         if (!split) FloatingChatCardVisuals.apply(header, CORNER_RADIUS_DP)
         val headerParent = header.parent as? ViewGroup
         if (headerParent != null && headerParent.getChildAt(headerParent.childCount - 1) !== header) {
@@ -533,23 +567,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun findVisibleChatContent(layout: View, header: View): ViewGroup? {
-        val headerLocation = IntArray(2).also(header::getLocationOnScreen)
-        val screenWidth = layout.resources.displayMetrics.widthPixels
-        val root = layout.rootView
-        val candidates = ArrayList<ViewGroup>()
-        collect(root) { view ->
-            if (view.javaClass.name == CHATTING_CONTENT_CLASS && view is ViewGroup) candidates += view
-        }
-        return candidates.firstOrNull { content ->
-            if (!content.isShown || content.width <= 0 || content.height <= 0) return@firstOrNull false
-            val location = IntArray(2).also(content::getLocationOnScreen)
-            val overlapsHeader = location[0] < headerLocation[0] + header.width &&
-                location[0] + content.width > headerLocation[0]
-            val onScreen = location[0] < screenWidth && location[0] + content.width > 0
-            overlapsHeader && onScreen
-        }
+        val id = layout.resources.getIdentifier("bki", "id", layout.context.packageName)
+        return (if (id != 0) layout.findViewById<View>(id) else null)?.takeIf {
+            it.javaClass.name == CHATTING_CONTENT_CLASS && it.isShown
+        } as? ViewGroup
     }
-
     private fun collect(root: View, visitor: (View) -> Unit) {
         visitor(root)
         val group = root as? ViewGroup ?: return
@@ -796,6 +818,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }.onFailure { HLog.e("[Hchat:$TAG] 恢复微信标题栏结构失败", it) }
     }
     fun destroy() {
+        livePrefs.unregisterOnSharedPreferenceChangeListener(liveListener)
+        configHandler.removeCallbacksAndMessages(null)
         capsule.destroy()
         chatTopPaddings.keys.toList().forEach(::restoreChatTopInset)
         states.keys.toList().forEach(::restoreView)
@@ -878,6 +902,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             else -> ViewGroup.LayoutParams(params)
         }
     private class HeaderLayoutTracker(
+        var settlePasses: Int = 0,
         var preDraw: android.view.ViewTreeObserver.OnPreDrawListener? = null
     )
 

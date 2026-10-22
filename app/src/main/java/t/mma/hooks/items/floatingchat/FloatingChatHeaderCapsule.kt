@@ -225,8 +225,10 @@ internal class FloatingChatHeaderCapsule {
         worker.execute {
             var bitmap: Bitmap? = null
             var sourceCount = 0
+            var contactsReady = false
             try {
                 val contacts = WeChatApis.contact().contacts()
+                contactsReady = contacts != null
                 val urls = listOf(contacts?.getAvatarUrl(talker, false), contacts?.getAvatarUrl(talker, true))
                     .filterNotNull().filter { it.isNotBlank() }.distinct()
                 sourceCount = urls.size
@@ -249,7 +251,7 @@ internal class FloatingChatHeaderCapsule {
                 } else {
                     // Retry independently of layout events, with the same generation guard.
                     if (failCounts.computeIfAbsent("avatar_empty") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
-                        HLog.i("[Hchat:悬浮标题栏] HEADER_AVATAR_RESULT empty=true sources=$sourceCount attempt=${target.avatarAttempts}")
+                        HLog.i("[Hchat:悬浮标题栏] HEADER_AVATAR_RESULT empty=true sources=$sourceCount contactsReady=$contactsReady group=${talker.endsWith("@chatroom")} attempt=${target.avatarAttempts}")
                     }
                     main.postDelayed({
                         val retryView = weakHeader.get(); val retryState = weakState.get()

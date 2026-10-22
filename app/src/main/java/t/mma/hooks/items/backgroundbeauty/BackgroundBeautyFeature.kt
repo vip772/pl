@@ -2564,13 +2564,16 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             val apply: (XC_MethodHook.MethodHookParam) -> Unit = { param ->
                 val view = param.thisObject as? View
                 if (view != null && hasClassName(view, className)) {
-                    view.post {
-                        val activity = findActivity(view) ?: return@post
-                        val state = states[activity]
-                        if (state == null || state.lastLoggedSlot != BackgroundBeautySettings.Slot.CHAT) scheduleRefresh(activity)
-                        if (state == null) return@post
-                        if (destroyed || resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return@post
-                        applyChatChromeRoot(state, view)
+                    val activity = findActivity(view)
+                    val state = activity?.let { states[it] }
+                    if (activity != null && (state == null || state.lastLoggedSlot != BackgroundBeautySettings.Slot.CHAT)) scheduleRefresh(activity)
+                    if (activity != null && state != null && !destroyed &&
+                        resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT && hasConfiguredBackground(activity)) {
+                        // Prepare the editor outline synchronously after native layout,
+                        // before its first draw. Full root transparency remains in refresh.
+                        val started = t.mma.utils.PerformanceSample.start()
+                        try { applyChatFooterTransparency(state, view) }
+                        finally { t.mma.utils.PerformanceSample.finish("chat_input_transparency", started) }
                     }
                 }
             }
