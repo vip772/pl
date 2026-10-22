@@ -2660,7 +2660,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         var visited = 0
         while (queue.isNotEmpty() && visited++ < 240) {
             val view = queue.removeFirst()
-            if (view !== inputSurface && view.id == resourceId("bkc")) continue
+            // Keep the bkc/AppPanel branch in this traversal: its surface is intentionally transparent.
+
             if (view is android.widget.EditText) {
                 val snapshot = surfaceSnapshot(state, view)
                 val dark = isWechatDark(view)
