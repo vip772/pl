@@ -327,7 +327,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         return runCatching {
             HookRegistry.get().hook(targetMethod, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!isEnabled()) return
+                    if (!isEnabled() || context.configStore().getGlobalBoolean("floating_chat_footer_enabled", false)) return
                     val scrollLayout = param.thisObject as? ViewGroup ?: return
                     val footer = (0 until scrollLayout.childCount)
                         .asSequence()
@@ -385,6 +385,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     val state = param.args.firstOrNull() as? Int ?: return
                     panelState = state
                     val footer = param.thisObject as? View ?: return
+                    if (isPanelState(state)) footer.clipToOutline = false
                     reportPanelState(footer, state, "before")
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
                     if (!isPanelState(state)) panel.visibility = View.GONE
@@ -398,6 +399,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     panelState = state
                     panel.visibility = if (isPanelState(state)) View.VISIBLE else View.GONE
                     if (isPanelState(state)) applyCompactPanelHeight(footer, panel)
+                    else footer.clipToOutline = true
                     states[footer]?.let { reportPanelState(footer, state, "after") }
                     runCatching {
                         requestFooterApply(footer)
@@ -743,7 +745,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                 RelativeLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     state.panelLayoutParams.height
-                )
+                ).also { it.topMargin = -(state.panelLayoutParams.height.takeIf { h -> h > 0 } ?: dp(MAX_PANEL_HEIGHT_DP)) }
             )
             panel.visibility = View.GONE
             for (index in 0 until state.root.childCount) {
@@ -805,8 +807,12 @@ private class FooterRuntime(private val context: FeatureContext) {
             dp(MAX_PANEL_HEIGHT_DP),
             (hostHeight * MAX_PANEL_HEIGHT_RATIO).roundToInt()
         ).coerceAtLeast(dp(MIN_PANEL_HEIGHT_DP))
-        if (lp.height != target) {
+        if (lp.height != target || (lp is ViewGroup.MarginLayoutParams && lp.topMargin != -target)) {
             lp.height = target
+            // The panel is hosted inside the floating card's RelativeLayout.
+            // Offset it upward by its own measured height so it overlays above
+            // the input row instead of increasing ChatFooter's measured height.
+            if (lp is ViewGroup.MarginLayoutParams) lp.topMargin = -target
             panel.layoutParams = lp
         }
         val group = panel as? ViewGroup ?: return
