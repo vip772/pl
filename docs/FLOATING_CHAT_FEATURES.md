@@ -82,3 +82,14 @@ footer预绘制使用既有已缓存GradientDrawable进行常量级背景一致�
 - FOOTER_FIRST_FRAME：等待可见、首次处理失败原因、就绪、就绪后视图树绘制；最多 64 条，普通阶段每实例最多 8 条。记录可见性、尺寸和可见矩形，不记录聊天内容。tree_draw_after_ready 仅说明视图树绘制回调，不能当作输入框实际绘出的证据。
 - FOOTER_INPUT_SURFACE：内部控件背景类别、资源名、tint 和前景，最多 24 条；用于确认残余白底或原生背景写回。
 - 本轮针对日志已确认的调度缺口和独立背景处理缺口；首次不显示最终根因、实机透明效果仍待安装复测。沉浸式背景滚动掉帧、头像空地址数据源未在本轮解决。
+
+
+## 2026-10-23：面板展开回归与语音背景分层修正
+
+对照正常基线 `d732440` 与 `89d71aa`，本次运行日志显示：面板状态 2、3 展开后，面板高 867，输入行从 197 被压至 26，footer 上边距从 -223 改成 -52；收起后恢复。后续改动把承载面板和输入列的 RelativeLayout 锁为输入行高度，同时对面板写入 `parent.height - panelHeight` 偏移，并与 footer 圆角裁剪并存。现恢复正常基线的面板参与根容器测量、输入列 BELOW 面板的排列，删除锁高、面板额外偏移及状态回调中被 apply 覆盖的裁剪切换。保留紧凑面板高度限制、输入区域独立测量及生命周期恢复。
+
+用户补充圈中的表情面板拖动区域会导致输入框移位，不能只恢复展示而忽略拖动。原有 scroll Hook 在 isEnabled 后又检测同一启用开关并直接返回，导致悬浮开启时从未运行。删除该重复退出条件，恢复仅在当前聊天 footer 面板可见时，将滚动目标约束为实际 IME inset。8.0.78 原生 ChattingScrollLayout.b(IZII)V 的锚点为 `scrollContentTo: y:%s, targetScroll:%s, alwaysScroll:%s`，参数一写入目标滚动字段，后续驱动 OverScroller；dispatchTouchEvent 还按当前滚动偏移修正触摸坐标。不安装全局触摸拦截，不消费表情面板内部滚动。
+
+语音区核对 8.0.78 原生 t8.xml：bpe 是 WeImageButton；p6x 是按住说话 Button；输入末端 w2n SpeechInputLayout 同级还有独立普通 View wi2（背景 cy4），旧逻辑只处理容器和按钮会漏掉 wi2。保留现有按钮/容器清理，新增同时校验资源名 wi2、普通 View 类型、同父 SpeechInputLayout 的背景层清理，不动图标 drawable。预绘制只重检已捕获输入表面，处理原生模式切换中未触发布局的背景重写；继续排除 ChatFooterBottom 整棵面板子树。关闭时恢复原始背景、tint、foreground。
+
+验证：生产 FloatingChatFooterFeature.kt、FloatingChatCardVisuals.kt、FloatingFooterInputSurfaces.kt 使用真实 Android 36 SDK 及 DexKit 定向编译通过（项目辅助依赖使用桩）；现有生产列表 padding JVM 回归通过；git diff --check 通过。未执行 Gradle 或 APK 构建，未提交或推送。此处原生结构仅核实本机现有 8.0.78 反编译材料，未完成其它微信版本横向验证，也未声称实机展开和拖动已验收。

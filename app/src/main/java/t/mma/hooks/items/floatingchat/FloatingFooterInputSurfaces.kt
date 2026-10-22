@@ -61,8 +61,16 @@ internal object FloatingFooterInputSurfaces {
             if (view.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom") continue
             val weImageButton = view.javaClass.name == "com.tencent.mm.ui.widget.imageview.WeImageButton"
             val input = view is EditText || view is Button || view is ImageButton || weImageButton
+            // Native input layout: wi2 is a plain speech-input backdrop View.
+            val speechBackdrop = view.javaClass == View::class.java &&
+                runCatching { view.resources.getResourceEntryName(view.id) == "wi2" }.getOrDefault(false) &&
+                (view.parent as? ViewGroup)?.let { parent ->
+                    (0 until parent.childCount).any {
+                        parent.getChildAt(it).javaClass.name == "com.tencent.mm.pluginsdk.ui.SpeechInputLayout"
+                    }
+                } == true
             val container = view is ViewGroup
-            if (input || container) {
+            if (input || container || speechBackdrop) {
                 val surface = tracked.firstOrNull { it.view === view } ?: Surface(view).also {
                     tracked.add(it)
                     FloatingChatCardVisuals.ownPresentation(view)
@@ -76,6 +84,17 @@ internal object FloatingFooterInputSurfaces {
             if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
         }
     }
+    // Native mode changes can rewrite a background without requesting layout.
+    // Only revisit captured input surfaces; never traverse panel descendants.
+    fun maintain(footer: View) {
+        surfaces[footer]?.forEach { surface ->
+            val view = surface.view
+            if (view.background !== surface.marker || view.backgroundTintList != null || view.foreground != null) {
+                surface.clear()
+            }
+        }
+    }
+
     private fun report(view: View, phase: String) {
         if (reports >= 24) return
         reports++
