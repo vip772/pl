@@ -221,7 +221,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (!isEnabled() || !footerClass.isInstance(param.thisObject)) return
                     val footer = param.thisObject as? View ?: return
-                    val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
+                    val panel = states[footer]?.panel ?: find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
                     if (!isPanelState(panelState) || panel.visibility != View.VISIBLE) return
                     val switchMethod = switchPanelMethod ?: return
                     switchMethod.invoke(footer, PANEL_STATE_NONE, true, -1)
@@ -437,6 +437,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     restore(footer)
                     return true
                 }
+                val wasReady = tracker.ready
                 val applied = apply(footer)
                 if (applied) {
                     tracker.attempts = 0
@@ -458,7 +459,9 @@ private class FooterRuntime(private val context: FeatureContext) {
                         HLog.w("[Hchat:$TAG] 初始布局未就绪，已恢复原始输入区和面板，等待后续布局变化")
                     }
                 }
-                return true
+                // Hierarchy/margins/padding changed: finish the native relayout
+                // before revealing the first frame instead of drawing intermediate bounds.
+                return !(applied && !wasReady)
             }
         }
         tracker.preDraw = listener
@@ -504,7 +507,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         val layout = findAncestorChatLayout(footer) ?: return false
         if (!isVisibleChatLayout(layout)) return false
         val marginParams = footer.layoutParams as? ViewGroup.MarginLayoutParams ?: return false
-        val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS }
+        val panel = states[footer]?.panel ?: find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS }
         if (panel == null) {
             reportStructureFailureOnce("未找到 $FOOTER_BOTTOM_CLASS")
             return false
@@ -550,11 +553,11 @@ private class FooterRuntime(private val context: FeatureContext) {
             footer.requestLayout()
         }
 
-        footer.outlineProvider = FloatingFooterOutlineProvider
-        footer.clipToOutline = true
-        footer.elevation = dp(ELEVATION_DP).toFloat()
-        FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP)
-        footer.invalidateOutline()
+        if (footer.outlineProvider !== FloatingFooterOutlineProvider) footer.outlineProvider = FloatingFooterOutlineProvider
+        if (!footer.clipToOutline) footer.clipToOutline = true
+        val elevation = dp(ELEVATION_DP).toFloat()
+        if (footer.elevation != elevation) footer.elevation = elevation
+        FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true)
         applyChatListPadding(footer, inputHeight + gap, state)
         ensurePreDrawTracking(footer)
 
@@ -748,17 +751,18 @@ private class FooterRuntime(private val context: FeatureContext) {
             liftNewMessageBubble(footer)
             return
         }
-        val wasAtBottom = !recycler.canScrollVertically(1)
-        val old = recycler.paddingBottom
         recycler.setPadding(recycler.paddingLeft, recycler.paddingTop, recycler.paddingRight, target)
-        if (wasAtBottom && target > old) recycler.scrollBy(0, target - old)
         liftNewMessageBubble(footer)
     }
 
     private fun ensurePreDrawTracking(footer: View) {
         if (preDrawListeners[footer] != null) return
         val listener = ViewTreeObserver.OnPreDrawListener {
-            if (isEnabled() && footer.isAttachedToWindow) liftNewMessageBubble(footer)
+            if (isEnabled() && footer.isAttachedToWindow) {
+                val started = t.mma.utils.PerformanceSample.start()
+                try { liftNewMessageBubble(footer) }
+                finally { t.mma.utils.PerformanceSample.finish("floating_footer_predraw", started) }
+            }
             true
         }
         preDrawListeners[footer] = listener
@@ -766,10 +770,13 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
 
     private fun liftNewMessageBubble(footer: View) {
-        val content = find(footer.rootView) {
-            it.javaClass.name == CHATTING_CONTENT_CLASS
-        } as? ViewGroup
-        content ?: return
+        val state = states[footer] ?: return
+        val content = state.chatContent?.takeIf { it.isAttachedToWindow }
+            ?: (footer.parent as? ViewGroup)?.let { parent ->
+                (0 until parent.childCount).asSequence().map(parent::getChildAt)
+                    .firstOrNull { it.javaClass.name == CHATTING_CONTENT_CLASS } as? ViewGroup
+            }?.also { state.chatContent = it }
+            ?: return
         for (index in 0 until content.childCount) {
             val candidate = content.getChildAt(index)
             if (!isNewMessageBubble(candidate)) continue
@@ -953,6 +960,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         val clipToOutline: Boolean,
         val changedRules: MutableMap<View, IntArray> = LinkedHashMap(),
         var reparented: Boolean = false,
+        var chatContent: ViewGroup? = null,
         var chatRecycler: View? = null,
         var recyclerPaddingBottom: Int? = null,
         var baseInputHeight: Int = 0

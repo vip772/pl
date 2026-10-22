@@ -31,6 +31,7 @@ internal class FloatingChatHeaderCapsule {
         var generation = 0
         var nextAttempt = 0L
         var loading = false
+        var avatarAttempts = 0
         var appliedLogged = false
         var strokeStyle: Pair<Int, Int>? = null
     }
@@ -79,7 +80,7 @@ internal class FloatingChatHeaderCapsule {
         state.strokeStyle = strokeStyle
         val talker = WeChatApis.chatPage()?.currentTalker().orEmpty()
         if (talker != state.talker) {
-            state.talker = talker; state.generation++; state.nextAttempt = 0L; state.loading = false
+            state.talker = talker; state.generation++; state.nextAttempt = 0L; state.loading = false; state.avatarAttempts = 0
             state.avatar.setImageDrawable(null)
         }
         val rawTitle = nativeTitle.text.toString()
@@ -215,16 +216,20 @@ internal class FloatingChatHeaderCapsule {
         }
         val now = SystemClock.elapsedRealtime()
         if (state.loading || now < state.nextAttempt) return
-        state.loading = true; state.nextAttempt = now + 30_000
+        if (state.avatarAttempts >= 3) return
+        state.avatarAttempts++
+        state.loading = true; state.nextAttempt = now + 2_000
         val token = state.generation
         val weakHeader = WeakReference(header); val weakState = WeakReference(state)
         workerStarted = true
         worker.execute {
             var bitmap: Bitmap? = null
+            var sourceCount = 0
             try {
                 val contacts = WeChatApis.contact().contacts()
                 val urls = listOf(contacts?.getAvatarUrl(talker, false), contacts?.getAvatarUrl(talker, true))
                     .filterNotNull().filter { it.isNotBlank() }.distinct()
+                sourceCount = urls.size
                 for (url in urls) {
                     if (closed || Thread.currentThread().isInterrupted) break
                     try { bitmap = download(url) } catch (e: Exception) {
@@ -239,7 +244,22 @@ internal class FloatingChatHeaderCapsule {
                 if (closed || view == null || target == null || states[view] !== target ||
                     target.generation != token || target.talker != talker) return@post
                 target.loading = false
-                if (result != null) { cache.put(talker, result); target.avatar.setImageBitmap(result) }
+                if (result != null) {
+                    cache.put(talker, result); target.avatar.setImageBitmap(result)
+                } else {
+                    // Retry independently of layout events, with the same generation guard.
+                    if (failCounts.computeIfAbsent("avatar_empty") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
+                        HLog.i("[Hchat:悬浮标题栏] HEADER_AVATAR_RESULT empty=true sources=$sourceCount attempt=${target.avatarAttempts}")
+                    }
+                    main.postDelayed({
+                        val retryView = weakHeader.get(); val retryState = weakState.get()
+                        if (!closed && retryView != null && retryState != null &&
+                            retryView.isAttachedToWindow && states[retryView] === retryState &&
+                            retryState.generation == token && retryState.talker == talker) {
+                            loadAvatar(retryView, retryState, talker)
+                        }
+                    }, 2_000)
+                }
             }
         }
     }
@@ -249,7 +269,12 @@ internal class FloatingChatHeaderCapsule {
         val conn = url.openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = 4000; conn.readTimeout = 4000
-            if (conn.responseCode !in 200..299) return null
+            if (conn.responseCode !in 200..299) {
+                if (failCounts.computeIfAbsent("avatar_http") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
+                    HLog.i("[Hchat:悬浮标题栏] HEADER_AVATAR_HTTP status=${conn.responseCode}")
+                }
+                return null
+            }
             val bytes = conn.inputStream.use { input ->
                 val out = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
                 while (!closed && !Thread.currentThread().isInterrupted) {

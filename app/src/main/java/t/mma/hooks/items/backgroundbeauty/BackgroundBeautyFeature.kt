@@ -1366,6 +1366,7 @@ private class BackgroundBeautyRuntime(
                 installed = hookOnce(method, after = { param ->
                     if (surfaceMutationDepth != 0 || Looper.myLooper() != Looper.getMainLooper()) return@hookOnce
                     val view = param.thisObject as? View ?: return@hookOnce
+                    if (t.mma.hooks.items.floatingchat.FloatingChatCardVisuals.contains(view)) return@hookOnce
                     val state = surfaceOwners[view] ?: run {
 // Only inspect untracked writes while the contacts page is active.
                         val active = WeChatApis.currentActivity()?.currentActivity() ?: return@hookOnce
@@ -2551,7 +2552,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 try {
                     val enabled = !destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT &&
                         hasConfiguredBackground(activity) && WeChatApis.version()?.current()?.versionName == "8.0.78"
-                    if (enabled) state.inputUnderlay.apply(scroll) else state.inputUnderlay.restore(scroll)
+                    if (enabled && !floatingFooterEnabled()) state.inputUnderlay.apply(scroll) else state.inputUnderlay.restore(scroll)
                 } catch (e: Throwable) {
                     state.inputUnderlay.restore(scroll)
                     HLog.e("$TAG 输入栏消息穿透布局失败", e)
@@ -2601,6 +2602,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         }
         return best
     }
+    private fun floatingFooterEnabled(): Boolean =
+        context.configStore().getGlobalBoolean("floating_chat_footer_enabled", false)
     private fun applyChatChromeRoot(state: HostState, root: View) {
         val layout = when {
             root.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout" -> root
@@ -2623,7 +2626,9 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         applyChatFooterTransparency(state, layout ?: root)
         if (WeChatApis.version()?.versionName() == "8.0.78") {
             val scroll = findVisibleDescendant(layout ?: root, ChatInputMessageUnderlay.SCROLL) as? ViewGroup
-            if (scroll != null) runCatching { state.inputUnderlay.apply(scroll) }
+            if (scroll != null) runCatching {
+                if (floatingFooterEnabled()) state.inputUnderlay.restore(scroll) else state.inputUnderlay.apply(scroll)
+            }
                 .onFailure { state.inputUnderlay.restore(scroll); HLog.e("$TAG 输入栏消息穿透布局失败", it) }
         }
     }
@@ -3150,6 +3155,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         preserveFeedback: Boolean = false
     ) {
         if (t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(view)) return
+        // The floating card owns its translucent surface; still clear native descendants.
+        if (t.mma.hooks.items.floatingchat.FloatingChatCardVisuals.contains(view)) return
         if (slot == BackgroundBeautySettings.Slot.CONTACTS && isContactIconSurface(view)) {
             // A pre-layout pass may have treated an unmeasured icon as a surface.
             state.surfaces[view]?.let { snapshot ->
