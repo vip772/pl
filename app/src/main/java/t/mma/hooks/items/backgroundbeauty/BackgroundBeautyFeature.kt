@@ -2321,13 +2321,11 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         var count = 0
         while (queue.isNotEmpty() && count++ < 80) {
             val node = queue.removeFirst()
-            logChatSurface(node, "speech-direct-before")
             if (node.javaClass == View::class.java || node is ViewGroup || node is ImageView) {
                 // A passive microphone is not a separate touch target. Its parent's host ripple
                 // must not be duplicated by another module ripple on the image itself.
                 setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
             }
-            logChatSurface(node, "speech-direct-after")
             if (node is ViewGroup) for (i in 0 until node.childCount) queue.add(node.getChildAt(i))
         }
     }
@@ -2358,9 +2356,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                     if (row is ViewGroup) for (i in 0 until row.childCount) rowNodes.add(row.getChildAt(i))
                 }
                 surfaces.forEach { surface ->
-                    logChatSurface(surface, "notice-before")
                     setTransparentSurface(state, surface, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
-                    logChatSurface(surface, "notice-after")
                 }
             }
             if (node is ViewGroup) for (i in 0 until node.childCount) queue.add(node.getChildAt(i))
@@ -2376,9 +2372,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         while (queue.isNotEmpty()) {
             val node = queue.removeFirst()
             if (talkId != 0 && node.id == talkId && node is android.widget.Button) {
-                logChatSurface(node, "hold-to-talk-before")
                 setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
-                logChatSurface(node, "hold-to-talk-after")
             }
             if (overlayId != 0 && node.id == overlayId && node is ViewGroup) {
                 // t8.xml sub/suc: anonymous View uses drawable/de7.png, outside SpeechInputLayout.
@@ -2387,22 +2381,13 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 while (layers.isNotEmpty()) {
                     val layer = layers.removeFirst()
                     if (layer.javaClass == View::class.java) {
-                        logChatSurface(layer, "voice-overlay-before")
                         setTransparentSurface(state, layer, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
-                        logChatSurface(layer, "voice-overlay-after")
                     }
                     if (layer is ViewGroup) for (i in 0 until layer.childCount) layers.add(layer.getChildAt(i))
                 }
             }
             if (node is ViewGroup) for (i in 0 until node.childCount) queue.add(node.getChildAt(i))
         }
-    }
-    private fun logChatSurface(view: View, phase: String) {
-        val key = "chat-surface:$phase:${view.id}:${view.javaClass.name}"
-        if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 3) return
-        val activity = findActivity(view) ?: return
-        val image = view as? ImageView
-        HLog.i("$TAG CHATPART phase=$phase ${wechatProbeView(view, activity)} image=${image?.drawable?.javaClass?.name} imageBounds=${image?.drawable?.bounds} elevation=${view.elevation} translationZ=${view.translationZ} fg=${view.foreground?.javaClass?.name}")
     }
     private fun applyEmojiPanelSurfaces(panel: View) {
         val activity = findActivity(panel) ?: return
@@ -2412,9 +2397,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         // a77.xml tab background (m), nested panel (p), tab wrapper (l).
         listOf("m", "p", "l").forEach { field ->
             (KavaReflector.readField(manager, field) as? View)?.let { view ->
-                logChatSurface(view, "emoji-before:$field")
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
-                logChatSurface(view, "emoji-after:$field")
             }
         }
     }
@@ -2455,7 +2438,6 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                         icon.setImageResource(id)
                         snapshot.appliedDrawable = icon.drawable
                         snapshot.slot = BackgroundBeautySettings.Slot.CHAT
-                        logChatSurface(icon, "app-grid:$key")
                     }
                 }
                 val queue = ArrayDeque<View>()
@@ -2651,14 +2633,12 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             else -> findVisibleDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter")
         } as? ViewGroup
         if (footer == null) {
-            HLog.i("$TAG CHROMEINPUT footerMissing root=${root.javaClass.name}")
             return
         }
         // The complete ChatFooter contains both the input surface and the sibling plus-menu
         // panel. Both are intended to reveal the chat background, so process the whole footer.
         applySpeechSurfaces(state, footer)
         applyChatVoiceSurfaces(state, footer)
-        HLog.i("$TAG CHROMEINPUT footerFound ${wechatProbeView(footer, state.activity)}")
         val queue = ArrayDeque<View>()
         queue.add(footer)
         var visited = 0
@@ -2690,22 +2670,17 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                     snapshot.appliedBitmap = null
                     snapshot.slot = BackgroundBeautySettings.Slot.CHAT
                     inputOutlineStyles[view] = style
-                    HLog.i("$TAG CHROMEINPUT outlineStyle dark=$dark color=$strokeColor widthPx=$strokeWidth")
-                    HLog.i("$TAG CHROMEINPUT outlineApplied ${wechatProbeView(view, state.activity)}")
                 } finally { surfaceMutationDepth-- }
             } else if (view is ViewGroup) {
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = appGridItems[view] == true)
                 for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
             } else if (view.javaClass == View::class.java && findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null) {
                 // ew_.xml: SpeechInputLayout.m and .o are independent solid View backgrounds.
-                logChatSurface(view, "speech-before")
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
-                logChatSurface(view, "speech-after")
             } else if (view is ImageView) {
                 // Footer icons retain their image drawable. Only their independent button surface is cleared.
                 val inSpeech = findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = !inSpeech)
-                if (inSpeech) logChatSurface(view, "speech-icon")
             }
         }
     }

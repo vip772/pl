@@ -120,8 +120,34 @@ internal class FloatingChatHeaderCapsule {
             HLog.i("[Hchat:悬浮标题栏] 更多候选不唯一 count=${verified.size} all=${candidates.size}")
         } else if (failCounts.computeIfAbsent("more_candidates") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
             HLog.i("[Hchat:悬浮标题栏] 更多候选未命中 all=${candidates.size} settingText=$settingText")
+            logMenuStructure(header, menu, candidates)
         }
         return null
+    }
+    // Only the first three failed resolutions reach here; no per-frame tree logging.
+    private fun logMenuStructure(header: ViewGroup, menu: ViewGroup, candidates: List<View>) {
+        fun describe(view: View): String {
+            val name = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("-")
+            val lp = view.layoutParams
+            val icon = (view as? ImageView)?.drawable
+            return "${view.javaClass.name}#$name id=${view.id} size=${view.width}x${view.height} " +
+                "pos=${view.left},${view.top} visibility=${view.visibility} shown=${view.isShown} " +
+                "enabled=${view.isEnabled} clickable=${view.isClickable} listeners=${view.hasOnClickListeners()} " +
+                "alpha=${view.alpha} lp=${lp?.javaClass?.name}:${lp?.width}x${lp?.height} " +
+                "icon=${icon?.javaClass?.name} iconState=${icon?.constantState?.javaClass?.name} " +
+                "descriptionPresent=${!view.contentDescription.isNullOrEmpty()}"
+        }
+        val rows = ArrayList<String>()
+        val queue = ArrayDeque<Pair<View, Int>>()
+        queue.add(header to 0)
+        while (queue.isNotEmpty() && rows.size < 80) {
+            val (view, depth) = queue.removeFirst()
+            rows += "depth=$depth ${describe(view)}"
+            if (view is ViewGroup && depth < 10) {
+                for (i in 0 until view.childCount) queue.add(view.getChildAt(i) to depth + 1)
+            }
+        }
+        HLog.i("[Hchat:悬浮标题栏] HEADER_MENU_DIAG menu=${describe(menu)} candidates=${candidates.size} truncated=${queue.isNotEmpty()} tree=$rows")
     }
     private fun create(header: ViewGroup): State {
         val ctx = header.context

@@ -37,3 +37,6 @@ footer内结构性ViewGroup统一禁用整块按压反馈，避免原生pressed�
 对比悬浮输入框：reparentPanel将ChatFooterBottom移出输入列并隐藏，随后用悬浮margin重排；本方案不采用该结构修改。
 修复按scroll/footer屏幕交集补齐行下窄尾部，尾部必须小于一个输入行高度，避免将展开的整块面板纳入消息覆盖；不硬编码26px或用户估计的3dp。原生footer位置、margin、触摸边界和透明策略不变。
 模型回归覆盖26px尾部、多轮原生布局、面板展开与收回、恢复；仍须区分模型/SDK编译和完整APK、实机绘制验收。
+
+## 实机验收后的诊断清理
+用户确认输入栏透明及贴底运行正常。移除CHROMEINPUT_DIAG快照、祖先链、遮挡子树扫描、仅用于诊断的EditText查找与缓存，以及CHROMEINPUT/CHATPART相关调试输出。保留screenRect/intersectionRect：它们参与底部尾部覆盖计算，属于功能。保留布局、透明及错误恢复逻辑。清理后真实SDK编译和模型回归通过。
