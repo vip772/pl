@@ -121,12 +121,12 @@ internal class ChatInputMessageUnderlay {
         }.getOrDefault("?")
         val bounds = screenRect()
         val identity = IdentityHashMap<ViewParent, Boolean>()
-        var node: ViewParent? = this
+        var node: View? = this
         var parentClip = true
         while (node is View) {
             if (identity.put(node, true) != null) break
             if (node !== this && node is ViewGroup && (!node.clipChildren || !node.clipToPadding)) parentClip = false
-            node = node.parent
+            node = node.parent as? View
         }
         return "${javaClass.name}#$idName@${System.identityHashCode(this)} rect=$bounds bg=${bg?.javaClass?.name}:${(bg as? ColorDrawable)?.color} fg=${fg?.javaClass?.name}:${(fg as? ColorDrawable)?.color} visibility=$visibility shown=$isShown elevation=$elevation z=$z clipChildren=${(this as? ViewGroup)?.clipChildren} clipToPadding=${(this as? ViewGroup)?.clipToPadding} parentClip=$parentClip"
     }
