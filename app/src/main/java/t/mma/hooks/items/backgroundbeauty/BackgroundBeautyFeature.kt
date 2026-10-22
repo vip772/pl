@@ -2650,19 +2650,13 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             HLog.i("$TAG CHROMEINPUT footerMissing root=${root.javaClass.name}")
             return
         }
-        // t8.xml's bfp is the full-height ChatFooter root, not the input row.
-        // ssr contains only the input controls; bkc/AppPanel is a sibling branch and
-        // must keep its native opaque background when the plus menu is open.
-        val inputRow = footer.findViewById<View>(resourceId("ssr")) as? ViewGroup
-        if (inputRow == null) {
-            HLog.i("$TAG CHROMEINPUT inputRowMissing footer=${wechatProbeView(footer, state.activity)}")
-            return
-        }
-        applySpeechSurfaces(state, inputRow)
-        applyChatVoiceSurfaces(state, inputRow)
-        HLog.i("$TAG CHROMEINPUT footerFound ${wechatProbeView(footer, state.activity)} inputRow=${wechatProbeView(inputRow, state.activity)}")
+        // The complete ChatFooter contains both the input surface and the sibling plus-menu
+        // panel. Both are intended to reveal the chat background, so process the whole footer.
+        applySpeechSurfaces(state, footer)
+        applyChatVoiceSurfaces(state, footer)
+        HLog.i("$TAG CHROMEINPUT footerFound ${wechatProbeView(footer, state.activity)}")
         val queue = ArrayDeque<View>()
-        queue.add(inputRow)
+        queue.add(footer)
         var visited = 0
         while (queue.isNotEmpty() && visited++ < 240) {
             val view = queue.removeFirst()
@@ -2671,8 +2665,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 val snapshot = surfaceSnapshot(state, view)
                 val dark = isWechatDark(view)
                 val strokeColor = if (dark) Color.WHITE else Color.BLACK
-                val strokeWidth = chatInputStrokeWidth(inputRow)
-                val icon = inputRow.findViewById<ImageView>(resourceId("bqr"))
+                val strokeWidth = chatInputStrokeWidth(footer)
+                val icon = footer.findViewById<ImageView>(resourceId("bqr"))
                 val ink = icon?.let { measuredIconStrokes[it] }
                 val style = listOf(strokeColor, strokeWidth, icon, icon?.drawable, ink?.top, ink?.bottom)
                 if (snapshot.slot == BackgroundBeautySettings.Slot.CHAT && inputOutlineStyles[view] == style &&
@@ -2724,10 +2718,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             val view = queue.removeFirst()
             val name = view.javaClass.name
             if (slot == BackgroundBeautySettings.Slot.CHAT &&
-                (name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooter" ||
-                    name == "com.tencent.mm.pluginsdk.ui.chat.AppPanel" ||
-                    findAncestor(view, "com.tencent.mm.pluginsdk.ui.chat.AppPanel") != null)
-            ) continue
+                name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") continue
             if (view !== root && isBottomBar(view)) continue
             if (view !== root && isComposeSurface(view)) continue
             if (isWechatTaskSurface(view)) {
