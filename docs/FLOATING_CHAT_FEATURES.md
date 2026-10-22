@@ -72,3 +72,13 @@ footer预绘制使用既有已缓存GradientDrawable进行常量级背景一致�
 悬浮输入卡片深浅模式均取消阴影：elevation与translationZ都置0，预绘制仅在值变化时校正；关闭时恢复原值，保留圆角裁剪。前次完整compileDebugKotlin最终成功（5m6s）；加入最终无阴影修改后再次检查。
 
 最终含无阴影修改的 :app:compileDebugKotlin --offline 成功，耗时43秒；未生成完整APK或执行实机验收。
+
+
+### 首次调度与输入区统一表面（2026-10-22 后续）
+
+- ChatFooter 原生 onLayout 后补齐首次调度；首次就绪前监听视图树全局布局，就绪和分离时移除。布局回调调度不再 requestLayout，避免重复请求布局。
+- 悬浮输入框独立清理输入区域容器、EditText、Button 的 background/tint/foreground，不依赖沉浸背景图片配置；排除 ChatFooterBottom 面板，保留图标 drawable、文字、监听器和输入交互。关闭时恢复已保存表面。
+- 保持外层与标题栏相同的 E6 半透明色及零描边、零阴影。布局时重检内部背景，不在 preDraw 扫描子树。
+- FOOTER_FIRST_FRAME：等待可见、首次处理失败原因、就绪、就绪后视图树绘制；最多 64 条，普通阶段每实例最多 8 条。记录可见性、尺寸和可见矩形，不记录聊天内容。tree_draw_after_ready 仅说明视图树绘制回调，不能当作输入框实际绘出的证据。
+- FOOTER_INPUT_SURFACE：内部控件背景类别、资源名、tint 和前景，最多 24 条；用于确认残余白底或原生背景写回。
+- 本轮针对日志已确认的调度缺口和独立背景处理缺口；首次不显示最终根因、实机透明效果仍待安装复测。沉浸式背景滚动掉帧、头像空地址数据源未在本轮解决。
