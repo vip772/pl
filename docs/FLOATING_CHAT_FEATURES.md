@@ -55,3 +55,20 @@ PerformanceSample新增floating_header_cards、floating_header_capsule、chat_in
 描边HostState可在图片异步加载完成前建立；新增INPUT_OUTLINE_SET与INPUT_OUTLINE_FIRST_DRAW各最多6条，区分描边安装延迟与首次绘制延迟。头像在空URL时于后台执行同表只读查询，sourceStatus区分query_unavailable/row_missing/fields_empty/fields_present_after_lookup，不记录用户名或URL。头像仍为空时，窗口重新获得焦点会开启新一轮有上限重试，保留代次防串图校验。
 
 验证：真实Android36 SDK标题/输入栏定向编译、背景屏幕对齐/窗口变化/侧滑JVM回归、顶部padding/输入栏布局/列表padding回归和原生绑定静态检查通过。完整工程首轮编译暴露缓存字段漏声明，已修正；重跑停留compileDebugKotlin等待超时，尚无成功结果。APK构建和本轮视觉/性能效果未实机验收。
+
+
+## 2026-10-22：首次输入卡片可见性与无描边表面
+
+实机确认标题首帧无闪现、消息无上跳、中段居中正常。新日志头像sourceStatus=fields_empty连续三次，说明img_flag记录存在但reserved1/reserved2为空，未臆造请求内部头像更新接口；既有资料页更新后焦点重试保留。
+
+footer首轮preDraw取消绘制后显式postInvalidateOnAnimation，注册preDraw时也显式请求绘制；初始隐藏后若聊天页临时不可见则恢复原visibility，避免悬置INVISIBLE。不是用延时猜测布局完成。
+
+用户要求悬浮输入框无描边：背景透明处理在floating_chat_footer_enabled时把编辑器设为透明，不创建ChatInputOutline，并清理该编辑器outline样式缓存；关闭悬浮时仍保留已验收的原生透明输入栏描边。悬浮卡片自身的暗色stroke也禁用。
+
+footer预绘制使用既有已缓存GradientDrawable进行常量级背景一致性检查，重新绑定被替换背景、清除残留backgroundTint、恢复Drawable alpha=255，表面颜色仍为0xE6。按颜色/描边模式变化设置stroke，稳定滚动不重复setStroke/requestLayout。FOOTER_SURFACE_REPAIR最多6条，仅含背景身份变化、alpha与tint状态，确认后续是否还有原生写入；未把透明度偶发问题的最终写入来源表述为已实机确认。
+
+验证：Android36 SDK输入框/共享视觉代码定向编译通过（项目辅助API使用桩），输入栏布局、列表padding和背景对齐回归通过，git diff --check通过；完整工程及实机结果以本轮最终报告为准。沉浸背景开启仍掉帧，现有本次日志没有对应慢调用，未据此宣称已解决或猜测新增GPU优化。
+
+悬浮输入卡片深浅模式均取消阴影：elevation与translationZ都置0，预绘制仅在值变化时校正；关闭时恢复原值，保留圆角裁剪。前次完整compileDebugKotlin最终成功（5m6s）；加入最终无阴影修改后再次检查。
+
+最终含无阴影修改的 :app:compileDebugKotlin --offline 成功，耗时43秒；未生成完整APK或执行实机验收。

@@ -14,8 +14,10 @@ object FloatingChatCardVisuals {
 
     private val originals = WeakHashMap<View, android.graphics.drawable.Drawable?>()
     private val applied = WeakHashMap<View, GradientDrawable>()
+    private val borderlessStyles = WeakHashMap<View, Boolean>()
+    private var surfaceRepairReports = 0
 
-    fun apply(view: View, radiusDp: Int, translucent: Boolean = false) {
+    fun apply(view: View, radiusDp: Int, translucent: Boolean = false, borderless: Boolean = false) {
         if (!originals.containsKey(view)) originals[view] = view.background
         val density = view.resources.displayMetrics.density
         val drawable = applied[view] ?: GradientDrawable().also { applied[view] = it }
@@ -24,16 +26,24 @@ object FloatingChatCardVisuals {
         val darkColor = if (translucent) 0xE6242424.toInt() else DARK_SURFACE_COLOR
         val lightColor = if (translucent) 0xE6F7F7F7.toInt() else LIGHT_SURFACE_COLOR
         if (view.context.isDarkMode()) {
-            if (drawable.color?.defaultColor != darkColor) {
+            if (drawable.color?.defaultColor != darkColor || borderlessStyles[view] != borderless) {
                 drawable.setColor(darkColor)
-                drawable.setStroke(density.roundToInt().coerceAtLeast(1), DARK_STROKE_COLOR)
+                drawable.setStroke(if (borderless) 0 else density.roundToInt().coerceAtLeast(1), DARK_STROKE_COLOR)
             }
         } else {
-            if (drawable.color?.defaultColor != lightColor) {
+            if (drawable.color?.defaultColor != lightColor || borderlessStyles[view] != borderless) {
                 drawable.setColor(lightColor)
                 drawable.setStroke(0, 0)
             }
         }
+        borderlessStyles[view] = borderless
+        if (borderless && (view.background !== drawable || drawable.alpha != 255 || view.backgroundTintList != null) && surfaceRepairReports++ < 6) {
+            t.mma.utils.HLog.i("[Hchat:悬浮输入框] FOOTER_SURFACE_REPAIR backgroundChanged=${view.background !== drawable} drawableAlpha=${drawable.alpha} tint=${view.backgroundTintList != null} viewAlpha=${view.alpha}")
+        }
+        // Native tint/Drawable alpha can survive a background identity change.
+        if (drawable.alpha != 255) drawable.alpha = 255
+        if (view.backgroundTintList != null) view.backgroundTintList = null
+        if (view.backgroundTintMode != null) view.backgroundTintMode = null
         if (view.background !== drawable) view.background = drawable
     }
 
@@ -48,5 +58,6 @@ object FloatingChatCardVisuals {
         if (!originals.containsKey(view)) return
         view.background = originals.remove(view)
         applied.remove(view)
+        borderlessStyles.remove(view)
     }
 }

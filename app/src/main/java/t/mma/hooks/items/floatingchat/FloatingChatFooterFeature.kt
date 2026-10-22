@@ -452,7 +452,10 @@ private class FooterRuntime(private val context: FeatureContext) {
             override fun onPreDraw(): Boolean {
                 if (observer.isAlive) observer.removeOnPreDrawListener(this)
                 if (tracker.preDraw === this) tracker.preDraw = null
-                if (!footer.isAttachedToWindow || !isVisibleChatLayout(tracker.layout)) return true
+                if (!footer.isAttachedToWindow || !isVisibleChatLayout(tracker.layout)) {
+                    if (!tracker.ready && footer.visibility == View.INVISIBLE) footer.visibility = tracker.visibility
+                    return true
+                }
                 if (!isEnabled()) {
                     footer.visibility = tracker.visibility
                     restore(footer)
@@ -482,7 +485,12 @@ private class FooterRuntime(private val context: FeatureContext) {
                 }
                 // Hierarchy/margins/padding changed: finish the native relayout
                 // before revealing the first frame instead of drawing intermediate bounds.
-                return !(applied && !wasReady)
+                if (applied && !wasReady) {
+                    // Returning false alone does not explicitly request the next draw.
+                    footer.rootView.postInvalidateOnAnimation()
+                    return false
+                }
+                return true
             }
         }
         tracker.preDraw = listener
@@ -576,9 +584,9 @@ private class FooterRuntime(private val context: FeatureContext) {
 
         if (footer.outlineProvider !== FloatingFooterOutlineProvider) footer.outlineProvider = FloatingFooterOutlineProvider
         if (!footer.clipToOutline) footer.clipToOutline = true
-        val elevation = dp(ELEVATION_DP).toFloat()
-        if (footer.elevation != elevation) footer.elevation = elevation
-        FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true)
+        if (footer.elevation != 0f) footer.elevation = 0f
+        if (footer.translationZ != 0f) footer.translationZ = 0f
+        FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true, borderless = true)
         applyChatListPadding(footer, inputHeight + gap, state)
         ensurePreDrawTracking(footer)
 
@@ -627,6 +635,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             topMargin = marginParams.topMargin,
             bottomMargin = marginParams.bottomMargin,
             elevation = footer.elevation,
+            translationZ = footer.translationZ,
             outlineProvider = footer.outlineProvider,
             clipToOutline = footer.clipToOutline,
             baseInputHeight = (0 until inputColumn.childCount)
@@ -781,7 +790,13 @@ private class FooterRuntime(private val context: FeatureContext) {
         val listener = ViewTreeObserver.OnPreDrawListener {
             if (isEnabled() && footer.isAttachedToWindow) {
                 val started = t.mma.utils.PerformanceSample.start()
-                try { liftNewMessageBubble(footer) }
+                try {
+                    // Constant-time consistency check: no subtree scan or requestLayout.
+                    if (footer.elevation != 0f) footer.elevation = 0f
+                    if (footer.translationZ != 0f) footer.translationZ = 0f
+                    FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true, borderless = true)
+                    liftNewMessageBubble(footer)
+                }
                 finally { t.mma.utils.PerformanceSample.finish("floating_footer_predraw", started) }
             }
             true
@@ -889,6 +904,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                 footer.layoutParams = params
             }
             footer.elevation = state.elevation
+            footer.translationZ = state.translationZ
             footer.outlineProvider = state.outlineProvider
             footer.clipToOutline = state.clipToOutline
             FloatingChatCardVisuals.restore(footer)
@@ -979,6 +995,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         val topMargin: Int,
         val bottomMargin: Int,
         val elevation: Float,
+        val translationZ: Float,
         val outlineProvider: ViewOutlineProvider?,
         val clipToOutline: Boolean,
         val changedRules: MutableMap<View, IntArray> = LinkedHashMap(),
@@ -1025,7 +1042,6 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val PANEL_STATE_APP = 3
         private const val SIDE_MARGIN_DP = 12
         private const val BOTTOM_GAP_DP = 8
-        private const val ELEVATION_DP = 4
         private const val CORNER_RADIUS_DP = 24
         private const val INITIAL_LAYOUT_RETRY_COUNT = 3
         private const val REQUIRED_HOOK_COUNT = 6

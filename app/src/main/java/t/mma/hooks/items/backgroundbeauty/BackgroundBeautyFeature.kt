@@ -2665,6 +2665,12 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             // Keep the bkc/AppPanel branch in this traversal: its surface is intentionally transparent.
 
             if (view is android.widget.EditText) {
+                if (floatingFooterEnabled()) {
+                    // Floating input has a single translucent card, without an editor border.
+                    setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
+                    inputOutlineStyles.remove(view)
+                    continue
+                }
                 val snapshot = surfaceSnapshot(state, view)
                 val dark = isWechatDark(view)
                 val strokeColor = if (dark) Color.WHITE else Color.BLACK
@@ -3345,7 +3351,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         surfaceMutationDepth++
         try {
             val appliedBackground = snapshot.appliedBackground
-            if (appliedBackground != null && view.background === appliedBackground) {
+            if (!t.mma.hooks.items.floatingchat.FloatingChatCardVisuals.contains(view) &&
+                appliedBackground != null && view.background === appliedBackground) {
                 view.background = snapshot.originalBackground
                 view.backgroundTintList = snapshot.originalTintList
                 view.backgroundTintMode = snapshot.originalTintMode
