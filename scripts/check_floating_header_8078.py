@@ -71,3 +71,16 @@ assert 'name="nwr" id="0x7f0a6816"' in (decoded / 'res/values/public.xml').read_
 assert 'view.getTag(iconTagId) == settingRaw' in source
 assert 'nativeSettingTag ||' in source
 print('PASS: native icon resource tag nwr validates settings independently of drawable wrappers')
+
+# Real 13:10 runtime path: chatroom MORE icon, not the settings menu branch.
+assert 'name="actionbar_icon_dark_more" id="0x7f110012"' in (decoded / 'res/values/public.xml').read_text()
+chatroom_literal = fg.index('    const-string v10, "chatroom"')
+start = fg.rfind('    :goto_9', 0, chatroom_literal)
+end = fg.index('    :goto_a', chatroom_literal)
+chatroom_more = fg[start:end]
+assert '0x7f110012' in chatroom_more and '"chatroom"' in chatroom_more
+assert 'Lcom/tencent/mm/ui/chatting/component/fg;->Z0(IIILjava/lang/String;' in chatroom_more
+assert 'moreRaw = header.resources.getIdentifier("actionbar_icon_dark_more", "raw"' in source
+assert 'moreRaw != 0 && view.getTag(iconTagId) == moreRaw' in source
+assert 'HEADER_SPLIT_APPLIED' in source
+print('PASS: runtime chatroom dark_more branch accepted alongside settings; applied marker present')

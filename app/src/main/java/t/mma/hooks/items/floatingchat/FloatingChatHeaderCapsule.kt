@@ -30,6 +30,7 @@ internal class FloatingChatHeaderCapsule {
         var generation = 0
         var nextAttempt = 0L
         var loading = false
+        var appliedLogged = false
     }
     private val states = WeakHashMap<ViewGroup, State>()
     private val failCounts = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
@@ -93,6 +94,10 @@ internal class FloatingChatHeaderCapsule {
         }
         if (header.background != null) header.background = null
         state.row.bringToFront()
+        if (!state.appliedLogged) {
+            state.appliedLogged = true
+            HLog.i("[Hchat:悬浮标题栏] HEADER_SPLIT_APPLIED root=${header.javaClass.name} size=${header.width}x${header.height} segments=${state.row.childCount}")
+        }
         return true
     }
     private fun fail(header: ViewGroup, reason: String = "unknown"): Boolean {
@@ -113,13 +118,16 @@ internal class FloatingChatHeaderCapsule {
         // Drawable constantState is unreliable after WeChat wraps/tints the icon.
         val iconTagId = header.resources.getIdentifier("nwr", "id", header.context.packageName)
         val fqId = header.resources.getIdentifier("fq", "id", header.context.packageName)
+        // fg's chatroom branch registers dark_more, not actionbar_setting_icon.
+        val moreRaw = header.resources.getIdentifier("actionbar_icon_dark_more", "raw", header.context.packageName)
         val verified = candidates.filter { view ->
             val title = (view.findViewById<TextView>(android.R.id.text1)?.text ?: view.contentDescription)?.toString()
             val icon = (view as? ImageView)?.drawable
                 ?: view.findViewById<ImageView>(android.R.id.icon)?.drawable
             val nativeSettingTag = iconTagId != 0 && fqId != 0 && view.id == fqId &&
                 view.javaClass.name == "com.tencent.mm.ui.widget.imageview.WeImageView" &&
-                settingRaw != 0 && view.getTag(iconTagId) == settingRaw
+                ((settingRaw != 0 && view.getTag(iconTagId) == settingRaw) ||
+                    (moreRaw != 0 && view.getTag(iconTagId) == moreRaw))
             nativeSettingTag || (settingText != null && title == settingText) ||
                 (settingRaw != 0 && settingIcon != null && icon?.constantState == settingIcon.constantState)
         }

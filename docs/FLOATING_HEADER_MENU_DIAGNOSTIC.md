@@ -19,3 +19,6 @@
 日志候选数从0变为1，但设置语义过滤仍失败；实际图标为th5.d/th5.c包装，现有文案及constantState路径均未命中。此前只修正候选收集不足以解决整个问题。
 ha.i(IILjava/lang/String;Z...)明确将p2图标资源写入fb.b；菜单创建时将fb.b通过setTag写入fq的id/nwr（0x7f0a6816）。增加精确fq类名+ID+原生nwr标签等于raw/actionbar_setting_icon的校验路径，不以单候选直接放行。失败树增加整数iconTag及资源名称，不记录联系人文本。保留原文案/图标兼容路径。
 图2所需三段结构已经由create提供独立返回、头像标题、更多三个表面；本次修正阻止create执行的第二层校验，不宣称群成员/在线数副标题已实现（微信当前可见原生标题数据之外不编造在线人数）。
+
+## 13:10 实机资源分支确认
+3条诊断一致：fq.nwr=2131820562（0x7f110012），资源名raw/actionbar_icon_dark_more。此前只允许actionbar_setting_icon导致验证拒绝。fg的goto_9群聊分支明确以0x7f110012、chatroom调用Z0；新增该精确资源标签白名单，保留设置分支。静态检查新增群聊分支证据，避免只验证设置路径。成功时每个胶囊State输出一次HEADER_SPLIT_APPLIED，含容器尺寸及段数；这表示apply执行成功，不等价于实机像素验收。
