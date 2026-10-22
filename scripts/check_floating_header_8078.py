@@ -28,7 +28,7 @@ source = (root / 'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatH
 assert 'val nativeTitle = named("obn") as? TextView' in source
 assert 'header.findViewById<TextView>(android.R.id.text1)' not in source
 assert 'named("obr")' in source and 'collectMenuActions(menu, candidates)' in source
-assert 'icon?.constantState == settingIcon.constantState' in source
+assert 'icon?.constantState == settingIcon?.constantState' in source
 assert 'settingRaw = header.resources.getIdentifier("actionbar_setting_icon", "raw"' in source
 assert 'view.javaClass.name == "com.tencent.mm.ui.widget.WXActionMenuView"' in source
 print('PASS: fg.I0 -> ba.xml; obn/obr/back/coy bindings; bc.xml WXActionMenuView menu; obsolete text1 lookup removed')

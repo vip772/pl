@@ -156,6 +156,10 @@ private class ScreenAlignedBitmapDrawable(
     private val rootLocation = IntArray(2)
     private val anchorLocation = IntArray(2)
     private val destination = RectF()
+    private var geometryWidth = -1
+    private var geometryHeight = -1
+    private var geometryX = Int.MIN_VALUE
+    private var geometryY = Int.MIN_VALUE
 
     init {
         updateDestination()
@@ -178,6 +182,10 @@ private class ScreenAlignedBitmapDrawable(
             anchorLocation[0] = 0
             anchorLocation[1] = 0
         }
+        val nextX = if (followHorizontalMotion) 0 else anchorLocation[0] - rootLocation[0]
+        val nextY = anchorLocation[1] - rootLocation[1]
+        if (geometryWidth == rootWidth && geometryHeight == rootHeight && geometryX == nextX && geometryY == nextY) return
+        geometryWidth = rootWidth; geometryHeight = rootHeight; geometryX = nextX; geometryY = nextY
         val scale = max(
             rootWidth.toFloat() / bitmap.width.toFloat(),
             rootHeight.toFloat() / bitmap.height.toFloat()
@@ -201,15 +209,15 @@ private class ScreenAlignedBitmapDrawable(
     }
 
     fun coverageDescription(): String = "bounds=$bounds destination=$destination alpha=${paint.alpha} callback=${callback?.javaClass?.name}"
-    private var drawDiagnostics = 0
     override fun draw(canvas: Canvas) {
         // Insets, keyboard and page transitions can move the anchor without changing drawable bounds.
+        val started = t.mma.utils.PerformanceSample.start()
         updateDestination()
         val bitmap = bitmapRef.get()
-        if (drawDiagnostics++ < 8) HLog.i("[Hchat:沉浸式背景] DIAG imageDraw bitmap=${bitmap != null} recycled=${bitmap?.isRecycled} alpha=${paint.alpha} destination=$destination clip=${canvas.clipBounds} hardware=${canvas.isHardwareAccelerated}")
+        // Avoid diagnostic allocations/log writes in scrolling draw callbacks.
         baseColor?.let { canvas.drawColor(it) }
-        if (bitmap == null || bitmap.isRecycled || destination.isEmpty) return
-        canvas.drawBitmap(bitmap, null, destination, paint)
+        if (bitmap != null && !bitmap.isRecycled && !destination.isEmpty) canvas.drawBitmap(bitmap, null, destination, paint)
+        t.mma.utils.PerformanceSample.finish("background_bitmap_draw_cpu", started)
     }
 
     private var alphaDiagnostics = 0
@@ -2495,7 +2503,9 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                     if (destroyed) return
                     val view = param.thisObject as? View ?: return
                     val activity = findActivity(view) ?: return
-                    if (resolveTarget(activity) != BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return
+                    val owner = states[activity] ?: return
+                    if (owner.lastLoggedSlot != BackgroundBeautySettings.Slot.CHAT ||
+                        !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) return
                     // 8.0.78: dispatchDraw paints the navigation inset with q after drawing children.
                     val paint = KavaReflector.readField(view, "q") as? Paint ?: return
                     param.setObjectExtra("Hchat:chatInsetPaint", paint to paint.alpha)
@@ -2565,7 +2575,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 val view = param.thisObject as? View
                 if (view != null && hasClassName(view, className)) {
                     val activity = findActivity(view)
-                    val state = activity?.let { states[it] }
+                    val state = activity?.let { states[it] ?: ensureState(it) }
                     if (activity != null && (state == null || state.lastLoggedSlot != BackgroundBeautySettings.Slot.CHAT)) scheduleRefresh(activity)
                     if (activity != null && state != null && !destroyed &&
                         resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT && hasConfiguredBackground(activity)) {
@@ -2678,6 +2688,9 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                     snapshot.appliedBitmap = null
                     snapshot.slot = BackgroundBeautySettings.Slot.CHAT
                     inputOutlineStyles[view] = style
+                    if (diagnosticCounts.computeIfAbsent("outline-set") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
+                        HLog.i("$TAG INPUT_OUTLINE_SET editor=${view.width}x${view.height} attached=${view.isAttachedToWindow} slot=${state.lastLoggedSlot} inkReady=${ink != null}")
+                    }
                 } finally { surfaceMutationDepth-- }
             } else if (view is ViewGroup) {
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = appGridItems[view] == true)
@@ -3035,6 +3048,9 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 view.background === snapshot.appliedBackground &&
                 (view !== state.activity.window.decorView || decorBackgroundApplied(view, snapshot.appliedBackground))
             ) return
+            if (diagnosticCounts.computeIfAbsent("bitmap-host") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
+                HLog.i("$TAG BACKDROP_HOST slot=${slot.key} host=${view.javaClass.name} bitmap=${bitmap.width}x${bitmap.height} opacity=$opacity")
+            }
             val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity,
                 resolveThemeBackground(view.context) or (0xff shl 24),
                 followHorizontalMotion = slot == BackgroundBeautySettings.Slot.CHAT)

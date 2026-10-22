@@ -84,6 +84,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val tipsContentBackgrounds = WeakHashMap<View, Drawable?>()
     private val layoutTrackers = WeakHashMap<ViewGroup, HeaderLayoutTracker>()
     private val tipsCardBottoms = WeakHashMap<ViewGroup, Int>()
+    private var headerWaitReports = 0
+    private var headerReadyReports = 0
     private var reparentFailureReported = false
     private var installed = false
     private val headerClass = "androidx.appcompat.widget.ActionBarContainer"
@@ -122,7 +124,13 @@ private class HeaderRuntime(private val context: FeatureContext) {
             }
         }
         KavaReflector.findMethodRecursive(clazz, "onLayout", Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let {
-            count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let(::scheduleApply) }
+            count += hook(it) { param ->
+                val layout = param.thisObject as? ViewGroup ?: return@hook
+                if (layout.javaClass.name != layoutClass) return@hook
+                // Prepare in native layout, before the enter animation's first preDraw.
+                if (isEnabled() && layout.isAttachedToWindow && layout.isShown && headersByLayout[layout]?.let { states[it]?.reparented } != true) apply(layout)
+                scheduleApply(layout)
+            }
         }
         KavaReflector.findMethodRecursive(clazz, "fitSystemWindows", Rect::class.java)?.let {
             count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let(::scheduleApply) }
@@ -255,7 +263,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
         // Never select an activity's shared ActionBarContainer from rootView.
         val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow && states[it] != null }
             ?: find(layout) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
-            ?: return
+            ?: run {
+                if (headerWaitReports++ < 3) HLog.i("[Hchat:$TAG] HEADER_WAIT stage=header_missing attached=${layout.isAttachedToWindow} shown=${layout.isShown} size=${layout.width}x${layout.height}")
+                return
+            }
         fun named(name: String): View? {
             val id = layout.resources.getIdentifier(name, "id", layout.context.packageName)
             return if (id != 0) layout.findViewById<View>(id) else null
@@ -276,7 +287,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         // Remove that remaining reservation only after the bar is an overlay.
         applyChatTopInset(layout)
         applyChatStatusWrapper(layout)
-        diagnoseStatusLayers(layout, header)
+        // State-area transparency already verified; no first-frame full-tree dump.
         val marginLp = header.layoutParams as? ViewGroup.MarginLayoutParams ?: return
         val side = dp(SIDE_MARGIN_DP)
         val left = side
@@ -297,6 +308,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val capsuleStarted = t.mma.utils.PerformanceSample.start()
         val split = (header as? ViewGroup)?.let { capsule.apply(it) } == true
         t.mma.utils.PerformanceSample.finish("floating_header_capsule", capsuleStarted)
+        val tracker = layoutTrackers.getOrPut(layout) { HeaderLayoutTracker() }
+        if (split && !tracker.readyLogged) {
+            tracker.readyLogged = true
+            if (headerReadyReports++ < 6) HLog.i("[Hchat:$TAG] HEADER_FIRST_READY delayMs=${android.os.SystemClock.uptimeMillis() - tracker.initialAt} pendingLayout=${layout.isLayoutRequested} x=${layout.x}")
+        }
         val elevation = if (split) 0f else dp(ELEVATION_DP).toFloat()
         if (header.elevation != elevation) header.elevation = elevation
         if (header.outlineProvider !== FloatingHeaderOutlineProvider) header.outlineProvider = FloatingHeaderOutlineProvider
@@ -314,7 +330,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             !source.isShown || source.width <= 0 || source.height <= 0) return null
         val location = IntArray(2).also(source::getLocationOnScreen)
         val screenWidth = source.resources.displayMetrics.widthPixels
-        return source.takeIf { location[0] < screenWidth && location[0] + source.width > 0 }
+        return source.takeIf { location[0] <= screenWidth && location[0] + source.width >= 0 }
     }
 
     private fun isWindowBar(header: View, layout: View): Boolean {
@@ -903,6 +919,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
     private class HeaderLayoutTracker(
         var settlePasses: Int = 0,
+        var initialAt: Long = android.os.SystemClock.uptimeMillis(),
+        var readyLogged: Boolean = false,
         var preDraw: android.view.ViewTreeObserver.OnPreDrawListener? = null
     )
 

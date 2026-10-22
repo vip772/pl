@@ -40,7 +40,10 @@ object FloatingChatCardVisuals {
     private fun Context.isDarkMode(): Boolean =
         (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 
-    fun contains(view: View): Boolean = applied.containsKey(view)
+    private val presentationOwners = WeakHashMap<View, Boolean>()
+    internal fun ownPresentation(view: View) { presentationOwners[view] = true }
+    internal fun releasePresentation(view: View) { presentationOwners.remove(view) }
+    fun contains(view: View): Boolean = applied.containsKey(view) || presentationOwners.containsKey(view)
     fun restore(view: View) {
         if (!originals.containsKey(view)) return
         view.background = originals.remove(view)

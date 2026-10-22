@@ -34,6 +34,7 @@ internal class FloatingChatHeaderCapsule {
         var avatarAttempts = 0
         var appliedLogged = false
         var strokeStyle: Pair<Int, Int>? = null
+        var focusListener: ViewTreeObserver.OnWindowFocusChangeListener? = null
     }
     private val states = WeakHashMap<ViewGroup, State>()
     private val failCounts = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
@@ -68,7 +69,7 @@ internal class FloatingChatHeaderCapsule {
         state.center.isClickable = titleAction != null
         val dark = header.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         val ink = if (dark) Color.WHITE else 0xFF191D21.toInt()
-        state.back.ink = ink; state.more.ink = ink; state.title.setTextColor(ink)
+        state.back.ink = ink; state.more.ink = ink; if (state.title.currentTextColor != ink) state.title.setTextColor(ink)
         val strokeStyle = dp(header, 1) to if (dark) 0x30FFFFFF else 0x88FFFFFF.toInt()
         for (surface in listOf(state.back, state.center, state.more)) {
             val bg = surface.background as GradientDrawable
@@ -88,14 +89,14 @@ internal class FloatingChatHeaderCapsule {
         val suffix = (named("obr") as? TextView)?.takeIf { it.visibility == View.VISIBLE }?.text?.toString().orEmpty()
         val title = rawTitle + suffix
         if (state.title.text.toString() != title) state.title.text = title
-        state.avatar.contentDescription = title
+        if (state.avatar.contentDescription != title) state.avatar.contentDescription = title
         if (talker.isNotBlank()) loadAvatar(header, state, talker)
         for (i in 0 until header.childCount) {
             val child = header.getChildAt(i)
             if (child === state.row) continue
             state.hidden.getOrPut(child) { ChildState(child.alpha, child.importantForAccessibility) }
             if (child.alpha != 0f) child.alpha = 0f
-            child.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
+            if (child.importantForAccessibility != View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS) child.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
         if (header.background != null) header.background = null
         if (header.getChildAt(header.childCount - 1) !== state.row) state.row.bringToFront()
@@ -116,9 +117,9 @@ internal class FloatingChatHeaderCapsule {
         collectMenuActions(menu, candidates)
         val settingText = runCatching { header.context.getString(header.resources.getIdentifier("cm", "string", header.context.packageName)) }.getOrNull()
         val settingRaw = header.resources.getIdentifier("actionbar_setting_icon", "raw", header.context.packageName)
-        val settingIcon = runCatching {
-            header.context.resources.getDrawable(settingRaw, header.context.theme)
-        }.getOrNull()
+        val settingIcon by lazy(LazyThreadSafetyMode.NONE) {
+            runCatching { header.context.resources.getDrawable(settingRaw, header.context.theme) }.getOrNull()
+        }
         // MMActivityController writes fb.b (the menu icon resource ID) to id/nwr.
         // Drawable constantState is unreliable after WeChat wraps/tints the icon.
         val iconTagId = header.resources.getIdentifier("nwr", "id", header.context.packageName)
@@ -134,7 +135,7 @@ internal class FloatingChatHeaderCapsule {
                 ((settingRaw != 0 && view.getTag(iconTagId) == settingRaw) ||
                     (moreRaw != 0 && view.getTag(iconTagId) == moreRaw))
             nativeSettingTag || (settingText != null && title == settingText) ||
-                (settingRaw != 0 && settingIcon != null && icon?.constantState == settingIcon.constantState)
+                (settingRaw != 0 && settingIcon != null && icon?.constantState == settingIcon?.constantState)
         }
         if (verified.size == 1) return verified.single()
         if (verified.size > 1) {
@@ -184,9 +185,9 @@ internal class FloatingChatHeaderCapsule {
         }
         val back = Icon(ctx, false).apply { background = surface(); contentDescription = "返回" }
         val more = Icon(ctx, true).apply { background = surface(); contentDescription = "更多" }
-        val center = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
-            background = surface(); setPadding(dp(header, 4), 0, dp(header, 12), 0)
+        val center = CenteredTitleContent(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
+            background = surface(); setPadding(dp(header, 8), 0, dp(header, 8), 0)
         }
         val avatar = ImageView(ctx).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
@@ -199,13 +200,29 @@ internal class FloatingChatHeaderCapsule {
             setSingleLine(true); ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER_VERTICAL
         }
         center.addView(avatar, LinearLayout.LayoutParams(size - dp(header, 8), size - dp(header, 8)))
-        center.addView(title, LinearLayout.LayoutParams(0, -1, 1f).apply { leftMargin = dp(header, 8) })
+        center.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, -1).apply { leftMargin = dp(header, 8) })
         row.addView(back, LinearLayout.LayoutParams(size, size))
         row.addView(center, LinearLayout.LayoutParams(0, size, 1f).apply { leftMargin = dp(header, 8); rightMargin = dp(header, 8) })
         row.addView(more, LinearLayout.LayoutParams(size, size))
         val original = header.background
+        // Claim before any background setter can be intercepted by immersive mode.
+        FloatingChatCardVisuals.ownPresentation(header)
+        listOf(row, back, more, center, avatar).forEach(FloatingChatCardVisuals::ownPresentation)
         header.addView(row, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER_VERTICAL))
-        return State(row, avatar, title, back, more, center, original)
+        val state = State(row, avatar, title, back, more, center, original)
+        val weakHeader = WeakReference(header)
+        val weakState = WeakReference(state)
+        val focus = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            val view = weakHeader.get(); val target = weakState.get()
+            if (focused && !closed && view != null && target != null && states[view] === target &&
+                !target.loading && target.avatar.drawable == null && target.talker.isNotBlank()) {
+                target.avatarAttempts = 0; target.nextAttempt = 0L
+                loadAvatar(view, target, target.talker)
+            }
+        }
+        state.focusListener = focus
+        header.viewTreeObserver.addOnWindowFocusChangeListener(focus)
+        return state
     }
     private fun loadAvatar(header: ViewGroup, state: State, talker: String) {
         cache.get(talker)?.let {
@@ -226,12 +243,24 @@ internal class FloatingChatHeaderCapsule {
             var bitmap: Bitmap? = null
             var sourceCount = 0
             var contactsReady = false
+            var sourceStatus = "not_checked"
             try {
                 val contacts = WeChatApis.contact().contacts()
                 contactsReady = contacts != null
                 val urls = listOf(contacts?.getAvatarUrl(talker, false), contacts?.getAvatarUrl(talker, true))
                     .filterNotNull().filter { it.isNotBlank() }.distinct()
                 sourceCount = urls.size
+                if (urls.isEmpty()) {
+                    val database = WeChatApis.runtime().database()
+                    val cursor = database?.rawQuery("SELECT reserved1, reserved2 FROM img_flag WHERE username=? LIMIT 1", arrayOf(talker))
+                    sourceStatus = if (cursor == null) "query_unavailable" else cursor.use {
+                        if (!it.moveToFirst()) "row_missing" else {
+                            val large = it.getString(it.getColumnIndexOrThrow("reserved1"))
+                            val small = it.getString(it.getColumnIndexOrThrow("reserved2"))
+                            if (large.isNullOrBlank() && small.isNullOrBlank()) "fields_empty" else "fields_present_after_lookup"
+                        }
+                    }
+                }
                 for (url in urls) {
                     if (closed || Thread.currentThread().isInterrupted) break
                     try { bitmap = download(url) } catch (e: Exception) {
@@ -251,7 +280,7 @@ internal class FloatingChatHeaderCapsule {
                 } else {
                     // Retry independently of layout events, with the same generation guard.
                     if (failCounts.computeIfAbsent("avatar_empty") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
-                        HLog.i("[Hchat:悬浮标题栏] HEADER_AVATAR_RESULT empty=true sources=$sourceCount contactsReady=$contactsReady group=${talker.endsWith("@chatroom")} attempt=${target.avatarAttempts}")
+                        HLog.i("[Hchat:悬浮标题栏] HEADER_AVATAR_RESULT empty=true sources=$sourceCount sourceStatus=$sourceStatus contactsReady=$contactsReady group=${talker.endsWith("@chatroom")} attempt=${target.avatarAttempts}")
                     }
                     main.postDelayed({
                         val retryView = weakHeader.get(); val retryState = weakState.get()
@@ -296,7 +325,10 @@ internal class FloatingChatHeaderCapsule {
     }
     fun restore(header: ViewGroup) {
         val state = states.remove(header) ?: return
-        state.generation++; header.removeView(state.row); header.background = state.background
+        state.generation++
+        state.focusListener?.let { if (header.viewTreeObserver.isAlive) header.viewTreeObserver.removeOnWindowFocusChangeListener(it) }
+        listOf(header, state.row, state.back, state.more, state.center, state.avatar).forEach(FloatingChatCardVisuals::releasePresentation)
+        header.removeView(state.row); header.background = state.background
         state.hidden.forEach { (view, old) -> view.alpha = old.alpha; view.importantForAccessibility = old.accessibility }
         state.hidden.clear()
     }
@@ -328,6 +360,20 @@ internal class FloatingChatHeaderCapsule {
         return null
     }
     private fun dp(view: View, value: Int) = (value * view.resources.displayMetrics.density + 0.5f).toInt()
+    /** Both children wrap their content; gravity centers the combined avatar/title block. */
+    private class CenteredTitleContent(ctx: Context) : LinearLayout(ctx) {
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            if (childCount == 2 && MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+                val avatar = getChildAt(0)
+                val title = getChildAt(1) as TextView
+                val titleParams = title.layoutParams as MarginLayoutParams
+                val available = (MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight -
+                    avatar.layoutParams.width.coerceAtLeast(0) - titleParams.leftMargin - titleParams.rightMargin).coerceAtLeast(0)
+                if (title.maxWidth != available) title.maxWidth = available
+            }
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
+    }
     private class Icon(ctx: Context, private val more: Boolean) : View(ctx) {
         var ink = Color.BLACK
             set(value) { if (field != value) { field = value; invalidate() } }

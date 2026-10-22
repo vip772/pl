@@ -117,9 +117,9 @@ public abstract class Drawable {
     for name in ['Canvas','ColorFilter','Rect']:
         p=work/('android/graphics/'+name+'.java');p.parent.mkdir(parents=True,exist_ok=True);p.write_text('package android.graphics; public class '+name+' {}')
     render_stubs = {
-      'android/graphics/Canvas.java': 'package android.graphics; public class Canvas {public String operations="";public int imageAlpha;public float left,top,bottom; public void drawColor(int c){operations+="base,";}public void drawBitmap(Bitmap b,Rect src,RectF dst,Paint p){operations+="image,";imageAlpha=p.alpha;left=dst.left;top=dst.top;bottom=dst.bottom;}public Rect getClipBounds(){return new Rect();}public boolean isHardwareAccelerated(){return true;}}',
+      'android/graphics/Canvas.java': 'package android.graphics; public class Canvas {public int save(){return 1;}public void clipRect(Rect r){}public void restoreToCount(int s){}public String operations="";public int imageAlpha;public float left,top,bottom; public void drawColor(int c){operations+="base,";}public void drawBitmap(Bitmap b,Rect src,RectF dst,Paint p){operations+="image,";imageAlpha=p.alpha;left=dst.left;top=dst.top;bottom=dst.bottom;}public Rect getClipBounds(){return new Rect();}public boolean isHardwareAccelerated(){return true;}}',
       'android/graphics/Bitmap.java': 'package android.graphics;public class Bitmap {public int getWidth(){return 100;}public int getHeight(){return 200;}public boolean isRecycled(){return false;}}',
-      'android/graphics/Rect.java': 'package android.graphics;public class Rect {public int width(){return 100;}public int height(){return 200;}}',
+      'android/graphics/Rect.java': 'package android.graphics;public class Rect {public int left=0,top=0,right=100,bottom=200;public Rect(){}public Rect(Rect r){left=r.left;top=r.top;right=r.right;bottom=r.bottom;}public Rect(int l,int t,int r,int b){left=l;top=t;right=r;bottom=b;}public int width(){return right-left;}public int height(){return bottom-top;}}',
       'android/graphics/RectF.java': 'package android.graphics;public class RectF {boolean empty=true;public float left,top,right,bottom;public void set(float l,float t,float r,float b){left=l;top=t;right=r;bottom=b;empty=false;}public boolean isEmpty(){return empty;}}',
       'android/graphics/Paint.java': 'package android.graphics;public class Paint {public static final int ANTI_ALIAS_FLAG=1,FILTER_BITMAP_FLAG=2,DITHER_FLAG=4;public int alpha;public ColorFilter colorFilter;public Paint(int f){}public int getAlpha(){return alpha;}public void setAlpha(int a){alpha=a;}public ColorFilter getColorFilter(){return colorFilter;}public void setColorFilter(ColorFilter c){colorFilter=c;}}',
       'android/view/View.java': 'package android.view;public class View {public int x=0,y=0,height=200;public View window;public int getWidth(){return 100;}public int getHeight(){return height;}public View getRootView(){return window==null?this:window;}public void getLocationOnScreen(int[] a){a[0]=x;a[1]=y;}}'
@@ -141,6 +141,9 @@ public abstract class Drawable {
     files=[]
     for name in ['R.kt','Test.kt']:
         p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end].replace('ColorStateList.valueOf', 'android.content.res.ColorStateList.valueOf') + chr(10) + text[text.index('private class ScreenAlignedBitmapDrawable'):text.index('private class BackgroundBeautyRuntime')].replace('    override fun onBoundsChange(bounds: Rect) {', '    fun onBoundsForTest() { updateDestination() }\n    override fun onBoundsChange(bounds: Rect) {') if name == 'Test.kt' else ''));files.append(str(p))
+    perf=work/'Performance.kt'
+    perf.write_text('package t.mma.utils; object PerformanceSample {fun start()=0L;fun finish(n:String,t:Long){}}')
+    files.append(str(perf))
     (work/'PixelFormat.kt').write_text('package android.graphics\nobject PixelFormat { const val TRANSLUCENT=-3;const val OPAQUE=-1 }')
 
     prod=repo/'app/src/main/java/t/mma/hooks/items/homesidepanel/SidePanelEdgeGesture.kt'
