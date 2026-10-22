@@ -10,6 +10,7 @@ import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.ImageView
 import java.util.WeakHashMap
 import t.mma.utils.HLog
 
@@ -56,7 +57,7 @@ internal object FloatingFooterInputSurfaces {
         val queue = ArrayDeque<View>()
         for (i in 0 until group.childCount) queue.add(group.getChildAt(i))
         var visited = 0
-        while (queue.isNotEmpty() && visited++ < 120) {
+        while (queue.isNotEmpty() && visited++ < 240) {
             val view = queue.removeFirst()
             if (view.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom") continue
             val weImageButton = view.javaClass.name == "com.tencent.mm.ui.widget.imageview.WeImageButton"
@@ -69,8 +70,15 @@ internal object FloatingFooterInputSurfaces {
                         parent.getChildAt(it).javaClass.name == "com.tencent.mm.pluginsdk.ui.SpeechInputLayout"
                     }
                 } == true
+            // Match BackgroundBeauty: speech ew_.xml solid Views and the
+            // anonymous de7 shadow under the t8.xml sub/suc overlay.
+            val speechLayer = view.javaClass == View::class.java &&
+                (hasAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") ||
+                    hasAncestorId(view, "sub"))
+            val speechImage = view is ImageView &&
+                hasAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout")
             val container = view is ViewGroup
-            if (input || container || speechBackdrop) {
+            if (input || container || speechBackdrop || speechLayer || speechImage) {
                 val surface = tracked.firstOrNull { it.view === view } ?: Surface(view).also {
                     tracked.add(it)
                     FloatingChatCardVisuals.ownPresentation(view)
@@ -84,6 +92,25 @@ internal object FloatingFooterInputSurfaces {
             if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
         }
     }
+    private fun hasAncestor(view: View, className: String): Boolean {
+        var parent = view.parent as? View
+        while (parent != null) {
+            if (parent.javaClass.name == className) return true
+            parent = parent.parent as? View
+        }
+        return false
+    }
+
+    private fun hasAncestorId(view: View, resourceName: String): Boolean {
+        var parent = view.parent as? View
+        while (parent != null) {
+            val current = parent
+            if (runCatching { current.resources.getResourceEntryName(current.id) }.getOrDefault("") == resourceName) return true
+            parent = parent.parent as? View
+        }
+        return false
+    }
+
     // Native mode changes can rewrite a background without requesting layout.
     // Only revisit captured input surfaces; never traverse panel descendants.
     fun maintain(footer: View) {

@@ -93,3 +93,12 @@ footer预绘制使用既有已缓存GradientDrawable进行常量级背景一致�
 语音区核对 8.0.78 原生 t8.xml：bpe 是 WeImageButton；p6x 是按住说话 Button；输入末端 w2n SpeechInputLayout 同级还有独立普通 View wi2（背景 cy4），旧逻辑只处理容器和按钮会漏掉 wi2。保留现有按钮/容器清理，新增同时校验资源名 wi2、普通 View 类型、同父 SpeechInputLayout 的背景层清理，不动图标 drawable。预绘制只重检已捕获输入表面，处理原生模式切换中未触发布局的背景重写；继续排除 ChatFooterBottom 整棵面板子树。关闭时恢复原始背景、tint、foreground。
 
 验证：生产 FloatingChatFooterFeature.kt、FloatingChatCardVisuals.kt、FloatingFooterInputSurfaces.kt 使用真实 Android 36 SDK 及 DexKit 定向编译通过（项目辅助依赖使用桩）；现有生产列表 padding JVM 回归通过；git diff --check 通过。未执行 Gradle 或 APK 构建，未提交或推送。此处原生结构仅核实本机现有 8.0.78 反编译材料，未完成其它微信版本横向验证，也未声称实机展开和拖动已验收。
+
+
+## 2026-10-23：取消指示条拖动与补齐麦克风背景层
+
+用户确认前次面板展开修复成功，上滑顶部指示条仍移动输入区。8.0.78 原生 EmojiPanelSlideIndicatorView.onTouchEvent 直接读取 rawY，调用 lv5.f0.e(height) 和 h1.a(height)，独立于聊天滚动目标。现只 Hook 此具体指示条，在悬浮启用、祖先 ChatFooter 已接管、祖先 ChatFooterBottom 与状态面板一致且可见时，消费整个触摸序列，不进入原生拖动、速度追踪与回弹；不处理表情列表，不改变已验收的面板排列。
+
+麦克风底色对照 BackgroundBeauty.applySpeechSurfaces/applyChatVoiceSurfaces：ew_.xml 的 SpeechInputLayout 内 wez/wev 是普通背景 View；t8.xml 的 sub/suc 下还有匿名 de7 阴影。前次只补 wi2 同级层，遗漏这些背景。现按相同祖先结构清理普通 View 和语音区 ImageView 的背景/前景，不修改图标 drawable。继续排除 ChatFooterBottom 子树，关闭时恢复原表面。
+
+真实 Android 36 SDK 与 DexKit 定向编译生产输入区、表面清理与共享卡片代码通过，项目辅助依赖使用桩；未运行 Gradle 或生成 APK。原生依据仅核实本机现有 8.0.78，未做其它版本横向验证。新日志附件在当前路径不可访问，未引用其内容；实机手势与底色仍待复测。

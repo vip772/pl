@@ -128,6 +128,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         locateEnterKeyboardState(footerClass)?.let { method ->
             count += hookEnterKeyboardState(method, footerClass)
         }
+        hookPanelDragIndicator()
         locateScrollContentTo()?.let { method ->
             count += hookScrollContent(method)
         }
@@ -321,6 +322,36 @@ private class FooterRuntime(private val context: FeatureContext) {
                     Int::class.javaPrimitiveType
                 )
             )
+
+    private fun hookPanelDragIndicator() {
+        // Verified native raw-Y drag controller, independent of chat scrolling.
+        val type = KavaReflector.loadClass(
+            "com.tencent.mm.view.EmojiPanelSlideIndicatorView", context.hostClassLoader()
+        ) ?: return
+        val method = KavaReflector.findDeclaredMethod(type, "onTouchEvent", android.view.MotionEvent::class.java)
+            ?: return
+        if (!hooked.add(method)) return
+        runCatching {
+            HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (!isEnabled()) return
+                    var node = param.thisObject as? View ?: return
+                    var panel: View? = null
+                    while (node.javaClass.name != FOOTER_CLASS) {
+                        if (node.javaClass.name == FOOTER_BOTTOM_CLASS) panel = node
+                        node = node.parent as? View ?: return
+                    }
+                    val state = states[node] ?: return
+                    if (!state.reparented || state.panel !== panel || state.panel.visibility != View.VISIBLE) return
+                    // Consume the entire sequence before native drag, fling or rebound.
+                    param.result = true
+                }
+            })
+        }.onFailure {
+            hooked.remove(method)
+            HLog.e("[Hchat:$TAG] 表情面板拖动指示条 Hook 安装失败", it)
+        }
+    }
 
     private fun hookScrollContent(targetMethod: Member): Int {
         if (!hooked.add(targetMethod)) return 1
