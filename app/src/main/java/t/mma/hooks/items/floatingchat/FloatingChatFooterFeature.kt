@@ -629,6 +629,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         }
         val state = states[footer] ?: createState(footer, panel, marginParams) ?: return applyNotReady(footer, "state_structure")
         if (isPanelState(panelState)) applyCompactPanelHeight(footer, state.panel)
+        clampFloatingRoot(state)
         val measuredInputHeight = visibleHeightExcludingPanel(state.inputColumn, state.panel)
         val stableInputHeight = measuredInputHeight.takeIf { it > 0 }
             ?: state.baseInputHeight.takeIf { it > 0 }
@@ -715,8 +716,10 @@ private class FooterRuntime(private val context: FeatureContext) {
             panel = panel,
             inputColumn = inputColumn,
             root = root,
+            rootClipChildren = root.clipChildren,
             panelIndex = panelIndex,
             panelLayoutParams = copyLayoutParams(panelParams),
+            rootLayoutParams = copyLayoutParams(root.layoutParams),
             panelVisibility = panel.visibility,
             leftMargin = marginParams.leftMargin,
             rightMargin = marginParams.rightMargin,
@@ -793,6 +796,19 @@ private class FooterRuntime(private val context: FeatureContext) {
             HLog.e("[Hchat:$TAG] 输入区结构重排失败", throwable)
             false
         }
+    }
+
+    private fun clampFloatingRoot(state: FooterState) {
+        val rootParams = state.root.layoutParams ?: return
+        val target = state.baseInputHeight.takeIf { it > 0 }
+            ?: visibleHeightExcludingPanel(state.inputColumn, state.panel).takeIf { it > 0 }
+            ?: return
+        if (rootParams.height != target) {
+            rootParams.height = target
+            state.root.layoutParams = rootParams
+        }
+        if (!state.root.clipChildren) return
+        state.root.clipChildren = false
     }
 
     private fun applyCompactPanelHeight(footer: View, panel: View) {
@@ -986,6 +1002,8 @@ private class FooterRuntime(private val context: FeatureContext) {
                 }
             }
             if (state.reparented) {
+                state.root.layoutParams = copyLayoutParams(state.rootLayoutParams)
+                state.root.clipChildren = state.rootClipChildren
                 state.changedRules.forEach { (view, rules) ->
                     val params = view.layoutParams as? RelativeLayout.LayoutParams ?: return@forEach
                     for (verb in params.rules.indices) params.removeRule(verb)
@@ -1102,6 +1120,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         val root: RelativeLayout,
         val panelIndex: Int,
         val panelLayoutParams: ViewGroup.LayoutParams,
+        val rootLayoutParams: ViewGroup.LayoutParams,
+        val rootClipChildren: Boolean,
         val panelVisibility: Int,
         val leftMargin: Int,
         val rightMargin: Int,

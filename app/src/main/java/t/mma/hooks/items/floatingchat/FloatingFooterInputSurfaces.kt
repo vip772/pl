@@ -59,7 +59,8 @@ internal object FloatingFooterInputSurfaces {
         while (queue.isNotEmpty() && visited++ < 120) {
             val view = queue.removeFirst()
             if (view.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooterBottom") continue
-            val input = view is EditText || view is Button || view is ImageButton
+            val weImageButton = view.javaClass.name == "com.tencent.mm.ui.widget.imageview.WeImageButton"
+            val input = view is EditText || view is Button || view is ImageButton || weImageButton
             val container = view is ViewGroup
             if (input || container) {
                 val surface = tracked.firstOrNull { it.view === view } ?: Surface(view).also {
