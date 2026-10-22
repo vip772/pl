@@ -3,6 +3,7 @@ package t.mma.hooks.items.floatingchat
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.*
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
@@ -31,6 +32,7 @@ internal class FloatingChatHeaderCapsule {
         var nextAttempt = 0L
         var loading = false
         var appliedLogged = false
+        var strokeStyle: Pair<Int, Int>? = null
     }
     private val states = WeakHashMap<ViewGroup, State>()
     private val failCounts = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
@@ -66,13 +68,15 @@ internal class FloatingChatHeaderCapsule {
         val dark = header.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         val ink = if (dark) Color.WHITE else 0xFF191D21.toInt()
         state.back.ink = ink; state.more.ink = ink; state.title.setTextColor(ink)
+        val strokeStyle = dp(header, 1) to if (dark) 0x30FFFFFF else 0x88FFFFFF.toInt()
         for (surface in listOf(state.back, state.center, state.more)) {
             val bg = surface.background as GradientDrawable
             val color = if (dark) 0xE6242424.toInt() else 0xE6F7F7F7.toInt()
             val stroke = if (dark) 0x30FFFFFF else 0x88FFFFFF.toInt()
             if (bg.color?.defaultColor != color) bg.setColor(color)
-            bg.setStroke(dp(header, 1), stroke)
+            if (state.strokeStyle != strokeStyle) bg.setStroke(strokeStyle.first, stroke)
         }
+        state.strokeStyle = strokeStyle
         val talker = WeChatApis.chatPage()?.currentTalker().orEmpty()
         if (talker != state.talker) {
             state.talker = talker; state.generation++; state.nextAttempt = 0L; state.loading = false
@@ -93,7 +97,7 @@ internal class FloatingChatHeaderCapsule {
             child.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
         if (header.background != null) header.background = null
-        state.row.bringToFront()
+        if (header.getChildAt(header.childCount - 1) !== state.row) state.row.bringToFront()
         if (!state.appliedLogged) {
             state.appliedLogged = true
             HLog.i("[Hchat:悬浮标题栏] HEADER_SPLIT_APPLIED root=${header.javaClass.name} size=${header.width}x${header.height} segments=${state.row.childCount}")
@@ -203,7 +207,12 @@ internal class FloatingChatHeaderCapsule {
         return State(row, avatar, title, back, more, center, original)
     }
     private fun loadAvatar(header: ViewGroup, state: State, talker: String) {
-        cache.get(talker)?.let { if (!it.isRecycled) { state.avatar.setImageBitmap(it); return } }
+        cache.get(talker)?.let {
+            if (!it.isRecycled) {
+                if ((state.avatar.drawable as? BitmapDrawable)?.bitmap !== it) state.avatar.setImageBitmap(it)
+                return
+            }
+        }
         val now = SystemClock.elapsedRealtime()
         if (state.loading || now < state.nextAttempt) return
         state.loading = true; state.nextAttempt = now + 30_000

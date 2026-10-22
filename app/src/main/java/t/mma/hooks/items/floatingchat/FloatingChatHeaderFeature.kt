@@ -244,14 +244,19 @@ private class HeaderRuntime(private val context: FeatureContext) {
         header.outlineProvider = FloatingHeaderOutlineProvider
         header.clipToOutline = !split
         if (!split) FloatingChatCardVisuals.apply(header, CORNER_RADIUS_DP)
-        header.bringToFront()
-        header.invalidateOutline()
-        (header.parent as? View)?.invalidate()
+        val headerParent = header.parent as? ViewGroup
+        if (headerParent != null && headerParent.getChildAt(headerParent.childCount - 1) !== header) {
+            header.bringToFront()
+        }
             } finally { t.mma.utils.PerformanceSample.finish("floating_header", performanceStarted) }
     }
 
     private fun visibleChatLayout(source: ViewGroup): ViewGroup? {
         val screenWidth = source.resources.displayMetrics.widthPixels
+        if (source.isShown && source.width > 0 && source.height > 0) {
+            val location = IntArray(2).also(source::getLocationOnScreen)
+            if (location[0] < screenWidth && location[0] + source.width > 0) return source
+        }
         val candidates = ArrayList<ViewGroup>()
         collect(source.rootView) { view ->
             if (view.javaClass.name == layoutClass && view is ViewGroup) candidates += view
@@ -405,8 +410,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (!tipsGroupElevations.containsKey(group)) tipsGroupElevations[group] = group.elevation
         group.elevation = 0f
         styleTipsCardBody(group)
-        group.bringToFront()
         if (diagnosedTipsGroups.put(group, true) == null) {
+            group.bringToFront()
             HLog.i(
                 "[Hchat:$TAG] 公告卡定位: class=${group.javaClass.name} " +
                     "from=${groupLocation[0]},${groupLocation[1]} targetTop=$targetTop " +
@@ -479,7 +484,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 recycler.layoutParams = recyclerLp
             }
             val originalMargins = tipsRecyclerMargins[recycler]
-            if (originalMargins != null && originalMargins[1] != originalMargins[3]) {
+            if (originalMargins != null && originalMargins[1] != originalMargins[3] &&
+                (recyclerLp.topMargin != (originalMargins[1] + originalMargins[3]) / 2 ||
+                    recyclerLp.bottomMargin != (originalMargins[1] + originalMargins[3]) / 2)) {
                 val vertical = (originalMargins[1] + originalMargins[3]) / 2
                 recyclerLp.topMargin = vertical
                 recyclerLp.bottomMargin = vertical
@@ -548,7 +555,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
             val baseTranslation = contentCardTranslations.getOrPut(child) { child.translationY }
             val currentTop = child.top + baseTranslation.roundToInt()
             val delta = nextTop - currentTop
-            if (delta != 0) child.translationY = baseTranslation + delta
+            val targetTranslation = baseTranslation + delta
+            if (child.translationY != targetTranslation) child.translationY = targetTranslation
             FloatingChatCardVisuals.apply(child, CARD_CORNER_RADIUS_DP)
             nextTop += child.height + gap
         }
@@ -571,7 +579,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val baseTranslation = contentCardTranslations.getOrPut(view) { view.translationY }
         val currentTop = viewLocation[1] - contentLocation[1] - view.translationY.roundToInt() +
             baseTranslation.roundToInt()
-        view.translationY = baseTranslation + targetTop - currentTop
+        val targetTranslation = baseTranslation + targetTop - currentTop
+        if (view.translationY != targetTranslation) view.translationY = targetTranslation
     }
 
     private fun isTopNewMessageChip(view: View): Boolean {
@@ -627,8 +636,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
             statusWrapperBackgrounds[target] = target.background
             statusWrapperColors[target] = readStatusBarColor(target)
         }
-        target.background = null
-        invokeStatusBarColor(target, Color.TRANSPARENT)
+        val clearStatus = target.background != null || diagnosedStatusWrappers[target] != true
+        if (target.background != null) target.background = null
+        if (clearStatus) invokeStatusBarColor(target, Color.TRANSPARENT)
         if (diagnosedStatusWrappers[target] != true) {
             diagnosedStatusWrappers[target] = true
             HLog.i(

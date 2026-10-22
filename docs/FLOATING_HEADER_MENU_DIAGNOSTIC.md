@@ -22,3 +22,7 @@ ha.i(IILjava/lang/String;Z...)明确将p2图标资源写入fb.b；菜单创建�
 
 ## 13:10 实机资源分支确认
 3条诊断一致：fq.nwr=2131820562（0x7f110012），资源名raw/actionbar_icon_dark_more。此前只允许actionbar_setting_icon导致验证拒绝。fg的goto_9群聊分支明确以0x7f110012、chatroom调用Z0；新增该精确资源标签白名单，保留设置分支。静态检查新增群聊分支证据，避免只验证设置路径。成功时每个胶囊State输出一次HEADER_SPLIT_APPLIED，含容器尺寸及段数；这表示apply执行成功，不等价于实机像素验收。
+
+## 三段启用后的滚动性能
+13:45日志确认三段启用，floating_header主线程慢调用18～23ms（采样限3次、仅启动3分钟，不能用于统计总频率）。源码onLayout调度preDraw apply，apply无条件row/header/group.bringToFront，可能由requestLayout形成重复布局；缓存头像每次setImageBitmap，描边及卡片背景每次重写；visibleChatLayout每次根树扫描。
+修正：row/header仅非末尾时置顶；公告组仅首次定位置顶，避免与header反复交换顺序；头像同一bitmap不重设；描边/卡片背景/位移/公告margin仅值变化时更新；当前source可见时优先使用，不扫描整树；状态区仅首次或背景被外部重设时调用颜色setter。生命周期和数据更新路径保留，不靠固定延时限频。三个生产文件共同通过真实Android36 SDK编译（项目API桩），静态绑定检查通过；未测实机帧率，不宣称已量化改善或排除其他瓶颈。

@@ -19,15 +19,20 @@ object FloatingChatCardVisuals {
         if (!originals.containsKey(view)) originals[view] = view.background
         val density = view.resources.displayMetrics.density
         val drawable = applied[view] ?: GradientDrawable().also { applied[view] = it }
-        drawable.cornerRadius = radiusDp * density
+        val radius = radiusDp * density
+        if (drawable.cornerRadius != radius) drawable.cornerRadius = radius
         if (view.context.isDarkMode()) {
-            drawable.setColor(DARK_SURFACE_COLOR)
-            drawable.setStroke(density.roundToInt().coerceAtLeast(1), DARK_STROKE_COLOR)
+            if (drawable.color?.defaultColor != DARK_SURFACE_COLOR) {
+                drawable.setColor(DARK_SURFACE_COLOR)
+                drawable.setStroke(density.roundToInt().coerceAtLeast(1), DARK_STROKE_COLOR)
+            }
         } else {
-            drawable.setColor(LIGHT_SURFACE_COLOR)
-            drawable.setStroke(0, 0)
+            if (drawable.color?.defaultColor != LIGHT_SURFACE_COLOR) {
+                drawable.setColor(LIGHT_SURFACE_COLOR)
+                drawable.setStroke(0, 0)
+            }
         }
-        view.background = drawable
+        if (view.background !== drawable) view.background = drawable
     }
 
     private fun Context.isDarkMode(): Boolean =
