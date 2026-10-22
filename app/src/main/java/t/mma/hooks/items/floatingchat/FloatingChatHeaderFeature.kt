@@ -58,6 +58,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val contentCardTranslations = WeakHashMap<View, Float>()
 
     private val diagnosedStatusWrappers = WeakHashMap<View, Boolean>()
+    private val statusLayerDiagnostics = WeakHashMap<ViewGroup, Boolean>()
     private val tipsGroups = WeakHashMap<View, View>()
     private val tipsAttachListeners = WeakHashMap<View, View.OnAttachStateChangeListener>()
     private val tipsLayoutListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
@@ -183,6 +184,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun scheduleApply(layout: ViewGroup) {
+        // Inherited ViewGroup lifecycle hooks can receive unrelated page instances.
+        if (layout.javaClass.name != layoutClass) return
         val tracker = layoutTrackers.getOrPut(layout) { HeaderLayoutTracker() }
         if (tracker.preDraw != null || !layout.isAttachedToWindow) return
         val observer = layout.viewTreeObserver
@@ -190,7 +193,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             override fun onPreDraw(): Boolean {
                 if (observer.isAlive) observer.removeOnPreDrawListener(this)
                 if (tracker.preDraw === this) tracker.preDraw = null
-                if (layout.isAttachedToWindow && layout.isShown) apply(layout)
+                if (layout.isAttachedToWindow && layout.isShown) apply(layout) else restore(layout)
                 return true
             }
         }
@@ -213,12 +216,27 @@ private class HeaderRuntime(private val context: FeatureContext) {
             visibleChatLayout(sourceLayout)?.takeIf { it !== sourceLayout }?.let(::restore)
             return
         }
-        val layout = visibleChatLayout(sourceLayout) ?: return
-        applyChatStatusWrapper(layout)
-        val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow }
+        val layout = visibleChatLayout(sourceLayout) ?: run {
+            restore(sourceLayout)
+            return
+        }
+        // Never select an activity's shared ActionBarContainer from rootView.
+        val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow && states[it] != null }
             ?: find(layout) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
-            ?: find(layout.rootView) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
             ?: return
+        fun named(name: String): View? {
+            val id = layout.resources.getIdentifier(name, "id", layout.context.packageName)
+            return if (id != 0) layout.findViewById<View>(id) else null
+        }
+        val titleId = layout.resources.getIdentifier("obn", "id", layout.context.packageName)
+        val title = if (titleId != 0) header.findViewById<TextView>(titleId) else null
+        if (named("bki")?.javaClass?.name != CHATTING_CONTENT_CLASS ||
+            named("k52")?.javaClass?.name != "com.tencent.mm.pluginsdk.ui.chat.ChatFooter" || title == null) {
+            restore(layout)
+            return
+        }
+        applyChatStatusWrapper(layout)
+        diagnoseStatusLayers(layout, header)
         val state = states[header] ?: createState(header) ?: return
         if (isWindowBar(header, layout)) {
             enableWindowOverlay(header)
@@ -252,20 +270,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun visibleChatLayout(source: ViewGroup): ViewGroup? {
+        if (source.javaClass.name != layoutClass || !source.isAttachedToWindow ||
+            !source.isShown || source.width <= 0 || source.height <= 0) return null
+        val location = IntArray(2).also(source::getLocationOnScreen)
         val screenWidth = source.resources.displayMetrics.widthPixels
-        if (source.isShown && source.width > 0 && source.height > 0) {
-            val location = IntArray(2).also(source::getLocationOnScreen)
-            if (location[0] < screenWidth && location[0] + source.width > 0) return source
-        }
-        val candidates = ArrayList<ViewGroup>()
-        collect(source.rootView) { view ->
-            if (view.javaClass.name == layoutClass && view is ViewGroup) candidates += view
-        }
-        return candidates.firstOrNull { layout ->
-            if (!layout.isShown || layout.width <= 0 || layout.height <= 0) return@firstOrNull false
-            val location = IntArray(2).also(layout::getLocationOnScreen)
-            location[0] < screenWidth && location[0] + layout.width > 0
-        }
+        return source.takeIf { location[0] < screenWidth && location[0] + source.width > 0 }
     }
 
     private fun isWindowBar(header: View, layout: View): Boolean {
@@ -627,9 +636,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
             }
             current = current.parent as? View
         }
-        if (wrapper == null) {
-            wrapper = find(layout.rootView) { it.javaClass.name == STATUS_WRAPPER_CLASS }
-        }
         val target = wrapper ?: return
         statusWrappersByLayout[layout] = target
         if (!statusWrapperBackgrounds.containsKey(target)) {
@@ -649,6 +655,45 @@ private class HeaderRuntime(private val context: FeatureContext) {
                     "setStatusBarColor=${hasStatusBarMethod(target, "setStatusBarColor")}"
             )
         }
+    }
+
+    // One bounded snapshot per actual chat layout, never per scroll frame.
+    private fun diagnoseStatusLayers(layout: ViewGroup, header: View) {
+        if (statusLayerDiagnostics.put(layout, true) != null) return
+        fun describe(view: View): String {
+            val id = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("-")
+            val xy = IntArray(2).also(view::getLocationOnScreen)
+            val group = view as? ViewGroup
+            val color = (view.background as? android.graphics.drawable.ColorDrawable)?.color
+            return "${view.javaClass.name}#$id rect=${xy[0]},${xy[1]},${view.width},${view.height} " +
+                "vis=${view.visibility} shown=${view.isShown} bg=${view.background?.javaClass?.name}:$color " +
+                "fg=${view.foreground?.javaClass?.name} padding=${view.paddingLeft},${view.paddingTop},${view.paddingRight},${view.paddingBottom} " +
+                "clip=${group?.clipChildren}/${group?.clipToPadding} fits=${view.fitsSystemWindows} elevation=${view.elevation}"
+        }
+        val ancestors = ArrayList<String>()
+        var node: View? = layout
+        while (node != null && ancestors.size < 16) {
+            ancestors += describe(node)
+            node = node.parent as? View
+        }
+        val topLayers = ArrayList<String>()
+        val queue = ArrayDeque<Pair<View, Int>>()
+        queue.add(layout.rootView to 0)
+        var visited = 0
+        val statusBottom = statusBarInset(layout)
+        while (queue.isNotEmpty() && visited++ < 160) {
+            val (view, depth) = queue.removeFirst()
+            val xy = IntArray(2).also(view::getLocationOnScreen)
+            if (view.isShown && xy[1] < statusBottom && xy[1] + view.height > 0) topLayers += describe(view)
+            if (view is ViewGroup && depth < 8) {
+                for (i in 0 until view.childCount) queue.add(view.getChildAt(i) to depth + 1)
+            }
+        }
+        val anchors = listOf("bki", "bqg", "bm6", "bp0").mapNotNull { name ->
+            val id = layout.resources.getIdentifier(name, "id", layout.context.packageName)
+            if (id == 0) null else layout.findViewById<View>(id)?.let(::describe)
+        }
+        HLog.i("[Hchat:$TAG] HEADER_STATUS_LAYERS anchors=$anchors inset=$statusBottom header=${describe(header)} ancestors=$ancestors topLayers=$topLayers truncated=${queue.isNotEmpty()}")
     }
 
     private fun findStatusBarMethod(view: View, name: String): Method? {

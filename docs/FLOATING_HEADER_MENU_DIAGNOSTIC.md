@@ -26,3 +26,8 @@ ha.i(IILjava/lang/String;Z...)明确将p2图标资源写入fb.b；菜单创建�
 ## 三段启用后的滚动性能
 13:45日志确认三段启用，floating_header主线程慢调用18～23ms（采样限3次、仅启动3分钟，不能用于统计总频率）。源码onLayout调度preDraw apply，apply无条件row/header/group.bringToFront，可能由requestLayout形成重复布局；缓存头像每次setImageBitmap，描边及卡片背景每次重写；visibleChatLayout每次根树扫描。
 修正：row/header仅非末尾时置顶；公告组仅首次定位置顶，避免与header反复交换顺序；头像同一bitmap不重设；描边/卡片背景/位移/公告margin仅值变化时更新；当前source可见时优先使用，不扫描整树；状态区仅首次或背景被外部重设时调用颜色setter。生命周期和数据更新路径保留，不靠固定延时限频。三个生产文件共同通过真实Android36 SDK编译（项目API桩），静态绑定检查通过；未测实机帧率，不宣称已量化改善或排除其他瓶颈。
+
+## 聊天页范围收紧与状态区取证
+14:20日志在真正聊天页出现前已发生title_obn_missing：旧实现将任意可见source当作聊天布局，并从rootView选取共享ActionBarContainer，且校验失败仍给共享bar应用整条卡片。现scheduleApply/visibleChatLayout严格匹配ChattingUILayout，要求bki/ChatFooter/obn结构，移除标题栏与状态wrapper根树兜底；脱离窗口及预绘制发现隐藏时恢复。
+状态区旧日志只有EdgeToEdgeWrapperLayout背景/方法信息，不含列表顶部及祖先padding、裁剪与覆盖层，无法证明透明失败具体是哪层。加入HEADER_STATUS_LAYERS一次性有界取证（最多160节点、8层），含聊天祖先、bki/bqg/bm6/bp0边界及覆盖状态区的层、背景前景、padding、fitsSystemWindows和裁剪；不改变未知层布局。当前状态区仍待该日志确认后定向处理，不能声称已完成透字。
+真实Android36 SDK编译整个标题runtime及胶囊、卡片视觉文件通过；原生绑定静态检查和diff检查通过。完整APK、跨页作用范围和状态区实机效果未验收。
