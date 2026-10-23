@@ -355,7 +355,7 @@ internal class MusicIcon(c:Context,private val symbol:String):TextView(c){
         when(symbol){
             "⌕"->{canvas.drawCircle(10f,10f,6f,pen);line(14.5f,14.5f,21f,21f)}
             "×"->{line(6f,6f,18f,18f);line(18f,6f,6f,18f)}
-            "remove"->{canvas.drawCircle(12f,12f,9f,pen);line(7f,12f,17f,12f)}
+            "remove"->{line(4f,6f,20f,6f);path(9f,6f,9f,3f,15f,3f,15f,6f);path(6f,6f,7f,21f,17f,21f,18f,6f);line(10f,10f,10f,17f);line(14f,10f,14f,17f)}
             "◷"->{canvas.drawCircle(12f,13f,8f,pen);line(12f,13f,12f,8f);line(12f,13f,16f,15f);line(9f,2f,15f,2f)}
             "♫"->{for(i in 0..4){val x=4f+i*4;val h=floatArrayOf(5f,10f,16f,10f,5f)[i];line(x,12-h/2,x,12+h/2)}}
             "☷"->{for(i in 0..2){val y=6f+i*6;canvas.drawCircle(4f,y,0.8f,pen);line(8f,y,21f,y)}}
