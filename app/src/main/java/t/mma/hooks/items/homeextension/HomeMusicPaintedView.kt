@@ -40,12 +40,13 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
             if(!visibleForFrames()){rotationFrameAt=0L;return}
             val snapshot=state();cachedState=snapshot
             val now=android.os.SystemClock.uptimeMillis()
-            if(style==3&&(snapshot.playing||portraitAngle!=0f)){
+            if(style==3&&!snapshot.playing){portraitAngle=0f;rotationFrameAt=0L}
+            else if(style==3){
                 if(rotationFrameAt!=0L)portraitAngle=advancePortraitAngle(portraitAngle,now-rotationFrameAt,snapshot.playing)
                 rotationFrameAt=now
             }else rotationFrameAt=0L
             invalidate();needsRefresh=false
-            if(snapshot.playing||(style==3&&portraitAngle!=0f)){scheduled=true;postDelayed(this,33)}
+            if(snapshot.playing){scheduled=true;postDelayed(this,33)}
         }
     }
     private fun resumeFrames(){
@@ -93,6 +94,7 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         super.onDraw(canvas);val w=width.toFloat();val h=height.toFloat();if(w<=0||h<=0)return
         // Normalised layout only positions components. Glyphs, discs and portraits always use one scale.
         sx=w/360f;sy=h/(if(full)720f else 209f);hits.clear();val s=cachedState?.takeUnless{needsRefresh}?:state().also{cachedState=it};loadCover(s.coverUrl)
+        if(style==3&&!s.playing){portraitAngle=0f;rotationFrameAt=0L}
         val alpha=HomeExtensionSettings.preferences(context).getInt(HomeExtensionSettings.MUSIC_ALPHA,100).coerceIn(0,100)*255/100
         if(decoration?.width!=width||decoration?.height!=height||decorationStyle!=style){decoration=Bitmap.createBitmap(width,height,Bitmap.Config.ARGB_8888).also{val bg=Canvas(it);if(style==2)graffiti(bg,w,h)else vinylBackground(bg,w,h)};decorationStyle=style};p.alpha=alpha;decoration?.let{canvas.drawBitmap(it,0f,0f,p)};p.alpha=255
         if(full){
@@ -226,11 +228,6 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
 }
 internal data class MusicPaintState(val title:String,val position:Int,val duration:Int,val playing:Boolean,val spectrum:FloatArray,val lyric:String="",val coverUrl:String="",val favorite:Boolean=false)
 
-/** Pause finishes the current clockwise turn within 600ms, then snaps exactly upright. */
-internal fun advancePortraitAngle(angle:Float,elapsedMs:Long,playing:Boolean):Float {
-    val elapsed=elapsedMs.coerceAtLeast(0).toFloat()
-    if(playing)return (angle+elapsed*360f/12000f)%360f
-    if(angle==0f)return 0f
-    val step=elapsed*360f/600f
-    return if(step>=360f-angle)0f else angle+step
-}
+/** Paused portraits are immediately upright; playback keeps the 12-second turn. */
+internal fun advancePortraitAngle(angle:Float,elapsedMs:Long,playing:Boolean):Float =
+    if(playing)(angle+elapsedMs.coerceAtLeast(0).toFloat()*360f/12000f)%360f else 0f

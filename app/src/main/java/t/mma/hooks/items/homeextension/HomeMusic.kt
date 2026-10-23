@@ -129,7 +129,7 @@ internal object HomeMusic {
         "play"->if(song!=null)play(c,song)else searchSheet(c,host)
         "previous"->previous(c);"next"->next(c);"open"->showPlayer(c);"search"->searchSheet(c,host)
         "favorite"->song?.let{toggleFavorite(c,it)}
-        "favorites"->openSheet(c,favorites(c),"我的收藏");"versions"->versions(c);"quality"->quality(c,song);"timer"->timer(c);"lyrics"->toggleLyricWindow(c,song)
+        "favorites"->openSheet(c,favorites(c),"我的收藏",allowRemove=true);"versions"->versions(c);"quality"->quality(c,song);"timer"->timer(c);"lyrics"->toggleLyricWindow(c,song)
         "shuffle"->{shuffle=!shuffle;toast(c,if(shuffle)"随机播放已开启"else"顺序播放已开启")}
     }},{fraction->if(!preparing)runCatching{player?.let{if(it.duration>0){it.seekTo((it.duration*fraction).toInt());changed()}}}})
     private fun showStyleThreePlayer(c:Context){if(playing&&visualizer==null)player?.let{captureSpectrum(c,it)};val dialog=Dialog(c);dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);val host=LinearLayout(c).apply{setBackgroundColor(Color.BLACK);gravity=Gravity.CENTER};host.addView(styleThree(c,true,host),LinearLayout.LayoutParams(-1,-1));dialog.setContentView(host);dialog.show();dialog.window?.setBackgroundDrawableResource(android.R.color.transparent);dialog.window?.setLayout(-1,-1)}
@@ -146,7 +146,37 @@ internal object HomeMusic {
         seek.addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener{override fun onViewAttachedToWindow(v:View){main.post(tick)};override fun onViewDetachedFromWindow(v:View){main.removeCallbacks(tick)}})
     }
     private fun time(ms:Int):String{val t=(ms/1000).coerceAtLeast(0);return "%02d:%02d".format(t/60,t%60)}
-    private fun openSheet(c:Context,songs:List<HomeMusicSong>,title:String){val dialog=Dialog(c);dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);val root=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(c,18),dp(c,16),dp(c,18),dp(c,20));background=rounded(c,0xFF102330.toInt(),22)};val head=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL};head.addView(txt(c,title,20f),LinearLayout.LayoutParams(0,-2,1f));head.addView(iconButton(c,"×"){dialog.dismiss()},LinearLayout.LayoutParams(dp(c,44),dp(c,44)));root.addView(head);val list=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL};if(songs.isEmpty())list.addView(txt(c,"暂无歌曲",15f,0xFFB7C2C9.toInt()));songs.forEach{song->val row=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(c,8),dp(c,10),dp(c,8),dp(c,10));setOnClickListener{storeSong(c,song);queue=songs.toMutableList();play(c,song);dialog.dismiss()}};val text=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL};text.addView(txt(c,song.title,16f));text.addView(txt(c,"${song.artist} · ${song.source}",12f,0xFFB7C2C9.toInt()));row.addView(text,LinearLayout.LayoutParams(0,-2,1f));row.addView(txt(c,"▶",20f));list.addView(row)};root.addView(ScrollView(c).apply{addView(list)},LinearLayout.LayoutParams(-1,0,1f));dialog.setContentView(root);dialog.show();dialog.window?.setBackgroundDrawableResource(android.R.color.transparent);dialog.window?.setLayout(-1,(c.resources.displayMetrics.heightPixels*0.82f).toInt());dialog.window?.setGravity(Gravity.BOTTOM);dialog.window?.attributes=dialog.window?.attributes?.apply{windowAnimations=android.R.style.Animation_InputMethod}}
+    private fun openSheet(c:Context,songs:List<HomeMusicSong>,title:String,allowRemove:Boolean=false){
+        val dialog=Dialog(c);dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
+        val root=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(c,18),dp(c,16),dp(c,18),dp(c,20));background=rounded(c,0xFF102330.toInt(),22)}
+        val head=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL}
+        head.addView(txt(c,title,20f),LinearLayout.LayoutParams(0,-2,1f))
+        head.addView(iconButton(c,"×"){dialog.dismiss()},LinearLayout.LayoutParams(dp(c,44),dp(c,44)));root.addView(head)
+        val list=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL}
+        val displayed=songs.toMutableList()
+        fun render(){
+            list.removeAllViews()
+            if(displayed.isEmpty())list.addView(txt(c,"暂无歌曲",15f,0xFFB7C2C9.toInt()))
+            displayed.forEach{song->
+                val startPlayback={storeSong(c,song);queue=displayed.toMutableList();play(c,song);dialog.dismiss()}
+                val row=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(c,8),dp(c,10),dp(c,8),dp(c,10));setOnClickListener{startPlayback()}}
+                val text=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL}
+                text.addView(txt(c,song.title,16f));text.addView(txt(c,"${song.artist} · ${song.source}",12f,0xFFB7C2C9.toInt()))
+                row.addView(text,LinearLayout.LayoutParams(0,-2,1f))
+                row.addView(iconButton(c,"▶"){startPlayback()},LinearLayout.LayoutParams(dp(c,44),dp(c,48)))
+                if(allowRemove)row.addView(iconButton(c,"remove"){
+                    val latest=favorites(c);latest.removeAll{sameSong(it,song)};saveFavorites(c,latest)
+                    displayed.removeAll{sameSong(it,song)};changed();render()
+                }.apply{contentDescription="移出收藏夹"},LinearLayout.LayoutParams(dp(c,44),dp(c,48)))
+                list.addView(row)
+            }
+        }
+        render()
+        root.addView(ScrollView(c).apply{addView(list)},LinearLayout.LayoutParams(-1,0,1f))
+        dialog.setContentView(root);dialog.show();dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialog.window?.setLayout(-1,(c.resources.displayMetrics.heightPixels*0.82f).toInt());dialog.window?.setGravity(Gravity.BOTTOM)
+        dialog.window?.attributes=dialog.window?.attributes?.apply{windowAnimations=android.R.style.Animation_InputMethod}
+    }
     private class SearchSongAction(c:Context,private val song:HomeMusicSong,private val favorite:Boolean):View(c){
         private val ink=android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
         private val shape=android.graphics.Path()
@@ -325,6 +355,7 @@ internal class MusicIcon(c:Context,private val symbol:String):TextView(c){
         when(symbol){
             "⌕"->{canvas.drawCircle(10f,10f,6f,pen);line(14.5f,14.5f,21f,21f)}
             "×"->{line(6f,6f,18f,18f);line(18f,6f,6f,18f)}
+            "remove"->{canvas.drawCircle(12f,12f,9f,pen);line(7f,12f,17f,12f)}
             "◷"->{canvas.drawCircle(12f,13f,8f,pen);line(12f,13f,12f,8f);line(12f,13f,16f,15f);line(9f,2f,15f,2f)}
             "♫"->{for(i in 0..4){val x=4f+i*4;val h=floatArrayOf(5f,10f,16f,10f,5f)[i];line(x,12-h/2,x,12+h/2)}}
             "☷"->{for(i in 0..2){val y=6f+i*6;canvas.drawCircle(4f,y,0.8f,pen);line(8f,y,21f,y)}}
