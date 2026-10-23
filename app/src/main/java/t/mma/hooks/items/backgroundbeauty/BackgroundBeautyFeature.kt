@@ -2058,9 +2058,10 @@ private class BackgroundBeautyRuntime(
         while (queue.isNotEmpty() && count++ < 80) {
             val node = queue.removeFirst()
             if (node.javaClass == View::class.java || node is ViewGroup || node is ImageView) {
-                // A passive microphone is not a separate touch target. Its parent's host ripple
-                // must not be duplicated by another module ripple on the image itself.
-                setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = true)
+                // Match the footer traversal below: speech surfaces have no separate feedback.
+                // Otherwise this pass installs feedback and the next pass removes it,
+                // replacing background/foreground on every layout and requesting another.
+                setTransparentSurface(state, node, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
             }
             if (node is ViewGroup) for (i in 0 until node.childCount) queue.add(node.getChildAt(i))
         }

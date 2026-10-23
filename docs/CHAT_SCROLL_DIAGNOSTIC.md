@@ -73,3 +73,11 @@ R8类合并/内联后不能只按外层类名归属：hi.o虽然类头为Dynamic
 旧12份/14帧说明由此节覆盖。观察Hook的范围、计数、停止卸载机制不变，不拦截请求；关闭专项不采样。每5秒桶通常仅1次深堆栈，桶边界可短时间内出现两次，全会话至多60次。相比旧版单份堆栈更深、总额度更多，仍须无诊断作性能对照。未修改穿透布局、padding、键盘面板策略。
 验证：Android36 SDK定向编译（项目/Xposed辅助依赖用桩）；生产过滤片段JVM测试覆盖45层父链后业务调用者、24帧输出上限及生产限额逻辑；实机来源采集仍待安装。未运行Gradle或构建APK，未提交推送。
 下一轮保持D配置，重启等待初始化后立即启动D专项，在5分钟内完成约30秒滚动。读取request.source并用该构建mapping还原；若仍只有父链，则再选择系统跟踪或更具体目标Hook，不猜测更改布局策略。
+
+
+## 974映射定位：语音子树反馈策略反复切换（本地待验收）
+映射包Hchat-release-mapping-9df8c5deffae9ed6eda99dde81c4459cd38774ee.zip的方法/行号匹配974诊断；未额外校验APK R8 map-id。映射仅保存在/tmp/pl-974-mapping，不入库。
+pi.z#w0:1013还原setTransparentSurface原2822行foreground写入；pi.z#i:68还原applySpeechSurfaces原2063行；pi.z#c:53还原applyChatFooterTransparency原2396行；pi.k#invoke:582还原installChatChromeLifecycle lambda原2312行。
+源码确认同次页脚处理先applySpeechSurfaces(preserveFeedback=true)，后通用遍历把语音匿名View设为false、语音ImageView设为!inSpeech=false、非appGrid容器设为false。对未被footerHost屏蔽的普通/图片叶节点，反馈背景与透明背景每轮互换，setTransparentSurface幂等检查因类型不匹配而失效，重新写background及foreground，setForeground可触发新的布局请求。此次现场多份来源直接落在前一遍写入，支持此反馈循环路径；尚不证明所有布局均由此引起。
+修复：applySpeechSurfaces与通用页脚遍历统一为不单独添加反馈；保留现有透明标记身份检查、外部背景同步和恢复机制。不改穿透高度/padding/键盘面板布局，不改非语音按钮及appGrid反馈。
+验证：生产反馈判断片段+策略断言JVM模型对照，旧叶节点100轮200次写入、统一后10000轮仅首次写入，宿主屏蔽稳定、外部替换重新应用、非语音反馈保留；此为模型而非Android布局实测。Android36 SDK定向编译背景生产代码（项目/Xposed辅助依赖用桩），未运行Gradle、未构建APK。实机待安装后复测D：先观察静止重复请求，再固定8轮往返，兼查文字/语音模式及加号面板。
