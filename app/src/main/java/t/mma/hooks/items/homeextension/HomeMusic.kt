@@ -167,7 +167,7 @@ internal object HomeMusic {
                 if(allowRemove)row.addView(iconButton(c,"remove"){
                     val latest=favorites(c);latest.removeAll{sameSong(it,song)};saveFavorites(c,latest)
                     displayed.removeAll{sameSong(it,song)};changed();render()
-                }.apply{contentDescription="移出收藏夹"},LinearLayout.LayoutParams(dp(c,44),dp(c,48)))
+                }.apply{contentDescription="移出收藏夹"},LinearLayout.LayoutParams(dp(c,44),dp(c,48)).apply{leftMargin=dp(c,12)})
                 list.addView(row)
             }
         }
