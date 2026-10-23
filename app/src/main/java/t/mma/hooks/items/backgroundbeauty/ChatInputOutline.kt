@@ -26,15 +26,9 @@ internal class ChatInputOutline(
         strokeWidth = stroke
         this.color = color
     }
-    private val createdAt = android.os.SystemClock.uptimeMillis()
-    private var firstDraw = true
-    companion object { private val drawReports = java.util.concurrent.atomic.AtomicInteger() }
     override fun draw(canvas: Canvas) {
         val editor = editorRef.get() ?: return
-        if (firstDraw) {
-            firstDraw = false
-            if (drawReports.incrementAndGet() <= 6) t.mma.utils.HLog.i("[Hchat:沉浸式背景] INPUT_OUTLINE_FIRST_DRAW delayMs=${android.os.SystemClock.uptimeMillis() - createdAt} size=${bounds.width()}x${bounds.height()} editor=${editor.width}x${editor.height}")
-        }
+
         val icon = iconRef.get()
         val half = stroke / 2f
         var top = bounds.top.toFloat()

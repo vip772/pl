@@ -68,13 +68,12 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val statusWrappersByLayout = WeakHashMap<ViewGroup, View>()
     private val contentCardTranslations = WeakHashMap<View, Float>()
 
-    private val diagnosedStatusWrappers = WeakHashMap<View, Boolean>()
-    private val statusLayerDiagnostics = WeakHashMap<ViewGroup, Boolean>()
+    private val initializedStatusWrappers = WeakHashMap<View, Boolean>()
     private val chatTopPaddings = WeakHashMap<ViewGroup, Int>()
+    private val raisedTipsGroups = WeakHashMap<View, Boolean>()
     private val tipsGroups = WeakHashMap<View, View>()
     private val tipsAttachListeners = WeakHashMap<View, View.OnAttachStateChangeListener>()
     private val tipsLayoutListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
-    private val diagnosedTipsGroups = WeakHashMap<View, Boolean>()
     private val tipsCardStates = WeakHashMap<View, TipsCardState>()
     private val tipsDimStates = WeakHashMap<View, TipsDimState>()
     private val tipsGroupElevations = WeakHashMap<View, Float>()
@@ -84,8 +83,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val tipsContentBackgrounds = WeakHashMap<View, Drawable?>()
     private val layoutTrackers = WeakHashMap<ViewGroup, HeaderLayoutTracker>()
     private val tipsCardBottoms = WeakHashMap<ViewGroup, Int>()
-    private var headerWaitReports = 0
-    private var headerReadyReports = 0
     private var reparentFailureReported = false
     private var installed = false
     private val headerClass = "androidx.appcompat.widget.ActionBarContainer"
@@ -138,7 +135,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         installTipsGroupTracking()?.let { count += it }
         installed = count > 0
         if (installed) configHandler.post { refreshVisible() }
-        HLog.i("[Hchat:$TAG] 标题栏功能安装结果 installed=$installed hooks=$count target=$layoutClass header=$headerClass")
+
         if (!installed) HLog.e("[Hchat:$TAG] 功能未生效: 未找到 ChattingUILayout 生命周期方法")
         return installed
     }
@@ -249,8 +246,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun apply(sourceLayout: ViewGroup) {
-        val performanceStarted = t.mma.utils.PerformanceSample.start()
-        try {
+
         if (!isEnabled()) {
             restore(sourceLayout)
             visibleChatLayout(sourceLayout)?.takeIf { it !== sourceLayout }?.let(::restore)
@@ -264,7 +260,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow && states[it] != null }
             ?: find(layout) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
             ?: run {
-                if (headerWaitReports++ < 3) HLog.i("[Hchat:$TAG] HEADER_WAIT stage=header_missing attached=${layout.isAttachedToWindow} shown=${layout.isShown} size=${layout.width}x${layout.height}")
+
                 return
             }
         fun named(name: String): View? {
@@ -299,20 +295,13 @@ private class HeaderRuntime(private val context: FeatureContext) {
             marginLp.topMargin = top
             header.layoutParams = marginLp
         }
-        val cardsStarted = t.mma.utils.PerformanceSample.start()
         applyHeaderZoneCards(layout, header)
         tipsCardBottoms.remove(layout)
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
-        t.mma.utils.PerformanceSample.finish("floating_header_cards", cardsStarted)
-        val capsuleStarted = t.mma.utils.PerformanceSample.start()
         val split = (header as? ViewGroup)?.let { capsule.apply(it) } == true
-        t.mma.utils.PerformanceSample.finish("floating_header_capsule", capsuleStarted)
         val tracker = layoutTrackers.getOrPut(layout) { HeaderLayoutTracker() }
-        if (split && !tracker.readyLogged) {
-            tracker.readyLogged = true
-            if (headerReadyReports++ < 6) HLog.i("[Hchat:$TAG] HEADER_FIRST_READY delayMs=${android.os.SystemClock.uptimeMillis() - tracker.initialAt} pendingLayout=${layout.isLayoutRequested} x=${layout.x}")
-        }
+
         val elevation = if (split) 0f else dp(ELEVATION_DP).toFloat()
         if (header.elevation != elevation) header.elevation = elevation
         if (header.outlineProvider !== FloatingHeaderOutlineProvider) header.outlineProvider = FloatingHeaderOutlineProvider
@@ -322,7 +311,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (headerParent != null && headerParent.getChildAt(headerParent.childCount - 1) !== header) {
             header.bringToFront()
         }
-            } finally { t.mma.utils.PerformanceSample.finish("floating_header", performanceStarted) }
+
     }
 
     private fun visibleChatLayout(source: ViewGroup): ViewGroup? {
@@ -406,7 +395,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             params.topMargin = 0
             root.addView(header, params)
             state.reparented = true
-            HLog.i("[Hchat:$TAG] 标题栏结构重排完成: root=${root.javaClass.name}")
+
             true
         }.getOrElse {
             HLog.e("[Hchat:$TAG] 标题栏结构重排失败", it)
@@ -475,14 +464,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (!tipsGroupElevations.containsKey(group)) tipsGroupElevations[group] = group.elevation
         group.elevation = 0f
         styleTipsCardBody(group)
-        if (diagnosedTipsGroups.put(group, true) == null) {
-            group.bringToFront()
-            HLog.i(
-                "[Hchat:$TAG] 公告卡定位: class=${group.javaClass.name} " +
-                    "from=${groupLocation[0]},${groupLocation[1]} targetTop=$targetTop " +
-                    "size=${group.width}x${group.height} parent=${group.parent?.javaClass?.name}"
-            )
-        }
+        if (raisedTipsGroups.put(group, true) == null) group.bringToFront()
+
     }
 
     private fun suppressTipsGroupDim(group: View) {
@@ -515,16 +498,16 @@ private class HeaderRuntime(private val context: FeatureContext) {
             )
         }
         FloatingChatCardVisuals.apply(body, CARD_CORNER_RADIUS_DP)
-        body.outlineProvider = FloatingTipsCardOutlineProvider
-        body.clipToOutline = true
-        body.elevation = 0f
+        if (body.outlineProvider !== FloatingTipsCardOutlineProvider) body.outlineProvider = FloatingTipsCardOutlineProvider
+        if (!body.clipToOutline) body.clipToOutline = true
+        if (body.elevation != 0f) body.elevation = 0f
         val recycler = find(group) { it.javaClass.name == TIPS_RECYCLER_CLASS }
         val recyclerLp = recycler?.layoutParams as? RelativeLayout.LayoutParams
         if (recycler != null && recyclerLp != null) {
             if (!tipsRecyclerBackgrounds.containsKey(recycler)) {
                 tipsRecyclerBackgrounds[recycler] = recycler.background
             }
-            recycler.background = null
+            if (recycler.background != null) recycler.background = null
             val recyclerGroup = recycler as? ViewGroup
             if (recyclerGroup != null) {
                 for (index in 0 until recyclerGroup.childCount) {
@@ -542,11 +525,14 @@ private class HeaderRuntime(private val context: FeatureContext) {
                     recyclerLp.bottomMargin
                 )
             }
+            var layoutChanged = false
             val rules = tipsRecyclerRules[recycler]
-            if (rules != null) {
+            if (rules != null && recyclerLp.rules.withIndex().any { (verb, anchor) ->
+                    anchor != if (verb == RelativeLayout.CENTER_VERTICAL) RelativeLayout.TRUE else 0
+                }) {
                 for (verb in recyclerLp.rules.indices) recyclerLp.removeRule(verb)
                 recyclerLp.addRule(RelativeLayout.CENTER_VERTICAL)
-                recycler.layoutParams = recyclerLp
+                layoutChanged = true
             }
             val originalMargins = tipsRecyclerMargins[recycler]
             if (originalMargins != null && originalMargins[1] != originalMargins[3] &&
@@ -555,15 +541,18 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 val vertical = (originalMargins[1] + originalMargins[3]) / 2
                 recyclerLp.topMargin = vertical
                 recyclerLp.bottomMargin = vertical
-                recycler.layoutParams = recyclerLp
+                layoutChanged = true
             }
+            if (layoutChanged) recycler.layoutParams = recyclerLp
         }
         val original = tipsCardStates[body]
         if (original != null && original.paddingTop != original.paddingBottom) {
             val vertical = (original.paddingTop + original.paddingBottom) / 2
-            body.setPadding(original.paddingLeft, vertical, original.paddingRight, vertical)
+            if (body.paddingLeft != original.paddingLeft || body.paddingTop != vertical ||
+                body.paddingRight != original.paddingRight || body.paddingBottom != vertical) {
+                body.setPadding(original.paddingLeft, vertical, original.paddingRight, vertical)
+            }
         }
-        body.invalidateOutline()
     }
 
     private fun clearTipsItemBackground(item: View) {
@@ -701,58 +690,13 @@ private class HeaderRuntime(private val context: FeatureContext) {
             statusWrapperBackgrounds[target] = target.background
             statusWrapperColors[target] = readStatusBarColor(target)
         }
-        val clearStatus = target.background != null || diagnosedStatusWrappers[target] != true
+        val clearStatus = target.background != null || initializedStatusWrappers[target] != true
         if (target.background != null) target.background = null
         if (clearStatus) invokeStatusBarColor(target, Color.TRANSPARENT)
-        if (diagnosedStatusWrappers[target] != true) {
-            diagnosedStatusWrappers[target] = true
-            HLog.i(
-                "[Hchat:$TAG] 聊天状态区目标: wrapper=${target.javaClass.name} " +
-                    "parent=${target.parent?.javaClass?.name} size=${target.width}x${target.height} " +
-                    "background=${target.background?.javaClass?.name} " +
-                    "setStatusBarBackgroundColor=${hasStatusBarMethod(target, "setStatusBarBackgroundColor")} " +
-                    "setStatusBarColor=${hasStatusBarMethod(target, "setStatusBarColor")}"
-            )
-        }
-    }
+        if (initializedStatusWrappers[target] != true) {
+            initializedStatusWrappers[target] = true
 
-    // One bounded snapshot per actual chat layout, never per scroll frame.
-    private fun diagnoseStatusLayers(layout: ViewGroup, header: View) {
-        if (statusLayerDiagnostics.put(layout, true) != null) return
-        fun describe(view: View): String {
-            val id = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("-")
-            val xy = IntArray(2).also(view::getLocationOnScreen)
-            val group = view as? ViewGroup
-            val color = (view.background as? android.graphics.drawable.ColorDrawable)?.color
-            return "${view.javaClass.name}#$id rect=${xy[0]},${xy[1]},${view.width},${view.height} " +
-                "vis=${view.visibility} shown=${view.isShown} bg=${view.background?.javaClass?.name}:$color " +
-                "fg=${view.foreground?.javaClass?.name} padding=${view.paddingLeft},${view.paddingTop},${view.paddingRight},${view.paddingBottom} " +
-                "clip=${group?.clipChildren}/${group?.clipToPadding} fits=${view.fitsSystemWindows} elevation=${view.elevation}"
         }
-        val ancestors = ArrayList<String>()
-        var node: View? = layout
-        while (node != null && ancestors.size < 16) {
-            ancestors += describe(node)
-            node = node.parent as? View
-        }
-        val topLayers = ArrayList<String>()
-        val queue = ArrayDeque<Pair<View, Int>>()
-        queue.add(layout.rootView to 0)
-        var visited = 0
-        val statusBottom = statusBarInset(layout)
-        while (queue.isNotEmpty() && visited++ < 160) {
-            val (view, depth) = queue.removeFirst()
-            val xy = IntArray(2).also(view::getLocationOnScreen)
-            if (view.isShown && xy[1] < statusBottom && xy[1] + view.height > 0) topLayers += describe(view)
-            if (view is ViewGroup && depth < 8) {
-                for (i in 0 until view.childCount) queue.add(view.getChildAt(i) to depth + 1)
-            }
-        }
-        val anchors = listOf("bki", "bqg", "bm6", "bp0").mapNotNull { name ->
-            val id = layout.resources.getIdentifier(name, "id", layout.context.packageName)
-            if (id == 0) null else layout.findViewById<View>(id)?.let(::describe)
-        }
-        HLog.i("[Hchat:$TAG] HEADER_STATUS_LAYERS anchors=$anchors inset=$statusBottom header=${describe(header)} ancestors=$ancestors topLayers=$topLayers truncated=${queue.isNotEmpty()}")
     }
 
     private fun findStatusBarMethod(view: View, name: String): Method? {
@@ -901,7 +845,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         tipsAttachListeners.clear()
         tipsLayoutListeners.clear()
         tipsGroups.clear()
-        diagnosedTipsGroups.clear()
+        raisedTipsGroups.clear()
     }
     private fun statusBarInset(layout: View): Int {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return 0
@@ -919,8 +863,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
     private class HeaderLayoutTracker(
         var settlePasses: Int = 0,
-        var initialAt: Long = android.os.SystemClock.uptimeMillis(),
-        var readyLogged: Boolean = false,
         var preDraw: android.view.ViewTreeObserver.OnPreDrawListener? = null
     )
 

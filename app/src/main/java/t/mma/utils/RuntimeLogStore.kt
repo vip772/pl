@@ -6,6 +6,7 @@ import android.os.Build
 import t.mma.BuildConfig
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.preferences.HchatStorage
+import java.io.RandomAccessFile
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -111,9 +112,7 @@ object RuntimeLogStore {
                         val file = runtimeLogFile(context)
                         file.parentFile?.mkdirs()
                         if (file.length() > MAX_LOG_BYTES) {
-                            val bytes = file.readBytes()
-                            val offset = (bytes.size - RETAIN_BYTES).coerceAtLeast(0)
-                            file.writeBytes(bytes.copyOfRange(offset, bytes.size))
+                            file.writeBytes(readTail(file, RETAIN_BYTES))
                         }
                         file.appendText(entry, Charsets.UTF_8)
                     }
@@ -146,10 +145,17 @@ object RuntimeLogStore {
     private fun runtimeLogFile(context: Context): File =
         File(File(HchatStorage.storageDir(context), LOG_DIR), LOG_FILE)
 
+    private fun readTail(file: File, limit: Int): ByteArray =
+        RandomAccessFile(file, "r").use { input ->
+            val length = input.length()
+            val count = minOf(length, limit.toLong()).toInt()
+            ByteArray(count).also { bytes ->
+                input.seek(length - count)
+                input.readFully(bytes)
+            }
+        }
     private fun readLimited(file: File): String = runCatching {
         if (!file.isFile) return@runCatching ""
-        val bytes = file.readBytes()
-        val offset = (bytes.size - MAX_LOG_BYTES.toInt()).coerceAtLeast(0)
-        bytes.copyOfRange(offset, bytes.size).toString(Charsets.UTF_8)
+                readTail(file, MAX_LOG_BYTES.toInt()).toString(Charsets.UTF_8)
     }.getOrDefault("")
 }

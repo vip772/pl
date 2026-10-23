@@ -27,17 +27,18 @@ internal class FloatingChatHeaderCapsule {
                         val back: Icon, val more: Icon, val center: LinearLayout,
                         val background: Drawable?) {
         val hidden = WeakHashMap<View, ChildState>()
+        var backTarget: View? = null
+        var moreTarget: View? = null
+        var titleTarget: View? = null
         var talker = ""
         var generation = 0
         var nextAttempt = 0L
         var loading = false
         var avatarAttempts = 0
-        var appliedLogged = false
         var strokeStyle: Pair<Int, Int>? = null
         var focusListener: ViewTreeObserver.OnWindowFocusChangeListener? = null
     }
     private val states = WeakHashMap<ViewGroup, State>()
-    private val failCounts = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
     private val main = Handler(Looper.getMainLooper())
     private val worker by lazy { Executors.newSingleThreadExecutor() }
     private var workerStarted = false
@@ -48,24 +49,33 @@ internal class FloatingChatHeaderCapsule {
 
     fun apply(header: ViewGroup): Boolean {
         if (closed) return false
-        if (header.width <= 0 || header.height <= 0) return fail(header, "header_unmeasured")
+        if (header.width <= 0 || header.height <= 0) return fail(header)
         val version = WeChatApis.version()?.versionName()
-        if (version != "8.0.78") return fail(header, "unsupported_version_${version ?: "unknown"}")
+        if (version != "8.0.78") return fail(header)
         fun named(name: String): View? {
             val id = header.resources.getIdentifier(name, "id", header.context.packageName)
             return if (id == 0) null else header.findViewById<View>(id)
         }
-        val nativeBack = named("actionbar_up_indicator") ?: return fail(header, "back_missing")
-        val nativeTitle = named("obn") as? TextView ?: return fail(header, "title_obn_missing")
-        val menu = named("coy") as? ViewGroup ?: return fail(header, "menu_coy_missing")
-        val nativeMore = findVerifiedMore(menu, header) ?: return fail(header, "more_menu_missing")
-        if (!nativeBack.isClickable || nativeBack.visibility != View.VISIBLE) return fail(header, "back_not_ready")
-        if (nativeTitle.text.isNullOrBlank()) return fail(header, "title_empty")
+        val nativeBack = named("actionbar_up_indicator") ?: return fail(header)
+        val nativeTitle = named("obn") as? TextView ?: return fail(header)
+        val menu = named("coy") as? ViewGroup ?: return fail(header)
+        val nativeMore = findVerifiedMore(menu, header) ?: return fail(header)
+        if (!nativeBack.isClickable || nativeBack.visibility != View.VISIBLE) return fail(header)
+        if (nativeTitle.text.isNullOrBlank()) return fail(header)
         val state = states[header] ?: create(header).also { states[header] = it }
-        state.back.setOnClickListener { nativeBack.performClick() }
-        state.more.setOnClickListener { nativeMore.performClick() }
+        if (state.backTarget !== nativeBack) {
+            state.backTarget = nativeBack
+            state.back.setOnClickListener { nativeBack.performClick() }
+        }
+        if (state.moreTarget !== nativeMore) {
+            state.moreTarget = nativeMore
+            state.more.setOnClickListener { nativeMore.performClick() }
+        }
         val titleAction = clickableAncestor(nativeTitle, header)
-        state.center.setOnClickListener { titleAction?.performClick() }
+        if (state.titleTarget !== titleAction) {
+            state.titleTarget = titleAction
+            state.center.setOnClickListener { titleAction?.performClick() }
+        }
         state.center.isClickable = titleAction != null
         val dark = header.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         val ink = if (dark) Color.WHITE else 0xFF191D21.toInt()
@@ -100,16 +110,11 @@ internal class FloatingChatHeaderCapsule {
         }
         if (header.background != null) header.background = null
         if (header.getChildAt(header.childCount - 1) !== state.row) state.row.bringToFront()
-        if (!state.appliedLogged) {
-            state.appliedLogged = true
-            HLog.i("[Hchat:悬浮标题栏] HEADER_SPLIT_APPLIED root=${header.javaClass.name} size=${header.width}x${header.height} segments=${state.row.childCount}")
-        }
+
         return true
     }
-    private fun fail(header: ViewGroup, reason: String = "unknown"): Boolean {
-        if (failCounts.computeIfAbsent(reason) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
-            HLog.i("[Hchat:悬浮标题栏] 胶囊未应用 reason=$reason root=${header.javaClass.name} size=${header.width}x${header.height}")
-        }
+    private fun fail(header: ViewGroup): Boolean {
+
         restore(header); return false
     }
     private fun findVerifiedMore(menu: ViewGroup, header: ViewGroup): View? {
@@ -138,42 +143,11 @@ internal class FloatingChatHeaderCapsule {
                 (settingRaw != 0 && settingIcon != null && icon?.constantState == settingIcon?.constantState)
         }
         if (verified.size == 1) return verified.single()
-        if (verified.size > 1) {
-            HLog.i("[Hchat:悬浮标题栏] 更多候选不唯一 count=${verified.size} all=${candidates.size}")
-        } else if (failCounts.computeIfAbsent("more_candidates") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
-            HLog.i("[Hchat:悬浮标题栏] 更多候选未命中 all=${candidates.size} settingText=$settingText")
-            logMenuStructure(header, menu, candidates)
-        }
+
         return null
     }
     // Only the first three failed resolutions reach here; no per-frame tree logging.
-    private fun logMenuStructure(header: ViewGroup, menu: ViewGroup, candidates: List<View>) {
-        fun describe(view: View): String {
-            val name = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("-")
-            val lp = view.layoutParams
-            val icon = (view as? ImageView)?.drawable
-            val tagId = view.resources.getIdentifier("nwr", "id", view.context.packageName)
-            val iconTag = if (tagId != 0) view.getTag(tagId) as? Int else null
-            val iconResource = iconTag?.let { runCatching { view.resources.getResourceName(it) }.getOrNull() }
-            return "${view.javaClass.name}#$name id=${view.id} size=${view.width}x${view.height} " +
-                "pos=${view.left},${view.top} visibility=${view.visibility} shown=${view.isShown} " +
-                "enabled=${view.isEnabled} clickable=${view.isClickable} listeners=${view.hasOnClickListeners()} " +
-                "alpha=${view.alpha} lp=${lp?.javaClass?.name}:${lp?.width}x${lp?.height} " +
-                "icon=${icon?.javaClass?.name} iconState=${icon?.constantState?.javaClass?.name} iconTag=$iconTag iconResource=$iconResource " +
-                "descriptionPresent=${!view.contentDescription.isNullOrEmpty()}"
-        }
-        val rows = ArrayList<String>()
-        val queue = ArrayDeque<Pair<View, Int>>()
-        queue.add(header to 0)
-        while (queue.isNotEmpty() && rows.size < 80) {
-            val (view, depth) = queue.removeFirst()
-            rows += "depth=$depth ${describe(view)}"
-            if (view is ViewGroup && depth < 10) {
-                for (i in 0 until view.childCount) queue.add(view.getChildAt(i) to depth + 1)
-            }
-        }
-        HLog.i("[Hchat:悬浮标题栏] HEADER_MENU_DIAG menu=${describe(menu)} candidates=${candidates.size} truncated=${queue.isNotEmpty()} tree=$rows")
-    }
+
     private fun create(header: ViewGroup): State {
         val ctx = header.context
         val size = minOf(dp(header, 48), header.height - dp(header, 4)).coerceAtLeast(dp(header, 32))
@@ -241,26 +215,11 @@ internal class FloatingChatHeaderCapsule {
         workerStarted = true
         worker.execute {
             var bitmap: Bitmap? = null
-            var sourceCount = 0
-            var contactsReady = false
-            var sourceStatus = "not_checked"
             try {
                 val contacts = WeChatApis.contact().contacts()
-                contactsReady = contacts != null
                 val urls = listOf(contacts?.getAvatarUrl(talker, false), contacts?.getAvatarUrl(talker, true))
                     .filterNotNull().filter { it.isNotBlank() }.distinct()
-                sourceCount = urls.size
-                if (urls.isEmpty()) {
-                    val database = WeChatApis.runtime().database()
-                    val cursor = database?.rawQuery("SELECT reserved1, reserved2 FROM img_flag WHERE username=? LIMIT 1", arrayOf(talker))
-                    sourceStatus = if (cursor == null) "query_unavailable" else cursor.use {
-                        if (!it.moveToFirst()) "row_missing" else {
-                            val large = it.getString(it.getColumnIndexOrThrow("reserved1"))
-                            val small = it.getString(it.getColumnIndexOrThrow("reserved2"))
-                            if (large.isNullOrBlank() && small.isNullOrBlank()) "fields_empty" else "fields_present_after_lookup"
-                        }
-                    }
-                }
+
                 for (url in urls) {
                     if (closed || Thread.currentThread().isInterrupted) break
                     try { bitmap = download(url) } catch (e: Exception) {
@@ -279,9 +238,7 @@ internal class FloatingChatHeaderCapsule {
                     cache.put(talker, result); target.avatar.setImageBitmap(result)
                 } else {
                     // Retry independently of layout events, with the same generation guard.
-                    if (failCounts.computeIfAbsent("avatar_empty") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
-                        HLog.i("[Hchat:悬浮标题栏] HEADER_AVATAR_RESULT empty=true sources=$sourceCount sourceStatus=$sourceStatus contactsReady=$contactsReady group=${talker.endsWith("@chatroom")} attempt=${target.avatarAttempts}")
-                    }
+
                     main.postDelayed({
                         val retryView = weakHeader.get(); val retryState = weakState.get()
                         if (!closed && retryView != null && retryState != null &&
@@ -301,9 +258,7 @@ internal class FloatingChatHeaderCapsule {
         try {
             conn.connectTimeout = 4000; conn.readTimeout = 4000
             if (conn.responseCode !in 200..299) {
-                if (failCounts.computeIfAbsent("avatar_http") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
-                    HLog.i("[Hchat:悬浮标题栏] HEADER_AVATAR_HTTP status=${conn.responseCode}")
-                }
+
                 return null
             }
             val bytes = conn.inputStream.use { input ->

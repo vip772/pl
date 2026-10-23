@@ -15,7 +15,6 @@ object FloatingChatCardVisuals {
     private val originals = WeakHashMap<View, android.graphics.drawable.Drawable?>()
     private val applied = WeakHashMap<View, GradientDrawable>()
     private val borderlessStyles = WeakHashMap<View, Boolean>()
-    private var surfaceRepairReports = 0
 
     fun apply(view: View, radiusDp: Int, translucent: Boolean = false, borderless: Boolean = false) {
         if (!originals.containsKey(view)) originals[view] = view.background
@@ -37,9 +36,7 @@ object FloatingChatCardVisuals {
             }
         }
         borderlessStyles[view] = borderless
-        if (borderless && (view.background !== drawable || drawable.alpha != 255 || view.backgroundTintList != null) && surfaceRepairReports++ < 6) {
-            t.mma.utils.HLog.i("[Hchat:悬浮输入框] FOOTER_SURFACE_REPAIR backgroundChanged=${view.background !== drawable} drawableAlpha=${drawable.alpha} tint=${view.backgroundTintList != null} viewAlpha=${view.alpha}")
-        }
+
         // Native tint/Drawable alpha can survive a background identity change.
         if (drawable.alpha != 255) drawable.alpha = 255
         if (view.backgroundTintList != null) view.backgroundTintList = null

@@ -64,9 +64,6 @@ private class FooterRuntime(private val context: FeatureContext) {
         context.hostContext(),
         "Hchat_floating_chat_footer_method_cache"
     )
-    private var diagnosticReports = 0
-    private var panelDiagnosticReports = 0
-    private var appliedReported = false
     private var structureFailureReported = false
     private var panelState = PANEL_STATE_NONE
     private var switchPanelMethod: Method? = null
@@ -173,7 +170,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         val method = candidates.singleOrNull()
         if (method != null) {
             DexMethodCache.save(methodPrefs, runtimeKey, CACHE_REFRESH_BOTTOM_HEIGHT, method)
-            HLog.i("[Hchat:$TAG] 已定位底部高度刷新入口: ${method.toGenericString()}")
+
         } else {
             DexMethodCache.clear(methodPrefs, runtimeKey, CACHE_REFRESH_BOTTOM_HEIGHT)
             HLog.e(
@@ -241,7 +238,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         val method = candidates.singleOrNull()
         if (method != null) {
             DexMethodCache.save(methodPrefs, runtimeKey, CACHE_ENTER_KEYBOARD_STATE, method)
-            HLog.i("[Hchat:$TAG] 已定位键盘状态入口: ${method.toGenericString()}")
+
         } else {
             DexMethodCache.clear(methodPrefs, runtimeKey, CACHE_ENTER_KEYBOARD_STATE)
             HLog.e("[Hchat:$TAG] 功能未生效: 键盘状态入口候选数量=${candidates.size}")
@@ -302,7 +299,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         val method = candidates.singleOrNull()
         if (method != null) {
             DexMethodCache.save(methodPrefs, runtimeKey, CACHE_SCROLL_CONTENT_TO, method)
-            HLog.i("[Hchat:$TAG] 已定位会话滚动入口: ${method.toGenericString()}")
+
         } else {
             DexMethodCache.clear(methodPrefs, runtimeKey, CACHE_SCROLL_CONTENT_TO)
             HLog.e("[Hchat:$TAG] 功能未生效: 会话滚动入口候选数量=${candidates.size}")
@@ -371,10 +368,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                             ?.getInsets(android.view.WindowInsets.Type.ime())?.bottom ?: 0
                     } else 0
                     if (panel.visibility == View.VISIBLE) {
-                        if (panelDiagnosticReports < 24) {
-                            panelDiagnosticReports++
-                            HLog.i("[Hchat:$TAG] FOOTER_PANEL_SCROLL imeBottom=$imeHeight panelHeight=${panel.height} panelMeasured=${panel.measuredHeight} panelVisibility=${panel.visibility} scrollY=${param.args.getOrNull(0)}")
-                        }
+
                         param.args[0] = imeHeight
                     }
                 }
@@ -416,7 +410,6 @@ private class FooterRuntime(private val context: FeatureContext) {
                     val state = param.args.firstOrNull() as? Int ?: return
                     panelState = state
                     val footer = param.thisObject as? View ?: return
-                    reportPanelState(footer, state, "before")
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
                     if (!isPanelState(state)) panel.visibility = View.GONE
                 }
@@ -429,7 +422,6 @@ private class FooterRuntime(private val context: FeatureContext) {
                     panelState = state
                     panel.visibility = if (isPanelState(state)) View.VISIBLE else View.GONE
                     if (isPanelState(state)) applyCompactPanelHeight(footer, panel)
-                    states[footer]?.let { reportPanelState(footer, state, "after") }
                     runCatching {
                         requestFooterApply(footer)
                     }
@@ -472,7 +464,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (!isEnabled()) { restore(footer); return }
         val layout = findAncestorChatLayout(footer) ?: return
         val tracker = trackerForFooter(footer, layout)
-        if (!isReadyChatLayout(layout)) { reportFooter(footer, tracker, "attach_wait_visible"); return }
+        if (!isReadyChatLayout(layout)) return
         if (!tracker.ready) footer.visibility = View.INVISIBLE
         scheduleFooterApply(footer, tracker)
     }
@@ -481,7 +473,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (!isEnabled()) { restore(footer); return }
         val layout = findAncestorChatLayout(footer) ?: return
         val tracker = trackerForFooter(footer, layout)
-        if (!isReadyChatLayout(layout)) { reportFooter(footer, tracker, "request_wait_visible"); return }
+        if (!isReadyChatLayout(layout)) return
         scheduleFooterApply(footer, tracker)
     }
 
@@ -504,7 +496,6 @@ private class FooterRuntime(private val context: FeatureContext) {
                 created.globalObserver = observer
                 created.globalListener = global
                 observer.addOnGlobalLayoutListener(global)
-                reportFooter(footer, created, "track")
             }
         }
         tracker.layout = layout
@@ -519,7 +510,6 @@ private class FooterRuntime(private val context: FeatureContext) {
                 if (observer.isAlive) observer.removeOnPreDrawListener(this)
                 if (tracker.preDraw === this) tracker.preDraw = null
                 if (!footer.isAttachedToWindow || !isReadyChatLayout(tracker.layout)) {
-                    reportFooter(footer, tracker, "predraw_wait_visible")
                     if (!tracker.ready && footer.visibility == View.INVISIBLE) footer.visibility = tracker.visibility
                     return true
                 }
@@ -536,12 +526,9 @@ private class FooterRuntime(private val context: FeatureContext) {
                     tracker.ready = true
                     footer.visibility = tracker.visibility
                     if (!wasReady) {
-                        reportFooter(footer, tracker, "ready")
                         removeGlobalTracking(tracker)
-                        observeFirstDraw(footer, tracker)
                     }
                 } else if (tracker.attempts++ < INITIAL_LAYOUT_RETRY_COUNT) {
-                    reportFooter(footer, tracker, "apply_not_ready")
                     footer.postOnAnimation {
                         if (footer.isAttachedToWindow && isReadyChatLayout(tracker.layout)) {
                             scheduleFooterApply(footer, tracker)
@@ -551,7 +538,6 @@ private class FooterRuntime(private val context: FeatureContext) {
                     // A failed apply may already have moved the native panel. Roll it back.
                     restore(footer)
                     footer.visibility = tracker.visibility
-                    reportFooter(footer, tracker, "retry_exhausted")
                     if (!tracker.failureReported) {
                         tracker.failureReported = true
                         HLog.w("[Hchat:$TAG] 初始布局未就绪，已恢复原始输入区和面板，等待后续布局变化")
@@ -572,41 +558,12 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (requestLayout) footer.requestLayout()
     }
 
-    private fun applyNotReady(footer: View, reason: String): Boolean {
-        footerTrackers[footer]?.let { reportFooter(footer, it, reason) }
-        return false
-    }
     private fun removeGlobalTracking(tracker: FooterTracker) {
         tracker.globalListener?.let { if (tracker.globalObserver?.isAlive == true) tracker.globalObserver?.removeOnGlobalLayoutListener(it) }
         tracker.globalListener = null
         tracker.globalObserver = null
     }
-    private fun reportFooter(footer: View, tracker: FooterTracker, phase: String) {
-        if (diagnosticReports >= 64 || (tracker.reports >= 8 && phase != "ready" && phase != "tree_draw_after_ready")) return
-        diagnosticReports++; tracker.reports++
-        val rect = android.graphics.Rect()
-        val visible = footer.getGlobalVisibleRect(rect)
-        HLog.i("[Hchat:$TAG] FOOTER_FIRST_FRAME phase=$phase elapsedMs=${android.os.SystemClock.uptimeMillis() - tracker.started} savedVisibility=${tracker.visibility} visibility=${footer.visibility} shown=${footer.isShown} alpha=${footer.alpha} size=${footer.width}x${footer.height} visible=$visible rect=$rect chatShown=${tracker.layout.isShown} chatWidth=${tracker.layout.width} attempt=${tracker.attempts} layoutRequested=${footer.isLayoutRequested}")
-    }
-    private fun observeFirstDraw(footer: View, tracker: FooterTracker) {
-        val observer = footer.viewTreeObserver
-        val listener = object : ViewTreeObserver.OnDrawListener {
-            private var reported = false
-            override fun onDraw() {
-                if (reported) return
-                reported = true
-                // Tree draw callback is not proof that this footer passed visibility/clipping.
-                reportFooter(footer, tracker, "tree_draw_after_ready")
-                footer.post {
-                    if (observer.isAlive) observer.removeOnDrawListener(this)
-                    if (tracker.drawListener === this) tracker.drawListener = null
-                }
-            }
-        }
-        tracker.drawObserver = observer
-        tracker.drawListener = listener
-        observer.addOnDrawListener(listener)
-    }
+
     private fun findAncestorChatLayout(view: View): ViewGroup? {
         var current = view.parent as? View
         while (current != null) {
@@ -628,9 +585,7 @@ private class FooterRuntime(private val context: FeatureContext) {
     private fun disposeFooter(footer: View) {
         footerTrackers.remove(footer)?.let { tracker ->
             removeGlobalTracking(tracker)
-            tracker.drawListener?.let { listener ->
-                if (tracker.drawObserver?.isAlive == true) tracker.drawObserver?.removeOnDrawListener(listener)
-            }
+
             tracker.layoutListener?.let(footer::removeOnLayoutChangeListener)
             tracker.preDraw?.let { listener ->
                 runCatching { footer.viewTreeObserver.removeOnPreDrawListener(listener) }
@@ -641,8 +596,7 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
 
     private fun apply(footer: View): Boolean {
-        val performanceStarted = t.mma.utils.PerformanceSample.start()
-        try {
+
         if (!isEnabled()) {
             restore(footer)
             return false
@@ -650,19 +604,19 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (!footer.isAttachedToWindow) return false
         val layout = findAncestorChatLayout(footer) ?: return false
         if (!isReadyChatLayout(layout)) return false
-        val marginParams = footer.layoutParams as? ViewGroup.MarginLayoutParams ?: return applyNotReady(footer, "margin_params")
+        val marginParams = footer.layoutParams as? ViewGroup.MarginLayoutParams ?: return false
         val panel = states[footer]?.panel ?: find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS }
         if (panel == null) {
             reportStructureFailureOnce("未找到 $FOOTER_BOTTOM_CLASS")
-            return applyNotReady(footer, "panel_missing")
+            return false
         }
-        val state = states[footer] ?: createState(footer, panel, marginParams) ?: return applyNotReady(footer, "state_structure")
+        val state = states[footer] ?: createState(footer, panel, marginParams) ?: return false
         if (isPanelState(panelState)) applyCompactPanelHeight(footer, state.panel)
         val measuredInputHeight = visibleHeightExcludingPanel(state.inputColumn, state.panel)
         val stableInputHeight = measuredInputHeight.takeIf { it > 0 }
             ?: state.baseInputHeight.takeIf { it > 0 }
             ?: footer.height.takeIf { it > 0 }
-            ?: return applyNotReady(footer, "input_height_zero")
+            ?: return false
         if (state.baseInputHeight <= 0 && !isPanelState(panelState)) state.baseInputHeight = stableInputHeight
         val inputHeight = if (isPanelState(panelState)) {
             stableInputHeight
@@ -671,11 +625,10 @@ private class FooterRuntime(private val context: FeatureContext) {
         }
 
         // Do not mutate hierarchy until native input height is available.
-        if (!state.reparented && !reparentPanel(state)) return applyNotReady(footer, "reparent_failed")
+        if (!state.reparented && !reparentPanel(state)) return false
         val side = dp(SIDE_MARGIN_DP)
         val gap = dp(BOTTOM_GAP_DP)
         val targetTop = -(inputHeight + gap)
-        if (marginParams.topMargin != targetTop) reportPanel(footer, state, "margin_update", measuredInputHeight, inputHeight, targetTop)
         var layoutChanged = false
         if (marginParams.leftMargin != side) {
             marginParams.leftMargin = side
@@ -707,17 +660,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         applyChatListPadding(footer, inputHeight + gap, state)
         ensurePreDrawTracking(footer)
 
-        if (!appliedReported && footer.width > 0) {
-            appliedReported = true
-            HLog.i(
-                "[Hchat:$TAG] 功能实际生效: root=${footer.javaClass.name} " +
-                    "card=${footer.width}x$inputHeight panelParent=${state.panel.parent?.javaClass?.name} " +
-                    "margin=${marginParams.leftMargin},${marginParams.rightMargin}," +
-                    "${marginParams.topMargin},${marginParams.bottomMargin}"
-            )
-        }
         return true
-            } finally { t.mma.utils.PerformanceSample.finish("floating_footer", performanceStarted) }
+
     }
 
     private fun createState(
@@ -788,10 +732,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                 }
             }
             state.reparented = true
-            HLog.i(
-                "[Hchat:$TAG] 输入区结构重排完成: panel=${panel.javaClass.name} " +
-                    "root=${state.root.javaClass.name}"
-            )
+
             true
         }.getOrElse { throwable ->
             runCatching {
@@ -872,16 +813,6 @@ private class FooterRuntime(private val context: FeatureContext) {
         }
     }
 
-    private fun reportPanel(footer: View, state: FooterState, phase: String, measured: Int, input: Int, targetTop: Int) {
-        if (panelDiagnosticReports >= 48) return
-        panelDiagnosticReports++
-        val lp = state.panel.layoutParams
-        HLog.i("[Hchat:$TAG] FOOTER_PANEL_LAYOUT phase=$phase state=$panelState panelVisibility=${state.panel.visibility} panelParent=${state.panel.parent?.javaClass?.name} panelHeight=${state.panel.height} panelMeasured=${state.panel.measuredHeight} panelLpHeight=${lp?.height} inputMeasured=$measured baseInput=${state.baseInputHeight} inputUsed=$input topMargin=${(footer.layoutParams as? ViewGroup.MarginLayoutParams)?.topMargin} targetTop=$targetTop footerHeight=${footer.height}")
-    }
-    private fun reportPanelState(footer: View, stateValue: Int, phase: String) {
-        val state = states[footer] ?: return
-        reportPanel(footer, state, "state_$phase", visibleHeightExcludingPanel(state.inputColumn, state.panel), state.baseInputHeight, (footer.layoutParams as? ViewGroup.MarginLayoutParams)?.topMargin ?: 0)
-    }
     private fun visibleHeightExcludingPanel(root: ViewGroup, panel: View): Int {
         var total = 0
         for (index in 0 until root.childCount) {
@@ -915,8 +846,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (preDrawListeners[footer] != null) return
         val listener = ViewTreeObserver.OnPreDrawListener {
             if (isEnabled() && footer.isAttachedToWindow) {
-                val started = t.mma.utils.PerformanceSample.start()
-                try {
+                run {
                     // Recheck cached surfaces only; do not scan the tree or request layout.
                     if (footer.elevation != 0f) footer.elevation = 0f
                     if (footer.translationZ != 0f) footer.translationZ = 0f
@@ -924,7 +854,6 @@ private class FooterRuntime(private val context: FeatureContext) {
                     FloatingFooterInputSurfaces.maintain(footer)
                     liftNewMessageBubble(footer)
                 }
-                finally { t.mma.utils.PerformanceSample.finish("floating_footer_predraw", started) }
             }
             true
         }
@@ -945,8 +874,8 @@ private class FooterRuntime(private val context: FeatureContext) {
             if (!isNewMessageBubble(candidate)) continue
             val lp = candidate.layoutParams as? FrameLayout.LayoutParams ?: continue
             if (lp.gravity and Gravity.VERTICAL_GRAVITY_MASK != Gravity.BOTTOM) continue
-            val footerLocation = IntArray(2).also(footer::getLocationOnScreen)
-            val contentLocation = IntArray(2).also(content::getLocationOnScreen)
+            val footerLocation = state.footerLocation.also(footer::getLocationOnScreen)
+            val contentLocation = state.contentLocation.also(content::getLocationOnScreen)
             val cardTop = footerLocation[1] - contentLocation[1]
             val overlap = (content.height - cardTop).coerceAtLeast(0)
             val target = maxOf(originalNewMessageMargin(candidate), overlap + dp(8))
@@ -1109,12 +1038,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         var layoutListener: View.OnLayoutChangeListener? = null,
         var attempts: Int = 0,
         var failureReported: Boolean = false,
-        val started: Long = android.os.SystemClock.uptimeMillis(),
-        var reports: Int = 0,
         var globalObserver: ViewTreeObserver? = null,
         var globalListener: ViewTreeObserver.OnGlobalLayoutListener? = null,
-        var drawObserver: ViewTreeObserver? = null,
-        var drawListener: ViewTreeObserver.OnDrawListener? = null
     )
 
     private data class FooterState(
@@ -1134,6 +1059,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         val clipToOutline: Boolean,
         val changedRules: MutableMap<View, IntArray> = LinkedHashMap(),
         var reparented: Boolean = false,
+        val footerLocation: IntArray = IntArray(2),
+        val contentLocation: IntArray = IntArray(2),
         var chatContent: ViewGroup? = null,
         var chatRecycler: View? = null,
         var recyclerPaddingBottom: Int? = null,

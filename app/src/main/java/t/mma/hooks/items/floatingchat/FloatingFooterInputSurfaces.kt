@@ -1,5 +1,6 @@
 package t.mma.hooks.items.floatingchat
 
+import android.content.res.Configuration
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.graphics.PorterDuff
@@ -12,7 +13,6 @@ import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ImageView
 import java.util.WeakHashMap
-import t.mma.utils.HLog
 
 /** Own native input/button backgrounds, never icon drawables or the detached emoji panel. */
 internal object FloatingFooterInputSurfaces {
@@ -21,7 +21,19 @@ internal object FloatingFooterInputSurfaces {
         val foreground: Drawable? = view.foreground
         val tint: ColorStateList? = view.backgroundTintList
         val tintMode: PorterDuff.Mode? = view.backgroundTintMode
+        private val sendButton = (view as? Button)?.takeIf {
+            runCatching { it.resources.getResourceEntryName(it.id) == "bql" }.getOrDefault(false)
+        }
+        private val originalTextColors = sendButton?.textColors
+        private val lightTextColors = ColorStateList.valueOf(0xFF191919.toInt())
         val marker = ColorDrawable(Color.TRANSPARENT)
+        fun maintainTextContrast() {
+            val button = sendButton ?: return
+            val dark = (view.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+                Configuration.UI_MODE_NIGHT_YES
+            val colors = if (dark) originalTextColors ?: return else lightTextColors
+            if (button.textColors !== colors) button.setTextColor(colors)
+        }
         fun clear() {
             val padding = intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom)
             val minWidth = view.minimumWidth
@@ -36,6 +48,7 @@ internal object FloatingFooterInputSurfaces {
             }
         }
         fun restore() {
+            if (originalTextColors != null) sendButton?.setTextColor(originalTextColors)
             FloatingChatCardVisuals.releasePresentation(view)
             val padding = intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom)
             val minWidth = view.minimumWidth
@@ -50,7 +63,6 @@ internal object FloatingFooterInputSurfaces {
         }
     }
     private val surfaces = WeakHashMap<View, MutableList<Surface>>()
-    private var reports = 0
     fun apply(footer: View) {
         val group = footer as? ViewGroup ?: return
         val tracked = surfaces.getOrPut(footer) { ArrayList() }
@@ -82,12 +94,11 @@ internal object FloatingFooterInputSurfaces {
                 val surface = tracked.firstOrNull { it.view === view } ?: Surface(view).also {
                     tracked.add(it)
                     FloatingChatCardVisuals.ownPresentation(view)
-                    report(view, "capture")
                 }
                 if (view.background !== surface.marker || view.backgroundTintList != null || view.foreground != null) {
-                    report(view, "clear")
                     surface.clear()
                 }
+                surface.maintainTextContrast()
             }
             if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
         }
@@ -119,14 +130,9 @@ internal object FloatingFooterInputSurfaces {
             if (view.background !== surface.marker || view.backgroundTintList != null || view.foreground != null) {
                 surface.clear()
             }
+            surface.maintainTextContrast()
         }
     }
 
-    private fun report(view: View, phase: String) {
-        if (reports >= 24) return
-        reports++
-        val id = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("unknown")
-        HLog.i("[Hchat:悬浮输入框] FOOTER_INPUT_SURFACE phase=$phase class=${view.javaClass.name} id=$id background=${view.background?.javaClass?.name} tint=${view.backgroundTintList != null} foreground=${view.foreground?.javaClass?.name} visibility=${view.visibility}")
-    }
     fun restore(footer: View) { surfaces.remove(footer)?.forEach { it.restore() } }
 }

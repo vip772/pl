@@ -187,9 +187,15 @@ object CustomFriendAvatarStore {
     }
 
     private fun sha256(value: String): String {
-        return MessageDigest.getInstance("SHA-256")
-            .digest(value.toByteArray(Charsets.UTF_8))
-            .joinToString("") { byte -> "%02x".format(byte) }
+        val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+        val hex = "0123456789abcdef"
+        return CharArray(digest.size * 2).also { chars ->
+            digest.forEachIndexed { index, byte ->
+                val unsigned = byte.toInt() and 0xff
+                chars[index * 2] = hex[unsigned ushr 4]
+                chars[index * 2 + 1] = hex[unsigned and 0xf]
+            }
+        }.concatToString()
     }
 
     private const val TAG = "[Hchat:CustomFriendAvatar]"

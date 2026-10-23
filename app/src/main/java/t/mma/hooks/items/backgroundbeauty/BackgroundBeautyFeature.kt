@@ -208,23 +208,16 @@ private class ScreenAlignedBitmapDrawable(
         updateDestination()
     }
 
-    fun coverageDescription(): String = "bounds=$bounds destination=$destination alpha=${paint.alpha} callback=${callback?.javaClass?.name}"
     override fun draw(canvas: Canvas) {
         // Insets, keyboard and page transitions can move the anchor without changing drawable bounds.
-        val started = t.mma.utils.PerformanceSample.start()
         updateDestination()
         val bitmap = bitmapRef.get()
-        // Avoid diagnostic allocations/log writes in scrolling draw callbacks.
         baseColor?.let { canvas.drawColor(it) }
         if (bitmap != null && !bitmap.isRecycled && !destination.isEmpty) canvas.drawBitmap(bitmap, null, destination, paint)
-        t.mma.utils.PerformanceSample.finish("background_bitmap_draw_cpu", started)
     }
 
-    private var alphaDiagnostics = 0
     override fun setAlpha(alpha: Int) {
-        if (alphaDiagnostics++ < 4 && alpha != paint.alpha) {
-            HLog.i("[Hchat:沉浸式背景] WXIMAGE alpha old=${paint.alpha} requested=$alpha trace=${Throwable().stackTrace.take(8).joinToString(" > ")}")
-        }
+
         paint.alpha = alpha.coerceIn(0, 255)
         invalidateSelf()
     }
@@ -266,7 +259,6 @@ private class BackgroundBeautyRuntime(
         const val MAX_INITIAL_REFRESHES = 2
         const val MAX_LAUNCHER_BITMAPS = 4
         const val MAX_SCAN_NODES = 1200
-        private const val ENABLE_RENDER_DIAGNOSTICS = false
         const val TAB_WECHAT = 0
         const val TAB_CONTACTS = 1
         const val TAB_DISCOVER = 2
@@ -362,8 +354,6 @@ private class BackgroundBeautyRuntime(
     private val ownedHooks = java.util.concurrent.CopyOnWriteArrayList<XC_MethodHook.Unhook>()
     private var surfaceMutationDepth = 0
     private val surfaceOwners = WeakHashMap<View, HostState>()
-    private val diagnosticCounts = java.util.concurrent.ConcurrentHashMap<String, java.util.concurrent.atomic.AtomicInteger>()
-    private val diagnosedLists = WeakHashMap<View, Boolean>()
     private val listAdapters = WeakHashMap<View, Any>()
     private val bounceColors = WeakHashMap<View, MutableMap<java.lang.reflect.Method, Any?>>()
     private var restoringBounce = false
@@ -385,7 +375,6 @@ private class BackgroundBeautyRuntime(
     private var destroyed = false
 
     fun install(): Boolean {
-        val started = android.os.SystemClock.uptimeMillis()
         // Decode concurrently with hook installation, before the first page refresh.
         if (prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) {
             loader.execute {
@@ -394,7 +383,7 @@ private class BackgroundBeautyRuntime(
                 if (bitmap != null && !destroyed && revision == prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)) {
                     preloadedHome = LoadedBitmap(revision, bitmap)
                 }
-                HLog.i("$TAG STARTUP homePreloadMs=${android.os.SystemClock.uptimeMillis() - started} ready=${bitmap != null}")
+
                 main.post { if (!destroyed) refreshAll() }
             }
         }
@@ -402,7 +391,7 @@ private class BackgroundBeautyRuntime(
         val installed = installActivityHooks() or
             installTabHooks() or
             installFragmentHooks() or
-            installSurfaceHooks() or installBackgroundWriteHook() or installWechatTargetDiagnostics() or installWechatVerifiedPaths()
+            installSurfaceHooks() or installBackgroundWriteHook() or installWechatVerifiedPaths()
         installChatChromeLifecycle()
         installChatBackgroundComponentHook(allowDexSearch = false)
         if (!installed) HLog.e("$TAG 未安装任何页面 Hook")
@@ -597,7 +586,7 @@ private class BackgroundBeautyRuntime(
             findWechatVerifiedMethod(clazz, "C0", Bundle::class.java)?.let { method ->
                 installed = hookOnce(method, after = { param ->
                     if (destroyed) return@hookOnce
-                    val mute = wechatProbeField(param.thisObject, "v") as? View ?: return@hookOnce
+                    val mute = readNativeField(param.thisObject, "v") as? View ?: return@hookOnce
                     if (mute.javaClass.name != "com.tencent.mm.plugin.story.ui.view.StoryMuteView") return@hookOnce
                     val activity = findActivity(mute) ?: return@hookOnce
                     if (activity.javaClass.name != LAUNCHER_ACTIVITY ||
@@ -607,7 +596,7 @@ private class BackgroundBeautyRuntime(
                         val original = mute.visibility
                         mute.visibility = View.GONE
                         initialStoryMuteVisibility[mute] = original
-                        HLog.i("$TAG MEMUTE initializedHidden ${wechatProbeView(mute, activity)}")
+
                     }
                 }) || installed
             }
@@ -661,107 +650,7 @@ private class BackgroundBeautyRuntime(
         return installed
     }
 
-    private fun wechatProbeField(owner: Any?, name: String): Any? = owner?.let { KavaReflector.readField(it, name) }
-    // APK 8.0.78 class definitions and method bodies verified before installing these probes.
-    private var wechatProbeDragAt = 0L
-    private val wechatProbeCalls = java.util.concurrent.atomic.AtomicInteger()
-    private val wechatProbePending = IdentityHashMap<XC_MethodHook.MethodHookParam, Pair<Int, Activity>>()
-    private fun wechatProbeView(view: View?, activity: Activity): String {
-        if (view == null) return "null"
-        val snapshot = states[activity]?.surfaces?.get(view)
-        val location = IntArray(2)
-        view.getLocationOnScreen(location)
-        val parents = ArrayList<String>(3)
-        var parent = view.parent
-        repeat(3) {
-            val node = parent as? View ?: return@repeat
-            parents += "${node.javaClass.name}@${System.identityHashCode(node)}"
-            parent = node.parent
-        }
-        val bg = view.background
-        return "${view.javaClass.name}@${System.identityHashCode(view)} id=${view.id} bg=${bg?.javaClass?.name}:${(bg as? ColorDrawable)?.color} managed=${snapshot != null} retained=${snapshot != null && bg === snapshot.appliedBackground} slot=${snapshot?.slot} visibility=${view.visibility} shown=${view.isShown} alpha=${view.alpha} xy=${location[0]},${location[1]} size=${view.width}x${view.height} translationY=${view.translationY} parents=$parents"
-    }
-    private fun wechatProbeState(activity: Activity): String =
-        "activity=${activity.javaClass.name}@${System.identityHashCode(activity)} target=${resolveTarget(activity)} tab=${launcherTabIndices[activity]} chat=${resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT} bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} barsApplied=${states[activity]?.systemBarsApplied} configured=${hasConfiguredBackground(activity)} mutation=$surfaceMutationDepth restoring=$restoringBounce pending=${pendingRefreshes.containsKey(activity)}"
-
-    private fun installWechatTargetDiagnostics(): Boolean {
-        var installed = false
-        val probes = listOf(
-            Triple("com.tencent.mm.plugin.taskbar.ui.b0", "y", arrayOf(Float::class.javaPrimitiveType!!)),
-            Triple("com.tencent.mm.plugin.taskbar.ui.TaskBarContainer", "l", emptyArray<Class<*>>()),
-            Triple("com.tencent.mm.plugin.taskbar.ui.TaskBarView", "z1", emptyArray<Class<*>>()),
-            Triple("com.tencent.mm.ui.HomeUI", "v", arrayOf(Int::class.javaPrimitiveType!!)),
-            Triple("com.tencent.mm.dynamicbackground.view.GradientColorBackgroundView", "onDraw", arrayOf(android.graphics.Canvas::class.java))
-        )
-        probes.forEach { (className, name, types) ->
-            // y 的后置保护属于业务逻辑，其他探针仅在诊断启用时安装。
-            if (!ENABLE_RENDER_DIAGNOSTICS && name != "y") return@forEach
-            val clazz = KavaReflector.loadClass(className, context.hostClassLoader())
-            val method = KavaReflector.findMethodRecursive(clazz, name, *types)
-            if (method == null) {
-                HLog.i("$TAG WXPROBE install class=$className method=$name found=false")
-                return@forEach
-            }
-            val hooked = hookOnce(method, before = { param ->
-                if (!ENABLE_RENDER_DIAGNOSTICS) return@hookOnce
-                // Check the limit before any reflection or parent inspection in drawing/dragging.
-                val count = diagnosticCounts.computeIfAbsent("wx-probe:$className:$name") { java.util.concurrent.atomic.AtomicInteger() }
-                val limit = if (name == "y") 32 else if (name == "onDraw") 6 else 12
-                if (count.get() >= limit) return@hookOnce
-                if (name == "onDraw" && (wechatProbeDragAt == 0L || android.os.SystemClock.uptimeMillis() - wechatProbeDragAt > 2000L)) return@hookOnce
-                val owner = param.thisObject ?: return@hookOnce
-                val activity = when {
-                    owner is View -> findActivity(owner)
-                    name == "y" -> findActivity(wechatProbeField(owner, "g"))
-                    else -> wechatProbeField(owner, "q") as? Activity
-                } ?: return@hookOnce
-                if (activity.javaClass.name != LAUNCHER_ACTIVITY || !hasConfiguredBackground(activity)) return@hookOnce
-                if (name == "onDraw" && resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT) return@hookOnce
-                if (count.incrementAndGet() > limit) return@hookOnce
-                if (name == "y") wechatProbeDragAt = android.os.SystemClock.uptimeMillis()
-                val id = wechatProbeCalls.incrementAndGet()
-                synchronized(wechatProbePending) { wechatProbePending[param] = id to activity }
-                runCatching { logWechatProbe(id, "before", className, name, owner, param.args, activity) }
-            }, after = { param ->
-                if (name == "y") {
-                    rememberWechatTaskController(param.thisObject)
-                    protectWechatGl(param.thisObject)
-                    applyWechatControllerChrome(param.thisObject)
-                }
-                val pending = synchronized(wechatProbePending) { wechatProbePending.remove(param) } ?: return@hookOnce
-                runCatching { logWechatProbe(pending.first, "after", className, name, param.thisObject ?: return@hookOnce, param.args, pending.second) }
-            })
-            HLog.i("$TAG WXPROBE install class=$className method=$name found=true hooked=$hooked")
-            installed = hooked || installed
-        }
-        return installed
-    }
-    private fun logWechatProbe(id: Int, phase: String, className: String, name: String, owner: Any, args: Array<out Any?>, activity: Activity) {
-        HLog.i("$TAG WXPROBE call=$id phase=$phase method=$className.$name owner=${System.identityHashCode(owner)} args=${args.filter { it is Number }} ${wechatProbeState(activity)}")
-        val nodes = ArrayList<Pair<String, View?>>()
-        when (name) {
-            "y" -> {
-                val host = wechatProbeField(owner, "f")
-                val hostClass = host?.javaClass
-                val list = KavaReflector.findMethodRecursive(hostClass, "a")?.let { runCatching { it.invoke(host) as? View }.getOrNull() }
-                HLog.i("$TAG WXPROBE call=$id phase=$phase scrollHost=${hostClass?.name} M=${wechatProbeField(owner, "M")} R=${wechatProbeField(owner, "R")}")
-                nodes += "scroll-list" to list
-                nodes += "controller-r" to (wechatProbeField(owner, "r") as? View)
-                nodes += "taskbar" to (wechatProbeField(owner, "g") as? View)
-                nodes += "dynamic-q" to (wechatProbeField(owner, "q") as? View)
-            }
-            "l", "z1" -> {
-                val container = if (name == "l") owner as? View else wechatProbeField(owner, "p2") as? View
-                nodes += "container" to container
-                nodes += "container-parent" to (container?.parent as? View)
-                listOf("f", "g", "h", "i").forEach { field -> nodes += "container-$field" to (wechatProbeField(container, field) as? View) }
-                val task = if (name == "z1") owner else wechatProbeField(owner, "e")
-                HLog.i("$TAG WXPROBE call=$id phase=$phase G2=${wechatProbeField(task, "G2")} P2=${wechatProbeField(task, "P2")} Q2=${wechatProbeField(task, "Q2")} Y2=${wechatProbeField(task, "Y2")}")
-            }
-            "onDraw" -> nodes += "gradient-draw" to (owner as? View)
-        }
-        nodes.forEach { (label, view) -> HLog.i("$TAG WXNODE call=$id phase=$phase label=$label ${wechatProbeView(view, activity)}") }
-    }
+    private fun readNativeField(owner: Any?, name: String): Any? = owner?.let { KavaReflector.readField(it, name) }
 
     private fun wechatHomepageBackdropEnabled(activity: Activity): Boolean =
         activity.javaClass.name == LAUNCHER_ACTIVITY &&
@@ -770,7 +659,7 @@ private class BackgroundBeautyRuntime(
     private val wechatTaskControllers = WeakHashMap<View, WeakReference<Any>>()
     private val wechatGradientControllers = WeakHashMap<View, WeakReference<Any>>()
     private fun rememberWechatTaskController(owner: Any?) {
-        val container = wechatProbeField(owner, "g") as? View ?: return
+        val container = readNativeField(owner, "g") as? View ?: return
         if (owner != null) wechatTaskControllers[container] = WeakReference(owner)
     }
     private fun wechatControllerForGradient(view: View): Any? {
@@ -781,7 +670,7 @@ private class BackgroundBeautyRuntime(
             if (current.javaClass.name == "com.tencent.mm.ui.conversation.MainUIView") {
                 return wechatTaskControllers.entries.firstOrNull { (container, reference) ->
                     val controller = reference.get() ?: return@firstOrNull false
-                    val scrollHost = wechatProbeField(controller, "f") ?: return@firstOrNull false
+                    val scrollHost = readNativeField(controller, "f") ?: return@firstOrNull false
                     val list = KavaReflector.findMethodRecursive(scrollHost.javaClass, "a")?.let {
                         runCatching { it.invoke(scrollHost) as? View }.getOrNull()
                     }
@@ -795,16 +684,14 @@ private class BackgroundBeautyRuntime(
         return null
     }
     private fun applyWechatControllerChrome(owner: Any?) {
-        val container = wechatProbeField(owner, "g") as? View ?: return
+        val container = readNativeField(owner, "g") as? View ?: return
         val activity = findActivity(container) ?: return
         if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT || !hasConfiguredBackground(activity)) return
         val state = states[activity] ?: return
         listOf("U1", "T1").forEach { field ->
-            (wechatProbeField(owner, field) as? View)?.takeIf { findActivity(it) === activity }?.let {
+            (readNativeField(owner, field) as? View)?.takeIf { findActivity(it) === activity }?.let {
                 setTransparentSurface(state, it, BackgroundBeautySettings.Slot.WECHAT)
-                if (diagnosticCounts.computeIfAbsent("wx-title:$field") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-                    HLog.i("$TAG WXFIX title=$field ${wechatProbeView(it, activity)}")
-                }
+
             }
         }
     }
@@ -817,7 +704,7 @@ private class BackgroundBeautyRuntime(
         try { view.visibility = visibility } finally { wechatGlMutation = false }
     }
     private fun protectWechatGl(owner: Any?) {
-        val dynamic = wechatProbeField(owner, "q") as? ViewGroup ?: return
+        val dynamic = readNativeField(owner, "q") as? ViewGroup ?: return
         val activity = findActivity(dynamic) ?: return
         val protected = wechatHomepageBackdropEnabled(activity)
         for (index in 0 until dynamic.childCount) {
@@ -828,9 +715,7 @@ private class BackgroundBeautyRuntime(
             if (view.visibility != View.INVISIBLE) {
                 wechatGlMutation = true
                 try { view.visibility = View.INVISIBLE } finally { wechatGlMutation = false }
-                if (diagnosticCounts.computeIfAbsent("wx-gl-hidden") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
-                    HLog.i("$TAG WXFIX glHidden controller=${System.identityHashCode(owner)} ${wechatProbeView(view, activity)}")
-                }
+
             }
         }
     }
@@ -838,69 +723,23 @@ private class BackgroundBeautyRuntime(
         wechatGradientControllers.keys.toList().filter { findActivity(it) === activity }.forEach { it.invalidate() }
         wechatTitleBackdrops.keys.toList().filter { findActivity(it) === activity }.forEach { it.invalidate() }
     }
-    private fun probeWechatReturnRender(activity: Activity, phase: String) {
-        val state = states[activity] ?: return
-        val decor = activity.window.decorView
-        val host = resolveBackgroundHost(activity)
-        listOf("decor" to decor, "host" to host,
-            "launcher" to decor.findViewById<View>(0x7f0a3e2d),
-            "snapshot" to decor.findViewById<View>(0x7f0a541c)).forEach { (label, view) ->
-            if (view != null) {
-                val bg = view.background
-                val snapshot = state.surfaces[view]
-                val image = view as? ImageView
-                HLog.i("$TAG WXRENDER phase=$phase label=$label ${wechatProbeView(view, activity)} actualBg=${actualViewBackground(view)?.javaClass?.name} actualContains=${backgroundContains(actualViewBackground(view), bg)} bgAlpha=${bg?.alpha} bgBounds=${bg?.bounds} callbackMatches=${bg?.callback === view} image=${image?.drawable?.javaClass?.name} imageAlpha=${image?.imageAlpha} tagView=${(view.tag as? View)?.javaClass?.name} bitmapMatch=${snapshot?.appliedBitmap === state.loadedBitmaps[BackgroundBeautySettings.Slot.WECHAT]?.bitmap}")
-            }
-        }
-        state.surfaces.entries.filter { (view, _) ->
-            view.javaClass.name == "com.tencent.mm.ui.conversation.ConversationListView"
-        }.forEach { (list, _) ->
-            HLog.i("$TAG WXRENDER phase=$phase label=list ${wechatProbeView(list, activity)}")
-            var parent = list.parent as? View
-            repeat(6) {
-                val node = parent ?: return@repeat
-                HLog.i("$TAG WXRENDER phase=$phase label=list-parent ${wechatProbeView(node, activity)} layer=${node.layerType}")
-                parent = node.parent as? View
-            }
-        }
-    }
-    private fun logChatReturn(activity: Activity, owner: Any, phase: String) {
-        if (diagnosticCounts.computeIfAbsent("chat-return:$phase") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 8) return
-        val chat = wechatProbeField(owner, "c") as? View
-        val home = activity.findViewById<View>(2131377709)
-        val snapshot = activity.findViewById<View>(2131383324)
-        HLog.i("$TAG CHATRETURN phase=$phase closed=${wechatProbeField(owner, "k")} animating=${wechatProbeField(owner, "l")} home=${wechatProbeView(home, activity)} chat=${wechatProbeView(chat, activity)} snapshot=${wechatProbeView(snapshot, activity)} animation=${chat?.animation?.javaClass?.name} ended=${chat?.animation?.hasEnded()}")
-        val root = chat as? ViewGroup ?: return
-        for (i in 0 until minOf(root.childCount, 6)) HLog.i("$TAG CHATRETURN child phase=$phase ${wechatProbeView(root.getChildAt(i), activity)}")
-    }
+
     private fun completeWechatReturn(activity: Activity, reason: String) {
         if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY || resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return
-        val probe = diagnosticCounts.computeIfAbsent("wx-return-render") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4
-        if (probe) probeWechatReturnRender(activity, "before:$reason")
         preparedRoots.entries.removeAll { it.value.first.activity === activity }
         applyForActivity(activity)
         invalidateWechatBackdrops(activity)
-        if (probe) {
-            probeWechatReturnRender(activity, "after:$reason")
-            activity.window.decorView.postOnAnimation {
-                if (!destroyed) probeWechatReturnRender(activity, "draw-frame:$reason")
-            }
-        }
+
         wechatTaskControllers.entries.toList().filter { findActivity(it.key) === activity }.forEach {
             protectWechatGl(it.value.get())
             applyWechatControllerChrome(it.value.get())
         }
-        if (diagnosticCounts.computeIfAbsent("wx-return-complete:$reason") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
-            HLog.i("$TAG WXFIX returnComplete reason=$reason ${wechatProbeState(activity)}")
-            activity.window.decorView.postOnAnimation {
-                if (!destroyed) armWechatDiagnostics(activity, "return-complete:$reason")
-            }
-        }
+
     }
 
     private fun findWechatVerifiedMethod(clazz: Class<*>?, name: String, vararg types: Class<*>): java.lang.reflect.Method? {
         val method = KavaReflector.findMethodRecursive(clazz, name, *types)
-        HLog.i("$TAG WXINSTALL class=${clazz?.name} method=$name types=${types.joinToString { it.name }} found=${method != null} alreadyHooked=${method != null && hookedMembers.contains(method)}")
+
         return method
     }
     private val suppressedDynamicContainers = WeakHashMap<View, Boolean>()
@@ -921,9 +760,9 @@ private class BackgroundBeautyRuntime(
             if (!suppressHomepageDynamicBackground(container)) return@hookOnce
             // b(false) pauses/releases an existing GL view and removes it using WeChat's lifecycle.
             // In the common case e is null: skip activation before allocation or render-thread resume.
-            if (wechatProbeField(container, "e") != null) {
+            if (readNativeField(container, "e") != null) {
                 KavaReflector.invoke(stop, container, false)
-                if (wechatProbeField(container, "e") != null) return@hookOnce
+                if (readNativeField(container, "e") != null) return@hookOnce
             }
             suppressedDynamicContainers[container] = true
             param.result = null
@@ -945,6 +784,13 @@ private class BackgroundBeautyRuntime(
         KavaReflector.declaredConstructors(controllerClass).forEach { constructor ->
             installed = hookOnce(constructor, after = { param -> rememberWechatTaskController(param.thisObject) }) || installed
         }
+        findWechatVerifiedMethod(controllerClass, "y", Float::class.javaPrimitiveType!!)?.let { method ->
+            installed = hookOnce(method, after = { param ->
+                rememberWechatTaskController(param.thisObject)
+                protectWechatGl(param.thisObject)
+                applyWechatControllerChrome(param.thisObject)
+            }) || installed
+        }
         val ints = Int::class.javaPrimitiveType!!
         val bools = Boolean::class.javaPrimitiveType!!
         listOf("f" to arrayOf(ints, ints, ints), "m" to arrayOf(bools, bools, ints, ints), "n" to arrayOf(bools)).forEach { (name, types) ->
@@ -955,9 +801,9 @@ private class BackgroundBeautyRuntime(
                     applyWechatControllerChrome(param.thisObject)
                     if (name != "f") {
                         val owner = param.thisObject
-                        listOf("u", "v", "q").forEach { field -> (wechatProbeField(owner, field) as? View)?.invalidate() }
-                        val container = wechatProbeField(owner, "g") as? View
-                        (wechatProbeField(container, "o") as? View)?.let { title ->
+                        listOf("u", "v", "q").forEach { field -> (readNativeField(owner, field) as? View)?.invalidate() }
+                        val container = readNativeField(owner, "g") as? View
+                        (readNativeField(container, "o") as? View)?.let { title ->
                             title.invalidate()
                             wechatTitleBackdrops.keys.toList().filter { backdrop ->
                                 var parent = backdrop.parent as? View
@@ -975,7 +821,6 @@ private class BackgroundBeautyRuntime(
         }
         val gradientClass = KavaReflector.loadClass("com.tencent.mm.dynamicbackground.view.GradientColorBackgroundView", context.hostClassLoader())
         findWechatVerifiedMethod(gradientClass, "onDraw", android.graphics.Canvas::class.java)?.let { method ->
-            // This method also has a diagnostic hook; install the drawing guard separately.
             ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (destroyed) return
@@ -993,12 +838,7 @@ private class BackgroundBeautyRuntime(
                     val activity = findActivity(view) ?: return
                     if (activity.javaClass.name != LAUNCHER_ACTIVITY || !wechatHomepageBackdropEnabled(activity)) return
                     param.result = null
-                    if (desktopGradient && diagnosticCounts.computeIfAbsent("wx-desktop-gradient") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
-                        HLog.i("$TAG WXFIX desktopGradientSkipped ${wechatProbeView(view, activity)}")
-                    }
-                    if (diagnosticCounts.computeIfAbsent("wx-gradient-skip") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
-                        HLog.i("$TAG WXFIX gradientSkipped controller=${System.identityHashCode(owner)} open=${wechatProbeField(owner, "P")} ${wechatProbeView(view, activity)}")
-                    }
+
                 }
             })
             installed = true
@@ -1007,16 +847,14 @@ private class BackgroundBeautyRuntime(
         findWechatVerifiedMethod(conversationClass, "y")?.let { method ->
             installed = hookOnce(method, after = { param ->
                 val list = param.thisObject as? View ?: return@hookOnce
-                val owner = wechatProbeField(list, "m") ?: return@hookOnce
+                val owner = readNativeField(list, "m") ?: return@hookOnce
                 rememberWechatTaskController(owner)
                 val activity = findActivity(list) ?: return@hookOnce
                 if (resolveTarget(activity) == BackgroundBeautySettings.Slot.WECHAT && hasConfiguredBackground(activity)) {
                     val state = states[activity] ?: return@hookOnce
-                    (wechatProbeField(list, "C") as? View)?.let {
+                    (readNativeField(list, "C") as? View)?.let {
                         setTransparentSurface(state, it, BackgroundBeautySettings.Slot.WECHAT)
-                        if (diagnosticCounts.computeIfAbsent("wx-bound-title") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
-                            HLog.i("$TAG WXFIX boundTitle ${wechatProbeView(it, activity)}")
-                        }
+
                     }
                 }
                 protectWechatGl(owner)
@@ -1064,7 +902,7 @@ private class BackgroundBeautyRuntime(
                 var owner: Any? = null
                 repeat(4) {
                     val node = parent ?: return@repeat
-                    if (node.javaClass.name == "com.tencent.mm.plugin.taskbar.ui.TaskBarContainer") owner = wechatProbeField(node, "d")
+                    if (node.javaClass.name == "com.tencent.mm.plugin.taskbar.ui.TaskBarContainer") owner = readNativeField(node, "d")
                     parent = node.parent as? View
                 }
                 val controller = owner ?: return@hookOnce
@@ -1072,41 +910,17 @@ private class BackgroundBeautyRuntime(
                 if (activity.javaClass.name != LAUNCHER_ACTIVITY || !wechatHomepageBackdropEnabled(activity)) return@hookOnce
                 wechatTitleBackdrops[view] = true
                 param.result = null
-                if (diagnosticCounts.computeIfAbsent("wx-bottom-skip") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
-                    HLog.i("$TAG WXFIX titleBackdropSkipped ${wechatProbeView(view, activity)}")
-                }
+
             }) || installed
         }
         val chatTabClass = KavaReflector.loadClass("com.tencent.mm.ui.NewChattingTabUI", context.hostClassLoader())
-        findWechatVerifiedMethod(chatTabClass, "f", Boolean::class.javaPrimitiveType!!)?.let { method ->
-            // Separate callback registration: a previously registered observer must not suppress
-            // this lifecycle hook through hookOnce's member deduplication.
-            ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (destroyed) return
-                    val owner = param.thisObject
-                    val activity = wechatProbeField(owner, "a") as? Activity ?: return
-                    val chat = wechatProbeField(owner, "c") as? View ?: return
-                    logChatReturn(activity, owner, "before-close")
-                    HLog.i("$TAG CHATRETURN close animated=${param.args.firstOrNull()} host=${chat.javaClass.name} id=${chat.id}")
-                }
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    val owner = param.thisObject
-                    val activity = wechatProbeField(owner, "a") as? Activity ?: return
-                    logChatReturn(activity, owner, "after-close")
-                    activity.window.decorView.postOnAnimation { if (!destroyed) logChatReturn(activity, owner, "close-frame") }
-                }
-            })
-        }
         listOf("u" to emptyArray<Class<*>>(), "s" to arrayOf(Int::class.javaPrimitiveType!!)).forEach { (name, types) ->
             val method = findWechatVerifiedMethod(chatTabClass, name, *types)
-            if (method == null) {
-                HLog.i("$TAG WXINSTALL class=NewChattingTabUI method=$name found=false")
-            } else {
+            if (method != null) {
                 val hooked = hookOnce(method, after = { param ->
                     val owner = param.thisObject
-                    val activity = wechatProbeField(owner, "a") as? Activity ?: return@hookOnce
-                    val chatting = wechatProbeField(owner, "c") as? View ?: return@hookOnce
+                    val activity = readNativeField(owner, "a") as? Activity ?: return@hookOnce
+                    val chatting = readNativeField(owner, "c") as? View ?: return@hookOnce
                     if (name == "s" && param.args.firstOrNull() != View.VISIBLE) return@hookOnce
                     if (chatting.visibility == View.GONE) {
                         activity.window.decorView.postOnAnimation {
@@ -1114,24 +928,21 @@ private class BackgroundBeautyRuntime(
                         }
                     }
                 })
-                HLog.i("$TAG WXINSTALL class=NewChattingTabUI method=$name found=true hooked=$hooked")
+
                 installed = hooked || installed
             }
         }
         val endClass = KavaReflector.loadClass("com.tencent.mm.ui.uf", context.hostClassLoader())
         findWechatVerifiedMethod(endClass, "onAnimationEnd", android.view.animation.Animation::class.java)?.let { method ->
             installed = hookOnce(method, after = { param ->
-                val chatUi = wechatProbeField(param.thisObject, "d")
-                val chatView = wechatProbeField(chatUi, "c") as? View ?: return@hookOnce
+                val chatUi = readNativeField(param.thisObject, "d")
+                val chatView = readNativeField(chatUi, "c") as? View ?: return@hookOnce
                 if (chatView.visibility != View.GONE) return@hookOnce
                 val activity = findActivity(chatView) ?: return@hookOnce
                 if (activity.javaClass.name != LAUNCHER_ACTIVITY || resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return@hookOnce
                 preparedRoots.entries.removeAll { it.value.first.activity === activity }
                 applyForActivity(activity)
-                HLog.i("$TAG WXFIX chatAnimationEnd ${wechatProbeState(activity)}")
-                if (diagnosticCounts.computeIfAbsent("wx-chat-end") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-                    main.post { if (!destroyed) armWechatDiagnostics(activity, "chat-animation-end") }
-                }
+
             }) || installed
         }
         return installed
@@ -1198,10 +1009,7 @@ private class BackgroundBeautyRuntime(
                     val view = param.thisObject as? View ?: return@hookOnce
                     val activity = findActivity(view) ?: return@hookOnce
                     if (!restoringBounce && surfaceMutationDepth == 0 && hasConfiguredBackground(activity)) {
-                        if (diagnosticCounts.computeIfAbsent("bounce:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-                            HLog.i("$TAG DIAG bounce class=${view.javaClass.name} method=$name input=${param.args[0]}")
-                            // No delayed tree traversal in a bounce animation.
-                        }
+
                         recordBounceArgument(view, method, param.args[0])
                         param.args[0] = Color.TRANSPARENT
                     }
@@ -1217,9 +1025,7 @@ private class BackgroundBeautyRuntime(
                     if (!restoringBounce && surfaceMutationDepth == 0 && hasConfiguredBackground(activity)) {
                         recordBounceArgument(view, method, param.args[0])
                         param.args[0] = ColorDrawable(Color.TRANSPARENT)
-                        if (diagnosticCounts.computeIfAbsent("bounce:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-                            HLog.i("$TAG DIAG bounce drawable class=${view.javaClass.name} method=$name")
-                        }
+
                     }
                 }) || installed
             }
@@ -1245,12 +1051,6 @@ private class BackgroundBeautyRuntime(
         } else values[method] = argument
     }
     private fun restoreBounceColors(activity: Activity?) {
-        wechatDiagnosticListeners.entries.filter { activity == null || it.key === activity }.toList().forEach { (owner, listener) ->
-            val observer = owner.window.decorView.viewTreeObserver
-            if (observer.isAlive) observer.removeOnPreDrawListener(listener)
-            wechatDiagnosticListeners.remove(owner)
-            wechatDiagnosticFrames.remove(owner)
-        }
         pendingPageRoots.keys.removeAll { activity == null || findActivity(it) === activity }
         preparedRoots.entries.removeAll { activity == null || it.value.first.activity === activity }
         listSelectors.entries.filter { activity == null || findActivity(it.key) === activity }.toList().forEach { (list, selector) ->
@@ -1312,7 +1112,7 @@ private class BackgroundBeautyRuntime(
             "updateBackgroundDrawable" to emptyArray<Class<*>>()).forEach { (name, types) ->
             val method = KavaReflector.findMethodRecursive(clazz, name, *types)
             if (method == null) {
-                HLog.i("$TAG WXDECOR install method=$name found=false")
+
                 return@forEach
             }
             val hooked = hookOnce(method, before = { param ->
@@ -1336,7 +1136,6 @@ private class BackgroundBeautyRuntime(
                     !BackgroundBeautyStore.hasImage(context.hostContext(), slot)) return@hookOnce
                 if (decorBackgroundApplied(view, applied)) return@hookOnce
                 val host = view.background
-                val actualBefore = actualViewBackground(view)
                 if (host !== applied) {
                     snapshot.originalBackground = host
                     snapshot.originalTintList = view.backgroundTintList
@@ -1358,11 +1157,9 @@ private class BackgroundBeautyRuntime(
                     restoreSurfaceGeometry(view, snapshot)
                     view.invalidate()
                 } finally { surfaceMutationDepth-- }
-                if (diagnosticCounts.computeIfAbsent("decor-repair") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 10) {
-                    HLog.i("$TAG WXDECOR repaired method=$name getterBefore=${host?.javaClass?.name} actualBefore=${actualBefore?.javaClass?.name}:${(actualBefore as? ColorDrawable)?.color} actualAfter=${actualViewBackground(view)?.javaClass?.name} applied=${decorBackgroundApplied(view, snapshot.appliedBackground)}")
-                }
+
             })
-            HLog.i("$TAG WXDECOR install method=$name hooked=$hooked")
+
             installed = hooked || installed
         }
         return installed
@@ -1396,17 +1193,7 @@ private class BackgroundBeautyRuntime(
                     // DecorView.getBackground is not View.mBackground; never reenter its outer update here.
                     if (view === state.activity.window.decorView) return@hookOnce
                     if (view.background !== snapshot.appliedBackground) {
-                        if (diagnosticCounts.computeIfAbsent("write:${view.javaClass.name}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
-                            HLog.i("$TAG DIAG rewrite class=${view.javaClass.name} setter=$name background=${view.background?.javaClass?.name}")
-                        }
-                        if (snapshot.slot == BackgroundBeautySettings.Slot.WECHAT &&
-                            (isChromeSurface(view) || isSystemBarBackground(view) || view === state.activity.window.decorView)) {
-                            val key = "wxwrite:${view.javaClass.name}:$name"
-                            if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 2) {
-                                HLog.i("$TAG WXWRITE class=${view.javaClass.name} method=$name trace=${Throwable().stackTrace.take(16).joinToString(" > ")}")
-                            }
-                            armWechatDiagnostics(state.activity, "write:${view.javaClass.name}")
-                        }
+
                         if (snapshot.slot == BackgroundBeautySettings.Slot.CONTACTS) {
                             captureContactGeometry(view, snapshot)
                             if (isContactIconSurface(view)) {
@@ -1431,9 +1218,7 @@ private class BackgroundBeautyRuntime(
                                 restoreSurfaceGeometry(view, snapshot)
                             } finally { surfaceMutationDepth-- }
                         }
-                        if (diagnosticCounts.computeIfAbsent("write-result:${view.javaClass.name}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-                            HLog.i("$TAG WXRESULT class=${view.javaClass.name} slot=${snapshot.slot} applied=${applied != null} retained=${view.background === applied} active=${state.lastLoggedSlot}")
-                        }
+
                         if (applied == null) scheduleRefresh(state.activity)
                     }
                 }) || installed
@@ -1445,12 +1230,7 @@ private class BackgroundBeautyRuntime(
             KavaReflector.findMethodRecursive(windowClass, name, Integer.TYPE)?.let { method ->
                 hookOnce(method, before = { param ->
                     if (surfaceMutationDepth != 0 || restoringBounce) return@hookOnce
-                    val probeWindow = param.thisObject as? android.view.Window
-                    val probeActivity = probeWindow?.let { findActivity(it.decorView) }
-                    if (probeActivity != null && probeActivity.javaClass.name == LAUNCHER_ACTIVITY &&
-                        diagnosticCounts.computeIfAbsent("wx-bar:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 24) {
-                        HLog.i("$TAG WXBAR phase=before method=$name requested=${param.args.firstOrNull()} ${wechatProbeState(probeActivity)}")
-                    }
+
                     if (surfaceMutationDepth != 0 || restoringBounce) return@hookOnce
                     val window = param.thisObject as? android.view.Window ?: return@hookOnce
                     val activity = findActivity(window.decorView) ?: return@hookOnce
@@ -1462,14 +1242,6 @@ private class BackgroundBeautyRuntime(
                             else states[activity]?.originalNavigationBarColor = hostColor
                         }
                         param.args[0] = Color.TRANSPARENT
-                    }
-                }, after = { param ->
-                    if (surfaceMutationDepth != 0 || restoringBounce) return@hookOnce
-                    val window = param.thisObject as? android.view.Window ?: return@hookOnce
-val activity = findActivity(window.decorView) ?: return@hookOnce
-                    if (activity.javaClass.name == LAUNCHER_ACTIVITY &&
-                        diagnosticCounts.computeIfAbsent("wx-bar-after:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 24) {
-                        HLog.i("$TAG WXBAR phase=after method=$name effectiveArgument=${param.args.firstOrNull()} ${wechatProbeState(activity)}")
                     }
                 })
             }
@@ -1574,6 +1346,9 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         snapshot.originalMinimumHeight = view.minimumHeight
     }
     private fun updateListRipple(list: ViewGroup, event: android.view.MotionEvent) {
+        // A cancelled drag has no ripple to update; skip subsequent owner queries.
+        if (event.actionMasked != android.view.MotionEvent.ACTION_DOWN &&
+            !touchFeedbackOrigins.containsKey(list)) return
         val slot = homeLists[list] ?: return
         if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) return
         val activity = findActivity(list) ?: return
@@ -1607,9 +1382,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                                     contactOverlays[row] = overlay
                                 }
                             } else ripple.setTouchPressed(true)
-                            if (diagnosticCounts.computeIfAbsent("ripple:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-                                HLog.i("$TAG DIAG ripple slot=${slot.key} row=${row.javaClass.name} hotspot=$x/$y")
-                            }
+
                             touchFeedbackRows[list] = row
                             touchFeedbackOrigins[list] = event.x to event.y
                         }
@@ -1667,8 +1440,9 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                         prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) {
                         for (index in 0 until view.childCount) {
                             val row = view.getChildAt(index)
-                            if (dirtyBoundRows.remove(row) == true || owner.surfaces[row] == null ||
-                                (slot == BackgroundBeautySettings.Slot.CONTACTS && row.background !== owner.surfaces[row]?.appliedBackground)) {
+                            val snapshot = owner.surfaces[row]
+                            if (dirtyBoundRows.remove(row) == true || snapshot == null ||
+                                (slot == BackgroundBeautySettings.Slot.CONTACTS && row.background !== snapshot.appliedBackground)) {
                                 applyHomeRow(owner, row, slot)
                             }
                         }
@@ -1753,7 +1527,6 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     private fun applyHomeRow(state: HostState, row: View, slot: BackgroundBeautySettings.Slot) {
         if (t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(row)) return
         contactOverlays.remove(row)?.let { row.overlay.remove(it) }
-        val started = android.os.SystemClock.uptimeMillis()
         state.surfaces[row]?.let { snapshot ->
             snapshot.originalPaddingLeft = row.paddingLeft
             snapshot.originalPaddingTop = row.paddingTop
@@ -1779,13 +1552,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 for (i in 0 until child.childCount) queue.add(child.getChildAt(i))
             }
         }
-        val elapsed = android.os.SystemClock.uptimeMillis() - started
-        if (elapsed >= 8 && diagnosticCounts.computeIfAbsent("slow-row:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
-            HLog.i("$TAG PERF row slot=${slot.key} class=${row.javaClass.name} nodes=$visited elapsedMs=$elapsed")
-        }
+
     }
-
-
 
     @Synchronized
     fun installChatBackgroundComponentHook(allowDexSearch: Boolean): Boolean {
@@ -1934,12 +1702,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                         for (i in 0 until list.childCount) dirtyBoundRows[list.getChildAt(i)] = true
                     }
                 }
-                val started = android.os.SystemClock.uptimeMillis()
                 applyForActivity(activity)
-                val elapsed = android.os.SystemClock.uptimeMillis() - started
-                if (elapsed >= 16 && diagnosticCounts.computeIfAbsent("slow-refresh") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
-                    HLog.i("$TAG DIAG slowRefresh elapsedMs=$elapsed")
-                }
+
                 if (retries > 0 && !destroyed) {
                     main.postDelayed({ scheduleRefresh(activity, retries - 1) }, 120L)
                 }
@@ -1978,19 +1742,13 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         main.post {
             val launchers = synchronized(observedActivities) { observedActivities.keys.filter { it.javaClass.name == LAUNCHER_ACTIVITY } }
             launchers.forEach { activity ->
-                HLog.i("$TAG DIAG chatTransition entered=$entered")
+
                 scheduleRefresh(activity, 1)
                 invalidateWechatBackdrops(activity)
-                if (diagnosticCounts.computeIfAbsent("wx-chat-state") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
-                    HLog.i("$TAG WXRETURN phase=event entered=$entered ${wechatProbeState(activity)}")
-                    activity.window.decorView.postOnAnimation {
-                        if (!destroyed && !activity.isDestroyed) HLog.i("$TAG WXRETURN phase=next-frame entered=$entered ${wechatProbeState(activity)}")
-                    }
-                }
+
                 if (!entered) {
                     preparedRoots.entries.removeAll { it.value.first.activity === activity }
                     scheduleRefresh(activity, 1)
-                    main.post { armWechatDiagnostics(activity, "chat-exit") }
                 }
             }
         }
@@ -2078,31 +1836,6 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         }
     }
 
-    private fun probeMeMuteLayer(activity: Activity) {
-        if (diagnosticCounts.computeIfAbsent("me-mute") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 3) return
-        val root = activity.window.decorView
-        root.post {
-            if (destroyed || resolveTarget(activity) != BackgroundBeautySettings.Slot.ME) return@post
-            val queue = ArrayDeque<View>()
-            queue.add(root)
-            var visited = 0
-            while (queue.isNotEmpty() && visited++ < 450) {
-                val view = queue.removeFirst()
-                val text = (view as? android.widget.TextView)?.text?.toString().orEmpty()
-                val description = view.contentDescription?.toString().orEmpty()
-                if (text.contains("静音") || description.contains("静音")) {
-                    HLog.i("$TAG MEMUTE match text=$text description=$description ${wechatProbeView(view, activity)}")
-                    var node = view.parent as? View
-                    repeat(4) {
-                        val parent = node ?: return@repeat
-                        HLog.i("$TAG MEMUTE parent ${wechatProbeView(parent, activity)}")
-                        node = parent.parent as? View
-                    }
-                }
-                if (view is ViewGroup) for (index in 0 until view.childCount) queue.add(view.getChildAt(index))
-            }
-        }
-    }
     private fun applyBitmap(
         state: HostState,
         slot: BackgroundBeautySettings.Slot,
@@ -2160,10 +1893,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         applySystemBars(state)
         if (state.activity.javaClass.name == LAUNCHER_ACTIVITY) invalidateWechatBackdrops(state.activity)
         if (state.lastLoggedSlot != slot) {
-            if (slot == BackgroundBeautySettings.Slot.ME) probeMeMuteLayer(state.activity)
             state.lastLoggedSlot = slot
-            // Full tree/frame diagnostics removed after capturing 66fe209 evidence.
-            HLog.i("$TAG 页面背景已应用: slot=${slot.key} surfaces=${state.surfaces.size} lists=${homeLists.size} singleImageHost=${if (slot == BackgroundBeautySettings.Slot.CHAT) "chat-moving-content" else "window"}")
+
         }
     }
 
@@ -2181,16 +1912,13 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         val revision = prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)
         val prepared = preparedRoots[root]
         if (prepared?.first === state && prepared.second == revision) return
-        val started = android.os.SystemClock.uptimeMillis()
         applyWhitelistedSurfaces(state, root, slot)
         val pendingList = homeLists.entries.any { (list, listSlot) ->
             listSlot == slot && list is ViewGroup && list.childCount == 0 && isDescendantOf(list, root)
         }
         if (!pendingList) preparedRoots[root] = state to revision
         else pendingPageRoots[root] = slot
-        if (diagnosticCounts.computeIfAbsent("prepare:${slot.key}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-            HLog.i("$TAG DIAG prepare slot=${slot.key} elapsedMs=${android.os.SystemClock.uptimeMillis() - started}")
-        }
+
     }
     private fun applyLauncherBackground(
         state: HostState,
@@ -2257,9 +1985,6 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             applyWhitelistedSurfaces(state, root, BackgroundBeautySettings.Slot.CHAT)
             applyChatChromeRoot(state, root)
             findDescendant(root, "com.tencent.mm.view.SmileyPanelImpl")?.let(::applyEmojiPanelSurfaces)
-            probeVisibleChrome(activity, "chat-applied")
-            root.postOnAnimation { if (!destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT) probeVisibleChrome(activity, "chat-next-frame") }
-            root.postDelayed({ if (!destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT) probeVisibleChrome(activity, "chat-settled") }, 500L)
         }
     }
 
@@ -2276,9 +2001,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         val icon = footer.findViewById<ImageView>(resourceId("bqr"))
         val drawable = icon?.drawable
         if (icon == null || drawable == null || icon.width <= 0 || icon.height <= 0) {
-            if (diagnosticCounts.computeIfAbsent("stroke-missing") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
-                HLog.i("$TAG CHATSTROKE missing button=${icon != null} drawable=${drawable?.javaClass?.name} size=${icon?.width}x${icon?.height}")
-            }
+
             return (footer.resources.displayMetrics.density * 1.2f).toInt().coerceAtLeast(1)
         }
         val matrix = FloatArray(9).also { icon.imageMatrix.getValues(it) }
@@ -2318,7 +2041,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             HLog.e("$TAG 表情按钮实际线宽采样失败: ${drawable.javaClass.name}", error)
         } finally { bitmap.recycle() }
         val pixels = if (weighted > 0) kotlin.math.ceil(weighted).toInt() else (footer.resources.displayMetrics.density * 1.2f).toInt().coerceAtLeast(1)
-        HLog.i("$TAG CHATSTROKE actual button=${icon.id} drawable=${drawable.javaClass.name} bounds=${drawable.bounds} viewport=${icon.width}x${icon.height} scale=$scale weightedPx=$weighted widthPx=$pixels")
+
         if (weighted > 0) measuredIconStrokes[icon] = IconStroke(drawable, icon.width, icon.height, scale, pixels, inkTop, inkBottom)
         return pixels
     }
@@ -2461,7 +2184,6 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             })
         }
 
-
         val noticeClass = KavaReflector.loadClass("com.tencent.mm.ui.tipsbar.ChatTipsBarGroup", context.hostClassLoader())
         listOf("onAttachedToWindow", "c", "d", "onLayout").forEach { name ->
             val types = if (name == "onLayout") arrayOf(Boolean::class.javaPrimitiveType!!,
@@ -2522,11 +2244,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         findWechatVerifiedMethod(baseConversation, "closeChatting", Boolean::class.javaPrimitiveType!!)?.let { method ->
             hookOnce(method, after = { param ->
                 (param.thisObject as? Activity)?.let { activity ->
-                    logGroupReturnLayout(activity, "close")
                     scheduleRefresh(activity, 1)
-                    activity.window.decorView.postOnAnimation {
-                        if (!destroyed) logGroupReturnLayout(activity, "close-frame")
-                    }
+
                 }
             })
         }
@@ -2541,9 +2260,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 // TaskBarContainer reserves 52 px; the next conversation row remains clipped at the bottom.
                 // Skip that row's entire drawing (including text/foreground), without changing layout or touch.
                 param.result = null
-                if (diagnosticCounts.computeIfAbsent("desktop-row-draw-skip") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-                    HLog.i("$TAG DESKTOPEDGE clippedRowDrawSkipped ${wechatProbeView(view, activity)}")
-                }
+
             })
         }
         // Reapply overlap after every native scroll layout; this is the verified dd6383f path.
@@ -2581,9 +2298,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                         resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT && hasConfiguredBackground(activity)) {
                         // Prepare the editor outline synchronously after native layout,
                         // before its first draw. Full root transparency remains in refresh.
-                        val started = t.mma.utils.PerformanceSample.start()
-                        try { applyChatFooterTransparency(state, view) }
-                        finally { t.mma.utils.PerformanceSample.finish("chat_input_transparency", started) }
+                        applyChatFooterTransparency(state, view)
                     }
                 }
             }
@@ -2694,9 +2409,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                     snapshot.appliedBitmap = null
                     snapshot.slot = BackgroundBeautySettings.Slot.CHAT
                     inputOutlineStyles[view] = style
-                    if (diagnosticCounts.computeIfAbsent("outline-set") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
-                        HLog.i("$TAG INPUT_OUTLINE_SET editor=${view.width}x${view.height} attached=${view.isAttachedToWindow} slot=${state.lastLoggedSlot} inkReady=${ink != null}")
-                    }
+
                 } finally { surfaceMutationDepth-- }
             } else if (view is ViewGroup) {
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = appGridItems[view] == true)
@@ -2744,9 +2457,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             }
             if (isHomeContentList(view, slot)) {
                 homeLists[view] = slot
-                if (diagnosedLists.put(view, true) == null) {
-                    HLog.i("$TAG 主页列表: slot=${slot.key} class=${view.javaClass.name} children=${(view as? ViewGroup)?.childCount ?: 0}")
-                }
+
                 installRecyclerBinding(view)
                 if (view is ViewGroup) {
                     for (index in 0 until view.childCount) {
@@ -2853,7 +2564,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         val rect = Rect()
         if (!view.getGlobalVisibleRect(rect) || rect.bottom < activity.window.decorView.height - 2) return false
         val controller = wechatTaskControllers.entries.firstOrNull { findActivity(it.key) === activity }?.value?.get() ?: return false
-        return wechatProbeField(controller, "P") as? Boolean == true && rect.top > activity.window.decorView.height * 0.94f
+        return readNativeField(controller, "P") as? Boolean == true && rect.top > activity.window.decorView.height * 0.94f
     }
     private fun isWechatTaskSurface(view: View): Boolean =
         view.javaClass.name == "com.tencent.mm.plugin.taskbar.ui.TaskBarContainer" ||
@@ -2870,152 +2581,10 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         }
     }
 
-    private fun probeVisibleChrome(activity: Activity, reason: String) {
-        if (!ENABLE_RENDER_DIAGNOSTICS) return
-        if (destroyed) return
-        val decor = activity.window.decorView
-        if (reason == "desktop-settled") {
-            wechatTaskControllers.entries.toList().filter { findActivity(it.key) === activity }.forEach { (container, reference) ->
-                val owner = reference.get()
-                HLog.i("$TAG DESKTOPEDGE container=${wechatProbeView(container, activity)} fixed=${wechatProbeField(container, "F")} extra=${wechatProbeField(container, "I")} reserve=${wechatProbeField(container, "J")} measured=${wechatProbeField(container, "H")} open=${wechatProbeField(owner, "P")}")
-            }
-        }
-        HLog.i("$TAG CHROMEDRAW reason=$reason target=${resolveTarget(activity)} bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor}")
-        val queue = ArrayDeque<View>()
-        queue.add(decor)
-        var visited = 0
-        var emitted = 0
-        var footerCount = 0
-        var inputCount = 0
-        while (queue.isNotEmpty() && visited++ < 1800) {
-            val view = queue.removeFirst()
-            val location = IntArray(2)
-            view.getLocationOnScreen(location)
-            val rect = Rect()
-            val visible = view.getGlobalVisibleRect(rect) && view.isShown && view.alpha > 0f
-            val name = view.javaClass.name
-            if (name.contains("ChatFooter")) footerCount++
-            if (view is android.widget.EditText) inputCount++
-            val topOrBottom = rect.top < decor.height * 0.13f || rect.bottom > decor.height * 0.88f
-            val drawing = view.background != null || view.foreground != null || name.contains("Background") || name.contains("Surface") || name.contains("Footer") || isChromeSurface(view)
-            if (visible && topOrBottom && drawing && emitted++ < 80) {
-                val idName = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("none")
-                val methods = KavaReflector.declaredMethods(view.javaClass).filter { it.name in setOf("draw", "onDraw", "dispatchDraw") }.joinToString { it.name }
-                HLog.i("$TAG CHROMEDRAW reason=$reason node=${wechatProbeView(view, activity)} idName=$idName rect=$rect fg=${view.foreground?.javaClass?.name} draw=$methods")
-            }
-            if (view is ViewGroup) for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
-        }
-        HLog.i("$TAG CHROMEDRAW reason=$reason visited=$visited emitted=$emitted footers=$footerCount inputs=$inputCount")
-    }
     private val wechatCoveragePulls = WeakHashMap<Activity, Boolean>()
-    private fun probeWindowCoverage(activity: Activity, reason: String) {
-        if (!ENABLE_RENDER_DIAGNOSTICS) return
-        if (destroyed || !hasConfiguredBackground(activity)) return
-        val window = activity.window
-        val decor = window.decorView
-        fun describe(drawable: Drawable?, depth: Int = 0): String {
-            if (drawable == null || depth > 5) return "null"
-            val head = "${drawable.javaClass.name}@${System.identityHashCode(drawable)} bounds=${drawable.bounds}"
-            return when (drawable) {
-                is ScreenAlignedBitmapDrawable -> "$head ${drawable.coverageDescription()}"
-                is android.graphics.drawable.InsetDrawable -> "$head insetChild=[${describe(drawable.drawable, depth + 1)}]"
-                is LayerDrawable -> "$head layers=[${(0 until drawable.numberOfLayers).joinToString { describe(drawable.getDrawable(it), depth + 1) }}]"
-                is ColorDrawable -> "$head color=${drawable.color}"
-                else -> head
-            }
-        }
-        val insets = decor.rootWindowInsets
-        val contrast = if (android.os.Build.VERSION.SDK_INT >= 29) "${window.isStatusBarContrastEnforced}/${window.isNavigationBarContrastEnforced}" else "n/a"
-        HLog.i("$TAG WXCOVER reason=$reason bars=${window.statusBarColor}/${window.navigationBarColor} contrast=$contrast flags=${window.attributes.flags} ui=${decor.systemUiVisibility} size=${decor.width}x${decor.height} insets=$insets getter=[${describe(decor.background)}] actual=[${describe(actualViewBackground(decor))}]")
-        listOf("mBackgroundInsets", "mLastBackgroundInsets", "mFrameOffsets", "mLastTopInset", "mLastBottomInset").forEach { field ->
-            HLog.i("$TAG WXCOVER reason=$reason field=$field value=${wechatProbeField(decor, field)}")
-        }
-        listOf("statusBarBackground", "navigationBarBackground").forEach { name ->
-            val id = activity.resources.getIdentifier(name, "id", "android")
-            val view = if (id != 0) decor.findViewById<View>(id) else null
-            HLog.i("$TAG WXCOVER reason=$reason node=$name ${wechatProbeView(view, activity)}")
-        }
-        activity.findViewById<View>(android.R.id.content)?.let {
-            HLog.i("$TAG WXCOVER reason=$reason content=${wechatProbeView(it, activity)} padding=${it.paddingLeft},${it.paddingTop},${it.paddingRight},${it.paddingBottom}")
-        }
-    }
+
     private val wechatTouchStart = WeakHashMap<Activity, Float>()
-    private val wechatDiagnosticFrames = WeakHashMap<Activity, Int>()
-    private val wechatDiagnosticListeners = WeakHashMap<Activity, ViewTreeObserver.OnPreDrawListener>()
-    private fun armWechatDiagnostics(activity: Activity, reason: String) {
-        if (!ENABLE_RENDER_DIAGNOSTICS) return
-        if (resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT) return
-        val key = "wechat-arm:$reason"
-        if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 3) return
-        wechatDiagnosticFrames[activity] = 2
-        snapshotWechatLayers(activity, reason)
-        if (wechatDiagnosticListeners.containsKey(activity)) return
-        val listener = ViewTreeObserver.OnPreDrawListener {
-            val remaining = wechatDiagnosticFrames[activity] ?: 0
-            if (remaining > 0) {
-                wechatDiagnosticFrames[activity] = remaining - 1
-                snapshotWechatLayers(activity, "predraw:$remaining")
-            }
-            true
-        }
-        wechatDiagnosticListeners[activity] = listener
-        activity.window.decorView.viewTreeObserver.addOnPreDrawListener(listener)
-    }
-    private fun snapshotWechatLayers(activity: Activity, reason: String) {
-        if (diagnosticCounts.computeIfAbsent(if (reason.startsWith("touch") || reason.startsWith("predraw")) "wechat-touch-snapshots" else "wechat-write-snapshots") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 14) return
-        val state = states[activity] ?: return
-        val slot = resolveTarget(activity)
-        HLog.i("$TAG WXFRAME reason=$reason slot=$slot bars=${activity.window.statusBarColor}/${activity.window.navigationBarColor} chat=${resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT} pending=${pendingRefreshes.containsKey(activity)}")
-        val bottomQueue = ArrayDeque<View>()
-        bottomQueue.add(activity.window.decorView)
-        var bottomVisited = 0
-        var bottomEmitted = 0
-        while (bottomQueue.isNotEmpty() && bottomVisited++ < MAX_SCAN_NODES) {
-            val view = bottomQueue.removeFirst()
-            val location = IntArray(2)
-            view.getLocationOnScreen(location)
-            val bg = view.background
-            val intersectsBottom = location[1] < activity.window.decorView.height &&
-                location[1] + view.height > activity.window.decorView.height * 0.9f
-            val nativeBackground = bg != null && bg !is BackgroundBeautyTransparentDrawable &&
-                bg !is ScreenAlignedBitmapDrawable
-            val selfDraw = view.javaClass.name.contains("Background") || view.javaClass.name.contains("SurfaceView")
-            if (view.isShown && view.alpha > 0f && intersectsBottom &&
-                (nativeBackground || selfDraw || isSystemBarBackground(view)) && bottomEmitted++ < 24) {
-                HLog.i("$TAG WXBOTTOM ${wechatProbeView(view, activity)}")
-            }
-            if (view is ViewGroup) for (i in 0 until view.childCount) bottomQueue.add(view.getChildAt(i))
-        }
-        val window = activity.window
-        val contrast = if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced else null
-        HLog.i("$TAG WXBOTTOM window contrast=$contrast flags=${window.attributes.flags} ui=${window.decorView.systemUiVisibility}")
-        val queue = ArrayDeque<Pair<View, Int>>()
-        queue.add(activity.window.decorView to 0)
-        var visited = 0
-        var emitted = 0
-        while (queue.isNotEmpty() && visited++ < MAX_SCAN_NODES && emitted < 65) {
-            val (view, depth) = queue.removeFirst()
-            val rect = Rect()
-            if (!view.getGlobalVisibleRect(rect) || view.alpha <= 0f) continue
-            val bg = view.background
-            val fg = view.foreground
-            val id = runCatching { view.resources.getResourceEntryName(view.id) }.getOrDefault("none")
-            val top = rect.top < 550
-            val broad = rect.width() >= activity.window.decorView.width * 3 / 4
-            if (depth == 0 || top || broad && (bg != null || fg != null)) {
-                emitted++
-                val snapshot = state.surfaces[view]
-                val draw = KavaReflector.declaredMethods(view.javaClass).filter { it.name in setOf("onDraw", "dispatchDraw", "draw") }.joinToString { it.name }
-                val extras = if (view.javaClass.name == "com.tencent.mm.ui.FrostedContentView") {
-                    listOf("getFrostedEnabled", "getFrostedColor", "getTopBlurAreaHeight").joinToString { name -> "$name=${KavaReflector.findMethodRecursive(view.javaClass,name)?.let { KavaReflector.invoke(it,view) }}" }
-                } else if (view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") {
-                    listOf("h", "i", "m").joinToString { field -> val d=KavaReflector.readField(view,field) as? Drawable; "$field=${d?.javaClass?.name}:${(d as? ColorDrawable)?.color}" }
-                } else "-"
-                HLog.i("$TAG WXLAYER depth=$depth class=${view.javaClass.name} id=$id rect=$rect alpha=${view.alpha} bg=${bg?.javaClass?.name}:${(bg as? ColorDrawable)?.color} fg=${fg?.javaClass?.name}:${(fg as? ColorDrawable)?.color} tint=${view.backgroundTintList} owned=${snapshot != null && bg === snapshot.appliedBackground} slot=${snapshot?.slot} scroll=${view.scrollX}/${view.scrollY} translation=${view.translationX}/${view.translationY} draw=$draw extras=$extras")
-            }
-            if (view is ViewGroup && !isComposeSurface(view)) for (i in 0 until view.childCount) queue.add(view.getChildAt(i) to depth+1)
-        }
-    }
+
     private fun isSystemBarBackground(view: View): Boolean {
         val id = view.id
         if (id == View.NO_ID) return false
@@ -3054,9 +2623,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
                 view.background === snapshot.appliedBackground &&
                 (view !== state.activity.window.decorView || decorBackgroundApplied(view, snapshot.appliedBackground))
             ) return
-            if (diagnosticCounts.computeIfAbsent("bitmap-host") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 8) {
-                HLog.i("$TAG BACKDROP_HOST slot=${slot.key} host=${view.javaClass.name} bitmap=${bitmap.width}x${bitmap.height} opacity=$opacity")
-            }
+
             val image = ScreenAlignedBitmapDrawable(bitmap, view, opacity,
                 resolveThemeBackground(view.context) or (0xff shl 24),
                 followHorizontalMotion = slot == BackgroundBeautySettings.Slot.CHAT)
@@ -3082,35 +2649,11 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW) ||
             view.javaClass.name == "com.tencent.mm.ui.FrostedContentView" || view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") initializedChrome[view] = true
         if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW)) {
-            KavaReflector.findMethodRecursive(view.javaClass, "a", View::class.java, Integer.TYPE)?.let { method ->
-                hookOnce(method, before = { param ->
-                    val bounce = param.thisObject as? View ?: return@hookOnce
-                    val owner = findActivity(bounce) ?: return@hookOnce
-                    val slotForBounce = surfaceOwners[bounce]?.surfaces?.get(bounce)?.slot ?: return@hookOnce
-                    if (restoringBounce || !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
-                        !BackgroundBeautyStore.hasImage(context.hostContext(), slotForBounce)) return@hookOnce
-                    if (diagnosticCounts.computeIfAbsent("bounce-offset") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
-                        val colors = listOf("MStart2EndBg", "MEnd2StartBg", "MStart2EndBgByActionBar", "MEnd2StartBgByNavigationBar").joinToString(",") { property ->
-                            val getter = KavaReflector.findMethodRecursive(bounce.javaClass, "get$property")
-                            val drawable = getter?.let { KavaReflector.invoke(it, bounce) } as? Drawable
-                            "$property=${drawable?.javaClass?.name}:${(drawable as? ColorDrawable)?.color}"
-                        }
-                        val backdrop = KavaReflector.readField(bounce, "G") as? View
-                        HLog.i("$TAG DIAG bounceOffset offset=${param.args.getOrNull(1)} colors=$colors backdrop=${backdrop?.background?.javaClass?.name} managed=${backdrop?.let { surfaceOwners.containsKey(it) }}")
-                    }
-                }, after = { param ->
-                    val bounce = param.thisObject as? View ?: return@hookOnce
-                    val activity = findActivity(bounce) ?: return@hookOnce
-                    val offset = param.args.getOrNull(1) as? Int ?: return@hookOnce
-                    if (offset > 100) armWechatDiagnostics(activity, "bounce-positive")
-                    else if (offset == 0) armWechatDiagnostics(activity, "bounce-zero")
-                })
-            }
             val activity = findActivity(view)
             val state = activity?.let { states[it] }
             val backdrop = KavaReflector.readField(view, "G") as? View
             if (state != null && backdrop != null) setTransparentSurface(state, backdrop, slot)
-            HLog.i("$TAG DIAG bouncePrepared class=${view.javaClass.name} backdrop=${backdrop?.javaClass?.name}")
+
             listOf("MStart2EndBg", "MEnd2StartBg", "MStart2EndBgByActionBar", "MEnd2StartBgByNavigationBar").forEach { property ->
                 val getter = KavaReflector.findMethodRecursive(view.javaClass, "get$property") ?: return@forEach
                 val setter = KavaReflector.findMethodRecursive(view.javaClass, "set$property", Drawable::class.java) ?: return@forEach
@@ -3206,12 +2749,15 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         }
         // AppPanel containers cover the entire page. Only an AppGrid item root
         // owns feedback; propagated pressed states must not animate ancestors.
-        var itemAncestor: View? = view
-        while (itemAncestor != null && appGridItems[itemAncestor] != true) {
-            itemAncestor = itemAncestor.parent as? View
+        var inAppPanel = false
+        if (slot == BackgroundBeautySettings.Slot.CHAT && preserveFeedback) {
+            var itemAncestor: View? = view
+            while (itemAncestor != null && appGridItems[itemAncestor] != true) {
+                itemAncestor = itemAncestor.parent as? View
+            }
+            inAppPanel = itemAncestor != null ||
+                findAncestor(view, "com.tencent.mm.pluginsdk.ui.chat.AppPanel") != null
         }
-        val inAppPanel = itemAncestor != null ||
-            findAncestor(view, "com.tencent.mm.pluginsdk.ui.chat.AppPanel") != null
         // Footer hosts span input + offscreen panel. A propagated pressed state must
         // never paint a full-width rectangle; actual app-grid items keep feedback.
         val footerHost = slot == BackgroundBeautySettings.Slot.CHAT && view is ViewGroup &&
@@ -3381,16 +2927,16 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     }
 
     private fun restoreSurfaceGeometry(view: View, snapshot: SurfaceSnapshot) {
-        view.setPadding(
-            snapshot.originalPaddingLeft,
-            snapshot.originalPaddingTop,
-            snapshot.originalPaddingRight,
-            snapshot.originalPaddingBottom
-        )
-        view.minimumWidth = snapshot.originalMinimumWidth
-        view.minimumHeight = snapshot.originalMinimumHeight
+        if (view.paddingLeft != snapshot.originalPaddingLeft ||
+            view.paddingTop != snapshot.originalPaddingTop ||
+            view.paddingRight != snapshot.originalPaddingRight ||
+            view.paddingBottom != snapshot.originalPaddingBottom) {
+            view.setPadding(snapshot.originalPaddingLeft, snapshot.originalPaddingTop,
+                snapshot.originalPaddingRight, snapshot.originalPaddingBottom)
+        }
+        if (view.minimumWidth != snapshot.originalMinimumWidth) view.minimumWidth = snapshot.originalMinimumWidth
+        if (view.minimumHeight != snapshot.originalMinimumHeight) view.minimumHeight = snapshot.originalMinimumHeight
     }
-
     private fun applyWechatStatusMasks(activity: Activity, phase: String) {
         if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY ||
             !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
@@ -3402,11 +2948,8 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
             val id = resourceId(name)
             if (id == 0) return@forEach
             val mask = activity.window.decorView.findViewById<View>(id) ?: return@forEach
-            val before = mask.background
             setTransparentSurface(state, mask, BackgroundBeautySettings.Slot.WECHAT, clearForeground = true)
-            if (diagnosticCounts.computeIfAbsent("wx-status-mask:$phase:$name") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-                HLog.i("$TAG WXSTATUSMASK phase=$phase name=$name before=${before?.javaClass?.name}:${(before as? ColorDrawable)?.color} after=${mask.background?.javaClass?.name} size=${mask.width}x${mask.height} active=${resolveTarget(activity)}")
-            }
+
         }
     }
     private fun applySystemBars(state: HostState) {
@@ -3431,13 +2974,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         }
         state.systemBarsApplied = true
         } finally { surfaceMutationDepth-- }
-        if (state.activity.javaClass.name == LAUNCHER_ACTIVITY &&
-            diagnosticCounts.computeIfAbsent("nav-state") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 12) {
-            val contrast = if (android.os.Build.VERSION.SDK_INT >= 29) window.isNavigationBarContrastEnforced else null
-            val navId = state.activity.resources.getIdentifier("navigationBarBackground", "id", "android")
-            val nav = if (navId != 0) window.decorView.findViewById<View>(navId) else null
-            HLog.i("$TAG WXNAV state color=${window.navigationBarColor} contrast=$contrast flags=${window.attributes.flags} ui=${window.decorView.systemUiVisibility} view=${wechatProbeView(nav, state.activity)}")
-        }
+
     }
 
     private fun restoreSystemBars(state: HostState) {
@@ -3468,7 +3005,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
     }
 
     private fun clearActivity(activity: Activity) {
-        HLog.i("$TAG WXRESTORE activity=${activity.javaClass.name} target=${resolveTarget(activity)} enabled=${prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)}")
+
         restoreBounceColors(activity)
         synchronized(pendingLoads) { pendingLoads.remove(activity) }
         synchronized(pendingRefreshes) { pendingRefreshes.remove(activity) }
@@ -3531,15 +3068,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         }
         return false
     }
-    private fun logGroupReturnLayout(activity: Activity, phase: String) {
-        if (diagnosticCounts.computeIfAbsent("group-return:$phase") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() > 6) return
-        val decor = activity.window.decorView
-        val root = findDescendant(decor, "com.tencent.mm.ui.HomeUI\$FitSystemWindowLayoutView")
-        val content = activity.findViewById<View>(android.R.id.content)
-        val location = IntArray(2)
-        content?.getLocationOnScreen(location)
-        HLog.i("$TAG GROUPRETURN phase=$phase ui=${decor.systemUiVisibility} wrapperPadding=${root?.paddingTop}/${root?.paddingBottom} contentY=${location[1]} contentPadding=${content?.paddingTop} active=${resolveTarget(activity)}")
-    }
+
     private fun isConversationActivity(activity: Activity): Boolean {
         var type: Class<*>? = activity.javaClass
         while (type != null) {
@@ -3553,9 +3082,7 @@ val activity = findActivity(window.decorView) ?: return@hookOnce
         val getter = KavaReflector.findMethodRecursive(swipe.javaClass, "getTargetContentView") ?: return host
         val target = KavaReflector.invoke(getter, swipe) as? View ?: return host
         if (target === host || !isDescendantOf(target, host)) return host
-        if (diagnosticCounts.computeIfAbsent("chat-moving-host") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 6) {
-            HLog.i("$TAG CHATRETURN movingBackdrop outer=${host.javaClass.name}:${host.id} target=${target.javaClass.name}:${target.id}")
-        }
+
         return target
     }
     private fun chatBackgroundHost(activity: Activity): View? {
