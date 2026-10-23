@@ -65,3 +65,11 @@ R8类合并/内联后不能只按外层类名归属：hi.o虽然类头为Dynamic
 972 D专项三个窗口：原生布局/实际测量/实际布局各2116次，measureOnly累计3.571ms、layoutOnly累计1186.158ms；beforeNative常为measured2637/bounds2834/requested=true。结合beforeLayout只有measuredHeight等于expandedHeight时才恢复，可确认多数快照中原生测量已先恢复2637，不能将所有重复变化归因模块beforeLayout显式恢复。原生布局结束后扩展到2834的策略仍执行，初始requestLayout来源仍未确定。
 另发现背景onLayout后置兼容检查逐次调用WeChatVersionApi.current()；API即使缓存命中也先build完整包/热更新指纹。该调用不在underlay.layoutOnly内。本轮为聊天onLayout和applyChatChromeRoot两处兼容判断复用非空APK versionName；空值/API未就绪重试。缓存只用于APK版本门槛，不替代公共API的热更新检测。未改布局、padding、键盘、面板或尺寸恢复策略，未声明重复布局根因已解决。
 验证范围：生产版本缓存片段JVM检查（未就绪/空值重试、10000次不重查、实例独立）；原穿透生产模型回归；Android36 SDK穿透类定向编译（项目辅助依赖用桩）。背景整文件未全量编译，实机收益和重复请求来源待下一轮验证。未运行Gradle、未构建APK，本轮保留本地不提交推送。
+
+
+## 973后请求来源采样修正（本地待验收）
+973的12份请求样本均在前14帧内被框架Hook和父层requestLayout传播占满，无法确定初始业务调用者；额度在滚动刚开始即耗尽。现有证据不足以修改穿透尺寸策略。
+本轮只调整ChatScrollTrace：每个系统elapsedRealtime/5000时间桶至多一份来源、总额60份；保留每128个候选请求才采一次的门槛（时间桶已用额度时不递增候选计数）。检查堆栈前96帧，省略已知Xposed命名空间、观察器自身及android/androidx的requestLayout传播，保留最多24帧，输出request.source。混淆桥接帧可能保留，仍需对应新构建mapping；最多96帧之外的来源仍可能遗漏。采样不保证覆盖所有调用原因，也不区分原始请求与父链传播。
+旧12份/14帧说明由此节覆盖。观察Hook的范围、计数、停止卸载机制不变，不拦截请求；关闭专项不采样。每5秒桶通常仅1次深堆栈，桶边界可短时间内出现两次，全会话至多60次。相比旧版单份堆栈更深、总额度更多，仍须无诊断作性能对照。未修改穿透布局、padding、键盘面板策略。
+验证：Android36 SDK定向编译（项目/Xposed辅助依赖用桩）；生产过滤片段JVM测试覆盖45层父链后业务调用者、24帧输出上限及生产限额逻辑；实机来源采集仍待安装。未运行Gradle或构建APK，未提交推送。
+下一轮保持D配置，重启等待初始化后立即启动D专项，在5分钟内完成约30秒滚动。读取request.source并用该构建mapping还原；若仍只有父链，则再选择系统跟踪或更具体目标Hook，不猜测更改布局策略。

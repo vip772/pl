@@ -17,6 +17,8 @@ internal object ChatScrollTrace {
     private var lastFrame = 0L
     private var budget = 0
     private var requests = 0
+    private var sourceWindowAt = -1L
+    private var sourceWindowSamples = 0
     private val snapshots = HashMap<String, Long>()
     private var nativePhase: String? = null
     private val phase = ThreadLocal<String>()
@@ -24,7 +26,7 @@ internal object ChatScrollTrace {
     fun start() = onMain {
         cleanup()
         if (!ChatScrollDiagnostic.isActive()) return@onMain
-        budget = 12; requests = 0
+        budget = 60; requests = 0; sourceWindowAt = -1L; sourceWindowSamples = 0
         val token = ++generation
         try {
             val method = KavaReflector.findDeclaredMethod(View::class.java, "requestLayout") ?: error("missing requestLayout")
@@ -36,12 +38,20 @@ internal object ChatScrollTrace {
                     try {
                         val tag = phase.get() ?: "outside"
                         ChatScrollDiagnostic.hit("requestLayout.$tag")
-                        if (budget > 0 && requests++ % 128 == 0) {
-                            budget--
-                            val path = Throwable().stackTrace.asSequence()
-                                .filter { !it.className.startsWith(ChatScrollTrace::class.java.name) }
-                                .take(14).joinToString(" <- ") { "${it.className}#${it.methodName}:${it.lineNumber}" }
-                            ChatScrollDiagnostic.detail("request.$budget", "phase=$tag target=${view.javaClass.name} atMs=${android.os.SystemClock.elapsedRealtime()} $path")
+                        val now = android.os.SystemClock.elapsedRealtime()
+                        val window = now / 5_000L
+                        if (window != sourceWindowAt) { sourceWindowAt = window; sourceWindowSamples = 0 }
+                        if (budget > 0 && sourceWindowSamples < 1 && requests++ % 128 == 0) {
+                            budget--; sourceWindowSamples++
+                            val path = Throwable().stackTrace.asSequence().take(96)
+                                .filterNot { frame ->
+                                    frame.className.startsWith(ChatScrollTrace::class.java.name) ||
+                                        frame.className.startsWith("de.robv.android.xposed.") ||
+                                        (frame.methodName == "requestLayout" &&
+                                            (frame.className.startsWith("android.") || frame.className.startsWith("androidx.")))
+                                }
+                                .take(24).joinToString(" <- ") { "${it.className}#${it.methodName}:${it.lineNumber}" }
+                            ChatScrollDiagnostic.detail("request.source", "phase=$tag target=${view.javaClass.name} atMs=$now $path")
                         }
                     } catch (_: Throwable) { }
                 }
