@@ -39,6 +39,13 @@ internal class FloatingChatHeaderCapsule {
         var focusListener: ViewTreeObserver.OnWindowFocusChangeListener? = null
     }
     private val states = WeakHashMap<ViewGroup, State>()
+    private val resourceIds = WeakHashMap<android.content.res.Resources, MutableMap<Triple<String, String, String>, Int>>()
+    private fun resourceId(view: View, name: String, type: String): Int {
+        val key = Triple(view.context.packageName, type, name)
+        return resourceIds.getOrPut(view.resources) { HashMap() }.getOrPut(key) {
+            view.resources.getIdentifier(name, type, key.first)
+        }
+    }
     private val main = Handler(Looper.getMainLooper())
     private val worker by lazy { Executors.newSingleThreadExecutor() }
     private var workerStarted = false
@@ -53,7 +60,7 @@ internal class FloatingChatHeaderCapsule {
         val version = WeChatApis.version()?.versionName()
         if (version != "8.0.78") return fail(header)
         fun named(name: String): View? {
-            val id = header.resources.getIdentifier(name, "id", header.context.packageName)
+            val id = resourceId(header, name, "id")
             return if (id == 0) null else header.findViewById<View>(id)
         }
         val nativeBack = named("actionbar_up_indicator") ?: return fail(header)
@@ -120,17 +127,17 @@ internal class FloatingChatHeaderCapsule {
     private fun findVerifiedMore(menu: ViewGroup, header: ViewGroup): View? {
         val candidates = mutableListOf<View>()
         collectMenuActions(menu, candidates)
-        val settingText = runCatching { header.context.getString(header.resources.getIdentifier("cm", "string", header.context.packageName)) }.getOrNull()
-        val settingRaw = header.resources.getIdentifier("actionbar_setting_icon", "raw", header.context.packageName)
+        val settingText = runCatching { header.context.getString(resourceId(header, "cm", "string")) }.getOrNull()
+        val settingRaw = resourceId(header, "actionbar_setting_icon", "raw")
         val settingIcon by lazy(LazyThreadSafetyMode.NONE) {
             runCatching { header.context.resources.getDrawable(settingRaw, header.context.theme) }.getOrNull()
         }
         // MMActivityController writes fb.b (the menu icon resource ID) to id/nwr.
         // Drawable constantState is unreliable after WeChat wraps/tints the icon.
-        val iconTagId = header.resources.getIdentifier("nwr", "id", header.context.packageName)
-        val fqId = header.resources.getIdentifier("fq", "id", header.context.packageName)
+        val iconTagId = resourceId(header, "nwr", "id")
+        val fqId = resourceId(header, "fq", "id")
         // fg's chatroom branch registers dark_more, not actionbar_setting_icon.
-        val moreRaw = header.resources.getIdentifier("actionbar_icon_dark_more", "raw", header.context.packageName)
+        val moreRaw = resourceId(header, "actionbar_icon_dark_more", "raw")
         val verified = candidates.filter { view ->
             val title = (view.findViewById<TextView>(android.R.id.text1)?.text ?: view.contentDescription)?.toString()
             val icon = (view as? ImageView)?.drawable

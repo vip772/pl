@@ -59,6 +59,13 @@ private class HeaderRuntime(private val context: FeatureContext) {
     init { livePrefs.registerOnSharedPreferenceChangeListener(liveListener) }
     private val hooked = HashSet<Member>()
     private val capsule = FloatingChatHeaderCapsule()
+    private val resourceIds = java.util.WeakHashMap<android.content.res.Resources, MutableMap<Pair<String, String>, Int>>()
+    private fun resourceId(view: View, name: String): Int {
+        val key = view.context.packageName to name
+        return resourceIds.getOrPut(view.resources) { HashMap() }.getOrPut(key) {
+            view.resources.getIdentifier(name, "id", key.first)
+        }
+    }
     private val states = WeakHashMap<View, HeaderState>()
     private val headersByLayout = WeakHashMap<View, View>()
     private val headerZoneStates = WeakHashMap<View, HeaderZoneState>()
@@ -266,10 +273,10 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 return
             }
         fun named(name: String): View? {
-            val id = layout.resources.getIdentifier(name, "id", layout.context.packageName)
+            val id = resourceId(layout, name)
             return if (id != 0) layout.findViewById<View>(id) else null
         }
-        val titleId = layout.resources.getIdentifier("obn", "id", layout.context.packageName)
+        val titleId = resourceId(layout, "obn")
         val title = if (titleId != 0) header.findViewById<TextView>(titleId) else null
         if (named("bki")?.javaClass?.name != CHATTING_CONTENT_CLASS ||
             named("k52")?.javaClass?.name != "com.tencent.mm.pluginsdk.ui.chat.ChatFooter" || title == null) {
@@ -297,11 +304,16 @@ private class HeaderRuntime(private val context: FeatureContext) {
             marginLp.topMargin = top
             header.layoutParams = marginLp
         }
+        val cardsStarted = t.mma.utils.ChatScrollDiagnostic.begin()
+        try {
         applyHeaderZoneCards(layout, header)
         tipsCardBottoms.remove(layout)
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
-        val split = (header as? ViewGroup)?.let { capsule.apply(it) } == true
+        } finally { t.mma.utils.ChatScrollDiagnostic.end("header.cards", cardsStarted) }
+        val capsuleStarted = t.mma.utils.ChatScrollDiagnostic.begin()
+        val split = try { (header as? ViewGroup)?.let { capsule.apply(it) } == true }
+            finally { t.mma.utils.ChatScrollDiagnostic.end("header.capsule", capsuleStarted) }
         val tracker = layoutTrackers.getOrPut(layout) { HeaderLayoutTracker() }
 
         val elevation = if (split) 0f else dp(ELEVATION_DP).toFloat()
@@ -451,7 +463,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val base = contentCardTranslations.getOrPut(group) { group.translationY }
         val baseTop = groupLocation[1] - group.translationY.roundToInt() + base.roundToInt()
         val targetTop = headerLocation[1] + header.height + dp(CARD_GAP_DP)
-        group.translationY = base + targetTop - baseTop
+        val translation = base + targetTop - baseTop
+        if (group.translationY != translation) group.translationY = translation
         val layoutGroup = layout as? ViewGroup
         if (layoutGroup != null) {
             val layoutLocation = IntArray(2).also(layoutGroup::getLocationOnScreen)
@@ -466,7 +479,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
         suppressTipsGroupDim(group)
         if (!tipsGroupElevations.containsKey(group)) tipsGroupElevations[group] = group.elevation
-        group.elevation = 0f
+        if (group.elevation != 0f) group.elevation = 0f
         styleTipsCardBody(group)
         if (raisedTipsGroups.put(group, true) == null) group.bringToFront()
 
@@ -576,7 +589,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun findVisibleChatContent(layout: View, header: View): ViewGroup? {
-        val id = layout.resources.getIdentifier("bki", "id", layout.context.packageName)
+        val id = resourceId(layout, "bki")
         return (if (id != 0) layout.findViewById<View>(id) else null)?.takeIf {
             it.javaClass.name == CHATTING_CONTENT_CLASS && it.isShown
         } as? ViewGroup
@@ -650,9 +663,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private fun isFloatingContentCard(view: View, content: ViewGroup): Boolean {
         if (view.javaClass.name == CHATTING_SCROLL_LAYOUT_CLASS) return false
         if (view.javaClass.name == TIPS_BAR_GROUP_CLASS && tipsGroups.containsValue(view)) return false
-        if (find(view) { it.javaClass.name == CHATTING_SCROLL_LAYOUT_CLASS } != null) return false
         if (view.javaClass.name == "android.view.ViewStub") return false
         if (view.height >= content.height / 2 || view.width <= 0 || view.height <= 0) return false
+        if (find(view) { it.javaClass.name == CHATTING_SCROLL_LAYOUT_CLASS } != null) return false
         if (isNewMessageChip(view)) return false
         val name = view.javaClass.name
         if (name == TIPS_BAR_GROUP_CLASS || name.contains("Tips", true) ||
@@ -858,7 +871,14 @@ private class HeaderRuntime(private val context: FeatureContext) {
 
     private fun isEnabled() = context.configStore().getGlobalBoolean("${FloatingChatHeaderFeature.ID}_enabled", false)
     private fun dp(value: Int) = (value * context.hostContext().resources.displayMetrics.density).roundToInt()
-    private fun find(root: View, predicate: (View) -> Boolean): View? = if (predicate(root)) root else (root as? ViewGroup)?.let { group -> (0 until group.childCount).asSequence().mapNotNull { find(group.getChildAt(it), predicate) }.firstOrNull() }
+    private fun find(root: View, predicate: (View) -> Boolean): View? {
+        if (predicate(root)) return root
+        val group = root as? ViewGroup ?: return null
+        for (index in 0 until group.childCount) {
+            find(group.getChildAt(index), predicate)?.let { return it }
+        }
+        return null
+    }
     private fun copyLayoutParams(params: ViewGroup.LayoutParams): ViewGroup.LayoutParams =
         when (params) {
             is RelativeLayout.LayoutParams -> RelativeLayout.LayoutParams(params)
