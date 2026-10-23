@@ -1,5 +1,6 @@
 package t.mma.hooks.items.backgroundbeauty
 
+import t.mma.utils.ChatScrollDiagnostic
 import android.graphics.Rect
 import android.view.View
 import android.view.ViewGroup
@@ -23,6 +24,8 @@ internal class ChatInputMessageUnderlay {
     }
     private val states = WeakHashMap<ViewGroup, State>()
     fun apply(scroll: ViewGroup) {
+        val diagnosticStarted = ChatScrollDiagnostic.begin()
+        try {
         if (scroll.javaClass.name != SCROLL) return
         fun named(name: String): View? {
             val id = scroll.resources.getIdentifier(name, "id", scroll.context.packageName)
@@ -57,6 +60,7 @@ internal class ChatInputMessageUnderlay {
         if (list.paddingBottom != state.appliedPadding) state.basePadding = list.paddingBottom
         val padding = state.basePadding + overlap
         if (list.paddingBottom != padding) {
+            ChatScrollDiagnostic.hit("underlay.paddingWrite")
             list.setPadding(list.paddingLeft, list.paddingTop, list.paddingRight, padding)
         }
         state.appliedPadding = padding
@@ -71,28 +75,43 @@ internal class ChatInputMessageUnderlay {
             state.nativeTop = content.top
         }
         val height = state.nativeHeight + overlap
-        if (content.height != height) resizeContent(state, height)
+        ChatScrollDiagnostic.geometry(state.nativeHeight, height, overlap)
+        if (content.height != height) {
+            ChatScrollDiagnostic.hit("underlay.expand")
+            resizeContent(state, height)
+        }
         state.expandedHeight = height
         state.overlap = overlap
+
+        } finally { ChatScrollDiagnostic.end("underlay.apply", diagnosticStarted) }
     }
 
     private fun resizeContent(state: State, height: Int) {
+        val diagnosticStarted = ChatScrollDiagnostic.begin()
+        try {
         state.content.measure(
             View.MeasureSpec.makeMeasureSpec(state.nativeWidth, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
         )
         state.content.layout(state.nativeLeft, state.nativeTop,
             state.nativeLeft + state.nativeWidth, state.nativeTop + height)
+
+        } finally { ChatScrollDiagnostic.end("underlay.measureLayout", diagnosticStarted) }
     }
 
     // Called before native onLayout: native measurement/placement must never consume
     // our enlarged measured height, otherwise footer placement drifts on the next pass.
     fun beforeLayout(scroll: ViewGroup) {
+        val diagnosticStarted = ChatScrollDiagnostic.begin()
+        try {
         val state = states[scroll] ?: return
         if (state.expandedHeight >= 0 && state.content.measuredHeight == state.expandedHeight) {
+            ChatScrollDiagnostic.hit("underlay.restoreNative")
             resizeContent(state, state.nativeHeight)
         }
         state.expandedHeight = -1
+
+        } finally { ChatScrollDiagnostic.end("underlay.beforeLayout", diagnosticStarted) }
     }
 
     private fun inputRowOverlap(footer: ViewGroup, row: View): Int {
@@ -124,6 +143,7 @@ internal class ChatInputMessageUnderlay {
     fun restore(scroll: ViewGroup) {
         val state = states.remove(scroll) ?: return
         if (state.expandedHeight >= 0 && state.content.height == state.expandedHeight) {
+            ChatScrollDiagnostic.hit("underlay.restoreNative")
             resizeContent(state, state.nativeHeight)
         }
         val lp = state.content.layoutParams as? LinearLayout.LayoutParams

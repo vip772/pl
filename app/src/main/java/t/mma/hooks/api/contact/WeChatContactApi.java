@@ -1,6 +1,7 @@
 package t.mma.hooks.api.contact;
 
 import android.text.TextUtils;
+import t.mma.utils.ChatScrollDiagnostic;
 import android.content.ContentValues;
 
 import t.mma.dexkit.DexFinder;
@@ -168,19 +169,31 @@ public final class WeChatContactApi {
     }
 
     public String getGroupMemberDisplayName(String groupId, String memberWxId) {
+        long diagnosticStarted = ChatScrollDiagnostic.begin();
+        ChatScrollDiagnostic.query(groupId, memberWxId);
+        try {
         if (TextUtils.isEmpty(memberWxId)) return "";
         String internalName = getGroupMemberDisplayNameByWeChat(groupId, memberWxId);
-        if (!TextUtils.isEmpty(internalName)) return internalName;
+        if (!TextUtils.isEmpty(internalName)) { ChatScrollDiagnostic.hit("nickname.nativeHit"); return internalName; }
+        ChatScrollDiagnostic.hit("nickname.nativeEmpty");
         String roomName = getGroupMemberRoomDisplayName(groupId, memberWxId);
-        if (!TextUtils.isEmpty(roomName)) return roomName;
-        String name = getDisplayName(memberWxId);
+        if (!TextUtils.isEmpty(roomName)) { ChatScrollDiagnostic.hit("nickname.mappingHit"); return roomName; }
+        ChatScrollDiagnostic.hit("nickname.mappingEmpty");
+        long fallbackStarted = ChatScrollDiagnostic.begin();
+        String name;
+        try { name = getDisplayName(memberWxId); }
+        finally { ChatScrollDiagnostic.end("nickname.contactFallback", fallbackStarted); }
         log("群成员昵称回退: group=" + groupId
                 + " member=" + memberWxId
                 + " contactName=" + name);
         return !TextUtils.isEmpty(name) ? name : memberWxId;
+
+        } finally { ChatScrollDiagnostic.end("nickname.total", diagnosticStarted); }
     }
 
     private String getGroupMemberDisplayNameByWeChat(String groupId, String memberWxId) {
+        long diagnosticStarted = ChatScrollDiagnostic.begin();
+        try {
         if (!isGroup(groupId) || TextUtils.isEmpty(memberWxId) || dexFinder == null) return "";
         try {
             Method method = dexFinder.groupMemberDisplayNameMethod;
@@ -201,6 +214,8 @@ public final class WeChatContactApi {
                     + " member=" + memberWxId + " " + e.getMessage());
         }
         return "";
+
+        } finally { ChatScrollDiagnostic.end("nickname.native", diagnosticStarted); }
     }
 
     public String getGroupMemberRoomDisplayName(String groupId, String memberWxId) {
@@ -210,6 +225,8 @@ public final class WeChatContactApi {
     }
 
     public Map<String, String> getGroupMemberRoomDisplayNames(String groupId) {
+        long diagnosticStarted = ChatScrollDiagnostic.begin();
+        try {
         long performanceStarted = t.mma.utils.PerformanceSample.start();
         try {
         Map<String, String> result = new LinkedHashMap<>();
@@ -262,6 +279,8 @@ public final class WeChatContactApi {
         }
         return result;
             } finally { t.mma.utils.PerformanceSample.finish("group_member_names", performanceStarted); }
+
+        } finally { ChatScrollDiagnostic.end("nickname.mapping", diagnosticStarted); }
     }
 
     private Map<String, String> getRoomDataMemberDisplayNames(byte[] roomData) {

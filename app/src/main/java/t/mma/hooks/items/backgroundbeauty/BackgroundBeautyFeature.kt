@@ -2271,6 +2271,7 @@ private class BackgroundBeautyRuntime(
             hookOnce(method, before = { param ->
                 val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
                 val activity = findActivity(scroll) ?: return@hookOnce
+                t.mma.utils.ChatScrollDiagnostic.hit("scroll.nativeLayout")
                 states[activity]?.inputUnderlay?.beforeLayout(scroll)
             }, after = { param ->
                 val scroll = param.thisObject as? ViewGroup ?: return@hookOnce

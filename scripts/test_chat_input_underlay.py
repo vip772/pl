@@ -13,6 +13,7 @@ class ColorDrawable(val color:Int)
 ''',
 'Log.kt': '''package t.mma.utils
 object HLog{fun i(s:String){}}
+object ChatScrollDiagnostic {fun begin()=0L;fun end(n:String,t:Long){};fun hit(n:String){};fun geometry(a:Int,b:Int,c:Int){}}
 ''',
 'View.kt': '''package android.view
 interface ViewParent
