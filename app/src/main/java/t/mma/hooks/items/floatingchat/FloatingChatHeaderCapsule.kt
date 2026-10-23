@@ -52,12 +52,21 @@ internal class FloatingChatHeaderCapsule {
     private val cache = object : android.util.LruCache<String, Bitmap>(2 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
+    // APK versionName is stable for this host process. Avoid rebuilding the full
+    // runtime/patch fingerprint on every layout. Retry unavailable startup values.
+    private var hostVersionName: String? = null
+    private fun hostVersionName(): String? {
+        hostVersionName?.let { return it }
+        return WeChatApis.version()?.versionName()?.takeIf { it.isNotBlank() }?.also {
+            hostVersionName = it
+        }
+    }
     @Volatile private var closed = false
 
     fun apply(header: ViewGroup): Boolean {
         if (closed) return false
         if (header.width <= 0 || header.height <= 0) return fail(header)
-        val version = WeChatApis.version()?.versionName()
+        val version = hostVersionName()
         if (version != "8.0.78") return fail(header)
         fun named(name: String): View? {
             val id = resourceId(header, name, "id")
@@ -126,7 +135,8 @@ internal class FloatingChatHeaderCapsule {
     }
     private fun findVerifiedMore(menu: ViewGroup, header: ViewGroup): View? {
         val candidates = mutableListOf<View>()
-        collectMenuActions(menu, candidates)
+        val fqId = resourceId(header, "fq", "id")
+        collectMenuActions(menu, fqId, candidates)
         val settingText = runCatching { header.context.getString(resourceId(header, "cm", "string")) }.getOrNull()
         val settingRaw = resourceId(header, "actionbar_setting_icon", "raw")
         val settingIcon by lazy(LazyThreadSafetyMode.NONE) {
@@ -135,7 +145,6 @@ internal class FloatingChatHeaderCapsule {
         // MMActivityController writes fb.b (the menu icon resource ID) to id/nwr.
         // Drawable constantState is unreliable after WeChat wraps/tints the icon.
         val iconTagId = resourceId(header, "nwr", "id")
-        val fqId = resourceId(header, "fq", "id")
         // fg's chatroom branch registers dark_more, not actionbar_setting_icon.
         val moreRaw = resourceId(header, "actionbar_icon_dark_more", "raw")
         val verified = candidates.filter { view ->
@@ -147,7 +156,7 @@ internal class FloatingChatHeaderCapsule {
                 ((settingRaw != 0 && view.getTag(iconTagId) == settingRaw) ||
                     (moreRaw != 0 && view.getTag(iconTagId) == moreRaw))
             nativeSettingTag || (settingText != null && title == settingText) ||
-                (settingRaw != 0 && settingIcon != null && icon?.constantState == settingIcon?.constantState)
+                (settingRaw != 0 && icon != null && settingIcon != null && icon.constantState == settingIcon?.constantState)
         }
         if (verified.size == 1) return verified.single()
 
@@ -298,12 +307,13 @@ internal class FloatingChatHeaderCapsule {
         closed = true; states.keys.toList().forEach(::restore)
         if (workerStarted) worker.shutdownNow()
         main.removeCallbacksAndMessages(null); cache.evictAll()
+        hostVersionName = null
+        resourceIds.clear()
     }
-    private fun collectMenuActions(view: View, output: MutableList<View>) {
+    private fun collectMenuActions(view: View, fq: Int, output: MutableList<View>) {
         if (view.visibility != View.VISIBLE || !view.isEnabled) return
         // 8.0.78 has two native option-menu renderers. Runtime uses fq inside coy;
         // MMActivityController stores it in U and binds the option click/description.
-        val fq = view.resources.getIdentifier("fq", "id", view.context.packageName)
         val isNativeIcon = fq != 0 && view.id == fq &&
             view.javaClass.name == "com.tencent.mm.ui.widget.imageview.WeImageView"
         val isActionMenu = view.javaClass.name == "com.tencent.mm.ui.widget.WXActionMenuView"
@@ -311,7 +321,7 @@ internal class FloatingChatHeaderCapsule {
             output += view
             return
         }
-        if (view is ViewGroup) for (i in 0 until view.childCount) collectMenuActions(view.getChildAt(i), output)
+        if (view is ViewGroup) for (i in 0 until view.childCount) collectMenuActions(view.getChildAt(i), fq, output)
     }
     private fun clickableAncestor(view: View, boundary: View): View? {
         var current: View? = view

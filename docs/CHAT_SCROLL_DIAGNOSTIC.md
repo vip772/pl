@@ -50,3 +50,10 @@ A实机专项中header.apply平均约7.8ms、最大28.6ms；C关闭标题栏后�
 D的paddingWrite专项只有1次，不能据此认定穿透代码持续写padding。旧mapping中lm.c等不匹配本次堆栈，不可用于归属hi.o/gj.c0；当前未取得已确认匹配安装构建的mapping，D调用来源未精确还原，本轮未改D布局策略。后续需匹配mapping或更直接的局部来源证据。
 
 验证：Android36 SDK定向编译（标题栏Feature、Capsule及CardVisuals，项目依赖用桩）通过；生产顶部inset模型回归通过；diff检查通过。未运行Gradle、未构建APK、未安装实机验证。本轮保留本地，不提交推送。
+
+
+## 胶囊路径第二轮优化（本地待验收）
+9.2.7实机A组，21:05:42/47两个统计窗口：header.apply 618次、累计1748.423ms、平均2.829ms；header.capsule累计1715.392ms，约占98.1%；header.cards累计9.981ms。系统758帧、超时25.07%、P95 25ms。实际滚动样本约9秒，消息与旧样本不同，不能严格量化改善幅度。
+源码核查发现胶囊逐次调用versionName，而WeChatVersionApi.current即使命中cached仍先build完整版本指纹，包含包信息及热更新文件检查。本轮只在胶囊实例缓存非空APK versionName；空值或API未就绪继续重试，销毁清空。APK版本在宿主进程内固定，新安装后须重启；未更改公共版本API的热更新检测策略。此调用是明确重复工作，但尚未单独计时，不能声称已证明占胶囊耗时的具体比例。
+菜单递归复用按Resources缓存的fq资源ID，不再每节点getIdentifier；无候选图标时跳过兜底Drawable加载。仍逐次校验菜单唯一性、原生控件、标题与成员数，聊天对象查询、头像更新、深浅色适配和布局更新时机保留。
+验证：Android36 SDK定向编译（项目API和Xposed依赖用桩）；提取生产版本缓存逻辑做JVM验证，覆盖API为空、版本为空、后续就绪、10000次复用不重查、不同实例独立；diff检查。实机效果待安装复测，未运行Gradle或构建APK，未提交推送。D布局问题未改动。
