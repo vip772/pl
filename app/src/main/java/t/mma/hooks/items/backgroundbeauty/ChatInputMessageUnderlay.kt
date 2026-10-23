@@ -154,7 +154,17 @@ internal class ChatInputMessageUnderlay {
         ChatScrollTrace.snapshot("underlay.beforeNative", state.content)
         if (state.expandedHeight >= 0 && state.content.measuredHeight == state.expandedHeight) {
             ChatScrollDiagnostic.hit("underlay.restoreNative")
-            resizeContent(state, state.nativeHeight)
+            val diagnosticStarted = ChatScrollDiagnostic.begin()
+            val previousPhase = if (ChatScrollDiagnostic.isActive()) ChatScrollTrace.enter("underlayResize") else null
+            try {
+                state.content.measure(
+                    View.MeasureSpec.makeMeasureSpec(state.nativeWidth, View.MeasureSpec.EXACTLY),
+                    View.MeasureSpec.makeMeasureSpec(state.nativeHeight, View.MeasureSpec.EXACTLY)
+                )
+            } finally {
+                if (ChatScrollDiagnostic.isActive() || previousPhase != null) ChatScrollTrace.leave(previousPhase)
+                ChatScrollDiagnostic.end("underlay.measureLayout", diagnosticStarted)
+            }
         }
         state.expandedHeight = -1
 
