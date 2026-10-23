@@ -2085,3 +2085,6 @@ DexFinder 在构造阶段、发布给 FeatureContext 和各 API 安装器之前�
 依据：冷启动 simpleperf 的 Hchat-GroupJoin 线程路径，经 v8.3.7 对应 R8 mapping 核对，为 ProfileGroupInfoFeature.scheduleGroup → WeChatChatroomApi.getMemberJoinTimes → isMemberJoinSystemMessage / 数据库查询。本次移除已证实的启动后台负担，尚不能证明已解决所有秒级停顿；另一轮 Perfetto 中目标帧的主要延迟在 doFrame 开始前，等待调用栈仍需补齐。
 
 无 Gradle 的 JVM 验证：`python3 scripts/tests/profile-demand/run.py`，覆盖注册不查群、关闭不加载、按需后台加载、并发去重、缓存命中、刷新及销毁。
+
+### 首页音乐样式3暂停回正
+首页音乐样式3卡片与音乐二级页面共用HomeMusicPaintedView：播放时照片按12秒一圈旋转；暂停后沿原方向以600ms一圈的速度补齐剩余角度，精确归零后停止帧调度（回正最多约600ms）。回正过程中恢复播放从当前角度继续；不可见时不调度，重新可见后继续完成回正。样式2保持原有行为。Android36 SDK定向编译及生产角度推进逻辑JVM验证覆盖多角度暂停归零、归零后稳定、恢复播放与延迟帧；实机视觉效果待安装验收。

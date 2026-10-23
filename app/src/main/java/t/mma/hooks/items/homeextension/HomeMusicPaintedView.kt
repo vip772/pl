@@ -40,12 +40,12 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
             if(!visibleForFrames()){rotationFrameAt=0L;return}
             val snapshot=state();cachedState=snapshot
             val now=android.os.SystemClock.uptimeMillis()
-            if(style==3&&snapshot.playing){
-                if(rotationFrameAt!=0L)portraitAngle=(portraitAngle+(now-rotationFrameAt)*360f/12000f)%360f
+            if(style==3&&(snapshot.playing||portraitAngle!=0f)){
+                if(rotationFrameAt!=0L)portraitAngle=advancePortraitAngle(portraitAngle,now-rotationFrameAt,snapshot.playing)
                 rotationFrameAt=now
             }else rotationFrameAt=0L
             invalidate();needsRefresh=false
-            if(snapshot.playing){scheduled=true;postDelayed(this,33)}
+            if(snapshot.playing||(style==3&&portraitAngle!=0f)){scheduled=true;postDelayed(this,33)}
         }
     }
     private fun resumeFrames(){
@@ -225,3 +225,12 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         private val worker=Executors.newFixedThreadPool(2){Thread(it,"Hchat-MusicCover").apply{isDaemon=true}}}
 }
 internal data class MusicPaintState(val title:String,val position:Int,val duration:Int,val playing:Boolean,val spectrum:FloatArray,val lyric:String="",val coverUrl:String="",val favorite:Boolean=false)
+
+/** Pause finishes the current clockwise turn within 600ms, then snaps exactly upright. */
+internal fun advancePortraitAngle(angle:Float,elapsedMs:Long,playing:Boolean):Float {
+    val elapsed=elapsedMs.coerceAtLeast(0).toFloat()
+    if(playing)return (angle+elapsed*360f/12000f)%360f
+    if(angle==0f)return 0f
+    val step=elapsed*360f/600f
+    return if(step>=360f-angle)0f else angle+step
+}
