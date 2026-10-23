@@ -1376,10 +1376,10 @@ private class BackgroundBeautyRuntime(
                     val view = param.thisObject as? View ?: return@hookOnce
                     if (t.mma.hooks.items.floatingchat.FloatingChatCardVisuals.contains(view)) return@hookOnce
                     val state = surfaceOwners[view] ?: run {
-// Only inspect untracked writes while the contacts page is active.
-                        val active = WeChatApis.currentActivity()?.currentActivity() ?: return@hookOnce
-                        if (resolveTarget(active) != BackgroundBeautySettings.Slot.CONTACTS) return@hookOnce
-                        // Header children can be replaced without an adapter bind.
+                        // This global setter also sees every recycled message bubble.
+                        // Only a known contacts list ancestor can need late-row repair;
+                        // never resolve the active page or walk the decor tree here.
+                        if (framePageSlots.values.none { it == BackgroundBeautySettings.Slot.CONTACTS }) return@hookOnce
                         var ancestor = view.parent as? View
                         var depth = 0
                         while (ancestor != null && depth++ < 12) {
@@ -1399,7 +1399,7 @@ private class BackgroundBeautyRuntime(
                         if (diagnosticCounts.computeIfAbsent("write:${view.javaClass.name}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 3) {
                             HLog.i("$TAG DIAG rewrite class=${view.javaClass.name} setter=$name background=${view.background?.javaClass?.name}")
                         }
-                        if (resolveTarget(state.activity) == BackgroundBeautySettings.Slot.WECHAT &&
+                        if (snapshot.slot == BackgroundBeautySettings.Slot.WECHAT &&
                             (isChromeSurface(view) || isSystemBarBackground(view) || view === state.activity.window.decorView)) {
                             val key = "wxwrite:${view.javaClass.name}:$name"
                             if (diagnosticCounts.computeIfAbsent(key) { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 2) {
@@ -1422,7 +1422,7 @@ private class BackgroundBeautyRuntime(
                         snapshot.originalTintList = view.backgroundTintList
                         snapshot.originalTintMode = view.backgroundTintMode
                         if (applied != null && prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
-                            snapshot.slot?.let { BackgroundBeautyStore.hasImage(context.hostContext(), it) } == true) {
+                            snapshot.slot?.let { state.loadedBitmaps[it]?.bitmap?.isRecycled == false } == true) {
                             surfaceMutationDepth++
                             try {
                                 view.backgroundTintList = null
@@ -1432,7 +1432,7 @@ private class BackgroundBeautyRuntime(
                             } finally { surfaceMutationDepth-- }
                         }
                         if (diagnosticCounts.computeIfAbsent("write-result:${view.javaClass.name}") { java.util.concurrent.atomic.AtomicInteger() }.incrementAndGet() <= 4) {
-                            HLog.i("$TAG WXRESULT class=${view.javaClass.name} slot=${snapshot.slot} applied=${applied != null} retained=${view.background === applied} active=${resolveTarget(state.activity)}")
+                            HLog.i("$TAG WXRESULT class=${view.javaClass.name} slot=${snapshot.slot} applied=${applied != null} retained=${view.background === applied} active=${state.lastLoggedSlot}")
                         }
                         if (applied == null) scheduleRefresh(state.activity)
                     }

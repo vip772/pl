@@ -102,3 +102,12 @@ footer预绘制使用既有已缓存GradientDrawable进行常量级背景一致�
 麦克风底色对照 BackgroundBeauty.applySpeechSurfaces/applyChatVoiceSurfaces：ew_.xml 的 SpeechInputLayout 内 wez/wev 是普通背景 View；t8.xml 的 sub/suc 下还有匿名 de7 阴影。前次只补 wi2 同级层，遗漏这些背景。现按相同祖先结构清理普通 View 和语音区 ImageView 的背景/前景，不修改图标 drawable。继续排除 ChatFooterBottom 子树，关闭时恢复原表面。
 
 真实 Android 36 SDK 与 DexKit 定向编译生产输入区、表面清理与共享卡片代码通过，项目辅助依赖使用桩；未运行 Gradle 或生成 APK。原生依据仅核实本机现有 8.0.78，未做其它版本横向验证。新日志附件在当前路径不可访问，未引用其内容；实机手势与底色仍待复测。
+
+
+## 2026-10-23：沉浸背景聊天滚动热路径
+
+代码确认 BackgroundBeautyRuntime 对 View.setBackgroundDrawable/setBackgroundColor 的全局 after Hook 会收到 RecyclerView 消息复用过程中的背景写入。未接管 View 原先调用 currentActivity/resolveTarget；LauncherUI 的 resolveTarget 通过 chatBackgroundHost/findVisibleDescendant 搜索视图树。即使只是为通讯录延迟行绑定判断，也会在聊天气泡背景写入时执行。已接管表面的回写还调用 resolveTarget，并通过 hasImage 执行文件元数据查询。上述路径在主线程同步执行，属于明确可消除的重复工作；本轮没有设备帧时间采样，不能量化其对总掉帧的占比。
+
+修正：未接管写入先检查已维护的页面状态，只有存在通讯录页面时才按最多 12 层父链匹配已登记的通讯录列表；不再查询当前 Activity 或聊天视图树。已接管表面通过 snapshot.slot 和 state.loadedBitmaps 校验归属及有效图片，不在 setter 内查文件。图片变更仍由现有配置刷新/加载/恢复路径处理。背景位图画质、屏幕对齐、布局和刷新率保持原逻辑；该功能没有 preferredRefreshRate/setFrameRate/显示模式写入，因此没有强制提高刷新率。
+
+验证：新增 check_write_hot_path.py 提取并执行生产未接管写入代码，覆盖 10 万次聊天绑定、通讯录延迟行、混合列表和已接管旁路，并检查 setter 中没有页面解析或图片文件查询。现有背景屏幕对齐、窗口变化、侧滑和反馈回归通过；真实 Android 36 SDK + DexKit 定向编译 BackgroundBeautyFeature/Store/Settings/ChatInputMessageUnderlay/ChatInputOutline 通过（项目辅助 API 使用桩）。未运行 Gradle 或生成 APK，未完成实机 FPS/帧时间验证，不声称已消除所有掉帧。
