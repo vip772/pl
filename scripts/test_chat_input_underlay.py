@@ -6,7 +6,7 @@ root=Path(__file__).resolve().parents[1]
 lib=Path('/tmp/pl-kotlin-libs')
 files={
 'Rect.kt': '''package android.graphics
-data class Rect(var left:Int,var top:Int,var right:Int,var bottom:Int){fun width()=right-left;fun height()=bottom-top;companion object{fun intersects(a:Rect,b:Rect)=a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom}}
+data class Rect(var left:Int=0,var top:Int=0,var right:Int=0,var bottom:Int=0){fun set(l:Int,t:Int,r:Int,b:Int){left=l;top=t;right=r;bottom=b};fun width()=right-left;fun height()=bottom-top;companion object{fun intersects(a:Rect,b:Rect)=a.left<b.right&&b.left<a.right&&a.top<b.bottom&&b.top<a.bottom}}
 ''',
 'Color.kt': '''package android.graphics.drawable
 class ColorDrawable(val color:Int)
@@ -19,9 +19,9 @@ object ChatScrollDiagnostic {fun begin()=0L;fun end(n:String,t:Long){};fun hit(n
 interface ViewParent
 open class View {
  var parent:ViewParent?=null; var visibility=0; var height=0; var width=0; var id=0; var top=0; var elevation=0f; var z=0f; var isShown=true; var alpha=1f
- var left=0; var measuredHeight=0; var measuredWidth=0
- open fun measure(w:Int,h:Int){measuredWidth=w;measuredHeight=h}
- open fun layout(l:Int,t:Int,r:Int,b:Int){left=l;top=t;width=r-l;height=b-t}
+ var left=0; var measuredHeight=0; var measuredWidth=0;var isLayoutRequested=false;var measureCalls=0;var layoutCalls=0
+ open fun measure(w:Int,h:Int){measureCalls++;measuredWidth=w;measuredHeight=h}
+ open fun layout(l:Int,t:Int,r:Int,b:Int){layoutCalls++;left=l;top=t;width=r-l;height=b-t}
  object MeasureSpec {const val EXACTLY=0;fun makeMeasureSpec(s:Int,m:Int)=s}
  var layoutParams:Any?=null
  var background:Any?=null
@@ -107,6 +107,17 @@ fun main(){
   controller.apply(scroll)
   check(content.height==2834 && footer.top==2637 && list.paddingBottom==208)
  }
+ // Native relayout may change bounds without changing measured size.
+ content.measure(1440,2834);content.layout(0,0,1440,2637)
+ val measuredBefore=content.measureCalls;val laidBefore=content.layoutCalls
+ controller.apply(scroll)
+ check(content.height==2834 && content.measureCalls==measuredBefore && content.layoutCalls==laidBefore+1)
+ val stableMeasures=content.measureCalls;val stableLayouts=content.layoutCalls
+ repeat(10000){controller.apply(scroll)}
+ check(content.measureCalls==stableMeasures && content.layoutCalls==stableLayouts)
+ content.children.remove(wrapper);wrapper.parent=null
+ val replacement=MMChattingListView(list);replacement.id="bm6".hashCode();replacement.add(list);content.add(replacement)
+ controller.apply(scroll);check(content.height==2834)
  // A genuinely visible panel is not mistaken for the narrow bottom tail.
  scroll.height=3500;controller.apply(scroll)
  check(content.height==2808 && list.paddingBottom==182)
@@ -129,5 +140,5 @@ with tempfile.TemporaryDirectory() as d:
  for n,s in files.items():(d/n).write_text(s)
  std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
  jar=d/'test.jar'
- subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(jar),*[str(d/n) for n in files],str(root/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/ChatInputMessageUnderlay.kt')],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
+ subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(jar),*[str(d/n) for n in files],str(root/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/ChatInputMessageUnderlay.kt')],check=True,stdout=subprocess.PIPE)
  subprocess.run(['java','-cp',f'{jar}:{std}','t.mma.hooks.items.backgroundbeauty.MainKt'],check=True)

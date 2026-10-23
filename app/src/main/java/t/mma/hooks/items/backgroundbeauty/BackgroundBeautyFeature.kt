@@ -2278,8 +2278,11 @@ private class BackgroundBeautyRuntime(
                 val activity = findActivity(scroll) ?: return@hookOnce
                 val state = states[activity] ?: return@hookOnce
                 try {
-                    val enabled = !destroyed && resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT &&
-                        hasConfiguredBackground(activity) && WeChatApis.version()?.current()?.versionName == "8.0.78"
+                    // The verified scroll instance is already a chat-specific anchor.
+                    val enabled = !destroyed && scroll.isShown &&
+                        prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
+                        BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.CHAT) &&
+                        WeChatApis.version()?.current()?.versionName == "8.0.78"
                     if (enabled && !floatingFooterEnabled()) state.inputUnderlay.apply(scroll) else state.inputUnderlay.restore(scroll)
                 } catch (e: Throwable) {
                     state.inputUnderlay.restore(scroll)

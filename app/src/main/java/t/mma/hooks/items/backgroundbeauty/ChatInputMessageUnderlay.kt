@@ -11,6 +11,7 @@ import java.util.WeakHashMap
 /** 8.0.78 ss.xml/t8.xml: preserve native footer and overlap the visible ssr input row, excluding the app panel. */
 internal class ChatInputMessageUnderlay {
     private class State(val content: View, val list: ViewGroup, val margin: Int, val clip: Boolean) {
+        var targets: Targets? = null
         var basePadding = list.paddingBottom
         var appliedPadding = list.paddingBottom
         var overlap = 0
@@ -22,38 +23,46 @@ internal class ChatInputMessageUnderlay {
         var nativeLeft = 0
         var nativeTop = 0
     }
+    private class Targets(val content: View, val footer: ViewGroup, val strip: View, val wrapper: View, val list: ViewGroup) {
+        fun valid(scroll: ViewGroup): Boolean = content.parent === scroll && footer.parent === scroll &&
+            inside(strip, footer) && inside(wrapper, content) && inside(list, wrapper)
+        private fun inside(child: View, ancestor: View): Boolean {
+            var node: View? = child
+            repeat(32) {
+                if (node === ancestor) return true
+                node = node?.parent as? View ?: return false
+            }
+            return false
+        }
+    }
+    private val location = IntArray(2)
+    private val stripBounds = Rect()
+    private val scrollBounds = Rect()
+    private val footerBounds = Rect()
     private val states = WeakHashMap<ViewGroup, State>()
     fun apply(scroll: ViewGroup) {
         val diagnosticStarted = ChatScrollDiagnostic.begin()
         try {
         if (scroll.javaClass.name != SCROLL) return
-        fun named(name: String): View? {
-            val id = scroll.resources.getIdentifier(name, "id", scroll.context.packageName)
-            return if (id == 0) null else scroll.findViewById<View>(id)
-        }
-        val content = named("bki") ?: return
-        val footer = (named("k52") as? ViewGroup) ?: return
-        val strip = named("ssr") ?: return
-        val wrapper = named("bm6") ?: return
-        if (content.parent !== scroll || footer.parent !== scroll ||
-            content.javaClass.name != "com.tencent.mm.pluginsdk.ui.chat.ChattingContent" ||
-            footer.javaClass.name != "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") return
+        val target = states[scroll]?.targets?.takeIf { it.valid(scroll) } ?: resolveTargets(scroll) ?: return
+        val content = target.content
+        val footer = target.footer
+        val strip = target.strip
+        val list = target.list
         val lp = content.layoutParams as? LinearLayout.LayoutParams ?: return
-        // Native getListView() returns u3; in 8.0.78 the concrete instance is a View (RecyclerView).
-        val method = KavaReflector.findMethodRecursive(wrapper.javaClass, "getListView") ?: return
-        val list = KavaReflector.invokeOrThrow(method, wrapper) as? ViewGroup ?: return
         val state = states[scroll]?.takeIf { it.content === content && it.list === list } ?: run {
             restore(scroll)
-            State(content, list, lp.bottomMargin, list.clipToPadding).also { states[scroll] = it }
+            State(content, list, lp.bottomMargin, list.clipToPadding).also { states[scroll] = it; it.targets = target }
         }
-        val stripRect = strip.screenRect()
+        state.targets = target
+        val stripRect = strip.screenRect(stripBounds)
         // t8.xml: blr is ABOVE bl8/ssr, not the input row. Runtime logs show
         // blr.height=0 while ssr.height=171. Reserve only footer-top..row-bottom;
         // bkc/AppPanel below ssr must never contribute to this overlap.
         val rowOverlap = inputRowOverlap(footer, strip)
         // Native footer includes an offscreen panel. Cover the short visible tail
         // below ssr as well, but never extend through an opened panel.
-        val visibleFooter = intersectionRect(scroll.screenRect(), footer.screenRect())
+        val visibleFooter = intersectionRect(scroll.screenRect(scrollBounds), footer.screenRect(footerBounds))
         val tail = (visibleFooter.bottom - stripRect.bottom).coerceAtLeast(0)
         val bottomTail = if (rowOverlap > 0 && tail < strip.height) tail else 0
         val overlap = rowOverlap + bottomTail
@@ -86,16 +95,43 @@ internal class ChatInputMessageUnderlay {
         } finally { ChatScrollDiagnostic.end("underlay.apply", diagnosticStarted) }
     }
 
+    private fun resolveTargets(scroll: ViewGroup): Targets? {
+        ChatScrollDiagnostic.hit("underlay.resolveTargets")
+        fun named(name: String): View? {
+            val id = scroll.resources.getIdentifier(name, "id", scroll.context.packageName)
+            return if (id == 0) null else scroll.findViewById<View>(id)
+        }
+        val content = named("bki") ?: return null
+        val footer = (named("k52") as? ViewGroup) ?: return null
+        val strip = named("ssr") ?: return null
+        val wrapper = named("bm6") ?: return null
+        if (content.parent !== scroll || footer.parent !== scroll ||
+            content.javaClass.name != "com.tencent.mm.pluginsdk.ui.chat.ChattingContent" ||
+            footer.javaClass.name != "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") return null
+        // Native getListView() returns u3; in 8.0.78 the concrete instance is a View (RecyclerView).
+        val method = KavaReflector.findMethodRecursive(wrapper.javaClass, "getListView") ?: return null
+        val list = KavaReflector.invokeOrThrow(method, wrapper) as? ViewGroup ?: return null
+        return Targets(content, footer, strip, wrapper, list).takeIf { it.valid(scroll) }
+    }
     private fun resizeContent(state: State, height: Int) {
         val diagnosticStarted = ChatScrollDiagnostic.begin()
         try {
-        state.content.measure(
-            View.MeasureSpec.makeMeasureSpec(state.nativeWidth, View.MeasureSpec.EXACTLY),
-            View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
-        )
-        state.content.layout(state.nativeLeft, state.nativeTop,
-            state.nativeLeft + state.nativeWidth, state.nativeTop + height)
-
+        val needsMeasure = state.content.measuredWidth != state.nativeWidth ||
+            state.content.measuredHeight != height || state.content.isLayoutRequested
+        if (needsMeasure) {
+            ChatScrollDiagnostic.hit("underlay.actualMeasure")
+            state.content.measure(
+                View.MeasureSpec.makeMeasureSpec(state.nativeWidth, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
+            )
+        }
+        if (needsMeasure || state.content.left != state.nativeLeft || state.content.top != state.nativeTop ||
+            state.content.width != state.nativeWidth || state.content.height != height ||
+            state.content.isLayoutRequested) {
+            ChatScrollDiagnostic.hit("underlay.actualLayout")
+            state.content.layout(state.nativeLeft, state.nativeTop,
+                state.nativeLeft + state.nativeWidth, state.nativeTop + height)
+        }
         } finally { ChatScrollDiagnostic.end("underlay.measureLayout", diagnosticStarted) }
     }
 
@@ -128,10 +164,10 @@ internal class ChatInputMessageUnderlay {
         return if (node === footer) bottom.coerceIn(0, footer.height.coerceAtLeast(0)) else 0
     }
 
-    private fun View.screenRect(): Rect {
-        val location = IntArray(2)
+    private fun View.screenRect(out: Rect): Rect {
         getLocationOnScreen(location)
-        return Rect(location[0], location[1], location[0] + width, location[1] + height)
+        out.set(location[0], location[1], location[0] + width, location[1] + height)
+        return out
     }
 
     private fun intersectionRect(a: Rect, b: Rect): Rect = Rect(
