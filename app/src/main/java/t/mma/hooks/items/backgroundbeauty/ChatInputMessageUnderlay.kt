@@ -1,5 +1,6 @@
 package t.mma.hooks.items.backgroundbeauty
 
+import t.mma.utils.ChatScrollTrace
 import t.mma.utils.ChatScrollDiagnostic
 import android.graphics.Rect
 import android.view.View
@@ -55,6 +56,8 @@ internal class ChatInputMessageUnderlay {
             State(content, list, lp.bottomMargin, list.clipToPadding).also { states[scroll] = it; it.targets = target }
         }
         state.targets = target
+        ChatScrollTrace.watch(scroll, content, list, footer)
+        ChatScrollTrace.snapshot("underlay.beforeApply", content)
         val stripRect = strip.screenRect(stripBounds)
         // t8.xml: blr is ABOVE bl8/ssr, not the input row. Runtime logs show
         // blr.height=0 while ssr.height=171. Reserve only footer-top..row-bottom;
@@ -91,6 +94,7 @@ internal class ChatInputMessageUnderlay {
         }
         state.expandedHeight = height
         state.overlap = overlap
+        ChatScrollTrace.snapshot("underlay.afterApply", content)
 
         } finally { ChatScrollDiagnostic.end("underlay.apply", diagnosticStarted) }
     }
@@ -116,22 +120,28 @@ internal class ChatInputMessageUnderlay {
     private fun resizeContent(state: State, height: Int) {
         val diagnosticStarted = ChatScrollDiagnostic.begin()
         try {
+        val previousPhase = if (ChatScrollDiagnostic.isActive()) ChatScrollTrace.enter("underlayResize") else null
+        try {
         val needsMeasure = state.content.measuredWidth != state.nativeWidth ||
             state.content.measuredHeight != height || state.content.isLayoutRequested
         if (needsMeasure) {
             ChatScrollDiagnostic.hit("underlay.actualMeasure")
-            state.content.measure(
+            val measureStarted = ChatScrollDiagnostic.begin()
+            try { state.content.measure(
                 View.MeasureSpec.makeMeasureSpec(state.nativeWidth, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
-            )
+            ) } finally { ChatScrollDiagnostic.end("underlay.measureOnly", measureStarted) }
         }
         if (needsMeasure || state.content.left != state.nativeLeft || state.content.top != state.nativeTop ||
             state.content.width != state.nativeWidth || state.content.height != height ||
             state.content.isLayoutRequested) {
             ChatScrollDiagnostic.hit("underlay.actualLayout")
-            state.content.layout(state.nativeLeft, state.nativeTop,
-                state.nativeLeft + state.nativeWidth, state.nativeTop + height)
+            val layoutStarted = ChatScrollDiagnostic.begin()
+            try { state.content.layout(state.nativeLeft, state.nativeTop,
+                state.nativeLeft + state.nativeWidth, state.nativeTop + height) }
+            finally { ChatScrollDiagnostic.end("underlay.layoutOnly", layoutStarted) }
         }
+        } finally { if (ChatScrollDiagnostic.isActive() || previousPhase != null) ChatScrollTrace.leave(previousPhase) }
         } finally { ChatScrollDiagnostic.end("underlay.measureLayout", diagnosticStarted) }
     }
 
@@ -141,6 +151,7 @@ internal class ChatInputMessageUnderlay {
         val diagnosticStarted = ChatScrollDiagnostic.begin()
         try {
         val state = states[scroll] ?: return
+        ChatScrollTrace.snapshot("underlay.beforeNative", state.content)
         if (state.expandedHeight >= 0 && state.content.measuredHeight == state.expandedHeight) {
             ChatScrollDiagnostic.hit("underlay.restoreNative")
             resizeContent(state, state.nativeHeight)

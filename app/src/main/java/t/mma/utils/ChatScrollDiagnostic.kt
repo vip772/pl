@@ -25,7 +25,11 @@ object ChatScrollDiagnostic {
     @JvmStatic fun isActive() = until != 0L && SystemClock.elapsedRealtime() < until
     @JvmStatic fun begin(): Long = if (isActive()) SystemClock.elapsedRealtimeNanos() else 0L
     @JvmStatic fun end(name: String, started: Long) {
-        if (started != 0L) record(name, (SystemClock.elapsedRealtimeNanos() - started).coerceAtLeast(0))
+        if (started != 0L) {
+            val elapsed = (SystemClock.elapsedRealtimeNanos() - started).coerceAtLeast(0)
+            record(name, elapsed)
+            if (elapsed >= 4_000_000L) detail("slow.$name", "atMs=${SystemClock.elapsedRealtime()} elapsedUs=${elapsed/1000}")
+        }
     }
     private var lastGeometry = "unseen"
     @JvmStatic fun geometry(native: Int, expanded: Int, overlap: Int) {
@@ -34,6 +38,12 @@ object ChatScrollDiagnostic {
             if (isActive()) lastGeometry = "native=$native,expanded=$expanded,overlap=$overlap"
         }
     }
+    private val details = linkedMapOf<String, String>()
+    fun detail(name: String, value: String) {
+        if (!isActive()) return
+        synchronized(lock) { if (isActive() && (details.size < 32 || name in details)) details[name] = value.take(2400) }
+    }
+    fun observe(name: String, nanos: Long) { if (isActive()) record(name, nanos) }
     @JvmStatic fun hit(name: String) { if (isActive()) record(name, 0) }
     private fun record(name: String, time: Long) {
         try {
@@ -71,13 +81,14 @@ object ChatScrollDiagnostic {
             host = context.applicationContext ?: context
             label = group.takeIf { it in listOf("A", "B", "C", "D") } ?: "?"
             session = SystemClock.elapsedRealtime(); salt = java.util.Random().nextInt()
-            stats.clear(); pairs.clear(); sources.clear(); budget = 12; queries = 0; lastGeometry = "unseen"
+            stats.clear(); pairs.clear(); sources.clear(); details.clear(); budget = 12; queries = 0; lastGeometry = "unseen"
             until = session + 300_000L
             worker = ScheduledThreadPoolExecutor(1) { task -> Thread(task, "Hchat-ScrollDiag").apply { isDaemon = true } }.apply {
                 scheduleAtFixedRate({ tick() }, 5, 5, TimeUnit.SECONDS)
             }
             RuntimeLogStore.log("INFO", "[Hchat:ScrollDiag] start session=$session group=$label durationMs=300000")
         }
+        ChatScrollTrace.start()
     }
     private fun tick() {
         try { synchronized(lock) {
@@ -94,16 +105,18 @@ object ChatScrollDiagnostic {
             append("[Hchat:ScrollDiag] session=$session group=$label reason=$reason footer=$footer header=$header elapsedMs=${SystemClock.elapsedRealtime()-session}")
             append(" geometry=$lastGeometry pairs=${pairs.size} repeatQueries=${pairs.values.sumOf { (it-1).coerceAtLeast(0) }} pairCap=256")
             stats.forEach { (key, s) -> append(" | $key count=${s.count} totalUs=${s.total/1000} maxUs=${s.max/1000}") }
+            details.forEach { (key, value) -> append(" | $key=$value") }
             sources.forEach { append(" | source=$it") }
         })
-        stats.clear(); pairs.clear(); sources.clear()
+        stats.clear(); pairs.clear(); sources.clear(); details.clear()
     }
     @JvmStatic fun stop() { synchronized(lock) {
         if (until == 0L) return
         until = 0L
         try { flush("stop") } finally {
             worker?.shutdownNow(); worker = null; host = null
-            stats.clear(); pairs.clear(); sources.clear()
+            ChatScrollTrace.stop()
+            stats.clear(); pairs.clear(); sources.clear(); details.clear()
         }
     } }
 }

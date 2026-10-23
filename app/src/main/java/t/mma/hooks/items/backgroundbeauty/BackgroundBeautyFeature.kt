@@ -1754,6 +1754,8 @@ private class BackgroundBeautyRuntime(
         }
     }
     private fun applyForActivity(activity: Activity) {
+        val traceStarted = t.mma.utils.ChatScrollDiagnostic.begin()
+        try {
         if (destroyed || activity.isFinishing || activity.isDestroyed) return
         if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) {
             clearActivity(activity)
@@ -1815,6 +1817,8 @@ private class BackgroundBeautyRuntime(
                 applyBitmap(currentState, slot, bitmap)
             }
         }
+
+        } finally { t.mma.utils.ChatScrollDiagnostic.end("background.refresh", traceStarted) }
     }
 
     private fun ensureState(activity: Activity): HostState = synchronized(states) {
@@ -2271,9 +2275,12 @@ private class BackgroundBeautyRuntime(
             hookOnce(method, before = { param ->
                 val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
                 val activity = findActivity(scroll) ?: return@hookOnce
+                t.mma.utils.ChatScrollTrace.watch(scroll)
                 t.mma.utils.ChatScrollDiagnostic.hit("scroll.nativeLayout")
                 states[activity]?.inputUnderlay?.beforeLayout(scroll)
+                t.mma.utils.ChatScrollTrace.nativeBegin()
             }, after = { param ->
+                t.mma.utils.ChatScrollTrace.nativeEnd()
                 val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
                 val activity = findActivity(scroll) ?: return@hookOnce
                 val state = states[activity] ?: return@hookOnce
@@ -2365,6 +2372,8 @@ private class BackgroundBeautyRuntime(
         }
     }
     private fun applyChatFooterTransparency(state: HostState, root: View) {
+        val traceStarted = t.mma.utils.ChatScrollDiagnostic.begin()
+        try {
         val footer = when {
             root.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooter" -> root
             else -> findVisibleDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter")
@@ -2427,6 +2436,8 @@ private class BackgroundBeautyRuntime(
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = !inSpeech)
             }
         }
+
+        } finally { t.mma.utils.ChatScrollDiagnostic.end("background.footer", traceStarted) }
     }
     private fun applyWhitelistedSurfaces(
         state: HostState,

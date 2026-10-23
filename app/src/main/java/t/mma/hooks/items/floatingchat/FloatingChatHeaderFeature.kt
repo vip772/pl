@@ -246,6 +246,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun apply(sourceLayout: ViewGroup) {
+        val traceStarted = t.mma.utils.ChatScrollDiagnostic.begin()
+        try {
 
         if (!isEnabled()) {
             restore(sourceLayout)
@@ -312,6 +314,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
             header.bringToFront()
         }
 
+
+        } finally { t.mma.utils.ChatScrollDiagnostic.end("header.apply", traceStarted) }
     }
 
     private fun visibleChatLayout(source: ViewGroup): ViewGroup? {
