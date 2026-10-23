@@ -57,3 +57,11 @@ D的paddingWrite专项只有1次，不能据此认定穿透代码持续写paddin
 源码核查发现胶囊逐次调用versionName，而WeChatVersionApi.current即使命中cached仍先build完整版本指纹，包含包信息及热更新文件检查。本轮只在胶囊实例缓存非空APK versionName；空值或API未就绪继续重试，销毁清空。APK版本在宿主进程内固定，新安装后须重启；未更改公共版本API的热更新检测策略。此调用是明确重复工作，但尚未单独计时，不能声称已证明占胶囊耗时的具体比例。
 菜单递归复用按Resources缓存的fq资源ID，不再每节点getIdentifier；无候选图标时跳过兜底Drawable加载。仍逐次校验菜单唯一性、原生控件、标题与成员数，聊天对象查询、头像更新、深浅色适配和布局更新时机保留。
 验证：Android36 SDK定向编译（项目API和Xposed依赖用桩）；提取生产版本缓存逻辑做JVM验证，覆盖API为空、版本为空、后续就绪、10000次复用不重查、不同实例独立；diff检查。实机效果待安装复测，未运行Gradle或构建APK，未提交推送。D布局问题未改动。
+
+
+## 972构建映射核验与背景布局版本检查优化（本地待验收）
+用户提供Hchat-release-mapping-ed3adae2897edf1d9731127720401dbbc195443f.zip，包含mapping.txt。文件名提交与本地HEAD一致，映射的方法和行号可对应972诊断堆栈；未用APK内R8 map-id做额外绑定校验。映射仅存本地/tmp/pl-972-mapping，不加入仓库。
+R8类合并/内联后不能只按外层类名归属：hi.o虽然类头为DynamicRecallRuntime，但g的307—321行映射到ChatInputMessageUnderlay.apply原76行，实际是list.setPadding。pi.i#invoke:1112映射到BackgroundBeautyRuntime.installChatChromeLifecycle的lambda原2293行；pi.v#afterHookedMethod:8映射hookOnce原1679行；lm.c#beforeHookedMethod:134是ChatScrollTrace的请求观察器。故该请求来自背景穿透代码，不是防撤回。该样本发生在进入群聊时而非正式滚动区间，paddingWrite少量记录不能解释滚动期间8255次父链请求。
+972 D专项三个窗口：原生布局/实际测量/实际布局各2116次，measureOnly累计3.571ms、layoutOnly累计1186.158ms；beforeNative常为measured2637/bounds2834/requested=true。结合beforeLayout只有measuredHeight等于expandedHeight时才恢复，可确认多数快照中原生测量已先恢复2637，不能将所有重复变化归因模块beforeLayout显式恢复。原生布局结束后扩展到2834的策略仍执行，初始requestLayout来源仍未确定。
+另发现背景onLayout后置兼容检查逐次调用WeChatVersionApi.current()；API即使缓存命中也先build完整包/热更新指纹。该调用不在underlay.layoutOnly内。本轮为聊天onLayout和applyChatChromeRoot两处兼容判断复用非空APK versionName；空值/API未就绪重试。缓存只用于APK版本门槛，不替代公共API的热更新检测。未改布局、padding、键盘、面板或尺寸恢复策略，未声明重复布局根因已解决。
+验证范围：生产版本缓存片段JVM检查（未就绪/空值重试、10000次不重查、实例独立）；原穿透生产模型回归；Android36 SDK穿透类定向编译（项目辅助依赖用桩）。背景整文件未全量编译，实机收益和重复请求来源待下一轮验证。未运行Gradle、未构建APK，本轮保留本地不提交推送。

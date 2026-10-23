@@ -2289,7 +2289,7 @@ private class BackgroundBeautyRuntime(
                     val enabled = !destroyed && scroll.isShown &&
                         prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
                         BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.CHAT) &&
-                        WeChatApis.version()?.current()?.versionName == "8.0.78"
+                        chatChromeVersionName() == "8.0.78"
                     if (enabled && !floatingFooterEnabled()) state.inputUnderlay.apply(scroll) else state.inputUnderlay.restore(scroll)
                 } catch (e: Throwable) {
                     state.inputUnderlay.restore(scroll)
@@ -2341,6 +2341,16 @@ private class BackgroundBeautyRuntime(
         }
         return best
     }
+    // APK versionName is stable for this runtime. current() rebuilds the full
+    // patch fingerprint, so keep it out of per-layout compatibility checks.
+    // Missing startup values are retried; no public version API policy changes.
+    private var chatChromeVersionName: String? = null
+    private fun chatChromeVersionName(): String? {
+        chatChromeVersionName?.let { return it }
+        return WeChatApis.version()?.versionName()?.takeIf { it.isNotBlank() }?.also {
+            chatChromeVersionName = it
+        }
+    }
     private fun floatingFooterEnabled(): Boolean =
         context.configStore().getGlobalBoolean("floating_chat_footer_enabled", false)
     private fun applyChatChromeRoot(state: HostState, root: View) {
@@ -2363,7 +2373,7 @@ private class BackgroundBeautyRuntime(
         applySpeechSurfaces(state, layout ?: root)
         applyChatVoiceSurfaces(state, layout ?: root)
         applyChatFooterTransparency(state, layout ?: root)
-        if (WeChatApis.version()?.versionName() == "8.0.78") {
+        if (chatChromeVersionName() == "8.0.78") {
             val scroll = findVisibleDescendant(layout ?: root, ChatInputMessageUnderlay.SCROLL) as? ViewGroup
             if (scroll != null) runCatching {
                 if (floatingFooterEnabled()) state.inputUnderlay.restore(scroll) else state.inputUnderlay.apply(scroll)
