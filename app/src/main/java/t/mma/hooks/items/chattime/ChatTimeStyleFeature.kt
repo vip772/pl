@@ -127,10 +127,9 @@ private class ChatTimeStyleRuntime(
             bindings.remove(timeView)
             return
         }
-        val createTime = resolveNativeMessage(args?.getOrNull(1))
-            ?.let(::messageCreateTime)
-            ?: resolveNativeMessage(args)?.let(::messageCreateTime)
-            ?: 0L
+        val createTime = (resolveNativeMessage(args?.getOrNull(1))
+            ?: resolveNativeMessage(args?.filterIndexed { index, _ -> index != 1 }))
+            ?.let(::messageCreateTime) ?: 0L
         val bound = BoundTime(
             createTime = createTime,
             nativeText = timeView.text?.toString().orEmpty(),

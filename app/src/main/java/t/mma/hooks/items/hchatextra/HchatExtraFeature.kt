@@ -1532,10 +1532,18 @@ private class HchatExtraHooker(
     private fun applyForwardedRecordLabel(label: TextView, text: String) {
         if (!TextUtils.equals(label.text, text)) label.text = text
         applyMessageDetailsColors(label)
-        label.alpha = 1f
-        label.includeFontPadding = true
-        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, messageDetailsConfig.textSizeSp)
-        label.setPadding(dp(label.context, 4f), dp(label.context, 2f), dp(label.context, 4f), dp(label.context, 2f))
+        if (label.alpha != 1f) label.alpha = 1f
+        if (!label.includeFontPadding) label.includeFontPadding = true
+        val textSize = messageDetailsConfig.textSizeSp
+        if (kotlin.math.abs(label.textSize / label.resources.displayMetrics.scaledDensity - textSize) > 0.01f) {
+            label.setTextSize(TypedValue.COMPLEX_UNIT_SP, textSize)
+        }
+        val horizontalPadding = dp(label.context, 4f)
+        val verticalPadding = dp(label.context, 2f)
+        if (label.paddingLeft != horizontalPadding || label.paddingRight != horizontalPadding ||
+            label.paddingTop != verticalPadding || label.paddingBottom != verticalPadding) {
+            label.setPadding(horizontalPadding, verticalPadding, horizontalPadding, verticalPadding)
+        }
     }
 
     private fun applyMessageDetailsColors(label: TextView) {

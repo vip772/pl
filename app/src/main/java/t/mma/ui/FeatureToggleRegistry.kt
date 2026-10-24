@@ -109,7 +109,8 @@ object FeatureToggleRegistry {
                 string(context, "Hchat_custom_bottom_bar_config", "custom_bottom_bar_style") == "floating"
             "mention_extension" -> boolean(context, "Hchat_hidden_at_config", "enable") ||
                 boolean(context, "Hchat_emoji_at_config", "enable") ||
-                boolean(context, "Hchat_mention_highlight_config", "mention_highlight_enable")
+                boolean(context, "Hchat_mention_highlight_config", "mention_highlight_enable") ||
+                t.mma.hooks.items.mentionextension.MentionNoticeSettings.enabled(context)
             "special_message" -> {
                 val sp = HchatStorage.preferences(context, SpecialMessageFeature.PREFS)
                 sp.getBoolean("enabled", false) || sp.getBoolean("link", false)

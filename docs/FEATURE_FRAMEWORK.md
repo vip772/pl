@@ -2112,3 +2112,6 @@ DexFinder 在构造阶段、发布给 FeatureContext 和各 API 安装器之前�
 
 ### 悬浮输入框按钮互斥与系统帧分析
 微信8.0.78已验证的原生输入模式切换，在已接管悬浮footer下使用原生无动画分支，避免＋号/发送交叉淡入淡出叠字。其他模式与关闭悬浮时不干预，具体见FLOATING_CHAT_FEATURES.md。系统帧首轮trace发现长MOVE输入分发以线程实际Running为主，不能据此归因模块；详见CHAT_SCROLL_DIAGNOSTIC.md。
+
+### 艾特提醒与聊天绑定检查
+艾特扩展新增默认关闭的艾特提醒，群聊真实艾特当前账号及普通@所有人插入红色本地系统提示，持久化去重及边界见 `docs/MENTION_EXTENSION.md`。聊天时间避免备用分支重复解析优先参数，合并转发详情标签减少重复属性设置，采样结论与限制见 `docs/CHAT_SCROLL_DIAGNOSTIC.md`。

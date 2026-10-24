@@ -39,6 +39,8 @@ internal fun MentionExtensionMiuixPage(
     var hidden by remember { mutableStateOf(hiddenPrefs.getBoolean(t.mma.hooks.items.hiddenat.HiddenAtSettings.ENABLE, false)) }
     var emoji by remember { mutableStateOf(emojiPrefs.getBoolean(t.mma.hooks.items.emojiat.EmojiAtSettings.ENABLE, false)) }
     var highlight by remember { mutableStateOf(sp.getBoolean(MentionHighlightSettings.KEY_ENABLE, false)) }
+    val noticePrefs = remember { HchatStorage.preferences(context, t.mma.hooks.items.mentionextension.MentionNoticeSettings.PREFS) }
+    var notice by remember { mutableStateOf(t.mma.hooks.items.mentionextension.MentionNoticeSettings.enabled(context)) }
     val state = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
@@ -78,6 +80,10 @@ internal fun MentionExtensionMiuixPage(
                     SwitchRow(emoji, "表情艾特", "发送群聊表情时选择普通发送或隐藏成员艾特") {
                         emoji = it
                         emojiPrefs.edit().putBoolean(t.mma.hooks.items.emojiat.EmojiAtSettings.ENABLE, it).apply()
+                    }
+                    SwitchRow(notice, "艾特提醒", "收到群聊中艾特你或所有人的消息时，插入红色本地提醒") {
+                        notice = it
+                        noticePrefs.edit().putBoolean(t.mma.hooks.items.mentionextension.MentionNoticeSettings.ENABLE, it).apply()
                     }
                     SwitchRow(highlight, "艾特高亮", "高亮艾特对象并支持点击资料页；重新进入聊天后生效") {
                         highlight = it

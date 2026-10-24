@@ -182,6 +182,7 @@ object FeatureRegistry {
             .register(MessageBubbleFeature())
             .register(MessageTextColorFeature())
             .register(MentionHighlightFeature())
+            .register(t.mma.hooks.items.mentionextension.MentionNoticeFeature())
             .register(HomeTextColorFeature())
             .register(HideChatAvatarFeature())
             .register(MessageBlockFeature())

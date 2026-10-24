@@ -41,7 +41,8 @@ class MentionHighlightFeature : BaseFeature() {
             val host = context.hostContext()
             t.mma.hooks.items.hiddenat.HiddenAtSettings.preferences(host).getBoolean(t.mma.hooks.items.hiddenat.HiddenAtSettings.ENABLE, false) ||
                 t.mma.hooks.items.emojiat.EmojiAtSettings.preferences(host).getBoolean(t.mma.hooks.items.emojiat.EmojiAtSettings.ENABLE, false) ||
-                MentionHighlightSettings.preferences(host).getBoolean(MentionHighlightSettings.KEY_ENABLE, false)
+                MentionHighlightSettings.preferences(host).getBoolean(MentionHighlightSettings.KEY_ENABLE, false) ||
+                t.mma.hooks.items.mentionextension.MentionNoticeSettings.enabled(host)
         })
     }
 

@@ -47,7 +47,7 @@ object GroupLeaveMonitorHighlighter {
         }
     }
 
-    private fun installTextCleanup(context: Context, logger: (String, Throwable?) -> Unit): Boolean {
+    internal fun installTextCleanup(context: Context, logger: (String, Throwable?) -> Unit): Boolean {
         if (textCleanupInstalled) return true
         val method = KavaReflector.findDeclaredMethod(
             TextView::class.java,
@@ -63,7 +63,8 @@ object GroupLeaveMonitorHighlighter {
             HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val original = param.args?.getOrNull(0) as? CharSequence ?: return
-                    val highlighted = highlight(context, original) ?: return
+                    val highlighted = t.mma.hooks.items.mentionextension.MentionNoticeSettings.highlight(context, original)
+                        ?: highlight(context, original) ?: return
                     param.args[0] = highlighted
                 }
             })
