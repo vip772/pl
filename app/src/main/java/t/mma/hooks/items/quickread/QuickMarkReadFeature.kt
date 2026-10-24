@@ -127,12 +127,8 @@ private class QuickMarkReadDragController(
 
     private fun startPendingSession(activity: Activity, event: MotionEvent): Boolean {
         val root = activity.window?.decorView as? ViewGroup ?: return false
-        if (root.findViewWithTag<View>(HCHAT_SETTINGS_PAGE_TAG) != null) {
-            clearGesture(resetActive = true)
-            return false
-        }
-        val target = findUnreadTargetAt(root, event.rawX, event.rawY) ?: return false
         clearGesture(resetActive = true)
+        val target = findUnreadTargetAt(root, event.rawX, event.rawY) ?: return false
         pending = PendingDragSession(root, target, event.rawX, event.rawY)
         return false
     }
@@ -204,12 +200,14 @@ private class QuickMarkReadDragController(
     }
 
     private fun findUnreadTargetAt(root: ViewGroup, rawX: Float, rawY: Float): DragTarget? {
-        findFloatingBottomBar(root)?.let { floatingBar ->
+        val bottomNav = findBottomBarAt(root, eventX = rawX, eventY = rawY) ?: return null
+        if (bottomNav.tag == CustomBottomBarFeature.FLOATING_BOTTOM_BAR_TAG) {
+            val floatingBar = bottomNav
             findFloatingHomeRegion(root, floatingBar, rawX, rawY)?.let { homeRegion ->
                 return syntheticDotTarget(root, homeRegion, rawX, rawY)
             }
+            return null
         }
-        val bottomNav = findBottomNavContainer(root) ?: return null
         val homeRegion = findBottomTabRegion(bottomNav, HOME_TAB_LABEL) ?: return null
         if (!homeRegion.contains(rawX, rawY)) return null
         val matches = ArrayList<BadgeHit>()
@@ -235,10 +233,29 @@ private class QuickMarkReadDragController(
         return syntheticDotTarget(root, homeRegion, rawX, rawY)
     }
 
-    private fun findFloatingBottomBar(root: ViewGroup): ViewGroup? {
-        return root.findViewWithTag<View>(CustomBottomBarFeature.FLOATING_BOTTOM_BAR_TAG)
-            ?.takeIf { it.isShown && it.visibility == View.VISIBLE }
-            ?.let { it as? ViewGroup }
+    // Follow the topmost visible touch branch, never search siblings behind a chat or dialog.
+    private fun findBottomBarAt(view: View, eventX: Float, eventY: Float): ViewGroup? {
+        if (!view.isShown || view.visibility != View.VISIBLE || view.alpha <= 0f) return null
+        val visible = android.graphics.Rect()
+        if (!view.getGlobalVisibleRect(visible) ||
+            eventX < visible.left || eventX >= visible.right ||
+            eventY < visible.top || eventY >= visible.bottom) return null
+        if (view.tag == HCHAT_SETTINGS_PAGE_TAG) return null
+        val group = view as? ViewGroup ?: return null
+        if (view.tag == CustomBottomBarFeature.FLOATING_BOTTOM_BAR_TAG ||
+            view.javaClass.name == "com.tencent.mm.ui.LauncherUIBottomTabView") return group
+        val children = (0 until group.childCount).sortedWith(
+            compareByDescending<Int> { group.getChildAt(it).z }.thenByDescending { it }
+        )
+        for (index in children) {
+            val child = group.getChildAt(index)
+            if (!child.isShown || child.visibility != View.VISIBLE || child.alpha <= 0f) continue
+            if (!child.getGlobalVisibleRect(visible) ||
+                eventX < visible.left || eventX >= visible.right ||
+                eventY < visible.top || eventY >= visible.bottom) continue
+            return findBottomBarAt(child, eventX, eventY)
+        }
+        return null
     }
 
     private fun findFloatingHomeRegion(
@@ -266,12 +283,15 @@ private class QuickMarkReadDragController(
             bottom = bounds.bottom
         )
         if (!barRect.contains(rawWindowX, rawWindowY)) return null
-        return ScreenRect(
-            left = barRect.left,
-            top = barRect.top,
-            right = barRect.left + barRect.width() / BOTTOM_TAB_LABELS.size,
-            bottom = barRect.bottom
+        val screenOffsetX = rootScreenLocation[0] - rootWindowLocation[0]
+        val screenOffsetY = rootScreenLocation[1] - rootWindowLocation[1]
+        val homeRegion = ScreenRect(
+            left = barRect.left + screenOffsetX,
+            top = barRect.top + screenOffsetY,
+            right = barRect.left + barRect.width() / BOTTOM_TAB_LABELS.size + screenOffsetX,
+            bottom = barRect.bottom + screenOffsetY
         )
+        return homeRegion.takeIf { it.contains(rawX, rawY) }
     }
 
     private fun isUnreadBadgeCandidate(view: View): Boolean {
@@ -411,49 +431,8 @@ private class QuickMarkReadDragController(
         return rawX >= left && rawX <= right && rawY >= top && rawY <= bottom
     }
 
-    private fun findBottomNavContainer(root: ViewGroup): ViewGroup? {
-        val rootHeight = root.height.takeIf { it > 0 }
-            ?: root.resources.displayMetrics.heightPixels
-        val candidates = ArrayList<ViewGroup>()
-        traverse(root) { view ->
-            val group = view as? ViewGroup ?: return@traverse
-            if (!isBottomContainer(group, rootHeight)) return@traverse
-            val labels = LinkedHashSet<String>()
-            collectTexts(group, depth = 0, labels)
-            if (BOTTOM_TAB_LABELS.count { label -> labels.any { it == label } } >= 2) {
-                candidates += group
-            }
-        }
-        return candidates.minWithOrNull(
-            compareBy<ViewGroup> { viewHeight(it).takeIf { height -> height > 0 } ?: Int.MAX_VALUE }
-                .thenBy { viewWidth(it).takeIf { width -> width > 0 } ?: Int.MAX_VALUE }
-        )
-    }
-
-    private fun isBottomContainer(group: ViewGroup, rootHeight: Int): Boolean {
-        val location = IntArray(2)
-        group.getLocationOnScreen(location)
-        val top = location[1]
-        val bottom = top + viewHeight(group)
-        val height = viewHeight(group)
-        return top >= rootHeight * 0.62f &&
-            bottom >= rootHeight * 0.88f &&
-            height <= rootHeight * 0.28f
-    }
-
-    private fun collectTexts(view: View, depth: Int, out: MutableSet<String>) {
-        if (depth > 4) return
-        if (view is TextView) {
-            view.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { out += it }
-            view.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }?.let { out += it }
-        }
-        val group = view as? ViewGroup ?: return
-        for (index in 0 until group.childCount) {
-            collectTexts(group.getChildAt(index), depth + 1, out)
-        }
-    }
-
     private fun traverse(view: View, block: (View) -> Unit) {
+        if (!view.isShown || view.visibility != View.VISIBLE || view.alpha <= 0f) return
         block(view)
         val group = view as? ViewGroup ?: return
         for (index in 0 until group.childCount) {

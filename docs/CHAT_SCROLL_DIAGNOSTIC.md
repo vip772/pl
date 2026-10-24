@@ -153,3 +153,38 @@ pi.z#w0:1013还原setTransparentSurface原2822行foreground写入；pi.z#i:68还
 采集Perfetto-20261024-131132，12秒、24741923字节，正式8轮滑动13:11:36—13:11:41，已返回Operit。采集linux.ftrace调度、gfx/view/input/dalvik、微信atrace及SurfaceFlinger FrameTimeline；解析stats无非零error项。系统帧257、超时124（48.25%）、P95/P99=53/65ms。此为系统追踪场景，开销、消息位置及诊断启用状态不与D组严格匹配，不用于宣称回归。
 
 trace进程16021的主线程utid812、RenderThread16122。主线程MOVE分发最长79.82ms，其中Running60.72ms、Runnable1.01ms，剩余为其他线程状态；另4条52.11—52.93ms MOVE分发中Running51.83—52.49ms。支持触摸分发路径存在显著CPU工作，不支持将这些片段完全解释成调度等待。嵌套input/View#onTouchEvent不可相加，完整trace含滚动前后及返回生命周期；FrameTimeline应用截止错过和Buffer Stuffing分类并存，不把全trace分类当正式滚动帧比例。trace不含Java采样调用栈，尚不能归因到微信或模块的具体方法。后续优先在MOVE事件长片段内用调用栈采样或更小范围trace查耗时，而非继续增添背景计数。原始trace及SQL输出保存在设备采集目录和本机/tmp，未入库。
+
+## 985两轮调用栈热点归属核查
+
+采样Stacks-20261024-134104与StacksRepeat-20261024-134549：主线程99Hz、8秒，分别406/340样本，丢失0，PID17547/25308。两轮包含滑动前后与返回生命周期，未按精确滑动时间筛选，不是单次52ms触摸片段的采样归因。内存DEX解析均报474条Invalid dex file header，数量不等于缺失样本数，不能由unknown占比估计Java栈完整率。
+
+本地微信8.0.78 classes11.dex单类反编译确认lj.h实现android.util.Printer，println是Matrix.LooperMonitor分发监听器，向有效监听器调用dispatch begin/end；pj.t属于Matrix.AnrTracer，c(String)建立AppMethodBeat索引并向Handler投递5000/2000ms检查，b取消检查。因此lj.h.println两轮含子调用4.43%/4.71%不是Hchat普通日志；不能依据名字关闭HLog或宿主ANR监控。
+
+classes14.dex确认n.m实现Window.Callback，dispatchTouchEvent仅委托内部callback。样本按DSO分组明确该方法来自微信base.vdex。旧983/984模块mapping里n.m对应Compose、lj.h对应GroupLeaveMonitor的同名混淆类，均不能跨APK名称直接归属；尤其当前985没有对应mapping附件，禁止以旧表套解当前JIT符号。
+
+classes11.dex确认c9是ChattingUIFragment列表监听器：onScrolled调用聊天组件p0、可选可见区监听、检查ChattingUIFragment.l1与加载条件，必要时触发加载更多。其5.88%—8.13%含子调用，不是该方法自身开销，不能跳过以减少样本。
+
+模块ModernXposedRuntime桥接before/proceed/after，原方法继续执行也在intercept子调用统计范围。gm.a.intercept两轮10.84%/11.76%不能解释为模块独占开销；未完成985精确符号表校验前只作为Hook分发线索。样本还包含匿名内存DEX和适配器绑定调用，无法分解各模块callback。
+
+源码检查发现ScriptSendButtonHook全局View.dispatchTouchEvent维护输入会话与长按，包含同步WeakHashMap查询；HchatExtraFeature全局ViewGroup触摸Hook只处理ACTION_DOWN并检查滚动容器；背景列表触摸处理另按已登记列表维护反馈。它们是进一步计时候选，不是已证实热点。本轮只记录归属，不新增全局Hook、不禁用触摸功能或Matrix、不修改运行时。下一步需获取985对应ee19a52的mapping，并对正式滑动时间筛选样本；未知DEX需补符号或针对现有回调做限量计时，才判断是否优化。
+
+## 985精确mapping补核
+
+已收到ee19a52410fba3f52b687627286e19380fef8b0a mapping，SHA256见本机/tmp/pl-985-mapping校验输出。对应模块gm.a.intercept为ModernXposedRuntime桥接；lj.h虽与GroupLeaveMonitor合成类重名，但模块表不存在println方法，结合原生DEX确认样本仍属微信Matrix。解码工具必须校验类+方法并核对DSO，不能仅按类名替换；JIT app cache不足以单独确定APK归属。R8内联映射无PC/行号时，只列外层及候选，不将全部候选当实际调用。
+
+两轮明确模块线索：fl.i.beforeHookedMethod对应QuickMarkReadDragController安装回调（含子调用1.97%/2.06%），fl.j.e对应其traverse（1.72%/1.76%）；wi.n.onPreDraw对应底栏预绘制合成回调（2.71%/2.35%，合并/内联存在多候选）；oj.s0.onPreDraw对应消息详情预绘制队列（1.72%/1.18%）。这些是全窗口统计，未证明全部发生于正式滑动。
+
+QuickMarkReadDragController仅以Activity类名LauncherUI判断首页；嵌入式聊天共用LauncherUI。ACTION_DOWN调用startPendingSession，先扫描设置tag、悬浮底栏、原生底栏；findBottomNavContainer使用traverse递归全树，traverse未跳过不可见分支。此为源码确认的聊天触摸下可能触发首页搜索的范围缺口，能解释样本中的遍历，不足以解释全部约52ms工作。后续修正应先限定首页可交互底栏范围并避免扫描聊天子树，保留原生/悬浮底栏拖拽命中、取消和恢复；不依赖可能滞后的聊天talker值，不用全树扫描判断聊天来抵消优化。
+
+本轮未修改运行代码，未构建、未操作微信，mapping及分析输出未入仓库；归属核查已完成，不需要再次滚动以重复确认同一统计。
+
+
+### 2026-10-24：快捷已读触摸边界与首页标题提前恢复修正
+
+- 延续 985 mapping 核查结果，删除 `findBottomNavContainer` 的 DecorView 全树遍历、底部位置猜测和全树文字收集。ACTION_DOWN 改为沿触点所在的可见分支查找已确认的 `LauncherUIBottomTabView` 或模块悬浮底栏；按 Z 与同层倒序检查，前景聊天、设置页和遮挡层命中后不再搜索背后的首页兄弟分支。角标搜索只发生在已命中的底栏内，排除隐藏和透明节点。
+- 保留拖拽启动、移动、结束、取消及原角标恢复代码；新 DOWN 先清理旧会话。不读取聊天 talker，也不通过额外全树扫描判断聊天。悬浮底栏快照由窗口坐标转换为屏幕坐标后检查首页四分之一区域，避免非零窗口偏移造成误命中。
+- 用户视频为 `Screen_Recording_20261024_153014_WeChat.mp4`，约 7.04 秒；抽帧 OCR 在约 3.5 秒附近捕获到首页原生“微信(255)”后进入聊天，前后多次显示头像昵称首页。视频只能证实短暂闪回，不能独立证明重启后 30 秒的触发阈值。
+- 源码证据：`WeChatChatPageApi.hookStartChattingMethod` 在原生启动方法 beforeHookedMethod 发 ENTER，且 API 的 Dex Hook 可后续补装；`HomeSidePanelRuntime.setChatVisible(true)` 原先立即隐藏自定义首页标题并恢复原生标题。因此异步补装完成后出现、冷启动早期不出现，与该时序缺口一致；没有把 30 秒写成延迟或修复常量。
+- 修正仅在侧边栏本地消费层：ENTER 后关闭首页交互，但若已绑定标题栏仍为精确的首页标题（微信、微信(数字)、微信（数字+）），继续保留头像昵称及动态效果；该标题实际变化为聊天标题后，在布局/预绘制时交还原生标题。同一 Activity 内的独立首页标题栏继续归首页，不按 ENTER 提前恢复。预绘制只在聊天事件已到且首页头部仍显示时检查既有标题子树，销毁时移除监听。
+- 验证：`scripts/test_home_title_quickread_scope.py` 执行生产触摸搜索与标题判定，覆盖原生/悬浮底栏、含一万节点的聊天遮挡、隐藏/透明层、Z 顺序、设置遮挡、提前 ENTER、真实标题交接及开关关闭；背景 chrome 归属回归通过。两处改动运行代码已对 Android 36 SDK 做定向 Kotlin 编译（外围宿主 API 使用桩），未执行 Gradle、未构建 APK、未操作微信。
+- 限制：当前证据与修正针对微信 8.0.78；未做其它微信版本的 APK 横向复核。视频中的闪回与新包实际拖拽行为仍需安装后验收，不能据此宣称全部长帧解决或量化性能收益。

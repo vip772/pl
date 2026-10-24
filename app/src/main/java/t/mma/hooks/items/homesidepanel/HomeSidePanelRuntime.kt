@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 internal class HomeSidePanelRuntime(private val context: FeatureContext) {
     private val profileLoader = Executors.newSingleThreadExecutor { task -> Thread(task, "Hchat-HomeProfile").apply { isDaemon = true } }
+    private val HOME_TITLE = Regex("""微信(?:[（(]\d+\+?[）)])?""")
     private val installedAt = android.os.SystemClock.uptimeMillis()
     private val handler = Handler(Looper.getMainLooper())
     private val sessions = Collections.synchronizedMap(WeakHashMap<Activity, Session>())
@@ -179,7 +180,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val root = if (showProfile()) header?.findViewWithTag<View>("hchat_home_avatar_effect") else effectTarget
             root ?: return
             val keys = t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings
-            val show = attached && !effectPaused && root.isShown && root.hasWindowFocus() && !chatVisible && isWechatTab() &&
+            val show = attached && !effectPaused && root.isShown && root.hasWindowFocus() && (!chatVisible || retainsHomeTitle()) && isWechatTab() &&
                 HomeSidePanelSettings.enabled(activity) && (effectPrefs.getBoolean(keys.KEY_AVATAR_EFFECT, false) ||
                     effectPrefs.getBoolean(keys.KEY_AVATAR_LIGHTNING, false))
             if (!show) {
@@ -197,7 +198,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         }
         private val replacedTitles = WeakHashMap<View, Int>()
         private val scrollTitles = WeakHashMap<View, Int>()
-        fun hideScrollTitle(): Boolean = attached && !chatVisible && isWechatTab() && HomeSidePanelSettings.enabled(activity)
+        fun hideScrollTitle(): Boolean = attached && isWechatTab() && HomeSidePanelSettings.enabled(activity)
         fun recordScrollTitleVisibility(view: View, requested: Int) { scrollTitles[view] = requested }
         private fun restoreScrollTitles() {
             restoringScrollTitles = true
@@ -217,6 +218,22 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
         private val hostResourceIds = HashMap<String, Int>()
         private fun hostResourceId(name: String): Int = hostResourceIds.getOrPut(name) {
             activity.resources.getIdentifier(name, "id", activity.packageName)
+        }
+        // The chat ENTER event precedes the transition. Retain the home presentation until
+        // the bound native title actually changes; a separate home toolbar stays owned by home.
+        private fun retainsHomeTitle(): Boolean {
+            val host = header?.parent as? ViewGroup ?: return false
+            val titleId = hostResourceId("gp")
+            if (titleId == 0) return false
+            val title = host.findViewById<View>(titleId) ?: return false
+            fun isHomeText(view: View): Boolean {
+                if (view is TextView) return HOME_TITLE.matches(view.text?.toString()?.trim().orEmpty())
+                if (view is ViewGroup) for (i in 0 until view.childCount) {
+                    if (isHomeText(view.getChildAt(i))) return true
+                }
+                return false
+            }
+            return isHomeText(title)
         }
         private fun updateTitleSpace(visible: Boolean) {
             if (!visible) { restoreTitles(); return }
@@ -304,10 +321,15 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             if (attached) refresh()
         }
 
+        private val titleHandoffListener = ViewTreeObserver.OnPreDrawListener {
+            if (attached && chatVisible && header?.visibility == View.VISIBLE && !retainsHomeTitle()) refresh()
+            true
+        }
         fun attach() {
             if (attached) return
             attached = true
             decor.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
+            decor.viewTreeObserver.addOnPreDrawListener(titleHandoffListener)
             drawer.attachTo(decor)
             refresh()
         }
@@ -334,8 +356,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val edgeEnabled = homeVisible && !showProfile()
             drawer.setEdgeEnabled(edgeEnabled)
             if (header != null && header?.parent == null) header = null
-            val headerVisible = homeVisible && isWechatTab()
-            if (headerVisible) ensureHeader()
+            val headerVisible = enabled && isWechatTab() && (!chatVisible || retainsHomeTitle())
+            if (headerVisible && !chatVisible) ensureHeader()
             val profileVisible = headerVisible && showProfile()
             val targetVisibility = if (profileVisible) View.VISIBLE else View.GONE
             if (header?.visibility != targetVisibility) header?.visibility = targetVisibility
@@ -384,6 +406,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             avatarEffect = null
             if (decor.viewTreeObserver.isAlive) {
                 decor.viewTreeObserver.removeOnGlobalLayoutListener(layoutListener)
+                decor.viewTreeObserver.removeOnPreDrawListener(titleHandoffListener)
             }
             drawer.detach()
             effectTarget = null
