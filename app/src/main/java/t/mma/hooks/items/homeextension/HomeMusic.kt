@@ -57,9 +57,10 @@ internal object HomeMusic {
     private fun searchSource(query:String,source:String,done:(List<HomeMusicSong>)->Unit){
         worker.execute{
             val songs=runCatching{
-                if(source=="QQ音乐") (qq.search(query) as? QQMusicSearchResult.Success)?.track?.let{listOf(qqSong(it))}?:emptyList()
+                if(source==HomeMusicAggregate.CHANNEL) HomeMusicAggregate.search(query)
+                else if(source=="QQ音乐") (qq.search(query) as? QQMusicSearchResult.Success)?.track?.let{listOf(qqSong(it))}?:emptyList()
                 else HomeMusicSources.searchMany(query,source)
-            }.getOrDefault(emptyList()).filter{it.source==source}.distinctBy{it.sourceId.ifBlank{it.title+"\u0000"+it.artist}}
+            }.getOrDefault(emptyList()).filter{it.source==source || (source==HomeMusicAggregate.CHANNEL && HomeMusicAggregate.owns(it.source))}.distinctBy{it.source+"\u0000"+it.sourceId.ifBlank{it.title+"\u0000"+it.artist}}
             main.post{done(songs)}
         }
     }
@@ -227,8 +228,8 @@ internal object HomeMusic {
     private fun searchSheet(c:Context,host:LinearLayout){
         val dialog=Dialog(c);dialog.requestWindowFeature(Window.FEATURE_NO_TITLE)
         val page=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(c,18),dp(c,16),dp(c,18),dp(c,18));background=rounded(c,0xFF102330.toInt(),22)}
-        val sourceKeys=listOf("QQ音乐","网易云","酷我","咪咕")
-        val sourceLabels=listOf("QQ音乐","网易云音乐","酷我音乐","咪咕音乐")
+        val sourceKeys=listOf(HomeMusicAggregate.CHANNEL,"QQ音乐","网易云","酷我","咪咕")
+        val sourceLabels=listOf("聚合音乐","QQ音乐","网易云音乐","酷我音乐","咪咕音乐")
         var selectedSource=0
         val sourceRow=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL}
         val sourceButtons=sourceLabels.mapIndexed { index,label ->
@@ -259,7 +260,7 @@ internal object HomeMusic {
         bar.addView(input,LinearLayout.LayoutParams(0,dp(c,48),1f))
         bar.addView(searchButton,LinearLayout.LayoutParams(dp(c,48),dp(c,48)))
         page.addView(bar,LinearLayout.LayoutParams(-1,dp(c,48)))
-        val status=txt(c,"搜索 QQ音乐 的歌曲",13f,0xFFB7C2C9.toInt()).apply{setPadding(0,dp(c,12),0,dp(c,8))};page.addView(status)
+        val status=txt(c,"搜索 聚合音乐 的歌曲（最多 80 首）",13f,0xFFB7C2C9.toInt()).apply{setPadding(0,dp(c,12),0,dp(c,8))};page.addView(status)
         val results=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL};page.addView(ScrollView(c).apply{addView(results)},LinearLayout.LayoutParams(-1,0,1f))
         var generation=0
         sourceButtons.forEachIndexed{index,button->button.setOnClickListener{
@@ -274,9 +275,9 @@ internal object HomeMusic {
     private fun next(c:Context){if(queue.size<2){toast(c,"请先从搜索结果选择播放列表");return};val i=queue.indexOfFirst{sameSong(it,current)};play(c,queue[if(shuffle)(queue.indices.filter{it!=i}.randomOrNull()?:0)else(i+1)%queue.size])}
     private fun quality(c:Context,s:HomeMusicSong?){
         if(s==null)return
-        val labels=if(s.source=="QQ音乐")arrayOf("当前音源（实际码率以播放流为准）")else arrayOf("标准","高品质","无损")
+        val labels=if(s.source=="QQ音乐" || s.source==HomeMusicAggregate.QQ)arrayOf("当前音源（实际码率以播放流为准）")else arrayOf("标准","高品质","无损")
         AlertDialog.Builder(c).setTitle("请求可用音质").setItems(labels){_,index->
-            if(s.source=="QQ音乐"){toast(c,"QQ 接口当前仅返回一种播放地址");return@setItems}
+            if(s.source=="QQ音乐" || s.source==HomeMusicAggregate.QQ){toast(c,"QQ 接口当前仅返回一种播放地址");return@setItems}
             val position=runCatching{player?.currentPosition?:0}.getOrDefault(0)
             worker.execute{val resolved=HomeMusicSources.resolve(s,index);main.post{if(resolved==null)toast(c,"当前音源未返回该音质的可用地址")else{releaseSpectrum();runCatching{player?.release()};player=null;play(c,resolved);val mp=player;mp?.setOnPreparedListener{if(player===it){preparing=false;it.seekTo(position);it.start();playing=true;captureSpectrum(c,it);changed()}}}}}
         }.show()

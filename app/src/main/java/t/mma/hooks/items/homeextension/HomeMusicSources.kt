@@ -22,6 +22,7 @@ internal object HomeMusicSources {
     }.getOrDefault(emptyList())
     fun resolve(s:HomeMusicSong,quality:Int=0):HomeMusicSong? {
         val q = quality.coerceIn(0,2)
+        if(HomeMusicAggregate.owns(s.source)) return runCatching{HomeMusicAggregate.resolve(s,q)}.getOrNull()
         val direct = if(s.source == "网易云" || s.source == "酷我") resolveDirect(s,q) else null
         return direct ?: if(s.source in listOf("网易云","酷我","咪咕")) backupResolve(s,q) else s.takeIf{it.playUrl.isNotBlank()}
     }

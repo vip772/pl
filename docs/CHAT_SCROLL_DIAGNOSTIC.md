@@ -1,5 +1,11 @@
 # 聊天滚动专项诊断
 
+## 976 消息详情参数比较修正（本地待验收）
+976映射将 oj.l0#f:543 还原到 addBottomDetailsView 原2008行，实际写入详情标签的 layoutParams；MMChattingListView 是接收到传播请求的监测节点。映射附件名提交与当前HEAD一致，未额外核验APK R8 map-id。
+AOSP android-16.0.0_r1 的 RelativeLayout.LayoutParams.resolveRules 将 START/END 规则解析为 LEFT/RIGHT。旧代码直接比较已解析与未解析的规则数组，会出现假差异。本轮两个比较调用传入 label.layoutDirection，复制当前参数，将复制件及新建期望参数解析到同方向后比较；保留宽高、边距、锚点检查，并比较 alignWithParent。不修改已安装参数，不拦截布局请求，不跳过重新附着校验。
+验证：生产比较函数通过Android36 SDK定向编译；使用AOSP规则解析原文及简化生命周期桩的JVM模型，在LTR/RTL、两侧对齐共40000次比较中，旧规则比较出现40000次假差异，修正后为0。真实锚点、边距、尺寸、对齐侧及alignWithParent变化仍识别；方向切换、空值、类型与原参数未改变检查通过。既有预绘制队列和布局观察器回归通过。模型不等于完整Android运行时，不能量化实机收益。
+来源：https://github.com/aosp-mirror/platform_frameworks_base/blob/android-16.0.0_r1/core/java/android/widget/RelativeLayout.java 。临时脚本 /tmp/check_details_relative_params.py 不入库。未运行Gradle、未构建APK、未操作微信，本次随聚合音乐一并提交推送；实机详情位置、行复用及性能待验收，整体卡顿尚未确认解决。
+
 运行日志页开启日志后，手动点击采集 A/B/C/D 组启动。按钮只标记组别，不自动切换功能。每组最长5分钟，每5秒汇总；点击停止输出最后一份汇总。默认不采集，重启不自动恢复。
 
 保持沉浸背景开启，同一群聊、同一消息范围、同一刷新率和键盘收起状态。先设置悬浮开关，再点击对应采集按钮，返回聊天等待5秒，上下滚动30秒，返回停止并立即导出该组日志。A=输入框开/标题栏开；B=输入框关/标题栏开；C=输入框开/标题栏关；D=输入框关/标题栏关。每组单独导出避免512KiB日志轮转覆盖。最后关闭专项诊断及运行日志，复测最卡的一组作体感对照。

@@ -2004,7 +2004,7 @@ private class HchatExtraHooker(
             if (label.visibility != expectedVisibility) label.visibility = expectedVisibility
             if (!alreadyAttached) {
                 parent.addView(label, expectedParams)
-            } else if (!sameRelativeLayoutParams(label.layoutParams, expectedParams)) {
+            } else if (!sameRelativeLayoutParams(label.layoutParams, expectedParams, label.layoutDirection)) {
                 label.layoutParams = expectedParams
             }
             if (avatarHidden) {
@@ -2182,17 +2182,27 @@ private class HchatExtraHooker(
         }
     }
 
-    private fun sameRelativeLayoutParams(current: ViewGroup.LayoutParams?, expected: RelativeLayout.LayoutParams): Boolean {
+    private fun sameRelativeLayoutParams(
+        current: ViewGroup.LayoutParams?,
+        expected: RelativeLayout.LayoutParams,
+        layoutDirection: Int
+    ): Boolean {
         val value = current as? RelativeLayout.LayoutParams ?: return false
-        return value.width == expected.width &&
-            value.height == expected.height &&
-            value.leftMargin == expected.leftMargin &&
-            value.topMargin == expected.topMargin &&
-            value.rightMargin == expected.rightMargin &&
-            value.bottomMargin == expected.bottomMargin &&
-            value.marginStart == expected.marginStart &&
-            value.marginEnd == expected.marginEnd &&
-            value.rules.contentEquals(expected.rules)
+        // RelativeLayout resolves START/END into LEFT/RIGHT in the installed params.
+        // Compare in the same direction, without changing the installed params.
+        val resolved = RelativeLayout.LayoutParams(value)
+        resolved.resolveLayoutDirection(layoutDirection)
+        expected.resolveLayoutDirection(layoutDirection)
+        return resolved.width == expected.width &&
+            resolved.height == expected.height &&
+            resolved.leftMargin == expected.leftMargin &&
+            resolved.topMargin == expected.topMargin &&
+            resolved.rightMargin == expected.rightMargin &&
+            resolved.bottomMargin == expected.bottomMargin &&
+            resolved.marginStart == expected.marginStart &&
+            resolved.marginEnd == expected.marginEnd &&
+            resolved.alignWithParent == expected.alignWithParent &&
+            resolved.rules.contentEquals(expected.rules)
     }
 
     private fun sameLinearLayoutParams(current: ViewGroup.LayoutParams?, expected: LinearLayout.LayoutParams): Boolean {
@@ -3314,7 +3324,7 @@ private class HchatExtraHooker(
                     topMargin = dp(label.context, 2f)
                 }
                 if (newlyAttached) parent.addView(label, params)
-                else if (!sameRelativeLayoutParams(label.layoutParams, params)) label.layoutParams = params
+                else if (!sameRelativeLayoutParams(label.layoutParams, params, label.layoutDirection)) label.layoutParams = params
             }
             is LinearLayout -> {
                 if (parent.orientation != LinearLayout.VERTICAL) return false
