@@ -147,3 +147,9 @@ pi.z#w0:1013还原setTransparentSurface原2822行foreground写入；pi.z#i:68还
 新增background.repair计时：只覆盖现有after Hook满足条件后的透明补回，finally退出backgroundRepair布局请求phase、恢复重入深度；每汇总窗口保留最新目标类/slot/时间，无内容和视图引用。长帧上下文纳入该阶段，仍最多16条、每回调清空。它和setTransparentSurface写入计数分别表示不同入口，不相加视为完整写入次数。仅专项开启时采样，不禁用原生回弹，不抑制requestLayout，不改变恢复配置的逻辑。
 
 依据仅覆盖8.0.78本地逆向与983现场；未新增内部Hook、字段或反射签名，未扩展其他版本结论。下一轮检查background.repair及requestLayout.backgroundRepair，再决定是否缩小修复范围；不能凭单次原生回弹栈直接屏蔽其背景更新。
+
+## 系统帧时间线首轮
+
+采集Perfetto-20261024-131132，12秒、24741923字节，正式8轮滑动13:11:36—13:11:41，已返回Operit。采集linux.ftrace调度、gfx/view/input/dalvik、微信atrace及SurfaceFlinger FrameTimeline；解析stats无非零error项。系统帧257、超时124（48.25%）、P95/P99=53/65ms。此为系统追踪场景，开销、消息位置及诊断启用状态不与D组严格匹配，不用于宣称回归。
+
+trace进程16021的主线程utid812、RenderThread16122。主线程MOVE分发最长79.82ms，其中Running60.72ms、Runnable1.01ms，剩余为其他线程状态；另4条52.11—52.93ms MOVE分发中Running51.83—52.49ms。支持触摸分发路径存在显著CPU工作，不支持将这些片段完全解释成调度等待。嵌套input/View#onTouchEvent不可相加，完整trace含滚动前后及返回生命周期；FrameTimeline应用截止错过和Buffer Stuffing分类并存，不把全trace分类当正式滚动帧比例。trace不含Java采样调用栈，尚不能归因到微信或模块的具体方法。后续优先在MOVE事件长片段内用调用栈采样或更小范围trace查耗时，而非继续增添背景计数。原始trace及SQL输出保存在设备采集目录和本机/tmp，未入库。

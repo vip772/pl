@@ -92,6 +92,25 @@ private class FooterRuntime(private val context: FeatureContext) {
         }
 
         var count = 0
+        // 8.0.78 ChatFooter.u0(int, boolean): false uses w()+settleInputModeSwitchViews,
+        // avoiding the native G/p crossfade exposed by our transparent button surfaces.
+        val verifiedInputSwitch = runCatching {
+            val host = context.hostContext()
+            host.packageManager.getPackageInfo(host.packageName, 0).versionName == "8.0.78"
+        }.getOrDefault(false)
+        if (verifiedInputSwitch) {
+            KavaReflector.findDeclaredMethod(footerClass, "u0", Int::class.javaPrimitiveType!!,
+                Boolean::class.javaPrimitiveType!!)?.takeIf { it.returnType == Void.TYPE }?.let { method ->
+                HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val footer = param.thisObject as? View ?: return
+                        if (!isEnabled() || states[footer]?.reparented != true) return
+                        val mode = param.args[0] as? Int ?: return
+                        if (mode == 1 || mode == 2) param.args[1] = false
+                    }
+                })
+            }
+        }
         KavaReflector.findDeclaredMethod(footerClass, "onAttachedToWindow")?.let { method ->
             count += hookFooter(method, footerClass) { footer -> trackFooter(footer) }
         }
