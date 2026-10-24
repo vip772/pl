@@ -29,7 +29,7 @@ internal object ChatScrollTrace {
     fun stage(name: String, started: Long, ended: Long) {
         if (!ChatScrollDiagnostic.isActive() || Looper.myLooper() != Looper.getMainLooper()) return
         if (name != "scroll.nativeLayoutDuration" && name != "underlay.apply" &&
-            name != "underlay.measureLayout" && name != "background.footer") return
+            name != "underlay.measureLayout" && name != "background.footer" && name != "background.repair") return
         if (recentStages.size == 16) { recentStages.removeFirst(); droppedStages++ }
         recentStages.addLast("$name[startMs=${started/1_000_000},endMs=${ended/1_000_000},elapsedUs=${(ended-started).coerceAtLeast(0)/1000}]")
     }

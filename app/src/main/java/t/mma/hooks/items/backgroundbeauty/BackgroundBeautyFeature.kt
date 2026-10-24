@@ -1213,13 +1213,21 @@ private class BackgroundBeautyRuntime(
                         snapshot.originalTintMode = view.backgroundTintMode
                         if (applied != null && prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
                             snapshot.slot?.let { state.loadedBitmaps[it]?.bitmap?.isRecycled == false } == true) {
+                            val repairStarted = t.mma.utils.ChatScrollDiagnostic.begin()
+                            val repairPhase = if (repairStarted != 0L) t.mma.utils.ChatScrollTrace.enter("backgroundRepair") else null
                             surfaceMutationDepth++
                             try {
                                 view.backgroundTintList = null
                                 view.backgroundTintMode = null
                                 view.background = applied
                                 restoreSurfaceGeometry(view, snapshot)
-                            } finally { surfaceMutationDepth-- }
+                                if (repairStarted != 0L) t.mma.utils.ChatScrollDiagnostic.detail(
+                                    "background.repair", "atMs=${android.os.SystemClock.elapsedRealtime()} target=${view.javaClass.name} slot=${snapshot.slot?.name}")
+                            } finally {
+                                surfaceMutationDepth--
+                                if (repairStarted != 0L) t.mma.utils.ChatScrollTrace.leave(repairPhase)
+                                t.mma.utils.ChatScrollDiagnostic.end("background.repair", repairStarted)
+                            }
                         }
 
                         if (applied == null) scheduleRefresh(state.activity)
