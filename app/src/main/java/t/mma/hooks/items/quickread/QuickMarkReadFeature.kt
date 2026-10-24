@@ -233,29 +233,33 @@ private class QuickMarkReadDragController(
         return syntheticDotTarget(root, homeRegion, rawX, rawY)
     }
 
-    // Follow the topmost visible touch branch, never search siblings behind a chat or dialog.
+    // Visible decoration is not necessarily a touch target. Continue behind passive layers,
+    // but propagate a real foreground blocker so hidden home tabs cannot start a drag.
     private fun findBottomBarAt(view: View, eventX: Float, eventY: Float): ViewGroup? {
-        if (!view.isShown || view.visibility != View.VISIBLE || view.alpha <= 0f) return null
+        data class Hit(val bar: ViewGroup? = null, val blocked: Boolean = false)
         val visible = android.graphics.Rect()
-        if (!view.getGlobalVisibleRect(visible) ||
-            eventX < visible.left || eventX >= visible.right ||
-            eventY < visible.top || eventY >= visible.bottom) return null
-        if (view.tag == HCHAT_SETTINGS_PAGE_TAG) return null
-        val group = view as? ViewGroup ?: return null
-        if (view.tag == CustomBottomBarFeature.FLOATING_BOTTOM_BAR_TAG ||
-            view.javaClass.name == "com.tencent.mm.ui.LauncherUIBottomTabView") return group
-        val children = (0 until group.childCount).sortedWith(
-            compareByDescending<Int> { group.getChildAt(it).z }.thenByDescending { it }
-        )
-        for (index in children) {
-            val child = group.getChildAt(index)
-            if (!child.isShown || child.visibility != View.VISIBLE || child.alpha <= 0f) continue
-            if (!child.getGlobalVisibleRect(visible) ||
+        fun search(node: View): Hit {
+            if (!node.isShown || node.visibility != View.VISIBLE || node.alpha <= 0f) return Hit()
+            if (!node.getGlobalVisibleRect(visible) ||
                 eventX < visible.left || eventX >= visible.right ||
-                eventY < visible.top || eventY >= visible.bottom) continue
-            return findBottomBarAt(child, eventX, eventY)
+                eventY < visible.top || eventY >= visible.bottom) return Hit()
+            if (node.tag == HCHAT_SETTINGS_PAGE_TAG ||
+                node.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout") return Hit(blocked = true)
+            val group = node as? ViewGroup
+            if (group != null) {
+                if (node.tag == CustomBottomBarFeature.FLOATING_BOTTOM_BAR_TAG ||
+                    node.javaClass.name == "com.tencent.mm.ui.LauncherUIBottomTabView") return Hit(bar = group)
+                val children = (0 until group.childCount).sortedWith(
+                    compareByDescending<Int> { group.getChildAt(it).z }.thenByDescending { it }
+                )
+                for (index in children) {
+                    val hit = search(group.getChildAt(index))
+                    if (hit.bar != null || hit.blocked) return hit
+                }
+            }
+            return Hit(blocked = node.isClickable || node.isLongClickable)
         }
-        return null
+        return search(view).bar
     }
 
     private fun findFloatingHomeRegion(

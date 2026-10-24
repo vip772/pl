@@ -21,7 +21,7 @@ assert 'removeOnPreDrawListener(titleHandoffListener)' in home
 assert 'if (headerVisible && !chatVisible) ensureHeader()' in home
 
 code = '''
-open class View(var tag:Any?=null,var z:Float=0f,var isShown:Boolean=true,var visibility:Int=0,var alpha:Float=1f,val box:android.graphics.Rect=android.graphics.Rect(0,0,100,100)) {
+open class View(var tag:Any?=null,var z:Float=0f,var isShown:Boolean=true,var visibility:Int=0,var alpha:Float=1f,var isClickable:Boolean=false,var isLongClickable:Boolean=false,val box:android.graphics.Rect=android.graphics.Rect(0,0,100,100)) {
  companion object { const val VISIBLE=0 }
  var reads=0
  fun getGlobalVisibleRect(out:android.graphics.Rect):Boolean { reads++;out.left=box.left;out.top=box.top;out.right=box.right;out.bottom=box.bottom;return box.right>box.left&&box.bottom>box.top }
@@ -37,7 +37,7 @@ fun main(){
  check(findBottomBarAt(root,10f,90f)===bar)
  check(findBottomBarAt(root,10f,20f)==null)
  // A foreground chat/dialog covers home. Never descend into the underlying home tree.
- val chat=ViewGroup(); val message=ViewGroup();chat.children+=message;root.children+=chat
+ val chat=com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout(); val message=ViewGroup();chat.children+=message;root.children+=chat
  repeat(10000){message.children+=TextView("message")}
  bar.reads=0
  check(findBottomBarAt(root,10f,90f)==null);check(bar.reads==0)
@@ -47,6 +47,14 @@ fun main(){
  chat.alpha=1f;home.z=10f;check(findBottomBarAt(root,10f,90f)===bar)
  home.z=0f;chat.tag="settings";check(findBottomBarAt(root,10f,90f)==null)
  root.children.remove(chat)
+ // Full-window passive decoration must not block either bottom bar.
+ val decoration=ViewGroup();decoration.children+=View();root.children+=decoration
+ check(findBottomBarAt(root,10f,90f)===bar)
+ val button=View().apply{isClickable=true};decoration.children+=button
+ check(findBottomBarAt(root,10f,90f)==null)
+ button.isClickable=false;button.isLongClickable=true
+ check(findBottomBarAt(root,10f,90f)==null)
+ decoration.children.remove(button)
  val native=com.tencent.mm.ui.LauncherUIBottomTabView();native.box.top=80;home.children.clear();home.children+=native
  check(findBottomBarAt(root,10f,90f)===native)
  // Retain home on early ENTER, release when native title changes, and disable immediately.
@@ -67,6 +75,7 @@ stdlib = next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
 with tempfile.TemporaryDirectory() as temp:
     directory = Path(temp)
     (directory / 'Test.kt').write_text(code)
+    (directory / 'Chat.kt').write_text('package com.tencent.mm.pluginsdk.ui.chat\nimport ViewGroup\nclass ChattingUILayout:ViewGroup()')
     (directory / 'Rect.kt').write_text('package android.graphics\nclass Rect(var left:Int=0,var top:Int=0,var right:Int=0,var bottom:Int=0)')
     # Kotlin default-package types can be explicitly imported by packaged fixtures.
     (directory / 'Native.kt').write_text('package com.tencent.mm.ui\nimport ViewGroup\nclass LauncherUIBottomTabView: ViewGroup()')
