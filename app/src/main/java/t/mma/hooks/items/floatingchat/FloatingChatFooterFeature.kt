@@ -628,7 +628,12 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (!state.reparented && !reparentPanel(state)) return false
         val side = dp(SIDE_MARGIN_DP)
         val gap = dp(BOTTOM_GAP_DP)
-        val targetTop = -(inputHeight + gap)
+        val panelHeight = if (state.panel.visibility == View.VISIBLE) {
+            state.panel.layoutParams?.height?.takeIf { it > 0 }
+                ?: state.panel.measuredHeight.coerceAtLeast(0)
+        } else 0
+        val occupiedHeight = inputHeight + panelHeight
+        val targetTop = -(occupiedHeight + gap)
         var layoutChanged = false
         if (marginParams.leftMargin != side) {
             marginParams.leftMargin = side
@@ -657,7 +662,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (footer.translationZ != 0f) footer.translationZ = 0f
         FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true, borderless = true)
         FloatingFooterInputSurfaces.apply(footer)
-        applyChatListPadding(footer, inputHeight + gap, state)
+        applyChatListPadding(footer, occupiedHeight + gap, state)
         ensurePreDrawTracking(footer)
 
         return true
@@ -710,27 +715,25 @@ private class FooterRuntime(private val context: FeatureContext) {
     private fun reparentPanel(state: FooterState): Boolean {
         val panel = state.panel
         return runCatching {
-            if (panel.id == View.NO_ID) panel.id = View.generateViewId()
+            // Keep the native input column above its accessory panel. The footer's
+            // negative top margin lifts the complete stack by its occupied height.
+            if (state.inputColumn.id == View.NO_ID) state.inputColumn.id = View.generateViewId()
             state.inputColumn.removeView(panel)
+            val columnParams = state.inputColumn.layoutParams as? RelativeLayout.LayoutParams
+                ?: error("输入列缺少 RelativeLayout 参数")
+            state.changedRules[state.inputColumn] = columnParams.rules.copyOf()
+            columnParams.removeRule(RelativeLayout.BELOW)
+            columnParams.removeRule(RelativeLayout.ABOVE)
+            columnParams.removeRule(RelativeLayout.ALIGN_PARENT_BOTTOM)
+            state.inputColumn.layoutParams = columnParams
             state.root.addView(
                 panel,
-                0,
                 RelativeLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     state.panelLayoutParams.height
-                )
+                ).apply { addRule(RelativeLayout.BELOW, state.inputColumn.id) }
             )
-            panel.visibility = View.GONE
-            for (index in 0 until state.root.childCount) {
-                val child = state.root.getChildAt(index)
-                if (child === panel) continue
-                val params = child.layoutParams as? RelativeLayout.LayoutParams ?: continue
-                if (params.rules[RelativeLayout.BELOW] == 0) {
-                    state.changedRules[child] = params.rules.copyOf()
-                    params.addRule(RelativeLayout.BELOW, panel.id)
-                    child.layoutParams = params
-                }
-            }
+            panel.visibility = if (isPanelState(panelState)) View.VISIBLE else View.GONE
             state.reparented = true
 
             true

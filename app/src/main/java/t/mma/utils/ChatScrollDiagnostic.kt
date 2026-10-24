@@ -31,6 +31,24 @@ object ChatScrollDiagnostic {
             if (elapsed >= 4_000_000L) detail("slow.$name", "atMs=${SystemClock.elapsedRealtime()} elapsedUs=${elapsed/1000}")
         }
     }
+    /** Inline so disabled diagnostics do not allocate a lambda or read the clock. */
+    inline fun <T> phase(name: String, block: () -> T): T {
+        val started = begin()
+        try { return block() } finally { end(name, started) }
+    }
+    fun backgroundWrite(reason: Int, targetClass: String) {
+        if (!isActive()) return
+        val category = when (reason) {
+            1 -> "external"
+            2 -> "first"
+            3 -> "slot"
+            4 -> "bitmap"
+            else -> "feedback"
+        }
+        hit("background.write.$category")
+        // One bounded latest sample per reason per flush; never retain the View.
+        detail("background.write.$category", "atMs=${SystemClock.elapsedRealtime()} target=${targetClass.take(160)}")
+    }
     private var lastGeometry = "unseen"
     @JvmStatic fun geometry(native: Int, expanded: Int, overlap: Int) {
         if (!isActive()) return

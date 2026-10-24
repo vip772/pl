@@ -1,5 +1,14 @@
 # 聊天滚动专项诊断
 
+## 978 后背景刷新细分诊断（待实机采样）
+
+仅专项开启时新增 background.target/cleanup/host/chatHost/movingContent/retireChatSurfaces/imageSurface/chatApply/chrome/systemBars/invalidate 阶段计时，沿用每5秒汇总及4ms慢调用样本。background.refresh 为外层总耗时，阶段间及既有 footer 等计时可能嵌套，不能直接相加。异步位图加载后应用不属于原始 refresh 同步窗口，阶段计数也不保证与 refresh 一一对应。
+
+setTransparentSurface 在外部状态同步前识别写入原因，仅实际完成背景赋值后计数：external=已安装背景被外部对象替换，first=无已安装背景标记，slot=页面类型变化，bitmap=位图切换，feedback=其余反馈模式不匹配。原因按上述顺序归类，不表示底层所有条件互斥；first也可能是清理后重新安装。此诊断只覆盖该透明背景赋值入口，不代表所有背景写入或所有 requestLayout 来源。
+
+沿用有界统计，每类原因每窗口最多保留一个最新样本，只含时间与目标类名，不记录View对象、聊天内容或联系人。专项关闭时不构造样本、无阶段lambda分配或高精度计时，但仍有轻量启用状态检查。返回值、异常及业务调用顺序不变。验证包含默认关闭、到期停止、阶段返回值与异常、原因计数与样本合并、隐私和工作线程释放，以及Android36 SDK定向编译（外围依赖用桩）。未运行Gradle、未构建APK、未操作微信，本次随悬浮输入框面板联动修正一并提交；细分数据待新版实机采样。
+
+
 ## 977 透明背景与前景更新分离（本地待验收）
 
 977 mapping 附件名提交与源码 `1f25c8a` 一致；未额外核验已安装 APK 的 R8 map-id。准备阶段 08:33:57 的堆栈还原为 `installChatChromeLifecycle` 第2313行 → `applyChatFooterTransparency` 第2439行 → `setTransparentSurface` 第2815行 `view.background = marker`。该样本早于08:34:17开始的滚动，不得把主要滚动窗口37次外部布局请求全部归到此来源。
