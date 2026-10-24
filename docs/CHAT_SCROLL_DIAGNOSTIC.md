@@ -218,3 +218,14 @@ QuickMarkReadDragController仅以Activity类名LauncherUI判断首页；嵌入�
 - 聊天时间原先在 isNativeMessage 中读取创建时间，绑定时再次读取；现改为解析直接返回已验证的创建时间，保留消息 ID 校验、递归边界和原有字段/方法回退，不做跨绑定消息缓存。
 - scripts/test_chat_input_underlay.py 执行生产控制器模型回归，新增窗口宽度切换且测量高度与旧扩展高度重合、宽度单独变化场景；原有重复布局、面板排除、输入行高度、padding 恢复测试通过。
 - scripts/test_chat_time_resolution.py 执行生产解析方法，计数验证创建时间每次解析读取一次，覆盖包装对象、集合、无效 ID/时间和可变消息重绑。bindTime 通过 Android SDK 定向编译。未运行 Gradle、未构建 APK、未操作微信、未重新采样；实际性能收益未知。
+
+## 85a8a50 实机未修复后的底部锚点补偿
+用户反馈全屏与悬浮窗下末条消息仍偏高，故上一轮仅几何缓存修正不足，不记为实机修复通过。新版 mapping 已保存至采样目录 mapping-85a8a50.txt；没有新增采样，也不能用 mapping 判断运行时几何。
+
+进一步静态核对微信 8.0.78 解码产物：ChattingContent 继承 FrameLayout，onMeasure/onLayout 直接调用父实现；ChattingRecyclerView 继承 RecyclerView，onLayout 调用父实现；MMChattingListView.getBottomSpace 按列表高度、paddingBottom、末个子项 bottom 及末项可见位置计算；ChattingScrollLayout.onLayout 内调用原生内容平移更新，发生于模块 after-layout 扩展之前。相关文件位于用户已有 wechat8078_decoded 的 smali_classes2、smali_classes10、smali_classes11，RecyclerView.scrollBy(II) 在 smali_classes17 中确认是实际列表滚动而非普通 View.scrollY。
+
+控制器此前恢复原生高度再扩展内容，会让真实列表经历两次布局；原测试 View 模型没有传播内容尺寸到列表，未覆盖末条消息滚动锚点。这次补充传播布局的列表模型，85a8a50 原生产控制器在重复原生布局后的贴底断言失败，新控制器通过。这说明已复现一条可导致上移的模块路径，不代表已证明截图中所有留白均来自该路径。
+
+修正：原生布局前仅记录原本处于末项、可向上滚动但不能继续向下滚动且末项距离有效底边约 0px 的状态；扩展完成后，消息总数与末项位置未变时，按实际几何差值做同步 scrollBy 补偿。查看历史、短列表、数据数量变化不补偿；没有 setSelection、滚到新消息或延迟跳转。已有异常处理由调用处恢复布局并使用 HLog.e 记录。
+
+验证：scripts/test_chat_input_underlay.py 新增真实尺寸传播模型，覆盖重复布局、窗口缩小/放大、历史、短列表、数据数量变化；旧版失败、新版通过，原有几何回归继续通过；完整控制器通过 Android SDK 36 定向编译。仅核对目标 8.0.78，未运行 Gradle、未构建 APK、未操作微信，实机和性能收益均待确认。本轮不改聊天时间或已验收功能。

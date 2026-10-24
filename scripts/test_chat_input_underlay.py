@@ -24,6 +24,9 @@ open class View {
  open fun measure(w:Int,h:Int){measureCalls++;measuredWidth=w;measuredHeight=h}
  open fun layout(l:Int,t:Int,r:Int,b:Int){layoutCalls++;left=l;top=t;width=r-l;height=b-t}
  object MeasureSpec {const val EXACTLY=0;fun makeMeasureSpec(s:Int,m:Int)=s}
+ val bottom get()=top+height
+ open fun canScrollVertically(direction:Int)=false
+ open fun scrollBy(x:Int,y:Int){}
  var layoutParams:Any?=null
  var background:Any?=null
  var paddingLeft=0;var paddingTop=0;var paddingRight=0;var paddingBottom=0
@@ -45,7 +48,7 @@ open class LinearLayout:android.view.ViewGroup(){class LayoutParams{var bottomMa
 ''',
 'Native.kt':'''package com.tencent.mm.pluginsdk.ui.chat
 class ChattingScrollLayout:android.widget.LinearLayout()
-class ChattingContent:android.view.ViewGroup()
+class ChattingContent:android.view.ViewGroup(){var resized:((Int)->Unit)?=null;override fun layout(l:Int,t:Int,r:Int,b:Int){super.layout(l,t,r,b);resized?.invoke(b-t)}}
 class ChatFooter:android.view.ViewGroup()
 class ChatFooterBottom:android.view.ViewGroup()
 class AppPanel:android.view.ViewGroup()
@@ -61,6 +64,14 @@ import android.view.*
 import android.widget.LinearLayout
 import com.tencent.mm.pluginsdk.ui.chat.*
 import com.tencent.mm.ui.chatting.view.MMChattingListView
+class TestList:ViewGroup(){
+ var scrollable=false;var history=false;var itemTotal=30;var last=29;var scrollCalls=0
+ fun getCount()=itemTotal
+ fun getLastVisiblePosition()=last
+ override fun canScrollVertically(direction:Int)=if(direction<0)scrollable else history
+ override fun scrollBy(x:Int,y:Int){scrollCalls++;for(row in children)row.top-=y}
+ override fun layout(l:Int,t:Int,r:Int,b:Int){super.layout(l,t,r,b);if(scrollable&&!history)for(row in children)if(row.bottom>height-paddingBottom)row.top=height-paddingBottom-row.height}
+}
 fun main(){
  val scroll=ChattingScrollLayout()
  val content=ChattingContent();content.id="bki".hashCode()
@@ -71,7 +82,7 @@ fun main(){
  val host=ViewGroup();host.id="bl8".hashCode();footer.add(host)
  val row=ViewGroup();row.id="ssr".hashCode();row.height=171;host.add(row)
  val panel=ChatFooterBottom();panel.height=1333;host.add(panel)
- val list=ViewGroup();list.setPadding(1,2,3,7)
+ val list=TestList();list.setPadding(1,2,3,7)
  val wrapper=MMChattingListView(list);wrapper.id="bm6".hashCode();wrapper.add(list);content.add(wrapper)
  scroll.add(content);scroll.add(footer)
  val controller=ChatInputMessageUnderlay()
@@ -148,6 +159,42 @@ fun main(){
  controller.apply(scroll)
  check(content.width==1440)
  controller.restoreAll()
+ // Model the real bottom-pinned list: native layout shrinks it first.
+ scroll.height=0
+ val rowItem=View();rowItem.height=120;list.add(rowItem)
+ list.scrollable=true
+ content.resized={h -> list.layout(0,0,content.width,h)}
+ list.layout(0,0,content.width,content.height)
+ rowItem.top=list.height-list.paddingBottom-rowItem.height
+ controller.apply(scroll)
+ check(rowItem.bottom==list.height-list.paddingBottom)
+ val nativeBottom=footer.top
+ repeat(4){
+  controller.beforeLayout(scroll)
+  content.layout(0,0,content.width,content.measuredHeight)
+  controller.apply(scroll)
+  check(rowItem.bottom==list.height-list.paddingBottom)
+ }
+ check(list.scrollCalls>0 && footer.top==nativeBottom)
+ for(h in listOf(1100,2400,1100,2400)){
+  controller.beforeLayout(scroll)
+  content.measure(720,h);content.layout(0,0,720,h)
+  footer.layout(0,h,720,h+1504)
+  controller.apply(scroll)
+  check(rowItem.bottom==list.height-list.paddingBottom)
+ }
+ list.history=true;list.last=15
+ val callsBefore=list.scrollCalls;val topBefore=rowItem.top
+ controller.beforeLayout(scroll);content.layout(0,0,720,content.measuredHeight);controller.apply(scroll)
+ check(list.scrollCalls==callsBefore && rowItem.top==topBefore)
+ list.history=false;list.last=29;list.scrollable=false
+ controller.beforeLayout(scroll);content.layout(0,0,720,content.measuredHeight);controller.apply(scroll)
+ check(list.scrollCalls==callsBefore)
+ list.scrollable=true;rowItem.top=list.height-list.paddingBottom-rowItem.height
+ controller.beforeLayout(scroll);list.itemTotal++
+ content.layout(0,0,720,content.measuredHeight);controller.apply(scroll)
+ check(list.scrollCalls==callsBefore)
+ println("PASS: bottom anchor across repeated native layouts and window resize; history, short lists and changed data untouched")
  println("PASS: native footer position preserved, no negative margin, zero-height blr, repeated native layouts, panel exclusion, multiline, offsets, visibility, padding, restore, native resize")
 }
 '''

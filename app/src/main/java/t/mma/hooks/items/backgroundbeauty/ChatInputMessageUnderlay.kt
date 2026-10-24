@@ -23,7 +23,9 @@ internal class ChatInputMessageUnderlay {
         var nativeWidth = 0
         var nativeLeft = 0
         var nativeTop = 0
+        var bottomAnchor: BottomAnchor? = null
     }
+    private data class BottomAnchor(val count: Int, val gap: Int)
     private class Targets(val content: View, val footer: ViewGroup, val strip: View, val wrapper: View, val list: ViewGroup) {
         fun valid(scroll: ViewGroup): Boolean = content.parent === scroll && footer.parent === scroll &&
             inside(strip, footer) && inside(wrapper, content) && inside(list, wrapper)
@@ -56,6 +58,8 @@ internal class ChatInputMessageUnderlay {
             State(content, list, lp.bottomMargin, list.clipToPadding).also { states[scroll] = it; it.targets = target }
         }
         state.targets = target
+        val bottomAnchor = state.bottomAnchor ?: captureBottomAnchor(list)
+        state.bottomAnchor = null
         ChatScrollTrace.watch(scroll, content, list, footer)
         ChatScrollTrace.snapshot("underlay.beforeApply", content)
         val stripRect = strip.screenRect(stripBounds)
@@ -95,6 +99,7 @@ internal class ChatInputMessageUnderlay {
         }
         state.expandedHeight = height
         state.overlap = overlap
+        restoreBottomAnchor(list, bottomAnchor)
         ChatScrollTrace.snapshot("underlay.afterApply", content)
 
         } finally { ChatScrollDiagnostic.end("underlay.apply", diagnosticStarted) }
@@ -152,6 +157,7 @@ internal class ChatInputMessageUnderlay {
         val diagnosticStarted = ChatScrollDiagnostic.begin()
         try {
         val state = states[scroll] ?: return
+        state.bottomAnchor = captureBottomAnchor(state.list)
         ChatScrollTrace.snapshot("underlay.beforeNative", state.content)
         // A fresh window measurement may coincide with our expanded height.
         // Only restore a measurement whose width and height still belong to us.
@@ -173,6 +179,31 @@ internal class ChatInputMessageUnderlay {
         state.expandedHeight = -1
 
         } finally { ChatScrollDiagnostic.end("underlay.beforeLayout", diagnosticStarted) }
+    }
+
+    // Preserve only an already bottom-aligned, scrollable conversation across
+    // native shrink + our expansion. No delayed jump or selection of a new row.
+    private fun captureBottomAnchor(list: ViewGroup): BottomAnchor? {
+        if (!list.canScrollVertically(-1) || list.canScrollVertically(1)) return null
+        val count = nativeListInt(list, "getCount") ?: return null
+        val last = nativeListInt(list, "getLastVisiblePosition") ?: return null
+        if (count <= 0 || last != count - 1) return null
+        val row = list.getChildAt(list.childCount - 1) ?: return null
+        val gap = list.height - list.paddingBottom - row.bottom
+        if (gap !in -2..2) return null
+        return BottomAnchor(count, gap)
+    }
+    private fun restoreBottomAnchor(list: ViewGroup, anchor: BottomAnchor?) {
+        if (anchor == null || !list.canScrollVertically(-1)) return
+        if (nativeListInt(list, "getCount") != anchor.count ||
+            nativeListInt(list, "getLastVisiblePosition") != anchor.count - 1) return
+        val row = list.getChildAt(list.childCount - 1) ?: return
+        val gap = list.height - list.paddingBottom - row.bottom
+        if (gap > anchor.gap) list.scrollBy(0, anchor.gap - gap)
+    }
+    private fun nativeListInt(list: ViewGroup, name: String): Int? {
+        val method = KavaReflector.findMethodRecursive(list.javaClass, name) ?: return null
+        return (KavaReflector.invokeOrThrow(method, list) as? Number)?.toInt()
     }
 
     private fun inputRowOverlap(footer: ViewGroup, row: View): Int {
