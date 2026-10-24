@@ -1,5 +1,15 @@
 # 聊天滚动专项诊断
 
+## 979 D组细分采样与映射核对
+
+采样前缀 `Dphase-20261024-100747`，版本9.3.5/979，系统帧窗口10:07:49–10:07:54：424帧，超时帧22.41%，P95/P99=18/25ms。相比978的21.33%、17/27ms有升有降，不判定性能改善。停止专项后的17.69%样本不作同条件对比。
+
+979附件文件名对应37b997b；mapping pg_map_id为 `2b59221fa91881526c5a6ed9e30393afaa4b92d62a46ca14bc65219a23f23bc8`，尚未额外核验安装APK的map-id。准备阶段堆栈 `pi.z.y0:1024` 对应 setTransparentSurface 第2838行背景赋值，`pi.z.d:394` 对应 applyChatFooterTransparency 第2453行，`pi.k.invoke:582` 对应 installChatChromeLifecycle 第2327行。该请求发生在准备阶段，不直接归为滚动期根因。
+
+与滚动开始重叠的25秒汇总窗口：background.refresh 3次、总21.226ms、最大13.012ms；cleanup最大3.559ms、chatApply最大3.857ms、chrome最大2.999ms。阶段最大值独立且可能嵌套，不能相加或当作同一次慢调用的组成。first=130、slot=6仅为该窗口计数，限频最新样本为CdnImageView和Toolbar；不证明全部首次写入来自相同类型，也不证明为同一对象反复写入。窗口包含切回微信过程，末两秒未捕获单独非空阶段汇总。
+
+源码核查：applyBitmap的cleanup会复制并遍历surfaces，恢复未附着视图后移除；applyChromeTransparency先处理已缓存装饰视图，再扫描目标树；setTransparentSurface的匹配条件包含slot。当前没有同一对象slot变化序列或逐次阶段关联，不能认定Toolbar发生错误往返切换，也不能将首次标记等同于冗余写入。暂不修改背景功能行为；进一步优化须先有逐次关联或可复现证据，避免跳过必要背景恢复。mapping与临时分析保留/tmp，不入仓库。
+
 ## 978 后背景刷新细分诊断（待实机采样）
 
 仅专项开启时新增 background.target/cleanup/host/chatHost/movingContent/retireChatSurfaces/imageSurface/chatApply/chrome/systemBars/invalidate 阶段计时，沿用每5秒汇总及4ms慢调用样本。background.refresh 为外层总耗时，阶段间及既有 footer 等计时可能嵌套，不能直接相加。异步位图加载后应用不属于原始 refresh 同步窗口，阶段计数也不保证与 refresh 一一对应。

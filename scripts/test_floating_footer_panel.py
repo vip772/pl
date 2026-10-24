@@ -6,13 +6,15 @@ source=(root/'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatFoote
 a=source.index('        val panelHeight = if (state.panel.visibility')
 b=source.index('        var layoutChanged',a)
 calculation=source[a:b]
-a=source.index('    private fun reparentPanel(');b=source.index('    private fun applyCompactPanelHeight(',a)
+a=source.index('    private fun reparentPanel(');b=source.index('    private fun visibleHeightExcludingPanel(',a)
 reparent=source[a:b]
 assert 'addRule(RelativeLayout.BELOW, state.inputColumn.id)' in reparent
 assert 'addRule(RelativeLayout.BELOW, panel.id)' not in reparent
 assert 'state.changedRules[state.inputColumn] = columnParams.rules.copyOf()' in reparent
 assert 'panel.visibility = if (isPanelState(panelState))' in reparent
 assert 'applyChatListPadding(footer, occupiedHeight + gap, state)' in source
+for removed in ['applyCompactPanelHeight', 'restorePanelHeight', 'panelOriginalHeights', 'panelBodyOriginalHeights', 'MAX_PANEL_HEIGHT_DP', 'MIN_PANEL_HEIGHT_DP', 'MAX_PANEL_HEIGHT_RATIO']:
+ assert removed not in source, removed
 code='''
 class Params(var height:Int)
 class View(var visibility:Int=0,var layoutParams:Params?=null,var measuredHeight:Int=0){companion object{const val VISIBLE=0}}
@@ -21,7 +23,7 @@ fun top(state:State,inputHeight:Int,gap:Int):Int {
 '''+calculation+''' return targetTop
 }
 fun main(){
- for(input in listOf(48,72,144))for(gap in listOf(0,8,24))for(height in listOf(180,265,600)){
+ for(input in listOf(48,72,144))for(gap in listOf(0,8,24))for(height in listOf(120,180,265,600,960,1200)){
   val panel=View(0,Params(height),height);val state=State(panel)
   val opened=top(state,input,gap)
   check(opened+input == -height-gap) // input bottom == panel top
