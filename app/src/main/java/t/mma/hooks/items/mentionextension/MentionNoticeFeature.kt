@@ -13,6 +13,10 @@ import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.preferences.HchatStorage
 import t.mma.utils.HLog
+import t.mma.utils.KavaReflector
+import t.mma.hooks.core.HookRegistry
+import de.robv.android.xposed.XC_MethodHook
+import java.lang.reflect.Modifier
 
 object MentionNoticeSettings {
     const val PREFS = "Hchat_mention_notice_config"
@@ -40,14 +44,68 @@ object MentionNoticeSettings {
             raw.startsWith(PREFIX) -> PREFIX.length
             else -> 0
         }
+        val stops = colors(context).map { Color.parseColor(it) }
         return SpannableStringBuilder(text).apply {
-            getSpans(0, length, NoticeGradientSpan::class.java).forEach { removeSpan(it) }
+            getSpans(0, length, android.text.style.ForegroundColorSpan::class.java).forEach { removeSpan(it) }
             getSpans(0, length, HiddenPrefixSpan::class.java).forEach { removeSpan(it) }
             if (prefixLength > 0) setSpan(HiddenPrefixSpan(), 0, prefixLength, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
-            if (length > prefixLength) setSpan(
-                NoticeGradientSpan(colors(context).map { Color.parseColor(it) }.toIntArray(), raw.substring(prefixLength)),
-                prefixLength, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE or (255 shl Spanned.SPAN_PRIORITY_SHIFT))
+            var index = prefixLength
+            while (index < length) {
+                val end = (index + Character.charCount(raw.codePointAt(index))).coerceAtMost(length)
+                val fraction = (index - prefixLength).toFloat() / (length - prefixLength - 1).coerceAtLeast(1)
+                val section = if (fraction < .5f) 0 else 1
+                val blend = if (section == 0) fraction * 2 else (fraction - .5f) * 2
+                val from = stops[section]
+                val to = stops[section + 1]
+                fun channel(a: Int, b: Int) = (a + (b - a) * blend).toInt()
+                val color = Color.argb(channel(Color.alpha(from), Color.alpha(to)),
+                    channel(Color.red(from), Color.red(to)), channel(Color.green(from), Color.green(to)),
+                    channel(Color.blue(from), Color.blue(to)))
+                setSpan(android.text.style.ForegroundColorSpan(color), index, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                index = end
+            }
         }
+    }
+    private val renderMethods = HashSet<java.lang.reflect.Method>()
+    @Synchronized
+    fun installRenderer(context: FeatureContext): Boolean {
+        val classes = listOfNotNull(
+            KavaReflector.loadClass("com.tencent.mm.view.x2c.X2CTextView", context.hostClassLoader()),
+            KavaReflector.loadClass("com.tencent.neattextview.textview.view.NeatTextView", context.hostClassLoader()),
+            KavaReflector.loadClass("com.tencent.mm.ui.widget.MMNeat7extView", context.hostClassLoader()))
+        var found = false
+        for (clazz in classes) {
+            var current: Class<*>? = clazz
+            while (current != null && current != android.view.View::class.java && current != android.widget.TextView::class.java) {
+                for (method in KavaReflector.declaredMethods(current)) {
+                    val types = method.parameterTypes
+                    if (Modifier.isStatic(method.modifiers) || Modifier.isAbstract(method.modifiers) ||
+                        types.firstOrNull() != CharSequence::class.java) continue
+                    val supported = types.size == 1 || (types.size == 2 && types[1] == java.lang.Boolean.TYPE) ||
+                        (types.size == 3 && types[1] == android.widget.TextView.BufferType::class.java && types[2] == java.lang.Boolean::class.java)
+                    if (!supported) continue
+                    found = true
+                    if (method in renderMethods) continue
+                    val hook = HookRegistry.get().hook(method, object : XC_MethodHook() {
+                        override fun beforeHookedMethod(param: MethodHookParam) {
+                            val input = param.args?.getOrNull(0) as? CharSequence ?: return
+                            // Exact module prefix only; ordinary messages and timestamps pass unchanged.
+                            if (!known(input.toString())) return
+                            try {
+                                val styled = highlight(context.hostContext(), input) ?: return
+                                check(styled.length == input.length && styled.toString() == input.toString())
+                                param.args[0] = styled
+                            } catch (error: Throwable) {
+                                HLog.e("[Hchat:艾特提醒] 渲染失败: ${method.toGenericString()}", error)
+                            }
+                        }
+                    })
+                    if (hook != null) renderMethods.add(method) else return false
+                }
+                current = current.superclass
+            }
+        }
+        return found
     }
     fun bind(root: android.view.View, content: String) {
         if (!enabled(root.context) || !known(content)) return
@@ -71,14 +129,7 @@ object MentionNoticeSettings {
         override fun draw(canvas: android.graphics.Canvas, text: CharSequence, start: Int,
             end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: android.graphics.Paint) = Unit
     }
-    private class NoticeGradientSpan(private val stops: IntArray, private val text: String) : android.text.style.CharacterStyle() {
-        override fun updateDrawState(paint: android.text.TextPaint) {
-            paint.color = stops[0]
-            paint.shader = if (stops.all { it == stops[0] }) null else android.graphics.LinearGradient(
-                0f, 0f, paint.measureText(text).coerceAtLeast(1f), 0f,
-                stops, floatArrayOf(0f, .5f, 1f), android.graphics.Shader.TileMode.CLAMP)
-        }
-    }
+
 }
 
 class MentionNoticeFeature : BaseFeature() {
@@ -95,6 +146,7 @@ class MentionNoticeFeature : BaseFeature() {
         if (context.loadPackageParam().processName != context.loadPackageParam().packageName) return
         subscribe(Events.DexReady::class.java) {
             DexInstallScheduler.schedule(featureId(), name()) {
+                if (!MentionNoticeSettings.installRenderer(context)) return@schedule false
                 val local = WeChatApis.localMessages() ?: return@schedule false
                 local.ensureReady()
                 val observe = WeChatApis.message().observe() ?: return@schedule false

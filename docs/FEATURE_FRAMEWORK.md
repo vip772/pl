@@ -2121,3 +2121,6 @@ DexFinder 在构造阶段、发布给 FeatureContext 和各 API 安装器之前�
 
 ### 艾特提醒三色闪退修复
 撤销通用setText入口中艾特提醒改写，绑定后保持字符长度与宿主span，隐藏前缀不删除字符；艾特扩展条目增加10dp间距。日志证据和验证边界见 `docs/MENTION_EXTENSION.md`。
+
+### 艾特提醒灰色渲染修正
+补接Neat/MMNeat/X2C真实文本入口，沿用艾特高亮的逐字ForegroundColorSpan实现三色，保持字符索引；原绑定后仅处理TextView不足以覆盖Neat。验证边界见 `docs/MENTION_EXTENSION.md`。
