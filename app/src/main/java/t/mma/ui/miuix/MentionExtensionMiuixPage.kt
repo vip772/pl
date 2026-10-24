@@ -41,6 +41,10 @@ internal fun MentionExtensionMiuixPage(
     var highlight by remember { mutableStateOf(sp.getBoolean(MentionHighlightSettings.KEY_ENABLE, false)) }
     val noticePrefs = remember { HchatStorage.preferences(context, t.mma.hooks.items.mentionextension.MentionNoticeSettings.PREFS) }
     var notice by remember { mutableStateOf(t.mma.hooks.items.mentionextension.MentionNoticeSettings.enabled(context)) }
+    var noticeColor by remember { mutableStateOf(noticePrefs.getString(
+        t.mma.hooks.items.mentionextension.MentionNoticeSettings.COLOR,
+        t.mma.hooks.items.mentionextension.MentionNoticeSettings.DEFAULT_COLOR
+    ).orEmpty()) }
     val state = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
@@ -54,6 +58,8 @@ internal fun MentionExtensionMiuixPage(
                     val normalized = MentionHighlightSettings.cleanColorSpec(colorSpec)
                         .ifEmpty { MentionHighlightSettings.DEFAULT_COLOR }
                     sp.edit().putString(MentionHighlightSettings.KEY_COLOR, normalized).apply()
+                    noticePrefs.edit().putString(t.mma.hooks.items.mentionextension.MentionNoticeSettings.COLOR,
+                        t.mma.hooks.items.antirecall.DynamicRecallGradient.parts(noticeColor).joinToString(",")).apply()
                     colorSpec = normalized
                     Toast.makeText(context, "设置已保存", Toast.LENGTH_SHORT).show()
                 },
@@ -70,26 +76,42 @@ internal fun MentionExtensionMiuixPage(
                 bottom = padding.calculateBottomPadding() + 84.dp
             )
         ) {
-            item { SmallTitle(text = "功能开关") }
-            item {
-                SettingsCard {
-                    SwitchRow(hidden, "隐藏艾特", "隐藏群聊消息中的艾特文字，保留艾特名单") {
-                        hidden = it
-                        hiddenPrefs.edit().putBoolean(t.mma.hooks.items.hiddenat.HiddenAtSettings.ENABLE, it).apply()
-                    }
-                    SwitchRow(emoji, "表情艾特", "发送群聊表情时选择普通发送或隐藏成员艾特") {
-                        emoji = it
-                        emojiPrefs.edit().putBoolean(t.mma.hooks.items.emojiat.EmojiAtSettings.ENABLE, it).apply()
-                    }
-                    SwitchRow(notice, "艾特提醒", "收到群聊中艾特你或所有人的消息时，插入红色本地提醒") {
-                        notice = it
-                        noticePrefs.edit().putBoolean(t.mma.hooks.items.mentionextension.MentionNoticeSettings.ENABLE, it).apply()
-                    }
-                    SwitchRow(highlight, "艾特高亮", "高亮艾特对象并支持点击资料页；重新进入聊天后生效") {
-                        highlight = it
-                        sp.edit().putBoolean(MentionHighlightSettings.KEY_ENABLE, it).apply()
-                    }
+            item { SettingsCard {
+                SwitchRow(hidden, "隐藏艾特", "") {
+                    hidden = it
+                    hiddenPrefs.edit().putBoolean(t.mma.hooks.items.hiddenat.HiddenAtSettings.ENABLE, it).apply()
                 }
+            } }
+            item { SettingsCard {
+                SwitchRow(emoji, "表情艾特", "") {
+                    emoji = it
+                    emojiPrefs.edit().putBoolean(t.mma.hooks.items.emojiat.EmojiAtSettings.ENABLE, it).apply()
+                }
+            } }
+            item { SettingsCard {
+                SwitchRow(highlight, "艾特高亮", "") {
+                    highlight = it
+                    sp.edit().putBoolean(MentionHighlightSettings.KEY_ENABLE, it).apply()
+                }
+            } }
+            item { SettingsCard {
+                SwitchRow(notice, "艾特提醒", "") {
+                    notice = it
+                    noticePrefs.edit().putBoolean(t.mma.hooks.items.mentionextension.MentionNoticeSettings.ENABLE, it).apply()
+                }
+            } }
+            if (notice) {
+                item { SettingsCard {
+                    ColorPickerRow("提醒颜色", "", noticeColor, threeColorGradient = true, showSummary = false,
+                        onReset = {
+                            noticeColor = t.mma.hooks.items.mentionextension.MentionNoticeSettings.DEFAULT_COLOR
+                            noticePrefs.edit().remove(t.mma.hooks.items.mentionextension.MentionNoticeSettings.COLOR).apply()
+                        }
+                    ) {
+                        noticeColor = it
+                        noticePrefs.edit().putString(t.mma.hooks.items.mentionextension.MentionNoticeSettings.COLOR, it).apply()
+                    }
+                } }
             }
             if (highlight) {
             item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "颜色") }
@@ -97,8 +119,9 @@ internal fun MentionExtensionMiuixPage(
                 SettingsCard {
                     ColorPickerRow(
                         "艾特高亮渐变颜色",
-                        "调节渐变起始色和结束色",
+                        "",
                         colorSpec,
+                        showSummary = false,
                         onReset = { colorSpec = MentionHighlightSettings.DEFAULT_COLOR }
                     ) { colorSpec = it.take(19) }
                 }

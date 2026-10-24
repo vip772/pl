@@ -1342,6 +1342,7 @@ private class CustomBottomBarHost(
     private val owner = BottomBarComposeOwner()
     private val clickTargets = arrayOfNulls<ViewGroup>(4)
     private val configState = mutableStateOf(initialConfig)
+    private val overlayActive = mutableStateOf(true)
     private val state = readInitialState()
     private val touchState = FloatingBottomBarTouchState()
     private val composeView = ComposeView(activity).apply {
@@ -1417,7 +1418,7 @@ private class CustomBottomBarHost(
             owner.attach()
             composeView.setContent {
                 CompositionLocalProvider(LocalNavigationEventDispatcherOwner provides owner) {
-                    CustomBottomBarRoot(
+                    if (overlayActive.value) CustomBottomBarRoot(
                         activity = activity,
                         sourceView = sourceView,
                         state = state,
@@ -1471,6 +1472,7 @@ private class CustomBottomBarHost(
         parent.clipChildren = false
         parent.clipToPadding = false
         val showOverlay = shouldShowOverlay()
+        if (overlayActive.value != showOverlay) overlayActive.value = showOverlay
         if (showOverlay) clearBottomBlur(root) else restoreBottomBlur(root)
         navigationAppearance.enforce()
         composeHost.visibility = if (showOverlay) View.VISIBLE else View.GONE
@@ -1481,7 +1483,7 @@ private class CustomBottomBarHost(
     }
 
     fun syncState(selectedIndexHint: Int? = null) {
-        if (!applied.get()) return
+        if (!applied.get() || !shouldShowOverlay()) return
         lastStateSyncAt = SystemClock.uptimeMillis()
         val selectedIndex = selectedIndexHint
             ?: (KavaReflector.invoke(getCurIdxMethod, bottomTab) as? Int)
@@ -1583,7 +1585,8 @@ private class CustomBottomBarHost(
     }
 
     private fun shouldShowOverlay(): Boolean {
-        return bottomTab.isAttachedToWindow &&
+        return WeChatApis.chatPage()?.isInChatPage() != true &&
+            bottomTab.isAttachedToWindow &&
             bottomTab.windowVisibility == View.VISIBLE &&
             bottomTab.isShown
     }

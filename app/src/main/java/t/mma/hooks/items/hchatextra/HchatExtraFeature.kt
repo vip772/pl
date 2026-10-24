@@ -579,6 +579,7 @@ private class HchatExtraHooker(
                         runCatching {
                             runCatching { bindDynamicRecall(param.thisObject, param.args, state) }
                                 .onFailure { logger("动态撤回消息绑定失败", it) }
+                            bindMentionNotice(param.thisObject, param.args, state)
                             if (messageDetailsConfig.enabled) {
                                 bindBottomMessageDetails(param.thisObject, param.args, 0, state.holder, state.message, state.root)
                             }
@@ -596,6 +597,17 @@ private class HchatExtraHooker(
         return complete
     }
 
+    private fun bindMentionNotice(bindObject: Any?, args: Array<Any?>?, state: MessageDetailsBindState) {
+        if (!t.mma.hooks.items.mentionextension.MentionNoticeSettings.enabled(context.hostContext())) return
+        val holder = state.holder ?: messageBindHolder(args) ?: return
+        val root = state.root ?: findRootView(holder) ?: return
+        if (isScrollingContainer(root)) return
+        val message = state.message ?: resolveMessageFromBindArgs(args)
+            ?: resolveMessageFromAdapter(bindObject, messageBindPosition(args)) ?: return
+        if (!isCenteredNotice(messageType(message))) return
+        val content = readMessageString(message, "getContent", "field_content", "content")
+        t.mma.hooks.items.mentionextension.MentionNoticeSettings.bind(root, content)
+    }
     private fun bindDynamicRecall(bindObject: Any?, args: Array<Any?>?, state: MessageDetailsBindState) {
         val adapterHolder = messageBindHolder(args) ?: return
         val itemView = findRootView(adapterHolder) ?: return
@@ -3217,11 +3229,12 @@ private class HchatExtraHooker(
     }
 
     private fun atMentionType(details: MessageDetails): WeChatMessage.AtMentionType {
-        return WeChatMessage.classifyAtMention(
-            details.msgSource,
-            details.body,
-            WeChatApis.account()?.selfWxId().orEmpty()
-        )
+        val self = WeChatApis.account()?.selfWxId().orEmpty()
+        val cached = details.mentionClassification
+        if (cached != null && cached.first == self) return cached.second
+        return WeChatMessage.classifyAtMention(details.msgSource, details.body, self).also {
+            details.mentionClassification = self to it
+        }
     }
 
     private fun parseAtUserIds(atUserList: String): List<String> {
@@ -4162,4 +4175,7 @@ private data class MessageDetails(
     val nativeClassName: String,
     val createTime: Long,
     val isSelf: Boolean
-)
+) {
+    // Snapshot-local memoization; never shared by mutable native message objects.
+    var mentionClassification: Pair<String, WeChatMessage.AtMentionType>? = null
+}

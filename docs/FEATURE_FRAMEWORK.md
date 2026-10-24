@@ -2115,3 +2115,6 @@ DexFinder 在构造阶段、发布给 FeatureContext 和各 API 安装器之前�
 
 ### 艾特提醒与聊天绑定检查
 艾特扩展新增默认关闭的艾特提醒，群聊真实艾特当前账号及普通@所有人插入红色本地系统提示，持久化去重及边界见 `docs/MENTION_EXTENSION.md`。聊天时间避免备用分支重复解析优先参数，合并转发详情标签减少重复属性设置，采样结论与限制见 `docs/CHAT_SCROLL_DIAGNOSTIC.md`。
+
+### 艾特提醒颜色和聊天页底栏暂停
+艾特扩展各功能独立条目且不显示说明；艾特提醒移除可见前缀，默认纯红并复用动态撤回三色编辑。旧提示显示兼容及验证限制见 `docs/MENTION_EXTENSION.md`。聊天页底栏条件组合/状态同步暂停与消息详情快照内艾特分类复用见 `docs/CHAT_SCROLL_DIAGNOSTIC.md`。

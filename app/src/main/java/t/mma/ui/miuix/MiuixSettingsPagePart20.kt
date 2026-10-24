@@ -1978,7 +1978,9 @@ public fun SwitchRow(
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(text = title, color = MiuixTheme.colorScheme.onSurface, fontWeight = FontWeight.Medium)
-            Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+            if (summary.isNotBlank()) {
+                Text(text = summary, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = 12.sp)
+            }
         }
         Switch(
             checked = checked,
@@ -2096,6 +2098,7 @@ public fun ColorPickerRow(
     allowGradient: Boolean = true,
     onReset: (() -> Unit)? = null,
     threeColorGradient: Boolean = false,
+    showSummary: Boolean = true,
     onValueChange: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -2127,6 +2130,7 @@ public fun ColorPickerRow(
                     )
                     ClickHintTag()
                 }
+                if (showSummary) {
                 Text(
                     text = if (threeColorGradient) {
                         "$summary，支持 #起始色,#中间色,#结束色"
@@ -2138,6 +2142,7 @@ public fun ColorPickerRow(
                     color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                     fontSize = 12.sp
                 )
+                }
             }
             ColorPreviewDot(if (allowGradient) value else colorParts.first, threeColorGradient = threeColorGradient)
         }

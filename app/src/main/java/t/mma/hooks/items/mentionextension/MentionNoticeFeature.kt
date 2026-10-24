@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Color
 import android.text.SpannableStringBuilder
 import android.text.Spanned
-import android.text.style.ForegroundColorSpan
 import t.mma.event.Events
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.message.WeChatMessageObserveApi
@@ -21,13 +20,43 @@ object MentionNoticeSettings {
     const val PREFIX = "[艾特提醒] "
     fun enabled(context: Context) = HchatStorage.preferences(context, PREFS).getBoolean(ENABLE, false)
 
-    // Reuse the existing system-notice setText hook; never alter a TextView's persistent color.
+    const val COLOR = "mention_notice_color"
+    const val DEFAULT_COLOR = "#E53935,#E53935,#E53935"
+    fun colors(context: Context): List<String> = t.mma.hooks.items.antirecall.DynamicRecallGradient.parts(
+        HchatStorage.preferences(context, PREFS).getString(COLOR, DEFAULT_COLOR).orEmpty().ifBlank { DEFAULT_COLOR })
+    const val MARKER = "\u2063\u2060\u2063"
+    private fun known(text: String): Boolean = text.startsWith(MARKER) || text.startsWith(PREFIX)
     fun highlight(context: Context, text: CharSequence): CharSequence? {
-        if (!text.startsWith(PREFIX) || !enabled(context) ||
-            !(text.endsWith("艾特了你") || text.endsWith("艾特了所有人"))) return null
-        return SpannableStringBuilder(text).apply {
-            setSpan(ForegroundColorSpan(Color.rgb(229, 57, 53)), 0, length,
-                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE or (255 shl Spanned.SPAN_PRIORITY_SHIFT))
+        val raw = text.toString()
+        if (!known(raw) || !enabled(context)) return null
+        val clean = raw.removePrefix(MARKER).removePrefix(PREFIX)
+        return SpannableStringBuilder(clean).apply {
+            getSpans(0, length, android.text.style.CharacterStyle::class.java).forEach { removeSpan(it) }
+            setSpan(NoticeGradientSpan(colors(context).map { Color.parseColor(it) }.toIntArray(), clean),
+                0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE or (255 shl Spanned.SPAN_PRIORITY_SHIFT))
+        }
+    }
+    fun bind(root: android.view.View, content: String) {
+        if (!enabled(root.context) || !known(content)) return
+        val pending = java.util.ArrayDeque<android.view.View>()
+        pending.add(root)
+        while (pending.isNotEmpty()) {
+            val view = pending.removeFirst()
+            if (view is android.widget.TextView) {
+                val raw = view.text?.toString().orEmpty()
+                if (raw == content || raw == content.removePrefix(MARKER).removePrefix(PREFIX)) {
+                    highlight(root.context, content)?.let { view.text = it }
+                }
+            }
+            if (view is android.view.ViewGroup) for (i in 0 until view.childCount) pending.add(view.getChildAt(i))
+        }
+    }
+    private class NoticeGradientSpan(private val stops: IntArray, private val text: String) : android.text.style.CharacterStyle() {
+        override fun updateDrawState(paint: android.text.TextPaint) {
+            paint.color = stops[0]
+            paint.shader = if (stops.all { it == stops[0] }) null else android.graphics.LinearGradient(
+                0f, 0f, paint.measureText(text).coerceAtLeast(1f), 0f,
+                stops, floatArrayOf(0f, .5f, 1f), android.graphics.Shader.TileMode.CLAMP)
         }
     }
 }
@@ -102,8 +131,9 @@ class MentionNoticeFeature : BaseFeature() {
             if (Thread.currentThread().isInterrupted || !MentionNoticeSettings.enabled(context) || WeChatApis.account()?.selfWxId() != self) return
             // Reserve persistently before insertion: process restart must not duplicate a notice.
             if (!store.edit().putBoolean(key, true).commit()) return
+            val notice = MentionNoticeSettings.MARKER + name + " " + suffix
             val inserted = WeChatApis.localMessages()?.insertSystemMessageAt(
-                event.talker, MentionNoticeSettings.PREFIX + name + " " + suffix,
+                event.talker, notice,
                 msg.createTime.let { if (it in 1..99_999_999_999L) it * 1000 else it }
                     .takeIf { it > 0 }?.plus(1) ?: System.currentTimeMillis()
             ) ?: 0L
