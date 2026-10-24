@@ -1754,7 +1754,7 @@ private class BackgroundBeautyRuntime(
         }
     }
     private fun applyForActivity(activity: Activity) {
-        val traceStarted = t.mma.utils.ChatScrollDiagnostic.begin()
+        val traceStarted = t.mma.utils.ChatScrollDiagnostic.beginRefresh()
         try {
         if (destroyed || activity.isFinishing || activity.isDestroyed) return
         if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) {
@@ -1818,7 +1818,7 @@ private class BackgroundBeautyRuntime(
             }
         }
 
-        } finally { t.mma.utils.ChatScrollDiagnostic.end("background.refresh", traceStarted) }
+        } finally { t.mma.utils.ChatScrollDiagnostic.endRefresh(traceStarted) }
     }
 
     private fun ensureState(activity: Activity): HostState = synchronized(states) {
@@ -2820,6 +2820,7 @@ private class BackgroundBeautyRuntime(
                 snapshot.appliedBitmap != null -> 4
                 else -> 5
             }
+            val diagnosticPreviousSlot = if (writeReason != 0) snapshot.slot?.name else null
             synchronizeExternalBackground(snapshot, view)
             if (slot == BackgroundBeautySettings.Slot.CONTACTS) captureContactGeometry(view, snapshot)
             val backgroundMatches = snapshot.slot == slot &&
@@ -2836,7 +2837,7 @@ private class BackgroundBeautyRuntime(
                 view.backgroundTintList = null
                 view.backgroundTintMode = null
                 view.background = marker
-                if (writeReason != 0) t.mma.utils.ChatScrollDiagnostic.backgroundWrite(writeReason, view.javaClass.name)
+                if (writeReason != 0) t.mma.utils.ChatScrollDiagnostic.backgroundWrite(writeReason, view.javaClass.name, view, diagnosticPreviousSlot, slot.name)
                 marker.state = view.drawableState
                 restoreSurfaceGeometry(view, snapshot)
                 snapshot.appliedBackground = marker

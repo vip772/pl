@@ -54,6 +54,8 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
     init { livePrefs.registerOnSharedPreferenceChangeListener(liveListener) }
     private val hooked = HashSet<Member>()
+    private val panelOriginalHeights = WeakHashMap<View, Int>()
+    private val panelBodyOriginalHeights = WeakHashMap<View, Int>()
     private val states = WeakHashMap<View, FooterState>()
     private val newMessageMargins = WeakHashMap<View, Int>()
     private val preDrawListeners = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
@@ -419,6 +421,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
                     panelState = state
                     panel.visibility = if (isPanelState(state)) View.VISIBLE else View.GONE
+                    if (isPanelState(state)) applyCompactPanelHeight(footer, panel)
                     runCatching {
                         requestFooterApply(footer)
                     }
@@ -608,6 +611,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             return false
         }
         val state = states[footer] ?: createState(footer, panel, marginParams) ?: return false
+        if (isPanelState(panelState)) applyCompactPanelHeight(footer, state.panel)
         val measuredInputHeight = visibleHeightExcludingPanel(state.inputColumn, state.panel)
         val stableInputHeight = measuredInputHeight.takeIf { it > 0 }
             ?: state.baseInputHeight.takeIf { it > 0 }
@@ -624,7 +628,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (!state.reparented && !reparentPanel(state)) return false
         val side = dp(SIDE_MARGIN_DP)
         val gap = dp(BOTTOM_GAP_DP)
-        // Preserve native panel/body dimensions; only read the current occupied height.
+        // Read the adjusted panel height for input anchoring and list avoidance.
         val panelHeight = if (state.panel.visibility == View.VISIBLE) {
             state.panel.layoutParams?.height?.takeIf { it > 0 }
                 ?: state.panel.measuredHeight.coerceAtLeast(0)
@@ -762,6 +766,57 @@ private class FooterRuntime(private val context: FeatureContext) {
         }
     }
 
+    private fun applyCompactPanelHeight(footer: View, panel: View) {
+        val lp = panel.layoutParams ?: return
+        val natural = panelOriginalHeights[panel]
+            ?: panel.height.takeIf { it > 0 }
+            ?: lp.height.takeIf { it > 0 }
+            ?: dp(MAX_PANEL_HEIGHT_DP)
+            .also { panelOriginalHeights[panel] = it }
+        if (!panelOriginalHeights.containsKey(panel)) panelOriginalHeights[panel] = natural
+        val hostHeight = (footer.parent as? View)?.height?.takeIf { it > 0 }
+            ?: footer.resources.displayMetrics.heightPixels
+        val target = minOf(
+            natural,
+            dp(MAX_PANEL_HEIGHT_DP),
+            (hostHeight * MAX_PANEL_HEIGHT_RATIO).roundToInt()
+        ).coerceAtLeast(dp(MIN_PANEL_HEIGHT_DP)) + dp(PANEL_EXTRA_HEIGHT_DP)
+        if (lp.height != target) {
+            lp.height = target
+            panel.layoutParams = lp
+        }
+        val group = panel as? ViewGroup ?: return
+        for (index in 0 until group.childCount) {
+            val child = group.getChildAt(index)
+            val childLp = child.layoutParams ?: continue
+            if (childLp.height != natural) continue
+            panelBodyOriginalHeights.getOrPut(child) { childLp.height }
+            if (childLp.height != target) {
+                childLp.height = target
+                child.layoutParams = childLp
+            }
+        }
+    }
+
+    private fun restorePanelHeight(panel: View) {
+        val group = panel as? ViewGroup
+        if (group != null) {
+            for (index in 0 until group.childCount) {
+                val child = group.getChildAt(index)
+                val height = panelBodyOriginalHeights.remove(child) ?: continue
+                child.layoutParams?.let { lp ->
+                    lp.height = height
+                    child.layoutParams = lp
+                }
+            }
+        }
+        val height = panelOriginalHeights.remove(panel) ?: return
+        panel.layoutParams?.let { lp ->
+            lp.height = height
+            panel.layoutParams = lp
+        }
+    }
+
     private fun visibleHeightExcludingPanel(root: ViewGroup, panel: View): Int {
         var total = 0
         for (index in 0 until root.childCount) {
@@ -876,6 +931,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         FloatingFooterInputSurfaces.restore(footer)
         val state = states.remove(footer) ?: return
         runCatching {
+            restorePanelHeight(state.panel)
             state.chatRecycler?.let { recycler ->
                 state.recyclerPaddingBottom?.let { bottom ->
                     recycler.setPadding(
@@ -932,6 +988,20 @@ private class FooterRuntime(private val context: FeatureContext) {
             view.layoutParams = lp
         }
         newMessageMargins.clear()
+        panelBodyOriginalHeights.forEach { (view, height) ->
+            view.layoutParams?.let { lp ->
+                lp.height = height
+                view.layoutParams = lp
+            }
+        }
+        panelBodyOriginalHeights.clear()
+        panelOriginalHeights.forEach { (view, height) ->
+            view.layoutParams?.let { lp ->
+                lp.height = height
+                view.layoutParams = lp
+            }
+        }
+        panelOriginalHeights.clear()
     }
 
     private fun isPanelState(state: Int): Boolean =
@@ -1035,6 +1105,10 @@ private class FooterRuntime(private val context: FeatureContext) {
         private const val PANEL_STATE_NONE = 0
         private const val PANEL_STATE_SMILEY = 2
         private const val PANEL_STATE_APP = 3
+        private const val MAX_PANEL_HEIGHT_DP = 265
+        private const val MIN_PANEL_HEIGHT_DP = 180
+        private const val MAX_PANEL_HEIGHT_RATIO = 0.30f
+        private const val PANEL_EXTRA_HEIGHT_DP = 50
         private const val SIDE_MARGIN_DP = 12
         private const val BOTTOM_GAP_DP = 8
         private const val CORNER_RADIUS_DP = 24

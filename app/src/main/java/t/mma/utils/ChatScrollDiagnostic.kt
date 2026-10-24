@@ -28,7 +28,51 @@ object ChatScrollDiagnostic {
         if (started != 0L) {
             val elapsed = (SystemClock.elapsedRealtimeNanos() - started).coerceAtLeast(0)
             record(name, elapsed)
+            refresh.get()?.let { frame ->
+                if (isActive() && frame.sessionId == session && name != "background.refresh" && name.startsWith("background.") &&
+                    (frame.phases.size < 24 || name in frame.phases)) {
+                    frame.phases[name] = (frame.phases[name] ?: 0L) + elapsed
+                }
+            }
             if (elapsed >= 4_000_000L) detail("slow.$name", "atMs=${SystemClock.elapsedRealtime()} elapsedUs=${elapsed/1000}")
+        }
+    }
+    private class Refresh(val started: Long, val sessionId: Long, val id: Long, val parent: Refresh?) {
+        val phases = linkedMapOf<String, Long>()
+        var writes = 0
+        val writeSamples = ArrayList<String>()
+    }
+    private val refresh = ThreadLocal<Refresh>()
+    private var refreshSequence = 0L
+    private var slowestRefresh = -1L
+    fun beginRefresh(): Long {
+        val started = begin()
+        if (started == 0L) return 0L
+        synchronized(lock) {
+            if (!isActive()) return 0L
+            refresh.set(Refresh(started, session, ++refreshSequence, refresh.get()))
+        }
+        return started
+    }
+    fun endRefresh(started: Long) {
+        if (started == 0L) return
+        val frame = refresh.get() ?: return
+        if (frame.started != started) return
+        try {
+            val elapsed = (SystemClock.elapsedRealtimeNanos() - started).coerceAtLeast(0)
+            record("background.refresh", elapsed)
+            synchronized(lock) {
+                if (isActive() && frame.sessionId == session && elapsed > slowestRefresh) {
+                    slowestRefresh = elapsed
+                    if (details.size < 32 || "background.refreshSample" in details) details["background.refreshSample"] = buildString {
+                        append("refresh=${frame.id} atMs=${SystemClock.elapsedRealtime()} elapsedUs=${elapsed/1000} writes=${frame.writes}")
+                        frame.phases.forEach { (name, nanos) -> append(" $name=${nanos/1000}") }
+                        frame.writeSamples.forEach { append(" write[$it]") }
+                    }.take(2400)
+                }
+            }
+        } finally {
+            if (frame.parent == null) refresh.remove() else refresh.set(frame.parent)
         }
     }
     /** Inline so disabled diagnostics do not allocate a lambda or read the clock. */
@@ -36,7 +80,7 @@ object ChatScrollDiagnostic {
         val started = begin()
         try { return block() } finally { end(name, started) }
     }
-    fun backgroundWrite(reason: Int, targetClass: String) {
+    fun backgroundWrite(reason: Int, targetClass: String, target: Any? = null, previousSlot: String? = null, nextSlot: String? = null) {
         if (!isActive()) return
         val category = when (reason) {
             1 -> "external"
@@ -47,7 +91,11 @@ object ChatScrollDiagnostic {
         }
         hit("background.write.$category")
         // One bounded latest sample per reason per flush; never retain the View.
-        detail("background.write.$category", "atMs=${SystemClock.elapsedRealtime()} target=${targetClass.take(160)}")
+        val frame = refresh.get()?.takeIf { it.sessionId == session }
+        frame?.let { it.writes++ }
+        val token = target?.let { Integer.toHexString(System.identityHashCode(it) xor salt) } ?: "none"
+        if (frame != null && frame.writeSamples.size < 8) frame.writeSamples.add("$category target=${targetClass.take(160)} view=$token from=${previousSlot?.take(32)} to=${nextSlot?.take(32)}")
+        detail("background.write.$category", "atMs=${SystemClock.elapsedRealtime()} target=${targetClass.take(160)} view=$token refresh=${frame?.id ?: 0L} from=${previousSlot?.take(32)} to=${nextSlot?.take(32)}")
     }
     private var lastGeometry = "unseen"
     @JvmStatic fun geometry(native: Int, expanded: Int, overlap: Int) {
@@ -99,7 +147,7 @@ object ChatScrollDiagnostic {
             host = context.applicationContext ?: context
             label = group.takeIf { it in listOf("A", "B", "C", "D") } ?: "?"
             session = SystemClock.elapsedRealtime(); salt = java.util.Random().nextInt()
-            stats.clear(); pairs.clear(); sources.clear(); details.clear(); budget = 12; queries = 0; lastGeometry = "unseen"
+            stats.clear(); pairs.clear(); sources.clear(); details.clear(); slowestRefresh = -1L; refreshSequence = 0L; budget = 12; queries = 0; lastGeometry = "unseen"
             until = session + 300_000L
             worker = ScheduledThreadPoolExecutor(1) { task -> Thread(task, "Hchat-ScrollDiag").apply { isDaemon = true } }.apply {
                 scheduleAtFixedRate({ tick() }, 5, 5, TimeUnit.SECONDS)
@@ -126,7 +174,7 @@ object ChatScrollDiagnostic {
             details.forEach { (key, value) -> append(" | $key=$value") }
             sources.forEach { append(" | source=$it") }
         })
-        stats.clear(); pairs.clear(); sources.clear(); details.clear()
+        stats.clear(); pairs.clear(); sources.clear(); details.clear(); slowestRefresh = -1L
     }
     @JvmStatic fun stop() { synchronized(lock) {
         if (until == 0L) return
