@@ -37,7 +37,12 @@ class MentionHighlightFeature : BaseFeature() {
     override fun featureId() = ID
     override fun name() = "艾特高亮"
     override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(MentionHighlightSettingsProvider())
+        registerSettingsProvider(t.mma.hooks.items.mentionextension.MentionExtensionSettingsProvider(), enabledCheck = {
+            val host = context.hostContext()
+            t.mma.hooks.items.hiddenat.HiddenAtSettings.preferences(host).getBoolean(t.mma.hooks.items.hiddenat.HiddenAtSettings.ENABLE, false) ||
+                t.mma.hooks.items.emojiat.EmojiAtSettings.preferences(host).getBoolean(t.mma.hooks.items.emojiat.EmojiAtSettings.ENABLE, false) ||
+                MentionHighlightSettings.preferences(host).getBoolean(MentionHighlightSettings.KEY_ENABLE, false)
+        })
     }
 
     override fun onFeatureInstall(context: FeatureContext) {

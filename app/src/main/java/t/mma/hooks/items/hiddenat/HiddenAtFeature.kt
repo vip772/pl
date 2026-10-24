@@ -7,8 +7,6 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
 import t.mma.preferences.HchatStorage
-import t.mma.ui.FeatureSettingsProvider
-import t.mma.ui.SimpleFeatureSettingsProvider
 import t.mma.utils.HLog
 import t.mma.utils.KavaReflector
 
@@ -24,12 +22,6 @@ class HiddenAtFeature : BaseFeature() {
     override fun featureId() = HiddenAtSettings.ID
     override fun name() = "隐藏艾特"
     override fun isEnabled(context: FeatureContext) = true
-    override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(object : SimpleFeatureSettingsProvider(
-            HiddenAtSettings.ID, "隐藏艾特", "隐藏群聊消息中的艾特文字，保留艾特名单",
-            FeatureSettingsProvider.CATEGORY_ENHANCE, true
-        ) {}, enabledCheck = { HiddenAtSettings.preferences(context.hostContext()).getBoolean(HiddenAtSettings.ENABLE, false) })
-    }
     override fun onFeatureInstall(context: FeatureContext) {
         if (context.loadPackageParam().processName != context.loadPackageParam().packageName) return
         runtime = HiddenAtRuntime(context).also { it.install() }

@@ -22,7 +22,7 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
 
 @Composable
-internal fun MentionHighlightMiuixPage(
+internal fun MentionExtensionMiuixPage(
     context: Context,
     provider: FeatureSettingsProvider,
     onBack: () -> Unit
@@ -34,6 +34,11 @@ internal fun MentionHighlightMiuixPage(
                 ?: MentionHighlightSettings.DEFAULT_COLOR
         )
     }
+    val hiddenPrefs = remember { t.mma.hooks.items.hiddenat.HiddenAtSettings.preferences(context) }
+    val emojiPrefs = remember { t.mma.hooks.items.emojiat.EmojiAtSettings.preferences(context) }
+    var hidden by remember { mutableStateOf(hiddenPrefs.getBoolean(t.mma.hooks.items.hiddenat.HiddenAtSettings.ENABLE, false)) }
+    var emoji by remember { mutableStateOf(emojiPrefs.getBoolean(t.mma.hooks.items.emojiat.EmojiAtSettings.ENABLE, false)) }
+    var highlight by remember { mutableStateOf(sp.getBoolean(MentionHighlightSettings.KEY_ENABLE, false)) }
     val state = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
@@ -66,15 +71,21 @@ internal fun MentionHighlightMiuixPage(
             item { SmallTitle(text = "功能开关") }
             item {
                 SettingsCard {
-                    SwitchRow(
-                        sp,
-                        MentionHighlightSettings.KEY_ENABLE,
-                        provider.title(),
-                        provider.subtitle(),
-                        false
-                    )
+                    SwitchRow(hidden, "隐藏艾特", "隐藏群聊消息中的艾特文字，保留艾特名单") {
+                        hidden = it
+                        hiddenPrefs.edit().putBoolean(t.mma.hooks.items.hiddenat.HiddenAtSettings.ENABLE, it).apply()
+                    }
+                    SwitchRow(emoji, "表情艾特", "发送群聊表情时选择普通发送或隐藏成员艾特") {
+                        emoji = it
+                        emojiPrefs.edit().putBoolean(t.mma.hooks.items.emojiat.EmojiAtSettings.ENABLE, it).apply()
+                    }
+                    SwitchRow(highlight, "艾特高亮", "高亮艾特对象并支持点击资料页；重新进入聊天后生效") {
+                        highlight = it
+                        sp.edit().putBoolean(MentionHighlightSettings.KEY_ENABLE, it).apply()
+                    }
                 }
             }
+            if (highlight) {
             item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "颜色") }
             item {
                 SettingsCard {
@@ -85,6 +96,7 @@ internal fun MentionHighlightMiuixPage(
                         onReset = { colorSpec = MentionHighlightSettings.DEFAULT_COLOR }
                     ) { colorSpec = it.take(19) }
                 }
+            }
             }
         }
     }

@@ -486,9 +486,12 @@ private class BackgroundBeautyRuntime(
                 val state = states[activity] ?: return@hookOnce
                 val slot = currentLauncherSlot(activity) ?: return@hookOnce
                 if (slot != BackgroundBeautySettings.Slot.CHAT && hasConfiguredBackground(activity)) {
+                    val visibleChatHost = chatBackgroundHost(activity)
                     // q is also invoked by ConversationListView.onScroll: never scan the tree here.
                     state.surfaces.entries.toList().forEach { (view, snapshot) ->
                         if (view.isAttachedToWindow && isChromeSurface(view) &&
+                            snapshot.slot != BackgroundBeautySettings.Slot.CHAT &&
+                            (visibleChatHost == null || !isDescendantOf(view, visibleChatHost)) &&
                             (view.background !== snapshot.appliedBackground || snapshot.slot != slot)) {
                             setTransparentSurface(state, view, slot)
                         }
@@ -2535,10 +2538,13 @@ private class BackgroundBeautyRuntime(
         slot: BackgroundBeautySettings.Slot
     ) {
         val host = resolveBackgroundHost(state.activity)
-        val chatHost = if (slot == BackgroundBeautySettings.Slot.CHAT) chatBackgroundHost(state.activity) ?: return else null
+        val visibleChatHost = chatBackgroundHost(state.activity)
+        val chatHost = if (slot == BackgroundBeautySettings.Slot.CHAT) visibleChatHost ?: return else null
         val cached = state.surfaces.keys.filter { view ->
             view !== host && view.isAttachedToWindow && isChromeSurface(view) &&
-                (chatHost == null || isDescendantOf(view, chatHost))
+                (if (chatHost != null) isDescendantOf(view, chatHost) else
+                    state.surfaces[view]?.slot != BackgroundBeautySettings.Slot.CHAT &&
+                        (visibleChatHost == null || !isDescendantOf(view, visibleChatHost)))
         }
         cached.forEach { view -> setTransparentSurface(state, view, slot) }
         val decor = chatHost ?: state.activity.window.decorView
@@ -2547,6 +2553,9 @@ private class BackgroundBeautyRuntime(
         var visited = 0
         while (queue.isNotEmpty() && visited++ < MAX_SCAN_NODES) {
             val view = queue.removeFirst()
+            // Homepage chrome must not descend into an embedded chatting page.
+            if (slot != BackgroundBeautySettings.Slot.CHAT &&
+                (view === visibleChatHost || state.surfaces[view]?.slot == BackgroundBeautySettings.Slot.CHAT)) continue
             if (view !== decor && isBottomBar(view)) {
                 if (slot != BackgroundBeautySettings.Slot.CHAT && view.tag != "Hchat:FloatingBottomBar") {
                     setTransparentSurface(state, view, slot)

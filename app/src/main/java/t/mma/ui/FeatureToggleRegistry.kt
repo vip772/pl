@@ -107,6 +107,9 @@ object FeatureToggleRegistry {
             "floating_chat_header", "floating_chat_footer" -> global(context, featureId)
             "floating_bottom_bar" -> boolean(context, "Hchat_custom_bottom_bar_config", "custom_bottom_bar_enable") &&
                 string(context, "Hchat_custom_bottom_bar_config", "custom_bottom_bar_style") == "floating"
+            "mention_extension" -> boolean(context, "Hchat_hidden_at_config", "enable") ||
+                boolean(context, "Hchat_emoji_at_config", "enable") ||
+                boolean(context, "Hchat_mention_highlight_config", "mention_highlight_enable")
             "special_message" -> {
                 val sp = HchatStorage.preferences(context, SpecialMessageFeature.PREFS)
                 sp.getBoolean("enabled", false) || sp.getBoolean("link", false)
