@@ -2800,25 +2800,27 @@ private class BackgroundBeautyRuntime(
             val snapshot = surfaceSnapshot(state, view)
             synchronizeExternalBackground(snapshot, view)
             if (slot == BackgroundBeautySettings.Slot.CONTACTS) captureContactGeometry(view, snapshot)
-            if (snapshot.slot == slot &&
+            val backgroundMatches = snapshot.slot == slot &&
                 snapshot.appliedBitmap == null &&
                 snapshot.appliedBackground != null &&
                 view.background === snapshot.appliedBackground &&
-                (if (feedback) snapshot.appliedBackground is BackgroundBeautyFeedbackDrawable else snapshot.appliedBackground !is BackgroundBeautyFeedbackDrawable) &&
-                (!clearForeground || view.foreground === snapshot.appliedForeground)
-            ) return
-            val marker: Drawable = if (feedback) {
-                BackgroundBeautyFeedbackDrawable(manualOnly = slot == BackgroundBeautySettings.Slot.CONTACTS || slot == BackgroundBeautySettings.Slot.ME)
-            } else BackgroundBeautyTransparentDrawable()
-            view.backgroundTintList = null
-            view.backgroundTintMode = null
-            view.background = marker
-            marker.state = view.drawableState
-            restoreSurfaceGeometry(view, snapshot)
-            snapshot.appliedBackground = marker
-            snapshot.appliedBitmap = null
-            snapshot.appliedOpacity = null
-            if (clearForeground) {
+                (if (feedback) snapshot.appliedBackground is BackgroundBeautyFeedbackDrawable else snapshot.appliedBackground !is BackgroundBeautyFeedbackDrawable)
+            // Foreground replacement must not reinstall an already correct background.
+            // Keep native background changes and feedback-mode changes on the full path.
+            if (!backgroundMatches) {
+                val marker: Drawable = if (feedback) {
+                    BackgroundBeautyFeedbackDrawable(manualOnly = slot == BackgroundBeautySettings.Slot.CONTACTS || slot == BackgroundBeautySettings.Slot.ME)
+                } else BackgroundBeautyTransparentDrawable()
+                view.backgroundTintList = null
+                view.backgroundTintMode = null
+                view.background = marker
+                marker.state = view.drawableState
+                restoreSurfaceGeometry(view, snapshot)
+                snapshot.appliedBackground = marker
+                snapshot.appliedBitmap = null
+                snapshot.appliedOpacity = null
+            }
+            if (clearForeground && (!backgroundMatches || view.foreground !== snapshot.appliedForeground)) {
                 val foregroundMarker = BackgroundBeautyTransparentDrawable()
                 view.foreground = foregroundMarker
                 snapshot.appliedForeground = foregroundMarker

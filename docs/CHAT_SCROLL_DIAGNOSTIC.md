@@ -1,5 +1,14 @@
 # 聊天滚动专项诊断
 
+## 977 透明背景与前景更新分离（本地待验收）
+
+977 mapping 附件名提交与源码 `1f25c8a` 一致；未额外核验已安装 APK 的 R8 map-id。准备阶段 08:33:57 的堆栈还原为 `installChatChromeLifecycle` 第2313行 → `applyChatFooterTransparency` 第2439行 → `setTransparentSurface` 第2815行 `view.background = marker`。该样本早于08:34:17开始的滚动，不得把主要滚动窗口37次外部布局请求全部归到此来源。
+
+源码与提取生产更新代码的 JVM 模型确认：背景仍是正确透明对象、仅前景被替换时，旧代码重新赋值背景一次。此次将背景匹配判断与前景更新分离，仅前景变化时只更新前景；保留外部背景同步、原生背景变化、反馈模式变化、slot变化及位图切换的完整背景更新路径。不拦截布局请求，不更改穿透高度、输入栏时序或遍历范围。
+
+验证：旧代码在前景单独变化时背景写入1次，修正后0次；10000次状态不变调用无额外背景写入；原生背景、反馈开关、slot及位图变化仍触发更新，clearForeground=false不覆盖前景。提取生产更新块通过Android36 SDK定向编译，外围类型简化；模型不等于完整Android运行时，尚不能说明977现场一定由此条件触发或量化收益。未运行Gradle、未构建APK、未操作微信，修改保留本地。实机需验收输入栏、键盘/语音及加号面板透明效果和点击反馈，再判断性能。
+
+
 ## 976 消息详情参数比较修正（本地待验收）
 976映射将 oj.l0#f:543 还原到 addBottomDetailsView 原2008行，实际写入详情标签的 layoutParams；MMChattingListView 是接收到传播请求的监测节点。映射附件名提交与当前HEAD一致，未额外核验APK R8 map-id。
 AOSP android-16.0.0_r1 的 RelativeLayout.LayoutParams.resolveRules 将 START/END 规则解析为 LEFT/RIGHT。旧代码直接比较已解析与未解析的规则数组，会出现假差异。本轮两个比较调用传入 label.layoutDirection，复制当前参数，将复制件及新建期望参数解析到同方向后比较；保留宽高、边距、锚点检查，并比较 alignWithParent。不修改已安装参数，不拦截布局请求，不跳过重新附着校验。
