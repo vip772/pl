@@ -132,6 +132,22 @@ fun main(){
  content.layout(0,0,1440,1700);footer.layout(0,1700,1440,3204);controller.apply(scroll)
  check(content.height==1871 && footer.top==1700)
  controller.restoreAll();check(content.height==1700)
+ // A new window width may share the previous expanded height.
+ controller.apply(scroll)
+ val oldExpanded=content.height
+ content.measure(720,oldExpanded)
+ controller.beforeLayout(scroll)
+ check(content.measuredWidth==720 && content.measuredHeight==oldExpanded)
+ content.layout(0,0,720,oldExpanded);footer.layout(0,oldExpanded,720,oldExpanded+1504)
+ controller.apply(scroll)
+ check(content.width==720 && content.height==oldExpanded+171)
+ controller.restoreAll()
+ check(content.width==720 && content.height==oldExpanded)
+ controller.apply(scroll)
+ content.layout(0,0,1440,content.height)
+ controller.apply(scroll)
+ check(content.width==1440)
+ controller.restoreAll()
  println("PASS: native footer position preserved, no negative margin, zero-height blr, repeated native layouts, panel exclusion, multiline, offsets, visibility, padding, restore, native resize")
 }
 '''

@@ -80,7 +80,8 @@ internal class ChatInputMessageUnderlay {
         if (list.clipToPadding != state.appliedClip) list.clipToPadding = state.appliedClip
         // Never change LinearLayout margins: they also move the following footer.
         // Enlarge only the content AFTER native layout, leaving footer bounds/hit area intact.
-        if (state.expandedHeight < 0 || content.height != state.expandedHeight) {
+        if (state.expandedHeight < 0 || content.height != state.expandedHeight ||
+            content.width != state.nativeWidth || content.left != state.nativeLeft || content.top != state.nativeTop) {
             state.nativeHeight = content.height
             state.nativeWidth = content.width
             state.nativeLeft = content.left
@@ -152,7 +153,10 @@ internal class ChatInputMessageUnderlay {
         try {
         val state = states[scroll] ?: return
         ChatScrollTrace.snapshot("underlay.beforeNative", state.content)
-        if (state.expandedHeight >= 0 && state.content.measuredHeight == state.expandedHeight) {
+        // A fresh window measurement may coincide with our expanded height.
+        // Only restore a measurement whose width and height still belong to us.
+        if (state.expandedHeight >= 0 && state.content.measuredHeight == state.expandedHeight &&
+            state.content.measuredWidth == state.nativeWidth) {
             ChatScrollDiagnostic.hit("underlay.restoreNative")
             val diagnosticStarted = ChatScrollDiagnostic.begin()
             val previousPhase = if (ChatScrollDiagnostic.isActive()) ChatScrollTrace.enter("underlayResize") else null

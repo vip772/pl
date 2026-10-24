@@ -127,9 +127,9 @@ private class ChatTimeStyleRuntime(
             bindings.remove(timeView)
             return
         }
-        val createTime = (resolveNativeMessage(args?.getOrNull(1))
-            ?: resolveNativeMessage(args?.filterIndexed { index, _ -> index != 1 }))
-            ?.let(::messageCreateTime) ?: 0L
+        val createTime = (resolveMessageCreateTime(args?.getOrNull(1))
+            ?: resolveMessageCreateTime(args?.filterIndexed { index, _ -> index != 1 }))
+            ?: 0L
         val bound = BoundTime(
             createTime = createTime,
             nativeText = timeView.text?.toString().orEmpty(),
@@ -279,23 +279,23 @@ private class ChatTimeStyleRuntime(
         return null
     }
 
-    private fun resolveNativeMessage(source: Any?): Any? {
-        return resolveNativeMessage(
+    private fun resolveMessageCreateTime(source: Any?): Long? {
+        return resolveMessageCreateTime(
             source,
             Collections.newSetFromMap(IdentityHashMap<Any, Boolean>()),
             0
         )
     }
 
-    private fun resolveNativeMessage(source: Any?, visited: MutableSet<Any>, depth: Int): Any? {
+    private fun resolveMessageCreateTime(source: Any?, visited: MutableSet<Any>, depth: Int): Long? {
         if (source == null || depth > 4 || !visited.add(source)) return null
-        if (isNativeMessage(source)) return source
+        nativeMessageCreateTime(source)?.let { return it }
         if (source is Array<*>) {
-            source.forEach { resolveNativeMessage(it, visited, depth + 1)?.let { result -> return result } }
+            source.forEach { resolveMessageCreateTime(it, visited, depth + 1)?.let { result -> return result } }
             return null
         }
         if (source is Collection<*>) {
-            source.forEach { resolveNativeMessage(it, visited, depth + 1)?.let { result -> return result } }
+            source.forEach { resolveMessageCreateTime(it, visited, depth + 1)?.let { result -> return result } }
             return null
         }
         val className = source.javaClass.name
@@ -306,18 +306,19 @@ private class ChatTimeStyleRuntime(
                 if (KavaReflector.isStatic(field) || field.type.isPrimitive || field.type.isArray) continue
                 if (field.type == String::class.java || Number::class.java.isAssignableFrom(field.type)) continue
                 val value = KavaReflector.readField(field, source) ?: continue
-                resolveNativeMessage(value, visited, depth + 1)?.let { return it }
+                resolveMessageCreateTime(value, visited, depth + 1)?.let { return it }
             }
             current = current.superclass
         }
         return null
     }
 
-    private fun isNativeMessage(value: Any): Boolean {
-        if (!value.javaClass.name.startsWith("com.tencent.mm.storage.")) return false
-        return messageCreateTime(value) > 0L && messageId(value) > 0L
+    // Reuse only within this resolution; do not cache mutable message objects.
+    private fun nativeMessageCreateTime(value: Any): Long? {
+        if (!value.javaClass.name.startsWith("com.tencent.mm.storage.")) return null
+        val createTime = messageCreateTime(value)
+        return createTime.takeIf { it > 0L && messageId(value) > 0L }
     }
-
     private fun messageCreateTime(message: Any): Long {
         parseLong(KavaReflector.invoke(KavaReflector.findMethod(message.javaClass, "getCreateTime"), message))
             ?.let { if (it > 0L) return it }
