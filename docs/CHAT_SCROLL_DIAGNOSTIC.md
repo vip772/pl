@@ -129,3 +129,11 @@ pi.z#w0:1013还原setTransparentSurface原2822行foreground写入；pi.z#i:68还
 源码确认同次页脚处理先applySpeechSurfaces(preserveFeedback=true)，后通用遍历把语音匿名View设为false、语音ImageView设为!inSpeech=false、非appGrid容器设为false。对未被footerHost屏蔽的普通/图片叶节点，反馈背景与透明背景每轮互换，setTransparentSurface幂等检查因类型不匹配而失效，重新写background及foreground，setForeground可触发新的布局请求。此次现场多份来源直接落在前一遍写入，支持此反馈循环路径；尚不证明所有布局均由此引起。
 修复：applySpeechSurfaces与通用页脚遍历统一为不单独添加反馈；保留现有透明标记身份检查、外部背景同步和恢复机制。不改穿透高度/padding/键盘面板布局，不改非语音按钮及appGrid反馈。
 验证：生产反馈判断片段+策略断言JVM模型对照，旧叶节点100轮200次写入、统一后10000轮仅首次写入，宿主屏蔽稳定、外部替换重新应用、非语音反馈保留；此为模型而非Android布局实测。Android36 SDK定向编译背景生产代码（项目/Xposed辅助依赖用桩），未运行Gradle、未构建APK。实机待安装后复测D：先观察静止重复请求，再固定8轮往返，兼查文字/语音模式及加号面板。
+
+## 布局来源与长帧关联补充
+
+982滚动窗口有39次outside布局请求但未留下来源，原因是旧采样同时要求每窗口最多一次与每累计128次请求一次。现移除128次间隔，主线程受观察视图每个5秒时段首个请求采栈，整次专项仍最多60条，停止后解除Hook。
+
+新增scroll.nativeLayoutDuration，范围是ChattingScrollLayout原生onLayout的before/after之间，不含beforeLayout恢复与after中的underlay扩展。每次诊断end仅对主线程四类阶段（原生布局、underlay.apply、underlay.measureLayout、background.footer）保留最近16条完成记录，含elapsedRealtime起止时间和耗时；每次Choreographer回调后清空，溢出丢弃最旧条目并计数。>=34ms时输出frame.longContext，记录该回调前完成的阶段及最近布局请求时间和phase，无聊天内容和视图引用。
+
+回调帧时间使用Choreographer time，阶段时间使用elapsedRealtime；关联以回调观察时间和阶段起止时间判断邻近，不能等同GPU耗时、逐帧CPU追踪或因果证明。嵌套阶段耗时重叠不可直接累加。汇总窗口仅保留最新长帧及上下文，两者成对覆盖；来源采样固定时段和日志汇总边界不完全一致。无阶段时输出空记录，不能理解成没有其他主线程工作。专项关闭后不采样、不读取阶段时钟、不改变业务布局；本次未改变背景、面板或消息发送行为。

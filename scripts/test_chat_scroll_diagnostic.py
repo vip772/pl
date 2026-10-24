@@ -14,7 +14,7 @@ class Looper {companion object {val main=Looper();fun myLooper()=main;fun getMai
 object HchatStorage {fun preferences(c:android.content.Context,n:String)=android.content.Prefs()}
 ''',
 'Log.kt':'''package t.mma.utils
-internal object ChatScrollTrace {fun start(){};fun stop(){}}
+internal object ChatScrollTrace {fun start(){};fun stop(){};fun stage(name:String,started:Long,ended:Long){}}
 object RuntimeLogStore {var enabled=true;val logs=mutableListOf<String>();fun isEnabled(c:android.content.Context)=enabled;fun log(l:String,m:String){logs.add(m)}}
 ''',
 'Test.kt':'''import t.mma.utils.*

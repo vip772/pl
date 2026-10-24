@@ -26,7 +26,9 @@ object ChatScrollDiagnostic {
     @JvmStatic fun begin(): Long = if (isActive()) SystemClock.elapsedRealtimeNanos() else 0L
     @JvmStatic fun end(name: String, started: Long) {
         if (started != 0L) {
-            val elapsed = (SystemClock.elapsedRealtimeNanos() - started).coerceAtLeast(0)
+            val ended = SystemClock.elapsedRealtimeNanos()
+            val elapsed = (ended - started).coerceAtLeast(0)
+            ChatScrollTrace.stage(name, started, ended)
             record(name, elapsed)
             refresh.get()?.let { frame ->
                 if (isActive() && frame.sessionId == session && name != "background.refresh" && name.startsWith("background.") &&

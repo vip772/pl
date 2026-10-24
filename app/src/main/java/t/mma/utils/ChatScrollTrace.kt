@@ -16,17 +16,29 @@ internal object ChatScrollTrace {
     private var generation = 0
     private var lastFrame = 0L
     private var budget = 0
-    private var requests = 0
     private var sourceWindowAt = -1L
     private var sourceWindowSamples = 0
     private val snapshots = HashMap<String, Long>()
     private var nativePhase: String? = null
+    private var nativeStarted = 0L
+    private var lastRequestAt = 0L
+    private var lastRequestPhase = "none"
+    private val recentStages = ArrayDeque<String>(16)
+    private var droppedStages = 0
+    // Main-thread only, bounded to one callback interval; values retain no Views.
+    fun stage(name: String, started: Long, ended: Long) {
+        if (!ChatScrollDiagnostic.isActive() || Looper.myLooper() != Looper.getMainLooper()) return
+        if (name != "scroll.nativeLayoutDuration" && name != "underlay.apply" &&
+            name != "underlay.measureLayout" && name != "background.footer") return
+        if (recentStages.size == 16) { recentStages.removeFirst(); droppedStages++ }
+        recentStages.addLast("$name[startMs=${started/1_000_000},endMs=${ended/1_000_000},elapsedUs=${(ended-started).coerceAtLeast(0)/1000}]")
+    }
     private val phase = ThreadLocal<String>()
     private var callback: Choreographer.FrameCallback? = null
     fun start() = onMain {
         cleanup()
         if (!ChatScrollDiagnostic.isActive()) return@onMain
-        budget = 60; requests = 0; sourceWindowAt = -1L; sourceWindowSamples = 0
+        budget = 60; sourceWindowAt = -1L; sourceWindowSamples = 0
         val token = ++generation
         try {
             val method = KavaReflector.findDeclaredMethod(View::class.java, "requestLayout") ?: error("missing requestLayout")
@@ -39,9 +51,10 @@ internal object ChatScrollTrace {
                         val tag = phase.get() ?: "outside"
                         ChatScrollDiagnostic.hit("requestLayout.$tag")
                         val now = android.os.SystemClock.elapsedRealtime()
+                        lastRequestAt = now; lastRequestPhase = tag
                         val window = now / 5_000L
                         if (window != sourceWindowAt) { sourceWindowAt = window; sourceWindowSamples = 0 }
-                        if (budget > 0 && sourceWindowSamples < 1 && requests++ % 128 == 0) {
+                        if (budget > 0 && sourceWindowSamples < 1) {
                             budget--; sourceWindowSamples++
                             val path = Throwable().stackTrace.asSequence().take(96)
                                 .filterNot { frame ->
@@ -73,12 +86,15 @@ internal object ChatScrollTrace {
                         if (delta >= 20_000_000L) ChatScrollDiagnostic.hit("frame.ge20ms")
                         if (delta >= 34_000_000L) {
                             ChatScrollDiagnostic.hit("frame.ge34ms")
-                            ChatScrollDiagnostic.detail("frame.latestLong", "atMs=${android.os.SystemClock.elapsedRealtime()} intervalUs=${delta/1000}")
+                            val now = android.os.SystemClock.elapsedRealtime()
+                            ChatScrollDiagnostic.detail("frame.latestLong", "atMs=$now intervalUs=${delta/1000}")
+                            ChatScrollDiagnostic.detail("frame.longContext", "observedAtMs=$now intervalUs=${delta/1000} requestAtMs=$lastRequestAt requestPhase=$lastRequestPhase dropped=$droppedStages recentCompleted=" + recentStages.joinToString(" "))
                         }
                         if (delta >= 50_000_000L) ChatScrollDiagnostic.hit("frame.ge50ms")
                     }
                     lastFrame = time
                 } else lastFrame = 0L
+                recentStages.clear(); droppedStages = 0
                 Choreographer.getInstance().postFrameCallback(this)
             }
         }
@@ -86,7 +102,10 @@ internal object ChatScrollTrace {
     }
     fun watch(scroll: View, content: View? = null, list: View? = null, footer: View? = null) {
         if (!ChatScrollDiagnostic.isActive() || Looper.myLooper() != Looper.getMainLooper()) return
-        if (anchor.get() !== scroll) { watched.clear(); lastFrame = 0L; anchor = WeakReference(scroll) }
+        if (anchor.get() !== scroll) {
+            watched.clear(); lastFrame = 0L; recentStages.clear(); droppedStages = 0
+            lastRequestAt = 0L; lastRequestPhase = "none"; anchor = WeakReference(scroll)
+        }
         if (content == null && list == null && footer == null && watched.isNotEmpty()) return
         for (target in arrayOf(scroll, content, list, footer)) {
             var node = target
@@ -104,8 +123,17 @@ internal object ChatScrollTrace {
         snapshots[name] = now
         ChatScrollDiagnostic.detail(name, "atMs=${android.os.SystemClock.elapsedRealtime()} measured=${view.measuredWidth}x${view.measuredHeight} bounds=${view.left},${view.top},${view.width},${view.height} requested=${view.isLayoutRequested}")
     }
-    fun nativeBegin() { if (ChatScrollDiagnostic.isActive()) nativePhase = enter("nativeLayout") }
-    fun nativeEnd() { leave(nativePhase); nativePhase = null }
+    fun nativeBegin() {
+        if (ChatScrollDiagnostic.isActive()) {
+            nativePhase = enter("nativeLayout")
+            nativeStarted = ChatScrollDiagnostic.begin()
+        }
+    }
+    fun nativeEnd() {
+        ChatScrollDiagnostic.end("scroll.nativeLayoutDuration", nativeStarted)
+        nativeStarted = 0L
+        leave(nativePhase); nativePhase = null
+    }
     fun enter(value: String): String? { val old = phase.get(); phase.set(value); return old }
     fun leave(old: String?) { if (old == null) phase.remove() else phase.set(old) }
     fun stop() = onMain { cleanup() }
@@ -113,7 +141,7 @@ internal object ChatScrollTrace {
     private fun cleanup() {
         generation++
         callback?.let { Choreographer.getInstance().removeFrameCallback(it) }; callback = null
-        try { unhook?.unhook() } catch (_: Throwable) { } finally { unhook = null; watched.clear(); anchor.clear(); lastFrame = 0L; phase.remove(); snapshots.clear(); nativePhase = null }
+        try { unhook?.unhook() } catch (_: Throwable) { } finally { unhook = null; watched.clear(); anchor.clear(); lastFrame = 0L; phase.remove(); snapshots.clear(); nativePhase = null; nativeStarted = 0L; recentStages.clear(); droppedStages = 0; lastRequestAt = 0L; lastRequestPhase = "none" }
     }
     private fun onMain(block: () -> Unit) { if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post { block() } }
 }
