@@ -29,11 +29,24 @@ object MentionNoticeSettings {
     fun highlight(context: Context, text: CharSequence): CharSequence? {
         val raw = text.toString()
         if (!known(raw) || !enabled(context)) return null
-        val clean = raw.removePrefix(MARKER).removePrefix(PREFIX)
-        return SpannableStringBuilder(clean).apply {
-            getSpans(0, length, android.text.style.CharacterStyle::class.java).forEach { removeSpan(it) }
-            setSpan(NoticeGradientSpan(colors(context).map { Color.parseColor(it) }.toIntArray(), clean),
-                0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE or (255 shl Spanned.SPAN_PRIORITY_SHIFT))
+        // NeatTextView keeps offsets from its original input. Never shorten or
+        // replace its character sequence, even for invisible module markers.
+        return style(context, text)
+    }
+    private fun style(context: Context, text: CharSequence): CharSequence {
+        val raw = text.toString()
+        val prefixLength = when {
+            raw.startsWith(MARKER) -> MARKER.length
+            raw.startsWith(PREFIX) -> PREFIX.length
+            else -> 0
+        }
+        return SpannableStringBuilder(text).apply {
+            getSpans(0, length, NoticeGradientSpan::class.java).forEach { removeSpan(it) }
+            getSpans(0, length, HiddenPrefixSpan::class.java).forEach { removeSpan(it) }
+            if (prefixLength > 0) setSpan(HiddenPrefixSpan(), 0, prefixLength, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            if (length > prefixLength) setSpan(
+                NoticeGradientSpan(colors(context).map { Color.parseColor(it) }.toIntArray(), raw.substring(prefixLength)),
+                prefixLength, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE or (255 shl Spanned.SPAN_PRIORITY_SHIFT))
         }
     }
     fun bind(root: android.view.View, content: String) {
@@ -45,11 +58,18 @@ object MentionNoticeSettings {
             if (view is android.widget.TextView) {
                 val raw = view.text?.toString().orEmpty()
                 if (raw == content || raw == content.removePrefix(MARKER).removePrefix(PREFIX)) {
-                    highlight(root.context, content)?.let { view.text = it }
+                    view.text = style(root.context, view.text)
                 }
             }
             if (view is android.view.ViewGroup) for (i in 0 until view.childCount) pending.add(view.getChildAt(i))
         }
+    }
+    // Hide legacy visible prefixes without changing offsets or deleting host spans.
+    private class HiddenPrefixSpan : android.text.style.ReplacementSpan() {
+        override fun getSize(paint: android.graphics.Paint, text: CharSequence, start: Int,
+            end: Int, fm: android.graphics.Paint.FontMetricsInt?): Int = 0
+        override fun draw(canvas: android.graphics.Canvas, text: CharSequence, start: Int,
+            end: Int, x: Float, top: Int, y: Int, bottom: Int, paint: android.graphics.Paint) = Unit
     }
     private class NoticeGradientSpan(private val stops: IntArray, private val text: String) : android.text.style.CharacterStyle() {
         override fun updateDrawState(paint: android.text.TextPaint) {
@@ -73,9 +93,6 @@ class MentionNoticeFeature : BaseFeature() {
     ).apply { allowCoreThreadTimeOut(true) }
     override fun onFeatureInstall(context: FeatureContext) {
         if (context.loadPackageParam().processName != context.loadPackageParam().packageName) return
-        t.mma.hooks.items.groupleave.GroupLeaveMonitorHighlighter.installTextCleanup(context.hostContext()) { message, error ->
-            if (error != null) HLog.e(message, error) else HLog.e(message)
-        }
         subscribe(Events.DexReady::class.java) {
             DexInstallScheduler.schedule(featureId(), name()) {
                 val local = WeChatApis.localMessages() ?: return@schedule false
