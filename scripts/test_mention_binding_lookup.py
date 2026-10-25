@@ -9,6 +9,7 @@ libs=Path('/tmp/pl-kotlin-libs');std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
 files={'Main.kt':'''import java.lang.reflect.Field
 import java.lang.reflect.Method
 import t.mma.hooks.api.model.*
+import t.mma.hooks.items.mentionhighlight.MentionHighlightScope
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.utils.KavaReflector
 class Check {
@@ -46,6 +47,13 @@ fun main(){
  n.field_talker="";check(c.convert(n)!!.talker=="room@chatroom");check(WeChatApis.store.queries==q+1)
  n.field_msgId=0;check(c.convert(n)==null);check(WeChatApis.store.queries==q+1)
  check(c.convert(Unknown())!!.content=="db text")
+ n.field_msgId=1;n.field_talker="room@chatroom";n.field_type=0x31000031
+ n.field_content="<appmsg><title><![CDATA[@alice 对的]]></title><type>57</type><refermsg><content>old</content></refermsg></appmsg>"
+ val reply=c.convert(n)!!;check(MentionHighlightScope.accepts(reply,"@alice 对的"))
+ check(reply.getEffectiveAtUserList()==listOf("alice"))
+ n.field_content="<appmsg><title>@alice link</title><type>5</type></appmsg>"
+ check(c.convert(n)==null)
+ n.field_type=1;n.field_content="hello"
  WeChatApis.store.message=null;n.field_msgId=1;n.field_talker="room@chatroom"
  check(c.convert(n)!!.content==n.field_content)
  val getter=Getter();check(c.convert(getter)!!.content=="getter")
@@ -85,5 +93,5 @@ with tempfile.TemporaryDirectory() as td:
  for n,v in files.items():(p/n).write_text(v)
  model=[r/'app/src/main/java/t/mma/hooks/api/model'/n for n in ['WeChatMessage.kt','WeChatMessageTypes.kt','WeChatParsedMessage.kt']]
  jar=p/'check.jar'
- subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(jar),*[str(p/n) for n in files],*map(str,model)],check=True,timeout=60)
+ subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(jar),*[str(p/n) for n in files],*map(str,model),str(r/"app/src/main/java/t/mma/hooks/items/mentionhighlight/MentionHighlightScope.kt")],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{jar}:{std}','MainKt'],check=True,timeout=15)

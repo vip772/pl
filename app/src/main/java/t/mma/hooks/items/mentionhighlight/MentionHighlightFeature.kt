@@ -163,7 +163,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             if (!prefs.getBoolean(MentionHighlightSettings.KEY_ENABLE, false)) return
             val message = bindStates.get().peekLast()?.message ?: return
             val input = param.args?.firstOrNull() as? CharSequence ?: return
-            if (!message.isGroupChat() || !message.isText()) return
+            if (!message.isGroupChat() || !MentionHighlightScope.accepts(message, input)) return
             val colorSpec = prefs.getString(
                 MentionHighlightSettings.KEY_COLOR,
                 MentionHighlightSettings.DEFAULT_COLOR
@@ -543,7 +543,8 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         // values must keep the database fallback (notably msgSource and reserved).
         val nativeType = numberValue(source, "getType", "field_type", "type").toInt()
         val nativeTalker = stringValue(source, "getTalker", "field_talker", "talker")
-        if (nativeType > 0 && !WeChatMessageTypes.isText(nativeType)) return null
+        if (nativeType > 0 && !WeChatMessageTypes.isText(nativeType) &&
+            !WeChatMessageTypes.isApp(nativeType)) return null
         if (nativeTalker.isNotBlank() && !WeChatMessage.isGroupTalker(nativeTalker)) return null
         val stored = runCatching { WeChatApis.messageStore()?.getMessageById(msgId) }.getOrNull()
         val content = stringValue(source, "getContent", "field_content", "content")
@@ -568,6 +569,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             reserved, stored?.translatedContent.orEmpty(), stored?.flag ?: 0,
             msgSource, stored?.selfWxId.orEmpty()
         )
+        if (!MentionHighlightScope.supports(merged)) return null
         debugLog { TAG + " message msgId=$msgId contentLen=${content.length} msgSourceLen=${msgSource.length} reservedLen=${reserved.length} atUsers=${merged.getAtUserList().size}" }
         return merged
     }
