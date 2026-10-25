@@ -73,6 +73,17 @@ private class ChatTimeStyleRuntime(
     private val rootFieldCache = ConcurrentHashMap<Class<*>, Field>()
     private val timeFieldCache = ConcurrentHashMap<Class<*>, Field>()
     private val unsupportedTimeHolders = ConcurrentHashMap.newKeySet<Class<*>>()
+    // Keys use Class identity (including loader); values contain metadata, never messages.
+    private class ResolutionMetadata {
+        var nestedFields: List<Field>? = null
+        val methods = HashMap<String, Method?>()
+        val fields = HashMap<String, Field?>()
+    }
+    private val resolutionMetadata = object : LinkedHashMap<Class<*>, ResolutionMetadata>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Class<*>, ResolutionMetadata>?): Boolean =
+            size > 128
+    }
+
     private val bindings = Collections.synchronizedMap(WeakHashMap<TextView, BoundTime>())
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == ChatTimeStyleSettings.KEY_MODE || key == ChatTimeStyleSettings.KEY_TIME_FORMAT) {
@@ -88,6 +99,7 @@ private class ChatTimeStyleRuntime(
 
     fun destroy() {
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
+        synchronized(resolutionMetadata) { resolutionMetadata.clear() }
         val attached = synchronized(bindings) {
             bindings.entries.map { it.key to it.value }.also { bindings.clear() }
         }
@@ -302,9 +314,7 @@ private class ChatTimeStyleRuntime(
         if (className.startsWith("java.") || className.startsWith("android.") || source is View) return null
         var current: Class<*>? = source.javaClass
         while (current != null && current != Any::class.java) {
-            for (field in KavaReflector.declaredFields(current)) {
-                if (KavaReflector.isStatic(field) || field.type.isPrimitive || field.type.isArray) continue
-                if (field.type == String::class.java || Number::class.java.isAssignableFrom(field.type)) continue
+            for (field in resolutionNestedFields(current)) {
                 val value = KavaReflector.readField(field, source) ?: continue
                 resolveMessageCreateTime(value, visited, depth + 1)?.let { return it }
             }
@@ -320,23 +330,56 @@ private class ChatTimeStyleRuntime(
         return createTime.takeIf { it > 0L && messageId(value) > 0L }
     }
     private fun messageCreateTime(message: Any): Long {
-        parseLong(KavaReflector.invoke(KavaReflector.findMethod(message.javaClass, "getCreateTime"), message))
+        parseLong(KavaReflector.invoke(resolutionMethod(message.javaClass, "getCreateTime"), message))
             ?.let { if (it > 0L) return it }
         for (name in arrayOf("field_createTime", "createTime")) {
-            parseLong(KavaReflector.readField(message, name))?.let { if (it > 0L) return it }
+            parseLong(readResolutionField(message, name))?.let { if (it > 0L) return it }
         }
         return 0L
     }
 
     private fun messageId(message: Any): Long {
         for (name in arrayOf("getMsgId", "getMsgID")) {
-            parseLong(KavaReflector.invoke(KavaReflector.findMethod(message.javaClass, name), message))
+            parseLong(KavaReflector.invoke(resolutionMethod(message.javaClass, name), message))
                 ?.let { if (it > 0L) return it }
         }
         for (name in arrayOf("field_msgId", "msgId", "msgID")) {
-            parseLong(KavaReflector.readField(message, name))?.let { if (it > 0L) return it }
+            parseLong(readResolutionField(message, name))?.let { if (it > 0L) return it }
         }
         return 0L
+    }
+
+    private fun metadata(clazz: Class<*>): ResolutionMetadata =
+        resolutionMetadata.getOrPut(clazz) { ResolutionMetadata() }
+
+    private fun resolutionNestedFields(clazz: Class<*>): List<Field> = synchronized(resolutionMetadata) {
+        val entry = metadata(clazz)
+        entry.nestedFields ?: KavaReflector.declaredFields(clazz).filter { field ->
+            !KavaReflector.isStatic(field) && !field.type.isPrimitive && !field.type.isArray &&
+                field.type != String::class.java && !Number::class.java.isAssignableFrom(field.type)
+        }.also { entry.nestedFields = it }
+    }
+
+    private fun resolutionMethod(clazz: Class<*>, name: String): Method? = synchronized(resolutionMetadata) {
+        val entry = metadata(clazz)
+        if (!entry.methods.containsKey(name)) entry.methods[name] = KavaReflector.findMethod(clazz, name)
+        entry.methods[name]
+    }
+
+    private fun resolutionField(clazz: Class<*>, name: String): Field? = synchronized(resolutionMetadata) {
+        val entry = metadata(clazz)
+        if (!entry.fields.containsKey(name)) entry.fields[name] = KavaReflector.findDeclaredField(clazz, name)
+        entry.fields[name]
+    }
+
+    private fun readResolutionField(receiver: Any, name: String): Any? {
+        var current: Class<*>? = receiver.javaClass
+        while (current != null && current != Any::class.java) {
+            val field = resolutionField(current, name)
+            if (field != null) return KavaReflector.readField(field, receiver)
+            current = current.superclass
+        }
+        return null
     }
 
     private fun parseLong(value: Any?): Long? = when (value) {
