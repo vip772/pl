@@ -1071,7 +1071,7 @@ internal fun RedPacketReplyStepsListPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "按顺序发送") }
@@ -1146,7 +1146,7 @@ internal fun RedPacketReplyStepEditorPage(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "回复内容") }

@@ -17,6 +17,8 @@ import t.mma.dexkit.DexMethodCache
 import t.mma.event.Events
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.media.FavoriteMenuItemResolver
+import t.mma.hooks.api.media.FavoriteVoiceResolver
+import t.mma.hooks.api.media.awaitFavoriteVoiceFile
 import t.mma.hooks.api.media.FavoriteMenuLocator
 import t.mma.hooks.api.media.VoiceMessageDurationResolver
 import t.mma.hooks.api.message.MultiSelectMessageMenuLocator
@@ -744,12 +746,6 @@ private class VoiceForwardHooker(
             param.result = null
             return
         }
-        val source = resolveFavoriteVoiceSource(favorite)
-        if (source == null) {
-            toast(activity, "收藏语音文件不存在")
-            param.result = null
-            return
-        }
         val targetActivity = activity
         if (targetActivity == null || targetActivity.isFinishing) {
             param.result = null
@@ -759,15 +755,28 @@ private class VoiceForwardHooker(
             seenDialogs.add(targetActivity)
             VoiceForwardMiuixDialog.showFavoriteVoiceSendConfirm(
                 activity = targetActivity,
-                preparePreview = {
-                    preparePreviewVoice(source)
+                prepareSource = { downloading ->
+                    val prepared = awaitFavoriteVoiceFile(
+                        resolve = {
+                            FavoriteVoiceResolver.resolve(context.hostContext(), context.hostClassLoader(),
+                                context.dexKitBridge(), favorite, logger)
+                        },
+                        startDownload = {
+                            FavoriteVoiceResolver.requestDownloadAwait(context.hostContext(), context.hostClassLoader(),
+                                context.dexKitBridge(), favorite, logger)
+                        },
+                        downloading = downloading
+                    )
+                    VoiceForwardMiuixDialog.FavoriteVoiceFile(prepared.path, prepared.durationMillis)
                 },
-                onConfirm = {
-                    val sent = sendVoiceForForward(source, target)
+                preparePreview = { file ->
+                    preparePreviewVoice(VoiceSource(file.path, file.durationMillis))
+                },
+                onConfirm = { file ->
+                    val sent = sendVoiceForForward(VoiceSource(file.path, file.durationMillis), target)
                     toast(targetActivity, if (sent) "收藏语音已发送" else "收藏语音发送失败")
-                    if (sent && !targetActivity.isFinishing) {
-                        targetActivity.finish()
-                    }
+                    if (sent && !targetActivity.isFinishing) targetActivity.finish()
+                    sent
                 },
                 onDismiss = {
                     seenDialogs.remove(targetActivity)

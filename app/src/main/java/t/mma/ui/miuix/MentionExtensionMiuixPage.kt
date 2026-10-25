@@ -75,7 +75,7 @@ internal fun MentionExtensionMiuixPage(
             verticalArrangement = Arrangement.spacedBy(10.dp),
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SettingsCard {

@@ -563,7 +563,7 @@ internal fun WeChatTabletMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "平板模式") }
@@ -885,7 +885,7 @@ internal fun AutoTransferMiuixPage(
                     state = listState,
                     contentPadding = PaddingValues(
                         top = padding.calculateTopPadding() + 8.dp,
-                        bottom = padding.calculateBottomPadding() + 84.dp
+                        bottom = padding.calculateBottomPadding() + 12.dp
                     )
                 ) {
                     item { SmallTitle(text = "规则") }
@@ -1019,7 +1019,7 @@ internal fun TransferTemplateListPage(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -1121,7 +1121,7 @@ internal fun TransferBindingListPage(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {
@@ -1217,7 +1217,7 @@ internal fun TransferBindingEditorPage(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "聊天") }
@@ -1270,7 +1270,7 @@ internal fun TransferBatchApplyPage(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "选择模板") }
@@ -1360,7 +1360,7 @@ internal fun TransferTemplateEditorPage(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -1678,7 +1678,7 @@ internal fun FakeWalletBalanceMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "显示") }
@@ -1858,7 +1858,7 @@ internal fun MemberTitleMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "基础") }

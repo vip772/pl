@@ -589,7 +589,7 @@ internal fun MessageBlockBatchBindingPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "批量配置") }
@@ -729,7 +729,7 @@ internal fun MessageBlockDefaultRulePage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "默认规则") }
@@ -882,7 +882,7 @@ internal fun MessageBlockTemplatePage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -1011,7 +1011,7 @@ internal fun MessageBlockBindingPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "名单信息") }
@@ -1383,7 +1383,7 @@ internal fun ConversationGroupListPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "功能") }
@@ -1470,7 +1470,7 @@ internal fun ConversationGroupAutomaticGroupingPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "归拢目标") }
@@ -1664,7 +1664,7 @@ internal fun ConversationGroupAutomaticPickerPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {
@@ -1769,7 +1769,7 @@ internal fun ConversationGroupEditorPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "分组内容") }
@@ -1992,7 +1992,7 @@ internal fun ConversationGroupConversationPickerPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {
@@ -2110,7 +2110,7 @@ internal fun ConversationGroupParentPickerPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "可用分组") }

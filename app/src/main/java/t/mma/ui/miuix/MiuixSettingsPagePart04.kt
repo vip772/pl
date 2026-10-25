@@ -572,7 +572,7 @@ internal fun PatBlockMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "聊天头像") }
@@ -612,7 +612,7 @@ internal fun AutoOriginalImageMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "聊天图片") }
@@ -652,7 +652,7 @@ internal fun AutoViewOriginalMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "聊天媒体") }
@@ -692,7 +692,7 @@ internal fun RemoveForwardLimitMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "消息转发") }
@@ -746,7 +746,7 @@ internal fun AtAllNotificationBlockMiuixPage(
                     state = listState,
                     contentPadding = PaddingValues(
                         top = padding.calculateTopPadding() + 8.dp,
-                        bottom = padding.calculateBottomPadding() + 84.dp
+                        bottom = padding.calculateBottomPadding() + 12.dp
                     )
                 ) {
                     item { SmallTitle(text = "群聊通知") }
@@ -831,7 +831,7 @@ internal fun DisableHotUpdateMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "热更新") }
@@ -993,7 +993,7 @@ internal fun MomentsAutoLikeMainPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "自动点赞") }
@@ -1392,7 +1392,7 @@ internal object MomentsAutoCommentPage {
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "自动评论") }
@@ -1949,7 +1949,7 @@ internal fun MomentsAutoForwardMainPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "自动转发") }

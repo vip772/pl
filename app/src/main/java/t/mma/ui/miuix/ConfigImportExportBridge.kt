@@ -24,11 +24,11 @@ internal object ConfigImportExportBridge {
     @Synchronized
     fun launchExport(activity: Activity) {
         if (!begin(activity, CONFIG_EXPORT_REQUEST_CODE, null)) return
-        val fileName = "Hchat_config_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".json"
+        val fileName = "Hchat_config_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()) + ".zip"
         try {
             val intent = Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
                 addCategory(Intent.CATEGORY_OPENABLE)
-                type = "application/json"
+                type = "application/zip"
                 putExtra(Intent.EXTRA_TITLE, fileName)
                 addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             }.preferSystemDocumentsUi(activity)
@@ -69,6 +69,10 @@ internal object ConfigImportExportBridge {
     }
 
     private fun begin(activity: Activity, requestCode: Int, onDone: (() -> Unit)?): Boolean {
+        if (busy.get()) {
+            Toast.makeText(activity, "配置文件正在处理中", Toast.LENGTH_SHORT).show()
+            return false
+        }
         val previous = pending?.owner?.get()
         if (previous != null && !previous.isFinishing && !previous.isDestroyed) return false
         pending = Pending(activity, requestCode, onDone)
@@ -117,28 +121,37 @@ internal object ConfigImportExportBridge {
         }
     }
 
+    private val io = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
+        Thread(task, "Hchat-ConfigBackup").apply { isDaemon = true }
+    }
+    private val busy = java.util.concurrent.atomic.AtomicBoolean(false)
     private fun handleResult(activity: Activity, request: Pending, uri: Uri) {
-        try {
-            if (request.requestCode == CONFIG_EXPORT_REQUEST_CODE) {
-                val count = HchatConfigBackup.exportToUri(activity, uri)
-                Toast.makeText(activity, if (count > 0) "已导出 $count 项配置" else "导出失败",
-                    Toast.LENGTH_SHORT).show()
-            } else {
-                val count = HchatConfigBackup.importFromUri(activity, uri)
-                if (count > 0) {
-                    val refreshed = runCatching { request.onImported?.invoke() }.onFailure {
+        if (!busy.compareAndSet(false, true)) {
+            Toast.makeText(activity, "配置文件正在处理中", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val app = activity.applicationContext ?: activity
+        io.execute {
+            val outcome = runCatching {
+                if (request.requestCode == CONFIG_EXPORT_REQUEST_CODE) HchatConfigBackup.exportToUri(app, uri)
+                else HchatConfigBackup.importFromUri(app, uri)
+            }
+            activity.runOnUiThread {
+                busy.set(false)
+                if (activity.isFinishing || activity.isDestroyed) return@runOnUiThread
+                outcome.onSuccess { result ->
+                    val exporting = request.requestCode == CONFIG_EXPORT_REQUEST_CODE
+                    if (!exporting) runCatching { request.onImported?.invoke() }.onFailure {
                         HLog.e("$TAG 配置已导入，但设置页刷新失败", it)
-                    }.isSuccess
-                    val message = if (refreshed) "已导入 $count 项配置，当前设置页已刷新"
-                        else "已导入 $count 项配置，请重新打开设置页"
+                    }
+                    val message = if (exporting) "已导出 ${result.description()}"
+                        else "已导入 ${result.description()}，请重启微信使全部配置生效"
                     Toast.makeText(activity, message, Toast.LENGTH_LONG).show()
-                } else {
-                    Toast.makeText(activity, "导入失败或文件无配置", Toast.LENGTH_SHORT).show()
+                }.onFailure { error ->
+                    HLog.e("$TAG 处理配置文件失败", error)
+                    Toast.makeText(activity, "配置处理失败：${error.message.orEmpty().take(120)}", Toast.LENGTH_LONG).show()
                 }
             }
-        } catch (error: Throwable) {
-            HLog.e("$TAG 处理配置文件失败", error)
-            Toast.makeText(activity, "配置文件处理失败", Toast.LENGTH_SHORT).show()
         }
     }
 }

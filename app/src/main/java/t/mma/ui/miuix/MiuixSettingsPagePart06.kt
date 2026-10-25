@@ -623,7 +623,7 @@ internal fun ProfileIdMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "资料页") }
@@ -675,7 +675,7 @@ internal fun ProfileGroupInfoMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "群成员资料页") }
@@ -770,7 +770,7 @@ internal fun HideChatMenuMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "聊天菜单") }
@@ -830,7 +830,7 @@ internal fun SettingsEntryMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "入口") }
@@ -878,7 +878,7 @@ internal fun PluginAgentEntryMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "加号菜单") }
@@ -998,7 +998,7 @@ internal fun FloatingShortcutMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "悬浮入口") }
@@ -1439,7 +1439,7 @@ internal fun FloatingShortcutAppearanceMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "主按钮") }
@@ -1753,7 +1753,7 @@ internal fun QuickMarkReadMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "快捷已读") }
@@ -1822,7 +1822,7 @@ internal fun WeChatKeepAliveMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "强保活") }

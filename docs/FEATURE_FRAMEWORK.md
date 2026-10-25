@@ -2124,3 +2124,6 @@ DexFinder 在构造阶段、发布给 FeatureContext 和各 API 安装器之前�
 
 ### 艾特提醒灰色渲染修正
 补接Neat/MMNeat/X2C真实文本入口，沿用艾特高亮的逐字ForegroundColorSpan实现三色，保持字符索引；原绑定后仅处理TextView不足以覆盖Neat。验证边界见 `docs/MENTION_EXTENSION.md`。
+
+## 配置与设置页布局维护
+新增功能的用户设置及资源应接入统一备份，运行数据显式排除；开发约定与验证见 [自动备份](CONFIG_BACKUP_AUTO_DISCOVERY.md)。设置页面通过 PageScaffold 的实测 bottomBar 高度避让，不再使用固定操作栏高度补偿，见 [设置底栏布局](SETTINGS_BOTTOM_BAR_LAYOUT.md)。收藏语音按需下载交互见 [收藏语音预览准备](FAVORITE_VOICE_LAZY_PREVIEW.md)。

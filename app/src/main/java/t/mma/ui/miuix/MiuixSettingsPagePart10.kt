@@ -652,7 +652,7 @@ internal fun MessageBubbleMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "基础") }
@@ -856,7 +856,7 @@ internal fun BackgroundBeautyMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "基础") }
@@ -1142,7 +1142,7 @@ internal fun MessageTextColorMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "基础") }
@@ -1229,7 +1229,7 @@ internal fun ChatTimeStyleMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "聊天时间") }
@@ -1300,7 +1300,7 @@ internal fun HideChatAvatarMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "聊天头像") }
@@ -1360,7 +1360,7 @@ internal fun RoundAvatarMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "全局头像") }
@@ -1457,7 +1457,7 @@ internal fun CustomFriendAvatarMiuixPage(
                         state = listState,
                         contentPadding = PaddingValues(
                             top = padding.calculateTopPadding() + 8.dp,
-                            bottom = padding.calculateBottomPadding() + 84.dp
+                            bottom = padding.calculateBottomPadding() + 12.dp
                         )
                     ) {
                         item { SmallTitle(text = "自定义头像") }
@@ -1968,7 +1968,7 @@ internal fun MessageBlockMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "基础") }
@@ -2050,7 +2050,7 @@ internal fun MessageBlockTemplateListPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -2157,7 +2157,7 @@ internal fun MessageBlockListManagerPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {

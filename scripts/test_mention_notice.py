@@ -19,6 +19,20 @@ fun main() {
  check(kind(me,self="")==WeChatMessage.AtMentionType.OTHERS)
  check(kind("<msgsource><atuserlist>announcement@all</atuserlist></msgsource>")==WeChatMessage.AtMentionType.ANNOUNCEMENT_ALL)
  check(kind(me, "@所有人\u2005hello")==WeChatMessage.AtMentionType.AT_ALL)
+ val quoted="<refermsg><content><![CDATA[@所有人\u2005old]]></content><msgsource><atuserlist>me</atuserlist></msgsource></refermsg>"
+ val reply="<msg><appmsg><title>reply only</title><type>57</type>$quoted</appmsg></msg>"
+ val model=WeChatMessage.transient("group@chatroom","B",reply,1L,false)
+ check(model.getMsgSource().isEmpty())
+ check(kind(model.getMsgSource(),model.bodyContent())==WeChatMessage.AtMentionType.NONE)
+ check(kind(quoted)==WeChatMessage.AtMentionType.NONE)
+ check(kind(me,reply)==WeChatMessage.AtMentionType.AT_ME)
+ check(kind(all,reply)==WeChatMessage.AtMentionType.AT_ALL)
+ check(kind(me,"<msg><appmsg><title>@所有人\u2005new</title>$quoted</appmsg></msg>")==WeChatMessage.AtMentionType.AT_ALL)
+ val ownSource=reply.replace("</msg>","$me</msg>")
+ val own=WeChatMessage.transient("group@chatroom","B",ownSource,1L,false)
+ check(kind(own.getMsgSource(),own.bodyContent())==WeChatMessage.AtMentionType.AT_ME)
+ check(kind("<refermsg><msgsource><atuserlist>notify@all</atuserlist></msgsource></refermsg>")==WeChatMessage.AtMentionType.NONE)
+ check(kind("<refermsg><msgsource><atuserlist>me</atuserlist></msgsource>")==WeChatMessage.AtMentionType.NONE)
  println("PASS real model: direct mention, at-all, combined mention, plain text rejection, other user, missing identity, announcement distinction")
 }
 ''')

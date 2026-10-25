@@ -69,9 +69,9 @@ class WeChatMessage(
     fun getMsgSource(): String {
         val raw = firstNotBlank(
             msgSource,
-            xmlSection(content, "msgsource"),
-            xmlSection(bodyContent(), "msgsource"),
-            xmlSection(reserved, "msgsource")
+            xmlSection(withoutQuotedMessage(content), "msgsource"),
+            xmlSection(withoutQuotedMessage(bodyContent()), "msgsource"),
+            xmlSection(withoutQuotedMessage(reserved), "msgsource")
         )
         return unescapeXml(raw)
     }
@@ -392,7 +392,7 @@ class WeChatMessage(
 
         @JvmStatic
         fun parseAtUserList(msgSource: String?): List<String> {
-            val source = msgSource.orEmpty()
+            val source = withoutQuotedMessage(msgSource.orEmpty())
             val atUsers = firstNotBlank(
                 xmlTag(source, "atuserlist"),
                 msgSourceValue(source, ".msgsource.atuserlist"),
@@ -410,7 +410,7 @@ class WeChatMessage(
             content: String?,
             selfWxId: String?
         ): AtMentionType {
-            val source = unescapeXml(msgSource.orEmpty())
+            val source = withoutQuotedMessage(unescapeXml(msgSource.orEmpty()))
             val atUsers = parseAtUserList(source)
             if (atUsers.any { it.equals("announcement@all", ignoreCase = true) } ||
                 source.contains("announcement@all", ignoreCase = true)
@@ -425,7 +425,7 @@ class WeChatMessage(
             val self = selfWxId.orEmpty()
             val expandedAtAll = self.isNotBlank() &&
                 atUsers.any { it.equals(self, ignoreCase = true) } &&
-                containsWechatAtAllMention(content.orEmpty())
+                containsWechatAtAllMention(withoutQuotedMessage(content.orEmpty()))
             if (explicitAtAll ||
                 expandedAtAll
             ) {
@@ -466,6 +466,32 @@ class WeChatMessage(
                 AtMentionType.ANNOUNCEMENT_ALL -> listOf("announcement@all")
                 else -> parseAtUserList(msgSource)
             }
+        }
+
+        // Walk XML tokens before searching metadata. CDATA and comments are opaque:
+        // quoted XML must not become metadata belonging to the new sender.
+        private fun withoutQuotedMessage(raw: String): String {
+            if (!raw.contains("refermsg", ignoreCase = true)) return raw
+            val tokens = Regex("<!\\[CDATA\\[.*?]]>|<!--.*?-->|</?([A-Za-z_][A-Za-z0-9_:.-]*)\\b[^>]*>",
+                setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
+            val result = StringBuilder(raw.length)
+            var depth = 0
+            var cursor = 0
+            for (token in tokens.findAll(raw)) {
+                if (!token.groupValues[1].equals("refermsg", ignoreCase = true)) continue
+                val closing = token.value.startsWith("</")
+                val selfClosing = token.value.endsWith("/>")
+                if (!closing) {
+                    if (depth == 0) result.append(raw, cursor, token.range.first)
+                    if (!selfClosing) depth++ else if (depth == 0) cursor = token.range.last + 1
+                } else if (depth > 0) {
+                    depth--
+                    if (depth == 0) cursor = token.range.last + 1
+                }
+            }
+            // An incomplete reference must not expose its partial metadata.
+            if (depth == 0) result.append(raw, cursor, raw.length)
+            return result.toString()
         }
 
         private fun hasPositiveAtAllFlag(source: String): Boolean {

@@ -653,7 +653,7 @@ internal fun GroupChatLabelListPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "分类标签") }
@@ -716,7 +716,7 @@ internal fun GroupChatLabelEditorPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "标签") }
@@ -957,7 +957,7 @@ internal fun GroupRenameMonitorMiuixPage(
                     state = listState,
                     contentPadding = PaddingValues(
                         top = padding.calculateTopPadding() + 8.dp,
-                        bottom = padding.calculateBottomPadding() + 84.dp
+                        bottom = padding.calculateBottomPadding() + 12.dp
                     )
                 ) {
                     item { SmallTitle(text = "提醒方式") }
@@ -1175,7 +1175,7 @@ internal fun GroupRenameGroupManagerPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {
@@ -1282,7 +1282,7 @@ internal fun GroupRenameTemplateListPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -1360,7 +1360,7 @@ internal fun GroupRenameTemplateEditorPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -1500,7 +1500,7 @@ internal fun GroupRenameBatchTemplateBindingPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {
@@ -1619,7 +1619,7 @@ internal fun GroupRenameGroupEditorPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -2178,7 +2178,7 @@ internal fun GroupLeaveMonitorMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "系统消息") }

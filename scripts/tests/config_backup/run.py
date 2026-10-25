@@ -5,6 +5,8 @@ import tempfile, subprocess, os
 repo = Path(__file__).resolve().parents[3]
 cache = Path.home() / '.gradle/caches/modules-2/files-2.1'
 def jar(group, name, version):
+    local=Path("/tmp/pl-kotlin-libs")/(name+"-"+version+".jar")
+    if local.exists(): return local
     return next((cache/group/name/version).glob('*/'+name+'-'+version+'.jar'))
 version = os.environ.get('KOTLIN_VERSION', '2.4.0')
 stdlib = jar('org.jetbrains.kotlin', 'kotlin-stdlib', version)
@@ -17,6 +19,8 @@ sources = {
 'Activity.kt': '''package android.app
 import android.content.Intent
 open class Activity {
+ val applicationContext get()=this
+ fun runOnUiThread(action:()->Unit){action()}
  var isFinishing=false; var isDestroyed=false; var launches=0; var failStarts=0
  open fun onActivityResult(requestCode:Int,resultCode:Int,data:Intent?) {}
  fun startActivityForResult(intent:Intent,code:Int) { launches++; if(failStarts>0) {failStarts--;error("start failed")} }
@@ -74,8 +78,9 @@ internal const val CONFIG_IMPORT_REQUEST_CODE=101
 internal fun Intent.preferSystemDocumentsUi(a:Activity)=this
 internal object HchatConfigBackup {
  var exports=0;var imports=0;var count=10
- fun exportToUri(a:Activity,u:Uri):Int {exports++;return count}
- fun importFromUri(a:Activity,u:Uri):Int {imports++;return count}
+ class Result {fun description()="test"}
+ fun exportToUri(a:Activity,u:Uri):Result {exports++;check(count>0);return Result()}
+ fun importFromUri(a:Activity,u:Uri):Result {imports++;check(count>0);return Result()}
 }
 ''',
 'Regression.kt': '''package t.mma.ui.miuix
@@ -92,6 +97,8 @@ fun main() {
  val a=D();val other=D();var refreshed=0
  fun result(owner:Activity=a,code:Int=100,status:Int=-1,data:Intent?=Intent().apply{this.data=Uri()}) {
    XposedBridge.result(owner,code,status,data)
+   val f=ConfigImportExportBridge::class.java.getDeclaredField("io");f.isAccessible=true
+   (f.get(ConfigImportExportBridge) as java.util.concurrent.ExecutorService).submit{}.get(5,java.util.concurrent.TimeUnit.SECONDS)
  }
  ConfigImportExportBridge.launchExport(a)
  check(XposedBridge.hooks.size==5 && XposedBridge.hooks.values.all{it.size==1})

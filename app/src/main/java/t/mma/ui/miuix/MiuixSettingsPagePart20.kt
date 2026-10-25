@@ -597,7 +597,7 @@ internal fun GroupNicknameColorMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "群昵称") }
@@ -682,7 +682,7 @@ internal fun RealNameTailMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "基础") }
@@ -923,7 +923,7 @@ internal fun MessageBlockContactPickerPage(
                 state = routeListState,
                 contentPadding = PaddingValues(
                     top = padding.calculateTopPadding() + 8.dp,
-                    bottom = padding.calculateBottomPadding() + 84.dp
+                    bottom = padding.calculateBottomPadding() + 12.dp
                 )
             ) {
                 item {
@@ -1215,7 +1215,7 @@ internal fun ContactPickerPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             if (scopeSelectionEnabled) {
@@ -1538,7 +1538,7 @@ internal fun FavoritePickerPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {
@@ -1713,7 +1713,7 @@ internal fun GroupMemberPickerPage(
                 state = routeListState,
                 contentPadding = PaddingValues(
                     top = padding.calculateTopPadding() + 8.dp,
-                    bottom = padding.calculateBottomPadding() + 84.dp
+                    bottom = padding.calculateBottomPadding() + 12.dp
                 )
             ) {
                 item {
@@ -1787,7 +1787,7 @@ internal fun OptionPickerPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "选项") }
@@ -1827,7 +1827,7 @@ internal fun UnsupportedFeaturePage(provider: FeatureSettingsProvider, onBack: (
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {
@@ -1890,25 +1890,26 @@ public fun PageScaffold(
                         defaultWindowInsetsPadding = true
                     )
                 },
-                bottomBar = {},
+                // Scaffold measures this slot and includes its complete height in
+                // content padding, including wrapped buttons and navigation avoidance.
+                bottomBar = {
+                    if (bottomBar != null) {
+                        Box(Modifier.fillMaxWidth().padding(bottom = bottomAvoidance)) {
+                            bottomBar.invoke(backdrop)
+                        }
+                    }
+                },
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 content = { padding ->
                     content(
                         PaddingValues(
                             top = padding.calculateTopPadding(),
-                            bottom = padding.calculateBottomPadding() + bottomAvoidance
+                            bottom = padding.calculateBottomPadding() +
+                                if (bottomBar == null) bottomAvoidance else 0.dp
                         )
                     )
                 }
             )
-        }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = bottomAvoidance)
-                .align(Alignment.BottomCenter)
-        ) {
-            bottomBar?.invoke(backdrop)
         }
     }
 }

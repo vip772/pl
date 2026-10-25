@@ -58,7 +58,7 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
     PageScaffold(title = provider.title(), largeTitle = provider.title(), scrollBehavior = behavior,
         bottomBar = { BottomActionBar(primaryText = "返回", onPrimaryClick = onBack) }) { padding ->
         LazyColumn(modifier = Modifier.fillMaxSize().nestedScroll(behavior.nestedScrollConnection), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(
-            top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)) {
+            top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)) {
             item { SmallTitle(text = "功能开关") }
             item { SettingsCard { SwitchRow(enabled, "首页扩展", "设置立即保存，返回首页生效") { enabled = it; prefs.edit().putBoolean(Settings.ENABLE, it).apply() } } }
             if (enabled) {

@@ -107,6 +107,30 @@ internal object FavoriteVoiceResolver {
         return true
     }
 
+    /** Await the actual main-thread invocation, respecting the calling dialog job. */
+    suspend fun requestDownloadAwait(
+        hostContext: Context,
+        classLoader: ClassLoader,
+        dexKitBridge: DexKitBridge?,
+        favorite: Any,
+        logger: ((String, Throwable?) -> Unit)? = null
+    ): Boolean {
+        if (favoriteType(favorite) != 3) return false
+        val method = favoriteDownloadMethod(hostContext, classLoader, dexKitBridge, favorite.javaClass, logger)
+            ?: return false
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+            try {
+                KavaReflector.invokeOrThrow(method, null, favorite, true)
+                true
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Throwable) {
+                logger?.invoke("收藏语音启动下载失败", error)
+                false
+            }
+        }
+    }
+
     private fun favoriteDownloadMethod(
         hostContext: Context,
         classLoader: ClassLoader,
@@ -302,7 +326,7 @@ internal object FavoriteVoiceResolver {
         cacheDirectory: String,
         fallbackExtension: String
     ): String? {
-        if (File(path).isFile) return path
+        if (File(path).isFile && File(path).length() > 0L) return path
         val input = openVfsInputStream(classLoader, path) ?: return null
         val ext = File(path).extension
             .takeIf { it.isNotBlank() && it.length <= 8 }

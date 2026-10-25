@@ -813,7 +813,7 @@ internal fun AutoMessageForwardMainPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "消息自动转发") }
@@ -911,7 +911,7 @@ internal fun AutoMessageForwardRuleListPage(
         LazyColumn(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item {
                 SettingsCard {
@@ -1002,7 +1002,7 @@ internal fun AutoMessageForwardRuleEditorPage(
         LazyColumn(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item { SmallTitle(text = "基础") }
             item {
@@ -1132,7 +1132,7 @@ internal fun AutoMessageForwardTypePickerPage(
         LazyColumn(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item {
                 SettingsCard {
@@ -1241,7 +1241,7 @@ internal fun AutoReplyMainPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "聊天自动回复") }
@@ -1353,7 +1353,7 @@ internal fun AutoReplyRuleListPage(
         LazyColumn(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item {
                 SettingsCard {
@@ -1529,7 +1529,7 @@ internal fun AutoReplyRuleEditorContent(
         LazyColumn(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item { SmallTitle(text = "基础") }
             item {
@@ -1750,7 +1750,7 @@ internal fun AutoReplyFriendPage(
         LazyColumn(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item {
                 SettingsCard {
@@ -1884,7 +1884,7 @@ internal fun AutoReplyLabelPickerPage(
         LazyColumn(
             modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
             state = listState,
-            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item { SmallTitle(text = "搜索") }
             item {
@@ -2397,7 +2397,7 @@ internal fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: ()
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
                         state = mainListState,
-                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
                     ) {
                         item { SmallTitle(text = "配置分组") }
                         item {
@@ -2432,7 +2432,7 @@ internal fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: ()
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
                         state = xiaozhiListState,
-                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
                     ) {
                         item { SmallTitle(text = "连接地址") }
                         item {
@@ -2642,7 +2642,7 @@ internal fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: ()
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
                         state = zhiliaListState,
-                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
                     ) {
                         item { SmallTitle(text = "当前配置") }
                         item {
@@ -2727,7 +2727,7 @@ internal fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: ()
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
                         state = zhiliaConfigListState,
-                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
                     ) {
                         item { SmallTitle(text = "配置") }
                         configs.forEach { config ->
@@ -2805,7 +2805,7 @@ internal fun AutoReplyAiPage(context: Context, sp: SharedPreferences, onBack: ()
                     LazyColumn(
                         modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
                         state = zhiliaModelListState,
-                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 84.dp)
+                        contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
                     ) {
                         item { SmallTitle(text = "拉取模型") }
                         item {

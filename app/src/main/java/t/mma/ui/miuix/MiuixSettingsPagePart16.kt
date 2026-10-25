@@ -567,7 +567,7 @@ internal fun RedPacketTemplateListPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -675,7 +675,7 @@ internal fun RedPacketBindingListPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {
@@ -1048,7 +1048,7 @@ internal fun RedPacketTemplatePage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -1361,7 +1361,7 @@ internal fun RedPacketBindingPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "聊天") }
@@ -1453,8 +1453,6 @@ internal fun AntiRecallMiuixPage(
         t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH)) }
     val usesTimeVariable = noticeText.contains(AntiRecallSettings.VAR_SEND_TIME) ||
         noticeText.contains(AntiRecallSettings.VAR_RECALL_TIME)
-    val actionBarDensity = LocalDensity.current
-    var actionBarHeight by remember { mutableStateOf(0.dp) }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
 
@@ -1463,9 +1461,7 @@ internal fun AntiRecallMiuixPage(
         largeTitle = provider.title(),
         scrollBehavior = scrollBehavior,
         bottomBar = {
-            Box(Modifier.onSizeChanged {
-                actionBarHeight = with(actionBarDensity) { it.height.toDp() }
-            }) {
+            Box {
                 BottomActionBar(
                     primaryText = "保存设置",
                     onPrimaryClick = save@{
@@ -1511,7 +1507,7 @@ internal fun AntiRecallMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + maxOf(actionBarHeight, 64.dp) + 20.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "防撤回") }
@@ -1613,7 +1609,7 @@ internal fun CrashReportMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "调试") }
@@ -1715,7 +1711,7 @@ internal fun ProtobufPacketMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "抓包") }
@@ -1816,7 +1812,7 @@ internal fun ScriptPluginMiuixPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "脚本插件") }
@@ -2362,7 +2358,7 @@ fun ScriptPluginMarketPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {

@@ -12,7 +12,7 @@ object DexMethodCache {
     private const val CACHE_KEY = "cache.key"
 
     fun prefs(context: Context, name: String): SharedPreferences {
-        return HchatStorage.preferences(context, name)
+        return HchatStorage.runtimePreferences(context, name)
     }
 
     fun runtimeKey(context: Context, classLoader: ClassLoader): String {

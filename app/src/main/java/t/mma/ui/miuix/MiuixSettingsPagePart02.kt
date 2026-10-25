@@ -916,208 +916,6 @@ internal object ScriptPluginDocumentBridge {
     }
 }
 
-internal object HchatConfigBackup {
-    private const val VERSION = 1
-    private const val TYPE_BOOLEAN = "boolean"
-    private const val TYPE_INT = "int"
-    private const val TYPE_LONG = "long"
-    private const val TYPE_FLOAT = "float"
-    private const val TYPE_STRING = "string"
-    private const val TYPE_STRING_SET = "string_set"
-    private const val KEY_TYPE = "type"
-    private const val KEY_VALUE = "value"
-
-    private val prefsNames = listOf(
-        UI_PREFS_NAME,
-        CallMediaLimitSettings.PREFS_NAME,
-        FakeLocationSettings.PREFS_NAME,
-        FinderMediaDownloadSettings.PREFS_NAME,
-        HchatExtraSettings.PREFS_NAME,
-        StatusTextLimitSettings.PREFS_NAME,
-        EditMessageSettings.PREFS_NAME,
-        DisableHotUpdateSettings.PREFS_NAME,
-        RemoveMomentsAdsSettings.PREFS_NAME,
-        MomentsAutoCommentSettings.PREFS_NAME,
-        MomentsAutoLikeSettings.PREFS_NAME,
-        MomentsAutoForwardSettings.PREFS_NAME,
-        MomentsAutoRefreshSettings.PREFS_NAME,
-        MomentsContactFilterSettings.PREFS_NAME,
-        MomentsBottomDetailSettings.PREFS_NAME,
-        MomentsPostNotificationSettings.PREFS_NAME,
-        MomentsFakeInteractionSettings.PREFS_NAME,
-        ProfileIdSettings.PREFS_NAME,
-        SettingsEntrySettings.PREFS_NAME,
-        FloatingShortcutSettings.PREFS_NAME,
-        SpecialMessageFeature.PREFS,
-        QuickMarkReadSettings.PREFS_NAME,
-        CustomNotificationSettings.PREFS_NAME,
-        ConversationGroupStore.PREFS_NAME,
-        AutoReplySettings.PREFS_NAME,
-        MessageAffixSettings.PREFS_NAME,
-        InputHintSettings.PREFS_NAME,
-        AutoOriginalImageSettings.PREFS_NAME,
-        AutoViewOriginalSettings.PREFS_NAME,
-        AtAllNotificationBlockSettings.PREFS_NAME,
-        KeywordNotificationSettings.PREFS_NAME,
-        TextSpeechSettings.PREFS_NAME,
-        TextVoiceSettings.PREFS_NAME,
-        ZombieCheckSettings.PREFS_NAME,
-        WeChatKeepAliveSettings.PREFS_NAME,
-        QuoteDeleteClearSettings.PREFS_NAME,
-        ChatTimeStyleSettings.PREFS_NAME,
-        EmojiSaveSettings.PREFS_NAME,
-        SwipeQuoteSettings.PREFS_NAME,
-        AudioTransformSettings.PREFS_NAME,
-        FakeVoiceDurationSettings.PREFS_NAME,
-        MessageBubbleSettings.PREFS_NAME,
-        MessageTextColorSettings.PREFS_NAME,
-        HideChatAvatarSettings.PREFS_NAME,
-        HideChatMenuSettings.PREFS_NAME,
-        t.mma.hooks.items.messagemenuextension.MessageMenuExtensionSettings.PREFS_NAME,
-        QuickContactEditSettings.PREFS_NAME,
-        RoundAvatarSettings.PREFS_NAME,
-        CustomFriendAvatarSettings.PREFS_NAME,
-        MessageBlockSettings.PREFS_NAME,
-        GroupLeaveMonitorSettings.PREFS_NAME,
-        GroupRenameMonitorSettings.PREFS_NAME,
-        MultiRecallSettings.PREFS_NAME,
-        VoiceForwardSettings.PREFS_NAME,
-        FakeScanCameraSettings.PREFS_NAME,
-        RedPacketSettings.PREFS_NAME,
-        AntiRecallSettings.PREFS_NAME,
-        ProtobufPacketSettings.PREFS_NAME,
-        ScriptPluginSettings.PREFS_NAME,
-        WeChatTabletSettings.PREFS_NAME,
-        AutoTransferSettings.PREFS_NAME,
-        FakeWalletBalanceSettings.PREFS_NAME,
-        MemberTitleSettings.PREFS_NAME,
-        RealNameTailSettings.PREFS_NAME,
-        GroupNicknameColorSettings.PREFS_NAME
-    ).distinct()
-
-    fun exportToUri(context: Context, uri: Uri): Int {
-        return runCatching {
-            val prefsJson = JSONObject()
-            var itemCount = 0
-            prefsNames.forEach { name ->
-                val sp = HchatStorage.preferences(context, name)
-                val entries = JSONObject()
-                sp.all.forEach { (key, value) ->
-                    encodePreferenceValue(value)?.let { encoded ->
-                        entries.put(key, encoded)
-                        itemCount++
-                    }
-                }
-                if (entries.length() > 0) {
-                    prefsJson.put(name, entries)
-                }
-            }
-            val root = JSONObject().apply {
-                put("format", "HchatConfigBackup")
-                put("version", VERSION)
-                put("appVersion", BuildConfig.VERSION_NAME)
-                put("exportedAt", System.currentTimeMillis())
-                put("prefs", prefsJson)
-            }
-            context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
-                output.write(root.toString(2).toByteArray(Charsets.UTF_8))
-            } ?: return 0
-            itemCount
-        }.getOrDefault(0)
-    }
-
-    fun importFromUri(context: Context, uri: Uri): Int {
-        return runCatching {
-            val text = context.contentResolver.openInputStream(uri)?.use { input ->
-                input.reader(Charsets.UTF_8).readText()
-            }.orEmpty()
-            if (text.isBlank()) return 0
-            val root = JSONObject(text)
-            if (root.optString("format") != "HchatConfigBackup") return 0
-            val prefsJson = root.optJSONObject("prefs") ?: return 0
-            var itemCount = 0
-            prefsNames.forEach { name ->
-                val entries = prefsJson.optJSONObject(name) ?: return@forEach
-                val editor = HchatStorage.preferences(context, name).edit().clear()
-                val keys = entries.keys()
-                while (keys.hasNext()) {
-                    val key = keys.next()
-                    val encoded = entries.optJSONObject(key) ?: continue
-                    if (decodePreferenceValue(editor, key, encoded)) {
-                        itemCount++
-                    }
-                }
-                editor.commit()
-            }
-            itemCount
-        }.getOrDefault(0)
-    }
-
-    private fun encodePreferenceValue(value: Any?): JSONObject? {
-        val obj = JSONObject()
-        when (value) {
-            is Boolean -> {
-                obj.put(KEY_TYPE, TYPE_BOOLEAN)
-                obj.put(KEY_VALUE, value)
-            }
-            is Int -> {
-                obj.put(KEY_TYPE, TYPE_INT)
-                obj.put(KEY_VALUE, value)
-            }
-            is Long -> {
-                obj.put(KEY_TYPE, TYPE_LONG)
-                obj.put(KEY_VALUE, value)
-            }
-            is Float -> {
-                obj.put(KEY_TYPE, TYPE_FLOAT)
-                obj.put(KEY_VALUE, value.toDouble())
-            }
-            is String -> {
-                obj.put(KEY_TYPE, TYPE_STRING)
-                obj.put(KEY_VALUE, value)
-            }
-            is Set<*> -> {
-                obj.put(KEY_TYPE, TYPE_STRING_SET)
-                obj.put(KEY_VALUE, JSONArray().apply {
-                    value.filterIsInstance<String>().forEach { put(it) }
-                })
-            }
-            else -> return null
-        }
-        return obj
-    }
-
-    private fun decodePreferenceValue(
-        editor: SharedPreferences.Editor,
-        key: String,
-        encoded: JSONObject
-    ): Boolean {
-        return try {
-            when (encoded.optString(KEY_TYPE)) {
-                TYPE_BOOLEAN -> editor.putBoolean(key, encoded.optBoolean(KEY_VALUE))
-                TYPE_INT -> editor.putInt(key, encoded.optInt(KEY_VALUE))
-                TYPE_LONG -> editor.putLong(key, encoded.optLong(KEY_VALUE))
-                TYPE_FLOAT -> editor.putFloat(key, encoded.optDouble(KEY_VALUE).toFloat())
-                TYPE_STRING -> editor.putString(key, encoded.optString(KEY_VALUE, ""))
-                TYPE_STRING_SET -> editor.putStringSet(key, decodeStringSet(encoded.optJSONArray(KEY_VALUE)))
-                else -> return false
-            }
-            true
-        } catch (_: Throwable) {
-            false
-        }
-    }
-
-    private fun decodeStringSet(array: JSONArray?): Set<String> {
-        if (array == null) return emptySet()
-        val result = LinkedHashSet<String>()
-        for (i in 0 until array.length()) {
-            result.add(array.optString(i, ""))
-        }
-        return result
-    }
-}
-
 @Composable
 internal fun Modifier.responsiveTap(
     onClick: () -> Unit,
@@ -1250,7 +1048,7 @@ internal fun MainSettingsPage(
                 state = activeListState,
                 contentPadding = PaddingValues(
                     top = padding.calculateTopPadding() + 8.dp,
-                    bottom = padding.calculateBottomPadding() + 78.dp
+                    bottom = padding.calculateBottomPadding() + 12.dp
                 )
             ) {
                 item {
@@ -1976,7 +1774,7 @@ internal fun FeatureGroupSettingsPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "功能") }

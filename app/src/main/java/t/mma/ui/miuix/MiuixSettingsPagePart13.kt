@@ -636,7 +636,7 @@ internal fun GroupMemberGroupManagerPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item {
@@ -746,7 +746,7 @@ internal fun GroupLeaveTemplateListPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -864,7 +864,7 @@ internal fun GroupLeaveBatchTemplateBindingPage(
             state = listState,
             contentPadding = PaddingValues(
                 top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 84.dp
+                bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
             item { SmallTitle(text = "模板") }
@@ -1030,7 +1030,7 @@ internal fun GroupLeaveTemplateEditorPage(
                 state = listState,
                 contentPadding = PaddingValues(
                     top = padding.calculateTopPadding() + 8.dp,
-                    bottom = padding.calculateBottomPadding() + 84.dp
+                    bottom = padding.calculateBottomPadding() + 12.dp
                 )
             ) {
                 item { SmallTitle(text = "模板") }
@@ -1348,7 +1348,7 @@ internal fun GroupMemberGroupEditorPage(
                 state = listState,
                 contentPadding = PaddingValues(
                     top = padding.calculateTopPadding() + 8.dp,
-                    bottom = padding.calculateBottomPadding() + 84.dp
+                    bottom = padding.calculateBottomPadding() + 12.dp
                 )
             ) {
                 item { SmallTitle(text = "模板") }

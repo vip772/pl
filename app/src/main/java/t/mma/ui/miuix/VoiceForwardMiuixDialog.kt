@@ -1,5 +1,6 @@
 package t.mma.ui.miuix
 
+import t.mma.utils.HLog
 import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -91,6 +92,7 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -1146,60 +1148,80 @@ object VoiceForwardMiuixDialog {
         }
     }
 
+    data class FavoriteVoiceFile(val path: String, val durationMillis: Int)
     fun showFavoriteVoiceSendConfirm(
         activity: Activity,
-        preparePreview: () -> String?,
-        onConfirm: () -> Unit,
+        prepareSource: suspend (downloading: () -> Unit) -> FavoriteVoiceFile,
+        preparePreview: (FavoriteVoiceFile) -> String?,
+        onConfirm: (FavoriteVoiceFile) -> Boolean,
         onDismiss: () -> Unit
     ): DialogHandle {
-        return show(activity, onDismiss) { close ->
+        val active = java.util.concurrent.atomic.AtomicBoolean(true)
+        return show(activity, { active.set(false); onDismiss() }) { close ->
+            fun dismiss() { active.set(false); close() }
             WindowDialog(
                 show = true,
                 title = "发送收藏语音",
-                onDismissRequest = close,
+                onDismissRequest = { dismiss() },
                 content = {
                     var previewPath by remember { mutableStateOf<String?>(null) }
                     var previewVersion by remember { mutableStateOf(0) }
-                    var previewLoading by remember { mutableStateOf(false) }
+                    var busy by remember { mutableStateOf(false) }
+                    var status by remember { mutableStateOf("") }
                     var previewError by remember { mutableStateOf("") }
-                    val previewScope = rememberCoroutineScope()
+                    val scope = rememberCoroutineScope()
+                    DisposableEffect(Unit) { onDispose { active.set(false) } }
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = "发送到当前聊天？",
+                            text = if (busy) status else "发送到当前聊天？",
                             color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                             fontSize = 14.sp,
                             modifier = Modifier.fillMaxWidth().padding(start = 4.dp, bottom = 10.dp),
                             textAlign = TextAlign.Center
                         )
                         FavoriteVoicePreviewPlayer(
-                            path = previewPath,
+                            path = if (busy) null else previewPath,
                             version = previewVersion,
-                            loading = previewLoading,
-                            error = previewError
+                            loading = busy,
+                            error = previewError,
+                            autoPlay = true
                         )
                         Row(
                             modifier = Modifier.fillMaxWidth().padding(top = 10.dp, bottom = 6.dp),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            DialogActionButton(
-                                text = "取消",
-                                onClick = close,
-                                modifier = Modifier.weight(1f)
-                            )
+                            DialogActionButton(text = "取消", onClick = { dismiss() }, modifier = Modifier.weight(1f))
                             DialogActionButton(
                                 text = if (previewPath == null) "预览" else "重载",
                                 onClick = {
-                                    previewScope.launch {
-                                        previewLoading = true
+                                    if (!busy && active.get()) {
+                                        busy = true
                                         previewError = ""
-                                        val path = withContext(Dispatchers.IO) { preparePreview() }
-                                        previewLoading = false
-                                        if (path.isNullOrBlank()) {
-                                            previewPath = null
-                                            previewError = "预览加载失败"
-                                        } else {
-                                            previewPath = path
-                                            previewVersion++
+                                        status = "正在准备试听…"
+                                        scope.launch {
+                                            try {
+                                                val file = withContext(Dispatchers.IO) {
+                                                    prepareSource {
+                                                        activity.runOnUiThread { if (active.get()) status = "正在下载收藏语音…" }
+                                                    }
+                                                }
+                                                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                                                if (!active.get() || activity.isFinishing || activity.isDestroyed) return@launch
+                                                val path = withContext(Dispatchers.IO) { preparePreview(file) }
+                                                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                                                if (!active.get()) return@launch
+                                                check(!path.isNullOrBlank()) { "语音试听准备失败，请重试" }
+                                                previewPath = path
+                                                previewVersion++
+                                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                                throw cancelled
+                                            } catch (error: Throwable) {
+                                                if (active.get()) {
+                                                    previewPath = null
+                                                    previewError = error.message ?: "语音试听准备失败"
+                                                }
+                                                HLog.e("[Hchat:VoiceForward] 收藏语音试听准备失败", error)
+                                            } finally { if (active.get()) busy = false }
                                         }
                                     }
                                 },
@@ -1208,8 +1230,31 @@ object VoiceForwardMiuixDialog {
                             DialogActionButton(
                                 text = "发送",
                                 onClick = {
-                                    close()
-                                    onConfirm()
+                                    if (!busy && active.get()) {
+                                        busy = true
+                                        previewError = ""
+                                        previewPath = null
+                                        status = "正在准备发送…"
+                                        scope.launch {
+                                            try {
+                                                val file = withContext(Dispatchers.IO) {
+                                                    prepareSource {
+                                                        activity.runOnUiThread { if (active.get()) status = "正在下载收藏语音…" }
+                                                    }
+                                                }
+                                                kotlinx.coroutines.currentCoroutineContext().ensureActive()
+                                                if (!active.get() || activity.isFinishing || activity.isDestroyed) return@launch
+                                                // Final cancellation check and send are on main, with no suspension between.
+                                                if (onConfirm(file)) dismiss()
+                                                else previewError = "语音发送失败，请重试"
+                                            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                                                throw cancelled
+                                            } catch (error: Throwable) {
+                                                if (active.get()) previewError = error.message ?: "语音发送准备失败"
+                                                HLog.e("[Hchat:VoiceForward] 收藏语音发送准备失败", error)
+                                            } finally { if (active.get()) busy = false }
+                                        }
+                                    }
                                 },
                                 modifier = Modifier.weight(1f),
                                 primary = true
@@ -1220,7 +1265,6 @@ object VoiceForwardMiuixDialog {
             )
         }
     }
-
     fun showVoicePreview(
         activity: Activity,
         durationMillis: Int,
@@ -1310,7 +1354,8 @@ object VoiceForwardMiuixDialog {
         version: Int,
         loading: Boolean,
         error: String,
-        knownDurationMillis: Int = 0
+        knownDurationMillis: Int = 0,
+        autoPlay: Boolean = false
     ) {
         var player by remember(path, version) { mutableStateOf<MediaPlayer?>(null) }
         var prepared by remember(path, version) { mutableStateOf(false) }
@@ -1332,17 +1377,23 @@ object VoiceForwardMiuixDialog {
         }
 
         DisposableEffect(path, version) {
+            var disposed = false
             val currentPath = path
             if (!currentPath.isNullOrBlank()) {
                 runCatching {
                     MediaPlayer().also { media ->
                         media.setDataSource(currentPath)
                         media.setOnPreparedListener { preparedPlayer ->
+                            if (disposed) return@setOnPreparedListener
                             duration = preparedPlayer.duration.takeIf { it > 0 }
                                 ?: knownDurationMillis.coerceAtLeast(0)
                             prepared = true
                             playing = false
                             position = 0
+                            if (autoPlay) {
+                                runCatching { preparedPlayer.start(); playing = true }
+                                    .onFailure { localError = "预览播放失败" }
+                            }
                         }
                         media.setOnCompletionListener { completed ->
                             playing = false
@@ -1365,6 +1416,7 @@ object VoiceForwardMiuixDialog {
                 }
             }
             onDispose {
+                disposed = true
                 player?.let { media ->
                     runCatching {
                         if (media.isPlaying) media.stop()

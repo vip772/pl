@@ -12,8 +12,7 @@ internal data class ConversationAiProfile(
 )
 
 internal class ConversationAnalysisAiConfigStore(context: Context) {
-    private val prefs = context.getSharedPreferences(ConversationAnalysisSettings.PREFS_NAME, Context.MODE_PRIVATE)
-
+    private val prefs = t.mma.preferences.HchatStorage.preferences(context, ConversationAnalysisSettings.PREFS_NAME)
     fun activeProfileId(): Int = prefs.getInt(KEY_ACTIVE_PROFILE, 1).coerceIn(1, PROFILE_COUNT)
 
     fun setActiveProfile(id: Int) {

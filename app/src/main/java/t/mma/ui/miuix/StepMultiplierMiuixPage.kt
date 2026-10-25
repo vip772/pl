@@ -24,7 +24,7 @@ internal fun StepMultiplierMiuixPage(context:Context,provider:FeatureSettingsPro
     PageScaffold(title=provider.title(),largeTitle=provider.title(),scrollBehavior=behavior,
         bottomBar={ BottomActionBar(primaryText="返回",onPrimaryClick=onBack) }) { padding ->
         LazyColumn(modifier=Modifier.fillMaxSize(),contentPadding=PaddingValues(
-            top=padding.calculateTopPadding()+8.dp,bottom=padding.calculateBottomPadding()+84.dp)) {
+            top=padding.calculateTopPadding()+8.dp,bottom=padding.calculateBottomPadding()+12.dp)) {
             item {
                 SettingsCard {
                     Column {
