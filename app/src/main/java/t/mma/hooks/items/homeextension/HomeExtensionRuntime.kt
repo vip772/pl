@@ -240,7 +240,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             text = value; textSize = size; setTextColor(this@Session.textForegroundColor); gravity = Gravity.CENTER
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         }
-        private fun card(alphaKey: String) = LinearLayout(ctx).apply {
+        private fun card(alphaKey: String, calendar: Boolean = false) = (if (calendar) AdjustableCalendarPanel(ctx) else LinearLayout(ctx)).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(if(compactCard) 6 else 14), dp(10), dp(if(compactCard) 6 else 14), dp(10))
             background = GradientDrawable().apply {
@@ -341,7 +341,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         }
         private var compactCard = false
         private fun renderCalendar() {
-            val panel = card(HomeExtensionSettings.CALENDAR_ALPHA).apply { clipChildren = false; clipToPadding = false }
+            val panel = card(HomeExtensionSettings.CALENDAR_ALPHA, calendar = true).apply { clipChildren = false; clipToPadding = false }
             // Decode/cache on the existing worker. Each callback belongs to this
             // panel only: replaced/removed panels must not receive stale results.
             val backgroundRevision = prefs.getLong(CalendarBackground.REVISION, 0L)
@@ -350,8 +350,9 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 if (bitmap != null) main.post {
                     if (!destroyed && panel.parent != null &&
                         backgroundRevision == prefs.getLong(CalendarBackground.REVISION, 0L)) {
-                        panel.background = CalendarBackgroundDrawable(bitmap, dp(18).toFloat(),
-                            prefs.getInt(HomeExtensionSettings.CALENDAR_ALPHA, 75).coerceIn(0, 100) * 255 / 100)
+                        (panel as AdjustableCalendarPanel).setBackgroundImage(bitmap, dp(18).toFloat(),
+                            prefs.getInt(HomeExtensionSettings.CALENDAR_ALPHA, 75).coerceIn(0, 100) * 255 / 100,
+                            backgroundRevision)
                     }
                 }
             }

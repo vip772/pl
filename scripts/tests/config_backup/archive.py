@@ -114,13 +114,16 @@ fun main(args:Array<String>){
  calImage.writeBytes(byteArrayOf(1,2,3,4,5))
  File(calImage.parentFile,"background.import").writeText("partial")
  File(calImage.parentFile,"background.tmp").writeText("partial")
+ Store.preferences(cal,"Hchat_home_photo_transform").edit().putFloat("home_calendar_background_9_z",2f).putFloat("home_calendar_background_9_x",.3f).putFloat("home_calendar_background_9_y",.8f).commit()
  val calZip=File(base,"calendar.zip")
  check(HchatConfigBackup.exportToUri(cal,Uri(calZip)).resources==1)
  check(HchatConfigBackup.importFromUri(calOut,Uri(calZip)).resources==1)
  check(File(Store.resourceDirectory(calOut,"home_calendar"),"background.jpg").readBytes().contentEquals(calImage.readBytes()))
  check(Store.preferences(calOut,"Hchat_home_extension_config").getInt("calendar_alpha",0)==61)
  check(!File(Store.resourceDirectory(calOut,"home_calendar"),"background.import").exists())
- println("PASS: calendar background resource + opacity round trip; temporary files excluded")
+ val calTransform=Store.preferences(calOut,"Hchat_home_photo_transform")
+ check(calTransform.getFloat("home_calendar_background_9_z",0f)==2f && calTransform.getFloat("home_calendar_background_9_x",0f)==.3f && calTransform.getFloat("home_calendar_background_9_y",0f)==.8f)
+ println("PASS: calendar resource, opacity, zoom and offsets round trip; temporary files excluded")
  // Empty stores also round trip.
  val c=Context(File(base,"c"),"com.test.c");HchatConfigBackup.importFromUri(c,Uri(backup))
  fun legacy(value:JSONObject):File {

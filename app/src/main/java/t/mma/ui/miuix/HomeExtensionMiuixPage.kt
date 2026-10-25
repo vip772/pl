@@ -108,7 +108,7 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                                 })
                         }
                         ActionRow(if (calendarPicking) "正在选择 / 导入背景…" else "选择 / 更换背景图片",
-                            if (calendarBackground) "已设置，图片居中裁切，仅用于日历背景" else "未设置，使用默认日历背景") {
+                            if (calendarBackground) "已设置，在首页日历长按拖动、双指缩放，松手保存" else "未设置，使用默认日历背景") {
                             if (!calendarPicking && activity != null) {
                                 calendarPicking = true
                                 SidePanelImagePicker.launch(activity, CalendarBackground.SLOT) { result ->

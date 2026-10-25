@@ -6,7 +6,7 @@ base=r/'app/src/main/java/t/mma/hooks/items/homeextension'
 s=(base/'HomeExtensionRuntime.kt').read_text();a=s.index('        private fun renderCalendar()');b=s.index('        private fun renderRecent()',a)
 files={
 'Storage.kt':'''package t.mma.preferences
-object HchatStorage { fun resourceDirectory(c:android.content.Context,f:String)=java.io.File("/tmp",f) }
+object HchatStorage { fun preferences(c:android.content.Context,n:String):android.content.SharedPreferences=TODO();fun resourceDirectory(c:android.content.Context,f:String)=java.io.File("/tmp",f) }
 ''',
 'Log.kt':'''package t.mma.utils
 object HLog {fun e(s:String,t:Throwable){}}
@@ -31,14 +31,14 @@ val week=LocalDate.now();val today=LocalDate.now();val compactCard=false;val des
 val worker=java.util.concurrent.Executors.newSingleThreadExecutor();val main=android.os.Handler(android.os.Looper.getMainLooper())
 val root=LinearLayout(ctx)
 fun dp(v:Int)=v
-fun card(s:String)=LinearLayout(ctx)
+fun card(s:String,calendar:Boolean=false):LinearLayout=if(calendar)AdjustableCalendarPanel(ctx)else LinearLayout(ctx)
 fun text(s:String,f:Float=14f)=TextView(ctx)
 '''+s[a:b]+'}'
 }
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)
  for n,v in files.items():(p/n).write_text(v)
- cmd=['java','-Xmx384m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',f'{std}:/usr/lib/android-sdk/platforms/android-36/android.jar','-d',str(p/'test.jar'),str(base/'CalendarBackground.kt'),*[str(p/n) for n in files]]
+ cmd=['java','-Xmx384m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',f'{std}:/usr/lib/android-sdk/platforms/android-36/android.jar','-d',str(p/'test.jar'),*[str(base/n) for n in ['CalendarBackground.kt','PhotoTransformController.kt','AdjustablePhotoView.kt','AdjustableCalendarPanel.kt']],*[str(p/n) for n in files]]
  result=subprocess.run(cmd,capture_output=True,text=True,timeout=60)
  if result.returncode:print(result.stderr)
  result.check_returncode()

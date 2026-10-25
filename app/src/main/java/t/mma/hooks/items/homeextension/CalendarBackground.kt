@@ -82,17 +82,25 @@ internal class CalendarBackgroundDrawable(bitmap: Bitmap, private val radius: Fl
     private val imageHeight = bitmap.height.toFloat()
     private val rect = RectF()
     private val matrix = Matrix()
+    private var customTransform = false
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
         this.shader = this@CalendarBackgroundDrawable.shader
         alpha = opacity.coerceIn(0, 255)
     }
     override fun onBoundsChange(bounds: Rect) {
         rect.set(bounds)
+        if (customTransform) { shader.setLocalMatrix(matrix); return }
         val scale = maxOf(bounds.width() / imageWidth, bounds.height() / imageHeight)
         matrix.setScale(scale, scale)
         matrix.postTranslate(bounds.left + (bounds.width() - imageWidth * scale) / 2f,
             bounds.top + (bounds.height() - imageHeight * scale) / 2f)
         shader.setLocalMatrix(matrix)
+    }
+    fun setTransform(value: Matrix) {
+        customTransform = true
+        matrix.set(value)
+        shader.setLocalMatrix(matrix)
+        invalidateSelf()
     }
     override fun draw(canvas: Canvas) { canvas.drawRoundRect(rect, radius, radius, paint) }
     override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }
