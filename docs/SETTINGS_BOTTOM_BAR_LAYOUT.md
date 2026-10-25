@@ -18,3 +18,11 @@ PageScaffold 原先把 Miuix Scaffold 的 bottomBar 设为空，将真实操作�
 scripts/test_settings_bottom_bar.py 提取并编译执行生产 PageScaffold 函数体，使用简化测量模型验证不同栏高（48/68/110/164dp）、系统底部边距（0/24/48dp）、无底栏、不重复避让，以及独立页面消费底部 padding；不是 Android/Compose 渲染测试。源码 diff 检查通过。未运行 Gradle、未构建 APK、未操作微信；大字体、横屏/小窗、真实 Miuix/Backdrop 渲染与页面末项操作仍需新包实机验收。
 
 与艾特提醒及配置备份修正一并整理提交；实机验收仍待进行。
+## 9c8e7e9 设置入口原生崩溃修正
+用户安装后进入设置即闪退。读取已有 crash buffer（未主动复现），10-25 14:40、14:41、14:44 多次记录均为 com.tencent.mm 的 RenderThread，SIGSEGV/SEGV_ACCERR，libhwui.so RenderNode::prepareTreeImpl 反复递归。日志保存于 /sdcard/Download/Operit/settings-crash-9c8e7e9.log。该栈为 native 渲染栈，无可用 R8 Java 帧；用户 mapping 临时附件在继续时已清理，未能解压，不将 mapping 当作已核对证据。
+
+源码对照确认上一修正将真实 bottomBar 放入 Scaffold 的同时，仍把整个 Scaffold 置于 layerBackdrop 采集层内。首页 MainNavigationBar 的 FloatingBottomBar 使用 drawBackdrop 读取同一层，导致生产者包含自身消费者，构成 RenderNode 循环。这是上一布局修正引入的回归；仅布局数值模型未覆盖渲染依赖。
+
+本次将 layerBackdrop 移至 Scaffold 的 content 槽，底栏与其成为同级渲染分支，保持真实 bottomBar 测量与末项避让，不关闭玻璃功能、不清空用户配置。新增静态回归禁止在 Scaffold 外层采集整个树，检查采集仅存在于内容槽；原可变栏高和导航边距模型仍通过。完整 PageScaffold 通过实际 Compose 编译插件、Miuix、Backdrop 与 Android SDK 的定向编译。静态结构检查及编译不能替代设备 RenderThread 实机验证。
+
+未运行 Gradle、未构建 APK、未主动打开微信。需安装修正版本后确认设置入口恢复、玻璃导航显示正常及动态角标末项不遮挡。

@@ -1863,7 +1863,6 @@ public fun PageScaffold(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .layerBackdrop(backdrop)
         ) {
             top.yukonga.miuix.kmp.basic.Scaffold(
                 topBar = {
@@ -1901,13 +1900,17 @@ public fun PageScaffold(
                 },
                 contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 content = { padding ->
-                    content(
-                        PaddingValues(
-                            top = padding.calculateTopPadding(),
-                            bottom = padding.calculateBottomPadding() +
-                                if (bottomBar == null) bottomAvoidance else 0.dp
+                    // Capture only the page body. The glass bottom bar samples this
+                    // layer and must never be recorded into its own backdrop (RenderNode cycle).
+                    Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
+                        content(
+                            PaddingValues(
+                                top = padding.calculateTopPadding(),
+                                bottom = padding.calculateBottomPadding() +
+                                    if (bottomBar == null) bottomAvoidance else 0.dp
+                            )
                         )
-                    )
+                    }
                 }
             )
         }

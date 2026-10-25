@@ -8,6 +8,14 @@ body=s[a:b].replace('@Composable ', '')
 # The production body must use the real scaffold slot, not an unmeasured outer overlay.
 assert 'bottomBar = {}' not in body
 assert '.align(Alignment.BottomCenter)' not in body
+# Glass consumers cannot be descendants of the backdrop capture modifier.
+scaffold_at=body.index('top.yukonga.miuix.kmp.basic.Scaffold(')
+content_at=body.index('content = { padding ->', scaffold_at)
+capture_at=body.index('.layerBackdrop(backdrop)')
+assert capture_at > content_at
+assert '.layerBackdrop(backdrop)' not in body[:scaffold_at]
+assert body.count('.layerBackdrop(backdrop)') == 1
+
 lib=Path('/tmp/pl-kotlin-libs');std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
 code='''package check
 class Dp(val value:Float){operator fun compareTo(other:Dp)=value.compareTo(other.value);operator fun plus(other:Dp)=Dp(value+other.value)}
