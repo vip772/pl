@@ -552,10 +552,9 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             !WeChatMessageTypes.isApp(nativeType)) return null
         if (nativeTalker.isNotBlank() && !WeChatMessage.isGroupTalker(nativeTalker)) return null
         val nativeContent = stringValue(source, "getContent", "field_content", "content")
-        if (WeChatMessageTypes.isApp(nativeType)) {
-            val subtype = MentionHighlightScope.knownAppSubtype(nativeContent)
-            if (subtype != null && subtype != 57) return null
-        }
+        val nativeIsApp = WeChatMessageTypes.isApp(nativeType)
+        val nativeSubtype = if (nativeIsApp) MentionHighlightScope.knownAppSubtype(nativeContent) else null
+        if (nativeSubtype != null && nativeSubtype != 57) return null
         val stored = runCatching { WeChatApis.messageStore()?.getMessageById(msgId) }.getOrNull()
         val content = nativeContent
             .ifBlank { stored?.content.orEmpty() }
@@ -580,7 +579,13 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             msgSource, stored?.selfWxId.orEmpty()
         )
         if (!merged.isText() && !merged.isApp()) return null
-        if (merged.isApp() && MentionHighlightScope.knownAppSubtype(content) != 57) return null
+        if (merged.isApp()) {
+            // Reuse even an unknown result when the native body is retained.
+            // A blank native body or newly resolved AppMsg type needs a fresh parse.
+            val subtype = if (nativeIsApp && nativeContent.isNotBlank()) nativeSubtype
+                else MentionHighlightScope.knownAppSubtype(content)
+            if (subtype != 57) return null
+        }
         debugLog { TAG + " message msgId=$msgId contentLen=${content.length} msgSourceLen=${msgSource.length} reservedLen=${reserved.length} atUsers=${merged.getAtUserList().size}" }
         return merged
     }

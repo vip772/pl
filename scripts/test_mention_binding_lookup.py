@@ -51,6 +51,37 @@ fun main(){
  n.field_content="<appmsg><title><![CDATA[@alice 对的]]></title><type>57</type><refermsg><content>old</content></refermsg></appmsg>"
  val reply=c.convert(n)!!;check(MentionHighlightScope.accepts(reply,"@alice 对的"))
  check(reply.getEffectiveAtUserList()==listOf("alice"))
+ val quoteBody=n.field_content
+ for(kind in listOf(49,0x31000031)) {
+  n.field_type=kind;n.field_content=quoteBody
+  val parses=MentionHighlightScope.subtypeReads
+  val queries=WeChatApis.store.queries
+  check(c.convert(n)!=null)
+  check(MentionHighlightScope.subtypeReads==parses+1)
+  check(WeChatApis.store.queries==queries+1)
+ }
+ val quoteStored=WeChatMessage(1,0,49,0,0,0,"room@chatroom",quoteBody,"","","",0,"","")
+ WeChatApis.store.message=quoteStored
+ for(body in listOf("", "   ")) {
+  n.field_content=body
+  val parses=MentionHighlightScope.subtypeReads
+  val queries=WeChatApis.store.queries
+  check(c.convert(n)!!.content==quoteBody)
+  check(MentionHighlightScope.subtypeReads==parses+2)
+  check(WeChatApis.store.queries==queries+1)
+ }
+ n.field_content="<appmsg><title>unknown</title></appmsg>"
+ val unknownParses=MentionHighlightScope.subtypeReads
+ val unknownQueries=WeChatApis.store.queries
+ check(c.convert(n)==null)
+ check(MentionHighlightScope.subtypeReads==unknownParses+1)
+ check(WeChatApis.store.queries==unknownQueries+1)
+ n.field_type=0;n.field_content=quoteBody
+ val resolvedParses=MentionHighlightScope.subtypeReads
+ check(c.convert(n)!=null)
+ check(MentionHighlightScope.subtypeReads==resolvedParses+1)
+ n.field_type=49
+ WeChatApis.store.message=stored()
  val beforeLink=WeChatApis.store.queries
  n.field_content="<appmsg><title>@alice link</title><type>5</type></appmsg>"
  check(c.convert(n)==null);check(WeChatApis.store.queries==beforeLink)
@@ -94,6 +125,15 @@ with tempfile.TemporaryDirectory() as td:
  p=Path(td)
  for n,v in files.items():(p/n).write_text(v)
  model=[r/'app/src/main/java/t/mma/hooks/api/model'/n for n in ['WeChatMessage.kt','WeChatMessageTypes.kt','WeChatParsedMessage.kt']]
+ scope=(r/'app/src/main/java/t/mma/hooks/items/mentionhighlight/MentionHighlightScope.kt').read_text()
+ scope=scope.replace('internal object MentionHighlightScope {', 'internal object MentionHighlightScope {\n var subtypeReads=0')
+ old='fun knownAppSubtype(content: String): Int? =' + chr(10)
+ assert scope.count(old)==1
+ scope=scope.replace(old, 'fun knownAppSubtype(content: String): Int? { subtypeReads++; return ')
+ end='            .toIntOrNull()?.takeIf { it > 0 }'
+ assert scope.count(end)==1
+ scope=scope.replace(end,end+'\n    }')
+ (p/'Scope.kt').write_text(scope)
  jar=p/'check.jar'
- subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(jar),*[str(p/n) for n in files],*map(str,model),str(r/"app/src/main/java/t/mma/hooks/items/mentionhighlight/MentionHighlightScope.kt")],check=True,timeout=60)
+ subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(jar),*[str(p/n) for n in files],*map(str,model),str(p/"Scope.kt")],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{jar}:{std}','MainKt'],check=True,timeout=15)
