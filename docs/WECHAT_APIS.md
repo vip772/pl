@@ -370,6 +370,8 @@ WeChatApis.message().observe().subscribe(message -> {
 - `getMsgId/getType/getCreateTime/getTalker/getSendTalker/getContent`
 - `getMsgSource/getAtUserList/isAnnounceAll/isNotifyAll/isAtMe`
 
+`getMsgSource()` 按原始 `msgSource`、剥离引用后的 content、剥离引用后的 bodyContent、剥离引用后的 reserved 顺序按需取首个非空白来源，命中后不再解析后备来源，最后沿用原有 XML 反转义。非空白来源不额外校验格式；引用隔离算法和公开接口保持不变。`scripts/test_message_source_fallback.py` 对照原实现覆盖 6,750 组输入，并用临时计数验证直接来源命中时后备 XML 工作为零及 3,000 次稳定读取。定向 JVM 回归不等于 Android/R8 构建或多版本实机验证。
+
 `getAtMentionType()` 将普通 @ 我、@ 全体、群公告全体和其他成员艾特归为互斥类型；`isNotifyAll()`、`isAnnounceAll()` 优先于 `isAtMe()`，因此服务端展开后的 @ 全体不会同时命中 @ 我。`getAtUserList()` 保留原始名单，`getEffectiveAtUserList()` 返回恢复后的语义名单。
 
 注意：`isFile()` 只认文件类 AppMsg，优先依据 `<appmsg><type>6</type>` 和文件字段。不能因为 XML 里出现 `<appattach>` 就判定为文件，因为接龙/笔记等 AppMsg 也可能带附件节点。接龙通过 `isNote()` 识别，依据是 `<appmsg><type>53</type>`、`solitaire` 或接龙特征。

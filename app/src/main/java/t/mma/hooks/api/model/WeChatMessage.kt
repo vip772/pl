@@ -67,12 +67,11 @@ class WeChatMessage(
     fun getContent(): String = content
 
     fun getMsgSource(): String {
-        val raw = firstNotBlank(
-            msgSource,
-            xmlSection(withoutQuotedMessage(content), "msgsource"),
-            xmlSection(withoutQuotedMessage(bodyContent()), "msgsource"),
-            xmlSection(withoutQuotedMessage(reserved), "msgsource")
-        )
+        // Preserve source priority while avoiding XML work after an earlier hit.
+        val raw = msgSource.takeIf { it.isNotBlank() }
+            ?: xmlSection(withoutQuotedMessage(content), "msgsource").takeIf { it.isNotBlank() }
+            ?: xmlSection(withoutQuotedMessage(bodyContent()), "msgsource").takeIf { it.isNotBlank() }
+            ?: xmlSection(withoutQuotedMessage(reserved), "msgsource")
         return unescapeXml(raw)
     }
 
