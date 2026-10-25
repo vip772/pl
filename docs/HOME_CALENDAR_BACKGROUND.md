@@ -1,0 +1,27 @@
+# 首页日历自定义背景图片
+
+已实现并随输入框提示生命周期修正一并交付，未实机验收。
+
+## 使用
+模块设置 → 首页扩展 → 开启首页扩展、首页日历 → 选择 / 更换背景图片。
+使用系统图片选择器，导入后返回首页生效。清除背景图片恢复原有主题卡片，不清除透明度或日历设置。
+
+仅改变日历卡片背景，图片居中等比例裁切为原有圆角，不改变日期、农历、问候语、当天动态特效或点击行为。沿用日历“背景透明度”，不影响文字透明度。亮暗模式的文字规则不变，过亮或过暗图片可能影响文字可读性，建议调整背景透明度。
+
+## 存储与失败处理
+- CalendarBackground 保存到 HchatStorage.resourceDirectory(context,"home_calendar")/background.jpg，固定路径，不依赖原始文件 URI。
+- 输入上限 32MB，校验可解码图片，采样至边长不超过1440且不超过约200万像素，转换静态 JPEG；动图仅保存静态解码结果，不支持视频。暂未加入 EXIF 方向旋转校正。
+- 源文件和转换结果先写 background.import/background.tmp，转换完成后替换旧图；失败清理临时文件，读取不到或图片损坏时保留默认主题卡片并记录 HLog 错误。
+- 复用 SidePanelImagePicker，仅为日历 slot 分流至独立导入器，原侧边栏和首页照片行为不变；选图取消/失败解除界面忙碌状态，处理中拦截重复选择，隐藏清除操作。
+- 解码使用现有后台 worker，按文件版本复用缓存；draw 只绘制已解码图片，重设边界时计算居中裁切矩阵。旧面板脱离或资源 revision 变化时拒绝迟到回调。无动画、持续刷新或新的常驻线程。
+
+## 备份
+统一资源根自动打包日历图片，HomeExtensionSettings 配置库自动包含透明度与 revision，不改备份名单；.tmp/.import 不打包。导入后按现有备份流程重启微信恢复，跨安装目录无需迁移外部图片路径。
+
+## 验证
+- scripts/test_calendar_background_sdk.py：完整生产图片导入/缓存/Drawable 和原文 renderCalendar 的 SDK 定向编译，宿主依赖为桩；另检查选图/清除分流与迟到回调保护。
+- scripts/test_calendar_background_controls.py：新增设置控件通过实际 Compose 编译器；完整生产文件选择器通过 SDK 定向编译，宿主依赖为桩。
+- scripts/tests/config_backup/archive.py：实际生产存储与归档代码，在文件宿主模型中验证日历图片字节及透明度跨目录导出导入，临时文件排除；保留原安全、回滚和旧格式测试。图片样本为测试字节，归档测试不证明 Android 图片可解码。
+- scripts/tests/home-extension-recycle/run.py：首页复用保护与透明度兼容回归。
+
+未执行 Android 真实图片解码、系统选图交互、实机显示或大图压力测试，未运行 Gradle、未构建 APK、未操作微信。上述定向编译和模型回归不是整工程构建或实机验收。

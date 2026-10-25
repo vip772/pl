@@ -3,6 +3,8 @@ package t.mma.ui.miuix
 import android.app.Activity
 import android.content.Context
 import android.widget.Toast
+import t.mma.hooks.items.homeextension.CalendarBackground
+import t.mma.hooks.items.homesidepanel.SidePanelPickResult
 import androidx.compose.foundation.layout.*
 import top.yukonga.miuix.kmp.basic.SmallTitle
 import androidx.compose.foundation.lazy.LazyColumn
@@ -26,6 +28,8 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
     val prefs = remember { Settings.preferences(context) }
     var enabled by remember { mutableStateOf(prefs.getBoolean(Settings.ENABLE, false)) }
     var calendar by remember { mutableStateOf(prefs.getBoolean(Settings.CALENDAR, true)) }
+    var calendarBackground by remember { mutableStateOf(CalendarBackground.hasImage(context)) }
+    var calendarPicking by remember { mutableStateOf(false) }
     var calendarEffect by remember { mutableStateOf(prefs.getBoolean(Settings.CALENDAR_EFFECT, false)) }
     var calendarEffectStyle by remember { mutableStateOf(prefs.getInt(Settings.CALENDAR_EFFECT_STYLE, 0).coerceIn(0, 2)) }
     var favorites by remember { mutableStateOf(prefs.getBoolean(Settings.FAVORITES, false)) }
@@ -102,6 +106,21 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                                 calendarEffectStyle.toString(), { value ->
                                     calendarEffectStyle = value.toInt(); prefs.edit().putInt(Settings.CALENDAR_EFFECT_STYLE, calendarEffectStyle).apply()
                                 })
+                        }
+                        ActionRow(if (calendarPicking) "正在选择 / 导入背景…" else "选择 / 更换背景图片",
+                            if (calendarBackground) "已设置，图片居中裁切，仅用于日历背景" else "未设置，使用默认日历背景") {
+                            if (!calendarPicking && activity != null) {
+                                calendarPicking = true
+                                SidePanelImagePicker.launch(activity, CalendarBackground.SLOT) { result ->
+                                    calendarPicking = false
+                                    calendarBackground = CalendarBackground.hasImage(context)
+                                    if (result == SidePanelPickResult.FAILED) Toast.makeText(context, "日历背景导入失败，请选择有效图片（不超过32MB）", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                        if (calendarBackground && !calendarPicking) ActionRow("清除背景图片", "恢复默认日历背景，保留透明度设置") {
+                            if (CalendarBackground.clear(context)) calendarBackground = false
+                            else Toast.makeText(context, "清除失败，请重试", Toast.LENGTH_SHORT).show()
                         }
                         HomeExtensionSlider(context, "背景透明度", Settings.CALENDAR_ALPHA, 75, 0f..100f, true)
                         InputRow(title = "问候语", summary = "显示在年月右侧，最多120字", value = greeting, onValueChange = { greeting = it.take(120); prefs.edit().putString(Settings.GREETING, greeting).apply() })

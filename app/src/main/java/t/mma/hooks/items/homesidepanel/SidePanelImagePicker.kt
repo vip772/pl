@@ -105,7 +105,9 @@ internal object SidePanelImagePicker {
                     takeReadPermission(activity, data, uri)
                     val appContext = activity.applicationContext
                     Thread({
-                        val success = SidePanelImages.saveFromUri(appContext, result.slot, uri)
+                        val success = if (result.slot == t.mma.hooks.items.homeextension.CalendarBackground.SLOT)
+                            t.mma.hooks.items.homeextension.CalendarBackground.save(appContext, uri)
+                        else SidePanelImages.saveFromUri(appContext, result.slot, uri)
                         val owner = result.activity.get()
                         if (owner == null) {
                             pending.remove(requestCode, result)

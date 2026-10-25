@@ -342,6 +342,19 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         private var compactCard = false
         private fun renderCalendar() {
             val panel = card(HomeExtensionSettings.CALENDAR_ALPHA).apply { clipChildren = false; clipToPadding = false }
+            // Decode/cache on the existing worker. Each callback belongs to this
+            // panel only: replaced/removed panels must not receive stale results.
+            val backgroundRevision = prefs.getLong(CalendarBackground.REVISION, 0L)
+            worker.execute {
+                val bitmap = CalendarBackground.load(ctx)
+                if (bitmap != null) main.post {
+                    if (!destroyed && panel.parent != null &&
+                        backgroundRevision == prefs.getLong(CalendarBackground.REVISION, 0L)) {
+                        panel.background = CalendarBackgroundDrawable(bitmap, dp(18).toFloat(),
+                            prefs.getInt(HomeExtensionSettings.CALENDAR_ALPHA, 75).coerceIn(0, 100) * 255 / 100)
+                    }
+                }
+            }
             val title = LinearLayout(ctx).apply { gravity = Gravity.CENTER_VERTICAL; if(compactCard) orientation = LinearLayout.VERTICAL }
             title.addView(text(week.format(DateTimeFormatter.ofPattern("yyyy年 M月")), if(compactCard) 13f else 18f).apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }, if(compactCard) LinearLayout.LayoutParams(-1, dp(26)) else LinearLayout.LayoutParams(0, dp(40), 1f))
             title.addView(text(prefs.getString(HomeExtensionSettings.GREETING, HomeExtensionSettings.DEFAULT_GREETING).orEmpty()).apply { gravity = Gravity.END or Gravity.CENTER_VERTICAL; maxLines = 2 }, if(compactCard) LinearLayout.LayoutParams(-1, dp(32)) else LinearLayout.LayoutParams(0, dp(40), 1.5f))

@@ -16,6 +16,7 @@ import t.mma.hooks.items.script.ScriptSendButtonHook
 import t.mma.utils.KavaReflector
 import java.util.Collections
 import java.util.WeakHashMap
+import java.lang.ref.WeakReference
 
 class InputHintFeature : BaseFeature() {
     private var runtime: InputHintRuntime? = null
@@ -70,6 +71,11 @@ private class InputHintRuntime(
     private val inputBindings = Collections.synchronizedMap(
         WeakHashMap<Any, InputHintBinding>()
     )
+    // Listeners belong only to verified ChatFooter instances, never global TextViews.
+    private val footerListeners = WeakHashMap<View, View.OnLayoutChangeListener>()
+    private val queuedFooters = WeakHashMap<View, Boolean>()
+    private val ownedHooks = mutableListOf<XC_MethodHook.Unhook>()
+    private var writingHint = false
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == InputHintSettings.KEY_ENABLE ||
             key == InputHintSettings.KEY_TEMPLATE ||
@@ -105,18 +111,32 @@ private class InputHintRuntime(
             logger("未找到聊天输入区挂载方法", null)
             return false
         }
+        val hintMethod = KavaReflector.declaredMethods(footerClass).singleOrNull {
+            it.name == "setHint" && it.returnType == Void.TYPE &&
+                it.parameterTypes.contentEquals(arrayOf(CharSequence::class.java))
+        } ?: run { logger("未找到聊天输入区提示更新方法", null); return false }
+        val installed = mutableListOf<XC_MethodHook.Unhook>()
         return runCatching {
-            HookRegistry.get().hook(attachMethod, object : XC_MethodHook() {
+            installed += HookRegistry.get().hook(attachMethod, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) { safelyBindFooter(param.thisObject) }
+            })
+            installed += HookRegistry.get().hook(hintMethod, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    bindFooter(param.thisObject)
+                    if (!writingHint) safelyBindFooter(param.thisObject)
                 }
             })
+            ownedHooks += installed
             inputHookInstalled = true
             true
         }.getOrElse {
+            installed.forEach { hook -> runCatching { HookRegistry.get().unhook(hook) } }
             logger("聊天输入框提示 Hook 安装失败", it)
             false
         }
+    }
+    private fun safelyBindFooter(footer: Any?, retry: Boolean = true) {
+        if (!active || writingHint) return
+        runCatching { bindFooter(footer, retry) }.onFailure { logger("聊天输入框提示绑定失败", it) }
     }
 
     fun installStatistics(): OutgoingMessageStatsRepository.Subscription? {
@@ -130,6 +150,9 @@ private class InputHintRuntime(
 
     fun destroy() {
         active = false
+        ownedHooks.forEach { runCatching { HookRegistry.get().unhook(it) } }; ownedHooks.clear()
+        footerListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
+        footerListeners.clear(); queuedFooters.clear()
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         val inputs = synchronized(inputBindings) {
             inputBindings.entries.map { it.key to it.value }.also { inputBindings.clear() }
@@ -143,19 +166,31 @@ private class InputHintRuntime(
         }
     }
 
-    private fun bindFooter(footer: Any?) {
+    private fun bindFooter(footer: Any?, retry: Boolean) {
         if (!active || footer == null) return
-        val input = ScriptSendButtonHook.findInputView(footer)
-        if (input != null) {
-            bindInput(input)
-            postToInput(input) { bindInput(input) }
-            return
+        val view = footer as? View
+        if (view != null && !footerListeners.containsKey(view)) {
+            val listener = View.OnLayoutChangeListener { changed, _, _, _, _, _, _, _, _ ->
+                safelyBindFooter(changed, retry = false)
+            }
+            footerListeners[view] = listener
+            view.addOnLayoutChangeListener(listener)
         }
-        (footer as? View)?.post {
-            ScriptSendButtonHook.findInputView(footer)?.let(::bindInput)
+        ScriptSendButtonHook.findInputView(footer)?.let(::bindInput)
+        // At most one retry per event burst. Later readiness/replacement is handled
+        // by footer layout events, not arbitrary sleeps or pre-draw polling.
+        if (retry && view != null && !queuedFooters.containsKey(view)) {
+            queuedFooters[view] = true
+            val reference = WeakReference(view)
+            view.post {
+                val owner = reference.get() ?: return@post
+                queuedFooters.remove(owner)
+                if (active && owner.isAttachedToWindow) runCatching {
+                    ScriptSendButtonHook.findInputView(owner)?.let(::bindInput)
+                }.onFailure { logger("聊天输入框提示延后绑定失败", it) }
+            }
         }
     }
-
     private fun bindInput(input: Any) {
         ScriptSendButtonHook.trackInputView(input)
         if (!supportsHint(input)) return
@@ -164,6 +199,8 @@ private class InputHintRuntime(
                 inputBindings[input] = InputHintBinding(readHint(input))
             }
         }
+        val binding = synchronized(inputBindings) { inputBindings[input] }
+        if (binding?.appliedHint != null && readHint(input) === binding.appliedHint) return
         applyHint(input)
     }
 
@@ -223,21 +260,18 @@ private class InputHintRuntime(
     }
 
     private fun writeHint(input: Any, hint: CharSequence?) {
-        if (input is TextView) {
-            input.hint = hint
-            return
-        }
-        KavaReflector.invokeSuccessfully(
-            KavaReflector.findMethodRecursive(
-                input.javaClass,
-                "setHint",
-                CharSequence::class.java
-            ),
-            input,
-            hint
-        )
+        if (writingHint) return
+        writingHint = true
+        try {
+            if (input is TextView) {
+                input.hint = hint
+                return
+            }
+            KavaReflector.invokeSuccessfully(
+                KavaReflector.findMethodRecursive(input.javaClass, "setHint", CharSequence::class.java), input, hint
+            )
+        } finally { writingHint = false }
     }
-
     private fun postToInput(input: Any, block: () -> Unit) {
         val view = input as? View
         if (view != null && view.isAttachedToWindow) {

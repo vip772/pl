@@ -106,6 +106,21 @@ fun main(args:Array<String>){
  File(Store.resourceDirectory(only,"new"),"icon").writeText("icon")
  val onlyZip=File(base,"only.zip");check(HchatConfigBackup.exportToUri(only,Uri(onlyZip)).items==0)
  check(HchatConfigBackup.importFromUri(b,Uri(onlyZip)).resources==1)
+ // Calendar uses a fixed resource path, so restore never needs the source URI.
+ val cal=Context(File(base,"calendar"),"com.calendar")
+ val calOut=Context(File(base,"calendar-restored"),"com.calendar.restored")
+ Store.preferences(cal,"Hchat_home_extension_config").edit().putInt("calendar_alpha",61).putLong("calendar_background_revision",9L).commit()
+ val calImage=File(Store.resourceDirectory(cal,"home_calendar"),"background.jpg")
+ calImage.writeBytes(byteArrayOf(1,2,3,4,5))
+ File(calImage.parentFile,"background.import").writeText("partial")
+ File(calImage.parentFile,"background.tmp").writeText("partial")
+ val calZip=File(base,"calendar.zip")
+ check(HchatConfigBackup.exportToUri(cal,Uri(calZip)).resources==1)
+ check(HchatConfigBackup.importFromUri(calOut,Uri(calZip)).resources==1)
+ check(File(Store.resourceDirectory(calOut,"home_calendar"),"background.jpg").readBytes().contentEquals(calImage.readBytes()))
+ check(Store.preferences(calOut,"Hchat_home_extension_config").getInt("calendar_alpha",0)==61)
+ check(!File(Store.resourceDirectory(calOut,"home_calendar"),"background.import").exists())
+ println("PASS: calendar background resource + opacity round trip; temporary files excluded")
  // Empty stores also round trip.
  val c=Context(File(base,"c"),"com.test.c");HchatConfigBackup.importFromUri(c,Uri(backup))
  fun legacy(value:JSONObject):File {
