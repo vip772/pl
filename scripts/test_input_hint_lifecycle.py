@@ -13,9 +13,27 @@ fun main(){
  footer.onAttachedToWindow();android.os.Handler.drain()
  // Not ready at attach or the single posted retry. A later real layout discovers it.
  val input=android.widget.TextView();footer.input=input;footer.layoutEvent();android.os.Handler.drain()
- check(input.hint.toString()=="custom");val writes=input.writes
+ check(input.hint.toString()=="custom");val writes=input.writes;val renders=InputHintSettings.renders
  repeat(1000){footer.layoutEvent();android.os.Handler.drain()}
- check(input.writes==writes)
+ check(input.writes==writes);check(InputHintSettings.renders==renders)
+ // Copied Spanned with equivalent color must not rebuild or rewrite.
+ InputHintSettings.color=2;InputHintSettings.notifyChange("input_hint_color_test");android.os.Handler.drain()
+ check((input.hint as android.text.Styled).color==2 && input.writes==writes+1)
+ val coloredWrites=input.writes;val coloredRenders=InputHintSettings.renders
+ repeat(1000){footer.layoutEvent()};android.os.Handler.drain()
+ check(input.writes==coloredWrites && InputHintSettings.renders==coloredRenders)
+ // Same text without spans is a real style overwrite, repaired from cache.
+ input.hint="custom";val strippedWrites=input.writes
+ footer.layoutEvent();android.os.Handler.drain()
+ check(input.writes==strippedWrites+1 && (input.hint as android.text.Styled).color==2)
+ check(InputHintSettings.renders==coloredRenders)
+ // No-op refreshes render once per burst but don't write unchanged output.
+ val beforeBurst=input.writes;val beforeRender=InputHintSettings.renders
+ repeat(20){InputHintSettings.notifyChange()};android.os.Handler.drain()
+ check(input.writes==beforeBurst && InputHintSettings.renders==beforeRender+1)
+ InputHintSettings.templateValue="changed";InputHintSettings.notifyChange(InputHintSettings.KEY_TEMPLATE);android.os.Handler.drain()
+ check(input.hint.toString()=="changed")
+ InputHintSettings.templateValue="custom";InputHintSettings.notifyChange(InputHintSettings.KEY_TEMPLATE);android.os.Handler.drain()
  footer.setHint("");check(input.hint.toString()=="custom");android.os.Handler.drain()
  footer.setHint("native");check(input.hint.toString()=="custom");android.os.Handler.drain()
  val replacement=android.widget.TextView();footer.input=replacement;footer.layoutEvent();android.os.Handler.drain()
@@ -25,14 +43,32 @@ fun main(){
  check(replacement.hint.toString()=="latest native")
  footer.setHint("disabled native");android.os.Handler.drain();check(replacement.hint.toString()=="disabled native")
  InputHintSettings.enabled=true;InputHintSettings.notifyChange();android.os.Handler.drain();check(replacement.hint.toString()=="custom")
+ // Statistics updates invalidate the render cache, stable layouts never reread.
+ check(r.installStatistics()!=null)
+ InputHintSettings.statisticsEnabled=true
+ InputHintSettings.notifyChange(InputHintSettings.KEY_STATISTICS_ENABLE);android.os.Handler.drain()
+ check(replacement.hint.toString()=="custom0")
+ OutgoingMessageStatsRepository.count=9;OutgoingMessageStatsRepository.listener!!();android.os.Handler.drain()
+ check(replacement.hint.toString()=="custom9")
+ val statsReads=OutgoingMessageStatsRepository.reads
+ repeat(1000){footer.layoutEvent()};android.os.Handler.drain()
+ check(OutgoingMessageStatsRepository.reads==statsReads)
+ // Expiration must invalidate even when no statistics callback is delivered.
+ val expires=r.javaClass.getDeclaredField("renderedHintExpiresAt");expires.isAccessible=true;expires.setLong(r,0)
+ footer.layoutEvent();android.os.Handler.drain()
+ check(OutgoingMessageStatsRepository.reads==statsReads+1)
+ InputHintSettings.statisticsEnabled=false
+ InputHintSettings.notifyChange(InputHintSettings.KEY_STATISTICS_ENABLE);android.os.Handler.drain()
+ check(replacement.hint.toString()=="custom")
  // Recursion through the public footer setHint is guarded.
  val proxy=com.tencent.mm.pluginsdk.ui.chat.ProxyInput(footer);footer.input=proxy
  footer.layoutEvent();android.os.Handler.drain();check(proxy.getHint().toString()=="custom")
  footer.setHint("proxy native");android.os.Handler.drain();check(proxy.getHint().toString()=="custom")
- r.destroy();android.os.Handler.drain();check(t.mma.hooks.core.HookRegistry.count()==0 && footer.listeners.isEmpty())
+ InputHintSettings.notifyChange();val beforeDestroy=InputHintSettings.renders
+ r.destroy();android.os.Handler.drain();check(InputHintSettings.renders==beforeDestroy);check(t.mma.hooks.core.HookRegistry.count()==0 && footer.listeners.isEmpty())
  check(proxy.getHint().toString()=="proxy native")
  footer.layoutEvent();android.os.Handler.drain()
- println("PASS: late readiness, replacement, host blank/native overwrite, 1000 stable layouts no hint writes, disable/restore, recursion guard, destroy cleanup")
+ println("PASS: late readiness, replacement, host blank/native overwrite, copied Spanned, 3000 stable layouts no render/write, style-only and template changes, stripped styles, burst coalescing, statistics and expiry, disable/restore, recursion guard, destroy cleanup")
 }
 ''',
 'Context.kt':'''package android.content
@@ -60,10 +96,25 @@ fun post(f:()->Unit){android.os.Handler.queue.add(f)}
 }
 ''',
 'Text.kt':'''package android.text
+interface Spanned:CharSequence {fun <T> getSpans(start:Int,end:Int,c:Class<T>):Array<T>;fun getSpanStart(o:Any):Int;fun getSpanEnd(o:Any):Int;fun getSpanFlags(o:Any):Int}
+class Styled(val value:String,val color:Int):Spanned {
+ val span=android.text.style.ForegroundColorSpan(color)
+ override val length get()=value.length
+ override fun get(i:Int)=value[i]
+ override fun subSequence(a:Int,b:Int)=value.subSequence(a,b)
+ override fun toString()=value
+ @Suppress("UNCHECKED_CAST") override fun <T> getSpans(start:Int,end:Int,c:Class<T>):Array<T> = arrayOf<Any>(span) as Array<T>
+ override fun getSpanStart(o:Any)=0
+ override fun getSpanEnd(o:Any)=length
+ override fun getSpanFlags(o:Any)=33
+}
 object TextUtils {fun equals(a:CharSequence?,b:CharSequence?)=a?.toString()==b?.toString()}
 ''',
+'Span.kt':'''package android.text.style
+class ForegroundColorSpan(val foregroundColor:Int)
+''',
 'Widget.kt':'''package android.widget
-open class TextView:android.view.View(){var writes=0;var hint:CharSequence?=null;set(v){writes++;field=v}}
+open class TextView:android.view.View(){var writes=0;var hint:CharSequence?=null;set(v){writes++;field=when(v){is android.text.Styled->android.text.Styled(v.value,v.color);null->null;else->StringBuilder(v)}}}
 ''',
 'Hook.kt':'''package de.robv.android.xposed
 open class XC_MethodHook {
@@ -104,23 +155,23 @@ fun setHint(h:CharSequence?){when(val i=input){is android.widget.TextView->i.hin
 class ProxyInput(val footer:ChatFooter){var value:CharSequence?="proxy original";fun getHint()=value;fun setHint(h:CharSequence?){footer.setHint(h)}}
 ''',
 'Settings.kt':'''package t.mma.hooks.items.inputhint
-class InputHintStats
+data class InputHintStats(val count:Int=0)
 object InputHintSettings {
 const val KEY_ENABLE="enabled";const val KEY_TEMPLATE="template";const val KEY_STATISTICS_ENABLE="stats";const val DEFAULT_ENABLE=false;const val DEFAULT_STATISTICS_ENABLE=false
-var enabled=true
+var statisticsEnabled=false;var enabled=true;var color=1;var renders=0;var templateValue="custom"
 val listeners=mutableListOf<android.content.SharedPreferences.OnSharedPreferenceChangeListener>()
 val prefs=object:android.content.SharedPreferences {
-override fun getBoolean(k:String,d:Boolean)=if(k==KEY_ENABLE)enabled else false
+override fun getBoolean(k:String,d:Boolean)=if(k==KEY_ENABLE)enabled else statisticsEnabled
 override fun registerOnSharedPreferenceChangeListener(l:android.content.SharedPreferences.OnSharedPreferenceChangeListener){listeners+=l}
 override fun unregisterOnSharedPreferenceChangeListener(l:android.content.SharedPreferences.OnSharedPreferenceChangeListener){listeners-=l}
 }
 fun preferences(c:android.content.Context)=prefs
-fun notifyChange(){listeners.toList().forEach{it.onSharedPreferenceChanged(prefs,KEY_ENABLE)}}
-fun template(p:android.content.SharedPreferences)="custom"
-fun variableColors(p:android.content.SharedPreferences)=0
-fun renderTemplateSpanned(t:String,s:InputHintStats,c:Int):CharSequence=StringBuilder(t)
+fun notifyChange(key:String=KEY_ENABLE){listeners.toList().forEach{it.onSharedPreferenceChanged(prefs,key)}}
+fun template(p:android.content.SharedPreferences)=templateValue
+fun variableColors(p:android.content.SharedPreferences)=color
+fun renderTemplateSpanned(t:String,s:InputHintStats,c:Int):CharSequence{renders++;return android.text.Styled(if(statisticsEnabled) t+s.count else t,c)}
 }
-object OutgoingMessageStatsRepository {class Subscription;fun install(l:(String,Throwable?)->Unit)=true;fun subscribe(f:()->Unit)=Subscription();fun current()=InputHintStats()}
+object OutgoingMessageStatsRepository {class Subscription;var count=0;var reads=0;var listener:(()->Unit)?=null;fun install(l:(String,Throwable?)->Unit)=true;fun subscribe(f:()->Unit):Subscription{listener=f;return Subscription()};fun current():InputHintStats{reads++;return InputHintStats(count)}}
 '''
 }
 with tempfile.TemporaryDirectory() as td:

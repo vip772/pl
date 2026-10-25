@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Handler
 import android.os.Looper
+import android.text.Spanned
+import android.text.style.ForegroundColorSpan
 import android.text.TextUtils
 import android.view.View
 import android.widget.TextView
@@ -76,6 +78,10 @@ private class InputHintRuntime(
     private val queuedFooters = WeakHashMap<View, Boolean>()
     private val ownedHooks = mutableListOf<XC_MethodHook.Unhook>()
     private var writingHint = false
+    private var renderRevision = 0L
+    private var renderedHintCache: CharSequence? = null
+    private var renderedHintExpiresAt = Long.MAX_VALUE
+    private var refreshQueued = false
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == InputHintSettings.KEY_ENABLE ||
             key == InputHintSettings.KEY_TEMPLATE ||
@@ -192,6 +198,11 @@ private class InputHintRuntime(
         }
     }
     private fun bindInput(input: Any) {
+        if (System.currentTimeMillis() >= renderedHintExpiresAt) {
+            renderedHintCache = null
+            renderedHintExpiresAt = Long.MAX_VALUE
+            renderRevision++
+        }
         ScriptSendButtonHook.trackInputView(input)
         if (!supportsHint(input)) return
         synchronized(inputBindings) {
@@ -200,16 +211,51 @@ private class InputHintRuntime(
             }
         }
         val binding = synchronized(inputBindings) { inputBindings[input] }
-        if (binding?.appliedHint != null && readHint(input) === binding.appliedHint) return
+        if (binding?.appliedHint != null && binding.revision == renderRevision &&
+            sameStyledHint(readHint(input), binding.appliedHint)) return
         applyHint(input)
     }
 
     private fun refreshAttachedInputs() {
-        val inputs = synchronized(inputBindings) { inputBindings.keys.toList() }
+        // Coalesce preference/statistics bursts; consume the latest state on main.
+        synchronized(inputBindings) {
+            if (!active || refreshQueued) return
+            refreshQueued = true
+        }
         mainHandler.post {
+            synchronized(inputBindings) { refreshQueued = false }
+            if (!active) return@post
+            renderRevision++
+            renderedHintCache = null
+            val inputs = synchronized(inputBindings) { inputBindings.keys.toList() }
             inputs.forEach { input ->
                 if ((input as? View)?.isAttachedToWindow != false) applyHint(input)
             }
+        }
+    }
+
+    // TextView may copy Spanned hints. Preserve style semantics, not just text.
+    private fun sameStyledHint(a: CharSequence?, b: CharSequence?): Boolean {
+        if (a === b) return true
+        if (!TextUtils.equals(a, b)) return false
+        val sa = a as? Spanned
+        val sb = b as? Spanned
+        val left = sa?.getSpans(0, sa.length, Any::class.java).orEmpty()
+        val right = sb?.getSpans(0, sb.length, Any::class.java).orEmpty()
+        if (left.size != right.size) return false
+        val used = BooleanArray(right.size)
+        return left.all { span ->
+            val match = right.indices.firstOrNull { i ->
+                val other = right[i]
+                !used[i] && span.javaClass == other.javaClass &&
+                    (span === other || (span is ForegroundColorSpan && other is ForegroundColorSpan &&
+                        span.foregroundColor == other.foregroundColor) || span == other) &&
+                    sa!!.getSpanStart(span) == sb!!.getSpanStart(other) &&
+                    sa.getSpanEnd(span) == sb.getSpanEnd(other) &&
+                    sa.getSpanFlags(span) == sb.getSpanFlags(other)
+            } ?: return@all false
+            used[match] = true
+            true
         }
     }
 
@@ -223,24 +269,34 @@ private class InputHintRuntime(
             binding.appliedHint = null
             return
         }
-        val statisticsEnabled = prefs.getBoolean(
-            InputHintSettings.KEY_STATISTICS_ENABLE,
-            InputHintSettings.DEFAULT_STATISTICS_ENABLE
-        )
-        val stats = if (statisticsEnabled) {
-            OutgoingMessageStatsRepository.current()
-        } else {
-            InputHintStats()
+        val renderedHint = renderedHintCache ?: run {
+            val statisticsEnabled = prefs.getBoolean(
+                InputHintSettings.KEY_STATISTICS_ENABLE,
+                InputHintSettings.DEFAULT_STATISTICS_ENABLE
+            )
+            val stats = if (statisticsEnabled) {
+                OutgoingMessageStatsRepository.current()
+            } else {
+                InputHintStats()
+            }
+            renderedHintExpiresAt = if (statisticsEnabled) java.util.Calendar.getInstance().apply {
+                add(java.util.Calendar.DAY_OF_MONTH, 1)
+                set(java.util.Calendar.HOUR_OF_DAY, 0)
+                set(java.util.Calendar.MINUTE, 0)
+                set(java.util.Calendar.SECOND, 0)
+                set(java.util.Calendar.MILLISECOND, 0)
+            }.timeInMillis else Long.MAX_VALUE
+            InputHintSettings.renderTemplateSpanned(
+                InputHintSettings.template(prefs), stats, InputHintSettings.variableColors(prefs)
+            ).also { renderedHintCache = it }
         }
-        val renderedHint = InputHintSettings.renderTemplateSpanned(
-            InputHintSettings.template(prefs), stats, InputHintSettings.variableColors(prefs)
-        )
         val currentHint = readHint(input)
-        if (binding.appliedHint == null || !TextUtils.equals(currentHint, binding.appliedHint)) {
+        if (binding.appliedHint == null || !sameStyledHint(currentHint, binding.appliedHint)) {
             binding.originalHint = currentHint
         }
         binding.appliedHint = renderedHint
-        writeHint(input, renderedHint)
+        binding.revision = renderRevision
+        if (!sameStyledHint(currentHint, renderedHint)) writeHint(input, renderedHint)
     }
 
     private fun supportsHint(input: Any): Boolean {
@@ -287,6 +343,7 @@ private class InputHintRuntime(
 
     private data class InputHintBinding(
         var originalHint: CharSequence?,
-        var appliedHint: CharSequence? = null
+        var appliedHint: CharSequence? = null,
+        var revision: Long = -1L
     )
 }

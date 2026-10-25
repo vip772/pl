@@ -94,6 +94,9 @@ object InputHintSettings {
     }
     private fun parseColor(value: String?): Int? = runCatching { Color.parseColor(value?.trim().orEmpty()) }.getOrNull()
     private class VariableGradientSpan(private val start: Int, private val end: Int) : CharacterStyle() {
+        override fun equals(other: Any?): Boolean =
+            other is VariableGradientSpan && start == other.start && end == other.end
+        override fun hashCode(): Int = 31 * start + end
         override fun updateDrawState(tp: TextPaint) { tp.shader = android.graphics.LinearGradient(0f, 0f, tp.textSize * 4f, 0f, start, end, android.graphics.Shader.TileMode.CLAMP) }
     }
 
