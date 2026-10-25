@@ -15,6 +15,9 @@ capture_at=body.index('.layerBackdrop(backdrop)')
 assert capture_at > content_at
 assert '.layerBackdrop(backdrop)' not in body[:scaffold_at]
 assert body.count('.layerBackdrop(backdrop)') == 1
+# Modifier order matters: background must be drawn inside the captured layer.
+surface_at = body.index('.background(MiuixTheme.colorScheme.background)', capture_at)
+assert capture_at < surface_at < body.index('content(', capture_at)
 
 lib=Path('/tmp/pl-kotlin-libs');std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
 code='''package check

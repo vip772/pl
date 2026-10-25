@@ -468,6 +468,10 @@ class WeChatMessage(
             }
         }
 
+        /** Strip reference provenance before a caller extracts msgsource and loses its owner. */
+        @JvmStatic
+        fun currentMessageXml(raw: String?): String = withoutQuotedMessage(raw.orEmpty())
+
         // Walk XML tokens before searching metadata. CDATA and comments are opaque:
         // quoted XML must not become metadata belonging to the new sender.
         private fun withoutQuotedMessage(raw: String): String {

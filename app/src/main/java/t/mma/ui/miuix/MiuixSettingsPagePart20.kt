@@ -1902,7 +1902,10 @@ public fun PageScaffold(
                 content = { padding ->
                     // Capture only the page body. The glass bottom bar samples this
                     // layer and must never be recorded into its own backdrop (RenderNode cycle).
-                    Box(Modifier.fillMaxSize().layerBackdrop(backdrop)) {
+                    // Include the page surface inside the recording: transparent gaps
+                    // and end padding must sample the same background as the visible page.
+                    Box(Modifier.fillMaxSize().layerBackdrop(backdrop)
+                        .background(MiuixTheme.colorScheme.background)) {
                         content(
                             PaddingValues(
                                 top = padding.calculateTopPadding(),

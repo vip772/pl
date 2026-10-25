@@ -45,3 +45,8 @@
 ## 引用消息艾特隔离
 当前消息缺少独立 msgSource 时，原 getMsgSource 的整段 XML 搜索可能回退到 refermsg 内的被引用消息，导致把原发送者的艾特归给引用者。现统一在公共消息模型的来源回退、艾特用户列表及分类前剔除引用区块；正文中的引用区块也不参与 @所有人判断。支持嵌套及未闭合引用隔离，CDATA/注释按不透明 XML token 处理。引用者自身有真实艾特时仍按当前消息来源判定。提醒展示、颜色和持久化去重不变；已插入的旧误报不自动删除。
 验证：生产模型定向编译和引用回归通过，覆盖纯引用、引用内艾特我/所有人、引用同时自身艾特、外层来源回退和不完整引用；尚未实机验收。最初按要求保留本地，后与其它修复统一提交；未运行 Gradle、未构建 APK、未操作微信。
+
+## 引用艾特仍误报：上游来源提取修正
+用户反馈引用仍触发。进一步核查发现 WeChatMessageParseApi.resolveMsgSource 在 add_msg 入站时，先对整段 xml/content 调用 getXmlSection("msgsource")，且早于独立来源字段。这样 refermsg 中的来源被提取成独立字符串，模型收到时引用外壳已经丢失，上一轮模型层剔除无法生效；这是上一修复覆盖不足。
+现在公共模型暴露 currentMessageXml 作为内部来源隔离工具，Java 入站解析在提取 msgsource 前先剔除引用，normalizeMsgSource 及字段回退同样隔离；剔除后为空时继续查找当前消息独立来源，不直接结束。没有禁用全部引用消息的艾特，引用者自身真实艾特仍保留。
+验证：scripts/test_mention_source_pipeline.py 编译实际 WeChatMessageParseApi Java 类和 Kotlin 模型，执行来源提取→分类联动，覆盖仅引用、独立自身艾特/所有人、外层来源、备用字段含引用与空引用继续回退；scripts/test_mention_notice.py 补充提前提取后误归属的反例和边界回归，均通过。Android TextUtils 和反射依赖使用桩；这不是完整微信事件实机测试。未运行 Gradle、未构建 APK、未操作微信；经用户授权与玻璃背景修正一并提交推送。此前已插入的提醒不自动清理。

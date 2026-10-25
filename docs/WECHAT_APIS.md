@@ -984,3 +984,6 @@ XML有非空顶层MsgSource时，选择已核实的k0.M完整13参数签名，p8
 ### AppMsg真实本地消息ID
 
 `WeChatApis.messages().sendAppMsgXmlWithLocalId(talker, xml)`复用XML解析与发送参数构造，返回成功结果Pair中的数值本地ID；失败或无数值ID返回-1。正数表示本地记录，不代表服务端送达；调用可能产生发送副作用，返回-1不能自动重试。原sendXml的布尔结果仍按原Pair成功判断。隐藏艾特仅在其已验证同步路由作用域内使用本接口。
+
+### 消息入站引用来源隔离
+WeChatMessageParseApi 提取 msgsource 前统一通过 WeChatMessage.currentMessageXml 移除 refermsg，避免先提取丢失归属后把原消息艾特归给引用者；字段回退走相同规则。仅改变模块 XML 解析边界，无新增宿主反射入口；验证与限制见 MENTION_EXTENSION.md 的上游来源提取修正记录。

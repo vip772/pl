@@ -188,23 +188,32 @@ public final class WeChatMessageParseApi {
     }
 
     private String resolveMsgSource(Object addMsg, String content, String xml) {
-        String fromXml = getXmlSection(xml, "msgsource");
-        if (TextUtils.isEmpty(fromXml)) fromXml = getXmlSection(content, "msgsource");
+        String fromXml = getXmlSection(WeChatMessage.currentMessageXml(xml), "msgsource");
+        if (TextUtils.isEmpty(fromXml)) fromXml = getXmlSection(WeChatMessage.currentMessageXml(content), "msgsource");
         if (!TextUtils.isEmpty(fromXml)) return "<msgsource>" + fromXml + "</msgsource>";
         String source = readTextContainerString(addMsg, "p");
-        if (!TextUtils.isEmpty(source)) return normalizeMsgSource(source);
+        if (!TextUtils.isEmpty(source)) {
+            String current = normalizeMsgSource(source);
+            if (!TextUtils.isEmpty(current)) return current;
+        }
         source = readTextContainerString(addMsg, "q");
-        if (!TextUtils.isEmpty(source) && source.contains("msgsource")) return normalizeMsgSource(source);
+        if (!TextUtils.isEmpty(source) && source.contains("msgsource")) {
+            String current = normalizeMsgSource(source);
+            if (!TextUtils.isEmpty(current)) return current;
+        }
         for (String fieldName : new String[]{"j", "k", "l", "n", "p", "s", "t"}) {
             String value = readTextContainerString(addMsg, fieldName);
-            if (!TextUtils.isEmpty(value) && value.contains("msgsource")) return value;
+            if (!TextUtils.isEmpty(value) && value.contains("msgsource")) {
+                String current = normalizeMsgSource(value);
+                if (!TextUtils.isEmpty(current)) return current;
+            }
         }
         return "";
     }
 
     private String normalizeMsgSource(String value) {
         if (TextUtils.isEmpty(value)) return "";
-        String trimmed = value.trim();
+        String trimmed = WeChatMessage.currentMessageXml(value).trim();
         if (trimmed.contains("<msgsource")) return trimmed;
         if (trimmed.contains("<atuserlist")) return "<msgsource>" + trimmed + "</msgsource>";
         if (trimmed.contains("atuserlist")

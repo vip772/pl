@@ -33,6 +33,14 @@ fun main() {
  check(kind(own.getMsgSource(),own.bodyContent())==WeChatMessage.AtMentionType.AT_ME)
  check(kind("<refermsg><msgsource><atuserlist>notify@all</atuserlist></msgsource></refermsg>")==WeChatMessage.AtMentionType.NONE)
  check(kind("<refermsg><msgsource><atuserlist>me</atuserlist></msgsource>")==WeChatMessage.AtMentionType.NONE)
+ // Reproduce add_msg's former early extraction (quote wrapper was lost).
+ val incoming="<msg><appmsg><type>57</type><title>B reply</title>$quoted</appmsg></msg>"
+ val wrong=WeChatMessage.xmlSection(incoming,"msgsource")
+ check(kind(wrong)==WeChatMessage.AtMentionType.AT_ME)
+ val clean=WeChatMessage.currentMessageXml(incoming)
+ check(WeChatMessage.xmlSection(clean,"msgsource").isEmpty())
+ check(kind(WeChatMessage.xmlSection(WeChatMessage.currentMessageXml(incoming.replace("</msg>","$me</msg>")),"msgsource"))==WeChatMessage.AtMentionType.AT_ME)
+ check(WeChatMessage.currentMessageXml("<refermsg>$quoted</refermsg>").isEmpty())
  println("PASS real model: direct mention, at-all, combined mention, plain text rejection, other user, missing identity, announcement distinction")
 }
 ''')
