@@ -190,7 +190,7 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
                 param.args?.set(0, cached)
                 return
             }
-            val result = buildMentionText(input, message, colorSpec)
+            val result = buildMentionText(input, message, state.effectiveAtUserList(), colorSpec)
             val effective = if (result.appliedCount > 0) {
                 renderedCache.put(cacheKey, result.text)
                 renderedByMessage.put(messageCacheKey, result.text)
@@ -334,11 +334,15 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         message.msgId.toString() + "|" + spec + "|" + message.talker + "|" +
             message.msgSource + "|" + message.reserved
 
-    private fun buildMentionText(text: CharSequence, message: WeChatMessage, spec: String): BuildResult {
+    private fun buildMentionText(
+        text: CharSequence,
+        message: WeChatMessage,
+        ids: List<String>,
+        spec: String
+    ): BuildResult {
         // Keep the wire order intact. The text ranges and atuserlist are
         // positional; distinct() would shift every later mention when the same
         // member is mentioned more than once.
-        val ids = message.getEffectiveAtUserList()
         if (ids.isEmpty() || ids.size > 64 || text.length > 32768) return BuildResult(text, 0, 0)
         if (text is Spanned && text.getSpans(0, text.length, ProfileSpan::class.java).isNotEmpty()) {
             return BuildResult(text, 0, 0) // Nested text setter; never duplicate our spans.
@@ -635,10 +639,20 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
 
     private class BindState(var message: WeChatMessage?) {
         private var prepared: MentionHighlightScope.Prepared? = null
+        private var effectiveAtUsers: List<String>? = null
+
         fun accepts(text: CharSequence): Boolean {
             val current = message ?: return false
             val scope = prepared ?: MentionHighlightScope.prepare(current).also { prepared = it }
             return scope.accepts(text)
+        }
+
+        // Cache the result, including an empty list, only for this bind frame.
+        // A recycled holder or nested bind must never reuse another message's list.
+        fun effectiveAtUserList(): List<String> {
+            effectiveAtUsers?.let { return it }
+            val current = message ?: return emptyList()
+            return current.getEffectiveAtUserList().also { effectiveAtUsers = it }
         }
     }
     private data class Gesture(val span: ProfileSpan, val x: Float, val y: Float,
