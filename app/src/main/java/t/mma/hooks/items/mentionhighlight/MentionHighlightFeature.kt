@@ -20,6 +20,7 @@ import android.widget.TextView
 import android.util.LruCache
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.api.model.WeChatMessageTypes
 import t.mma.hooks.api.model.WeChatMessage
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
@@ -28,6 +29,7 @@ import t.mma.hooks.core.HookRegistry
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
+import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.ArrayDeque
 import java.util.Collections
@@ -71,6 +73,16 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     private val renderedByMessage = LruCache<String, CharSequence>(96)
     private val bindStates = ThreadLocal.withInitial { ArrayDeque<BindState>() }
     private var installed = false
+    // Bounded metadata only: receiver values are read again on every binding.
+    private class BindingMembers {
+        val methods = HashMap<String, Method?>()
+        val fields = HashMap<String, Field?>()
+    }
+    private val bindingMembers = object : LinkedHashMap<Class<*>, BindingMembers>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Class<*>, BindingMembers>?): Boolean =
+            size > 128
+    }
+
     private val reentry = ThreadLocal<Boolean>()
 
     @Synchronized
@@ -309,8 +321,8 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         val root = findRoot(holder) ?: return BindState(null)
         val item = adapterItem(param.thisObject ?: return BindState(null), position) ?: return BindState(null)
         val native = resolveNativeMessage(item) ?: return BindState(null)
-        val message = messageFromNative(native) ?: return BindState(null)
         gestures.remove(root)
+        val message = messageFromNative(native) ?: return BindState(null)
         debugLog { TAG + " bind-before msgId=${message.msgId} talker=${message.talker} atUsers=${message.getEffectiveAtUserList().size}" }
         return BindState(message)
     }
@@ -527,13 +539,19 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     private fun messageFromNative(source: Any): WeChatMessage? {
         val msgId = numberValue(source, "getMsgId", "getMsgID", "field_msgId", "msgId", "msgID")
         if (msgId <= 0) return null
+        // Only proven ineligible native values can bypass enrichment. Blank/unknown
+        // values must keep the database fallback (notably msgSource and reserved).
+        val nativeType = numberValue(source, "getType", "field_type", "type").toInt()
+        val nativeTalker = stringValue(source, "getTalker", "field_talker", "talker")
+        if (nativeType > 0 && !WeChatMessageTypes.isText(nativeType)) return null
+        if (nativeTalker.isNotBlank() && !WeChatMessage.isGroupTalker(nativeTalker)) return null
         val stored = runCatching { WeChatApis.messageStore()?.getMessageById(msgId) }.getOrNull()
         val content = stringValue(source, "getContent", "field_content", "content")
             .ifBlank { stored?.content.orEmpty() }
-        val type = numberValue(source, "getType", "field_type", "type").toInt().takeIf { it > 0 }
+        val type = nativeType.takeIf { it > 0 }
             ?: stored?.type?.takeIf { it > 0 }
             ?: WeChatMessage.inferType(content)
-        val talker = stringValue(source, "getTalker", "field_talker", "talker")
+        val talker = nativeTalker
             .ifBlank { stored?.talker.orEmpty() }
             .ifBlank { runCatching { WeChatApis.chatPage()?.currentTalker().orEmpty() }.getOrDefault("") }
         val msgSource = stringValue(
@@ -554,17 +572,39 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         return merged
     }
 
+    private fun bindingMethod(clazz: Class<*>, name: String): Method? = synchronized(bindingMembers) {
+        val entry = bindingMembers.getOrPut(clazz) { BindingMembers() }
+        if (!entry.methods.containsKey(name)) entry.methods[name] = KavaReflector.findMethod(clazz, name)
+        entry.methods[name]
+    }
+
+    private fun bindingField(clazz: Class<*>, name: String): Field? = synchronized(bindingMembers) {
+        val entry = bindingMembers.getOrPut(clazz) { BindingMembers() }
+        if (!entry.fields.containsKey(name)) entry.fields[name] = KavaReflector.findDeclaredField(clazz, name)
+        entry.fields[name]
+    }
+
+    private fun bindingFieldValue(receiver: Any, name: String): Any? {
+        var current: Class<*>? = receiver.javaClass
+        while (current != null && current != Any::class.java) {
+            val field = bindingField(current, name)
+            if (field != null) return KavaReflector.readField(field, receiver)
+            current = current.superclass
+        }
+        return null
+    }
+
     private fun stringValue(source: Any, vararg names: String): String = names.firstNotNullOfOrNull { name ->
         val value = if (name.startsWith("get")) {
-            KavaReflector.invoke(KavaReflector.findMethod(source.javaClass, name), source)
-        } else KavaReflector.readField(source, name)
+            KavaReflector.invoke(bindingMethod(source.javaClass, name), source)
+        } else bindingFieldValue(source, name)
         value as? String
     }.orEmpty()
 
     private fun numberValue(source: Any, vararg names: String): Long = names.firstNotNullOfOrNull { name ->
         val value = if (name.startsWith("get")) {
-            KavaReflector.invoke(KavaReflector.findMethod(source.javaClass, name), source)
-        } else KavaReflector.readField(source, name)
+            KavaReflector.invoke(bindingMethod(source.javaClass, name), source)
+        } else bindingFieldValue(source, name)
         when (value) {
             is Number -> value.toLong()
             is String -> value.toLongOrNull()
