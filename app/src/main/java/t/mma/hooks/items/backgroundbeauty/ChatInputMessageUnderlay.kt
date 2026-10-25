@@ -24,6 +24,8 @@ internal class ChatInputMessageUnderlay {
         var nativeLeft = 0
         var nativeTop = 0
         var bottomAnchor: BottomAnchor? = null
+        var expandedMeasurement = false
+        var touching = false
     }
     private data class BottomAnchor(val count: Int, val gap: Int)
     private class Targets(val content: View, val footer: ViewGroup, val strip: View, val wrapper: View, val list: ViewGroup) {
@@ -38,6 +40,7 @@ internal class ChatInputMessageUnderlay {
             return false
         }
     }
+    private var measuring = false
     private val location = IntArray(2)
     private val stripBounds = Rect()
     private val scrollBounds = Rect()
@@ -58,7 +61,7 @@ internal class ChatInputMessageUnderlay {
             State(content, list, lp.bottomMargin, list.clipToPadding).also { states[scroll] = it; it.targets = target }
         }
         state.targets = target
-        val bottomAnchor = state.bottomAnchor ?: captureBottomAnchor(list)
+        val bottomAnchor = if (state.touching) null else state.bottomAnchor ?: captureBottomAnchor(list)
         state.bottomAnchor = null
         ChatScrollTrace.watch(scroll, content, list, footer)
         ChatScrollTrace.snapshot("underlay.beforeApply", content)
@@ -133,7 +136,7 @@ internal class ChatInputMessageUnderlay {
         if (needsMeasure) {
             ChatScrollDiagnostic.hit("underlay.actualMeasure")
             val measureStarted = ChatScrollDiagnostic.begin()
-            try { state.content.measure(
+            try { measureContent(state,
                 View.MeasureSpec.makeMeasureSpec(state.nativeWidth, View.MeasureSpec.EXACTLY),
                 View.MeasureSpec.makeMeasureSpec(height, View.MeasureSpec.EXACTLY)
             ) } finally { ChatScrollDiagnostic.end("underlay.measureOnly", measureStarted) }
@@ -151,23 +154,44 @@ internal class ChatInputMessageUnderlay {
         } finally { ChatScrollDiagnostic.end("underlay.measureLayout", diagnosticStarted) }
     }
 
+    private fun measureContent(state: State, widthSpec: Int, heightSpec: Int) {
+        measuring = true
+        try {
+            state.content.measure(widthSpec, heightSpec)
+            state.expandedMeasurement = true
+        } finally { measuring = false }
+    }
+    // ChattingContent.onMeasure is concrete and verified in 8.0.78. Module
+    // remeasurement is excluded; a fresh host measurement always wins.
+    fun onContentMeasured(content: View) {
+        if (measuring) return
+        val scroll = content.parent as? ViewGroup ?: return
+        states[scroll]?.takeIf { it.content === content }?.expandedMeasurement = false
+    }
+    fun onTouch(scroll: ViewGroup, action: Int) {
+        val state = states[scroll] ?: return
+        when (action) {
+            0 -> { state.touching = true; state.bottomAnchor = null }
+            1, 3 -> state.touching = false
+        }
+    }
     // Called before native onLayout: native measurement/placement must never consume
     // our enlarged measured height, otherwise footer placement drifts on the next pass.
     fun beforeLayout(scroll: ViewGroup) {
         val diagnosticStarted = ChatScrollDiagnostic.begin()
         try {
         val state = states[scroll] ?: return
-        state.bottomAnchor = captureBottomAnchor(state.list)
+        state.bottomAnchor = if (state.touching) null else captureBottomAnchor(state.list)
         ChatScrollTrace.snapshot("underlay.beforeNative", state.content)
-        // A fresh window measurement may coincide with our expanded height.
-        // Only restore a measurement whose width and height still belong to us.
-        if (state.expandedHeight >= 0 && state.content.measuredHeight == state.expandedHeight &&
+        // The content onMeasure hook invalidates ownership for EVERY native measure,
+        // including a new native size identical to our previous expansion.
+        if (state.expandedMeasurement && state.expandedHeight >= 0 && state.content.measuredHeight == state.expandedHeight &&
             state.content.measuredWidth == state.nativeWidth) {
             ChatScrollDiagnostic.hit("underlay.restoreNative")
             val diagnosticStarted = ChatScrollDiagnostic.begin()
             val previousPhase = if (ChatScrollDiagnostic.isActive()) ChatScrollTrace.enter("underlayResize") else null
             try {
-                state.content.measure(
+                measureContent(state,
                     View.MeasureSpec.makeMeasureSpec(state.nativeWidth, View.MeasureSpec.EXACTLY),
                     View.MeasureSpec.makeMeasureSpec(state.nativeHeight, View.MeasureSpec.EXACTLY)
                 )
@@ -195,8 +219,12 @@ internal class ChatInputMessageUnderlay {
     }
     private fun restoreBottomAnchor(list: ViewGroup, anchor: BottomAnchor?) {
         if (anchor == null || !list.canScrollVertically(-1)) return
-        if (nativeListInt(list, "getCount") != anchor.count ||
-            nativeListInt(list, "getLastVisiblePosition") != anchor.count - 1) return
+        // Only compensate within this synchronous layout transaction. Appends
+        // are allowed ONLY if the new final item is already visible; never
+        // select/scroll to an offscreen incoming message or a removed dataset.
+        val count = nativeListInt(list, "getCount") ?: return
+        if (count < anchor.count ||
+            nativeListInt(list, "getLastVisiblePosition") != count - 1) return
         val row = list.getChildAt(list.childCount - 1) ?: return
         val gap = list.height - list.paddingBottom - row.bottom
         if (gap > anchor.gap) list.scrollBy(0, anchor.gap - gap)

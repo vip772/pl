@@ -48,7 +48,7 @@ open class LinearLayout:android.view.ViewGroup(){class LayoutParams{var bottomMa
 ''',
 'Native.kt':'''package com.tencent.mm.pluginsdk.ui.chat
 class ChattingScrollLayout:android.widget.LinearLayout()
-class ChattingContent:android.view.ViewGroup(){var resized:((Int)->Unit)?=null;override fun layout(l:Int,t:Int,r:Int,b:Int){super.layout(l,t,r,b);resized?.invoke(b-t)}}
+class ChattingContent:android.view.ViewGroup(){var measured:((android.view.View)->Unit)?=null;override fun measure(w:Int,h:Int){super.measure(w,h);measured?.invoke(this)};var resized:((Int)->Unit)?=null;override fun layout(l:Int,t:Int,r:Int,b:Int){super.layout(l,t,r,b);resized?.invoke(b-t)}}
 class ChatFooter:android.view.ViewGroup()
 class ChatFooterBottom:android.view.ViewGroup()
 class AppPanel:android.view.ViewGroup()
@@ -86,6 +86,7 @@ fun main(){
  val wrapper=MMChattingListView(list);wrapper.id="bm6".hashCode();wrapper.add(list);content.add(wrapper)
  scroll.add(content);scroll.add(footer)
  val controller=ChatInputMessageUnderlay()
+ content.measured={controller.onContentMeasured(it)}
  controller.apply(scroll)
  check(content.height==2808 && footer.top==2637 && footer.height==1504 && lp.bottomMargin==3)
  check(list.paddingBottom==178 && !list.clipToPadding)
@@ -143,6 +144,16 @@ fun main(){
  content.layout(0,0,1440,1700);footer.layout(0,1700,1440,3204);controller.apply(scroll)
  check(content.height==1871 && footer.top==1700)
  controller.restoreAll();check(content.height==1700)
+ // Same-width NEW native measurement equal to our old expanded height must win.
+ controller.apply(scroll)
+ val sameWidthNewHeight=content.height
+ content.measure(content.width,sameWidthNewHeight)
+ controller.beforeLayout(scroll)
+ check(content.measuredHeight==sameWidthNewHeight)
+ content.layout(0,0,content.width,sameWidthNewHeight)
+ footer.layout(0,sameWidthNewHeight,content.width,sameWidthNewHeight+1504)
+ controller.apply(scroll);controller.restoreAll()
+ check(content.height==sameWidthNewHeight)
  // A new window width may share the previous expanded height.
  controller.apply(scroll)
  val oldExpanded=content.height
@@ -194,6 +205,38 @@ fun main(){
  controller.beforeLayout(scroll);list.itemTotal++
  content.layout(0,0,720,content.measuredHeight);controller.apply(scroll)
  check(list.scrollCalls==callsBefore)
+ // Appends during this layout: only compensate if the new last row is visible.
+ for(added in listOf(1,3)){
+  list.history=false;list.last=list.itemTotal-1
+  rowItem.top=list.height-list.paddingBottom-rowItem.height
+  controller.beforeLayout(scroll);list.itemTotal+=added;list.last=list.itemTotal-1
+  content.layout(0,0,720,content.measuredHeight);controller.apply(scroll)
+  check(rowItem.bottom==list.height-list.paddingBottom)
+  val stableScrolls=list.scrollCalls;val stableMeasures=content.measureCalls;val stableLayouts=content.layoutCalls
+  repeat(10000){controller.apply(scroll)}
+  check(list.scrollCalls==stableScrolls && content.measureCalls==stableMeasures && content.layoutCalls==stableLayouts)
+ }
+ // Offscreen appended rows and removed datasets must not be selected/scrolled.
+ for(removed in listOf(false,true)){
+  list.last=list.itemTotal-1;rowItem.top=list.height-list.paddingBottom-rowItem.height
+  controller.beforeLayout(scroll)
+  if(removed){list.itemTotal--;list.last=list.itemTotal-1}else{list.itemTotal++}
+  val calls=list.scrollCalls
+  content.layout(0,0,720,content.measuredHeight);controller.apply(scroll)
+  check(list.scrollCalls==calls)
+ }
+ // Touch cancels an already captured transaction; MOVE has no controller path.
+ list.last=list.itemTotal-1;rowItem.top=list.height-list.paddingBottom-rowItem.height
+ controller.beforeLayout(scroll);controller.onTouch(scroll,0)
+ val touchCalls=list.scrollCalls
+ content.layout(0,0,720,content.measuredHeight);controller.apply(scroll)
+ check(list.scrollCalls==touchCalls)
+ controller.onTouch(scroll,1)
+ controller.onTouch(scroll,0);controller.beforeLayout(scroll)
+ content.layout(0,0,720,content.measuredHeight);controller.apply(scroll)
+ check(list.scrollCalls==touchCalls)
+ controller.onTouch(scroll,3)
+ println("PASS: real measurement ownership, visible appends, offscreen/deletion protection, touch cancellation and stable 10000 refreshes")
  println("PASS: bottom anchor across repeated native layouts and window resize; history, short lists and changed data untouched")
  println("PASS: native footer position preserved, no negative margin, zero-height blr, repeated native layouts, panel exclusion, multiline, offsets, visibility, padding, restore, native resize")
 }

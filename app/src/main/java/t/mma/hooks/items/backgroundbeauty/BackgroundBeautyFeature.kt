@@ -2293,6 +2293,16 @@ private class BackgroundBeautyRuntime(
 
             })
         }
+        // Track actual native measurement, not equality with cached expanded sizes.
+        val contentClass = KavaReflector.loadClass("com.tencent.mm.pluginsdk.ui.chat.ChattingContent", context.hostClassLoader())
+        findWechatVerifiedMethod(contentClass, "onMeasure", Int::class.javaPrimitiveType!!,
+            Int::class.javaPrimitiveType!!)?.let { method ->
+            hookOnce(method, after = { param ->
+                val content = param.thisObject as? View ?: return@hookOnce
+                val activity = findActivity(content) ?: return@hookOnce
+                states[activity]?.inputUnderlay?.onContentMeasured(content)
+            })
+        }
         // Reapply overlap after every native scroll layout; this is the verified dd6383f path.
         val scrollClass = KavaReflector.loadClass(ChatInputMessageUnderlay.SCROLL, context.hostClassLoader())
         findWechatVerifiedMethod(scrollClass, "onLayout", Boolean::class.javaPrimitiveType!!,
@@ -2321,6 +2331,17 @@ private class BackgroundBeautyRuntime(
                     state.inputUnderlay.restore(scroll)
                     HLog.e("$TAG 输入栏消息穿透布局失败", e)
                 }
+            })
+        }
+        findWechatVerifiedMethod(scrollClass, "dispatchTouchEvent", android.view.MotionEvent::class.java)?.let { method ->
+            hookOnce(method, before = { param ->
+                val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
+                val action = (param.args.firstOrNull() as? android.view.MotionEvent)?.actionMasked ?: return@hookOnce
+                // MOVE is hot: no activity lookup or controller work is needed.
+                if (action != android.view.MotionEvent.ACTION_DOWN &&
+                    action != android.view.MotionEvent.ACTION_UP && action != android.view.MotionEvent.ACTION_CANCEL) return@hookOnce
+                val activity = findActivity(scroll) ?: return@hookOnce
+                states[activity]?.inputUnderlay?.onTouch(scroll, action)
             })
         }
         listOf("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", "com.tencent.mm.pluginsdk.ui.chat.ChatFooter").forEach { className ->

@@ -1562,7 +1562,9 @@ private class HchatExtraHooker(
         val textColor = messageDetailsResolvedTextColor(label.context)
         if (label.currentTextColor != textColor) label.setTextColor(textColor)
         val bgColor = messageDetailsResolvedBgColor(label.context)
-        val radius = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, 4f, label.resources.displayMetrics)
+        // Android clamps a radius larger than half the bounds to a capsule.
+        // No layout listener, height-dependent background replacement or extra padding.
+        val radius = 10_000f
         val background = label.background as? GradientDrawable
         if (background == null) {
             label.background = GradientDrawable().apply {
