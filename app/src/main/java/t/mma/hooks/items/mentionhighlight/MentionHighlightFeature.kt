@@ -161,9 +161,10 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             val view = param.thisObject as? View ?: return
             val prefs = MentionHighlightSettings.preferences(context.hostContext())
             if (!prefs.getBoolean(MentionHighlightSettings.KEY_ENABLE, false)) return
-            val message = bindStates.get().peekLast()?.message ?: return
+            val state = bindStates.get().peekLast() ?: return
+            val message = state.message ?: return
             val input = param.args?.firstOrNull() as? CharSequence ?: return
-            if (!message.isGroupChat() || !MentionHighlightScope.accepts(message, input)) return
+            if (!message.isGroupChat() || !state.accepts(input)) return
             val colorSpec = prefs.getString(
                 MentionHighlightSettings.KEY_COLOR,
                 MentionHighlightSettings.DEFAULT_COLOR
@@ -546,8 +547,13 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
         if (nativeType > 0 && !WeChatMessageTypes.isText(nativeType) &&
             !WeChatMessageTypes.isApp(nativeType)) return null
         if (nativeTalker.isNotBlank() && !WeChatMessage.isGroupTalker(nativeTalker)) return null
+        val nativeContent = stringValue(source, "getContent", "field_content", "content")
+        if (WeChatMessageTypes.isApp(nativeType)) {
+            val subtype = MentionHighlightScope.knownAppSubtype(nativeContent)
+            if (subtype != null && subtype != 57) return null
+        }
         val stored = runCatching { WeChatApis.messageStore()?.getMessageById(msgId) }.getOrNull()
-        val content = stringValue(source, "getContent", "field_content", "content")
+        val content = nativeContent
             .ifBlank { stored?.content.orEmpty() }
         val type = nativeType.takeIf { it > 0 }
             ?: stored?.type?.takeIf { it > 0 }
@@ -569,7 +575,8 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
             reserved, stored?.translatedContent.orEmpty(), stored?.flag ?: 0,
             msgSource, stored?.selfWxId.orEmpty()
         )
-        if (!MentionHighlightScope.supports(merged)) return null
+        if (!merged.isText() && !merged.isApp()) return null
+        if (merged.isApp() && MentionHighlightScope.knownAppSubtype(content) != 57) return null
         debugLog { TAG + " message msgId=$msgId contentLen=${content.length} msgSourceLen=${msgSource.length} reservedLen=${reserved.length} atUsers=${merged.getAtUserList().size}" }
         return merged
     }
@@ -626,7 +633,14 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     private fun isAtAll(user: String): Boolean =
         user.equals("notify@all", true) || user.equals("announcement@all", true)
 
-    private data class BindState(var message: WeChatMessage?)
+    private class BindState(var message: WeChatMessage?) {
+        private var prepared: MentionHighlightScope.Prepared? = null
+        fun accepts(text: CharSequence): Boolean {
+            val current = message ?: return false
+            val scope = prepared ?: MentionHighlightScope.prepare(current).also { prepared = it }
+            return scope.accepts(text)
+        }
+    }
     private data class Gesture(val span: ProfileSpan, val x: Float, val y: Float,
         val time: Long, var cancelled: Boolean = false)
     private data class BuildResult(val text: CharSequence, val mentionCount: Int, val appliedCount: Int)

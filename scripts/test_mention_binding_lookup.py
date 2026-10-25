@@ -51,8 +51,10 @@ fun main(){
  n.field_content="<appmsg><title><![CDATA[@alice 对的]]></title><type>57</type><refermsg><content>old</content></refermsg></appmsg>"
  val reply=c.convert(n)!!;check(MentionHighlightScope.accepts(reply,"@alice 对的"))
  check(reply.getEffectiveAtUserList()==listOf("alice"))
+ val beforeLink=WeChatApis.store.queries
  n.field_content="<appmsg><title>@alice link</title><type>5</type></appmsg>"
- check(c.convert(n)==null)
+ check(c.convert(n)==null);check(WeChatApis.store.queries==beforeLink)
+ n.field_content="";c.convert(n);check(WeChatApis.store.queries==beforeLink+1)
  n.field_type=1;n.field_content="hello"
  WeChatApis.store.message=null;n.field_msgId=1;n.field_talker="room@chatroom"
  check(c.convert(n)!!.content==n.field_content)
