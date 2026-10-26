@@ -217,7 +217,6 @@ private class ScreenAlignedBitmapDrawable(
     }
 
     override fun setAlpha(alpha: Int) {
-
         paint.alpha = alpha.coerceIn(0, 255)
         invalidateSelf()
     }
@@ -1036,7 +1035,6 @@ private class BackgroundBeautyRuntime(
                     val view = param.thisObject as? View ?: return@hookOnce
                     val activity = findActivity(view) ?: return@hookOnce
                     if (!restoringBounce && surfaceMutationDepth == 0 && hasConfiguredBackground(activity)) {
-
                         recordBounceArgument(view, method, param.args[0])
                         param.args[0] = Color.TRANSPARENT
                     }
@@ -1139,7 +1137,6 @@ private class BackgroundBeautyRuntime(
             "updateBackgroundDrawable" to emptyArray<Class<*>>()).forEach { (name, types) ->
             val method = KavaReflector.findMethodRecursive(clazz, name, *types)
             if (method == null) {
-
                 return@forEach
             }
             val hooked = hookOnce(method, before = { param ->
@@ -1220,7 +1217,6 @@ private class BackgroundBeautyRuntime(
                     // DecorView.getBackground is not View.mBackground; never reenter its outer update here.
                     if (view === state.activity.window.decorView) return@hookOnce
                     if (view.background !== snapshot.appliedBackground) {
-
                         if (snapshot.slot == BackgroundBeautySettings.Slot.CONTACTS) {
                             captureContactGeometry(view, snapshot)
                             if (isContactIconSurface(view)) {
@@ -1237,20 +1233,14 @@ private class BackgroundBeautyRuntime(
                         snapshot.originalTintMode = view.backgroundTintMode
                         if (applied != null && prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
                             snapshot.slot?.let { state.loadedBitmaps[it]?.bitmap?.isRecycled == false } == true) {
-                            val repairStarted = t.mma.utils.ChatScrollDiagnostic.begin()
-                            val repairPhase = if (repairStarted != 0L) t.mma.utils.ChatScrollTrace.enter("backgroundRepair") else null
                             surfaceMutationDepth++
                             try {
                                 view.backgroundTintList = null
                                 view.backgroundTintMode = null
                                 view.background = applied
                                 restoreSurfaceGeometry(view, snapshot)
-                                if (repairStarted != 0L) t.mma.utils.ChatScrollDiagnostic.detail(
-                                    "background.repair", "atMs=${android.os.SystemClock.elapsedRealtime()} target=${view.javaClass.name} slot=${snapshot.slot?.name}")
                             } finally {
                                 surfaceMutationDepth--
-                                if (repairStarted != 0L) t.mma.utils.ChatScrollTrace.leave(repairPhase)
-                                t.mma.utils.ChatScrollDiagnostic.end("background.repair", repairStarted)
                             }
                         }
 
@@ -1791,14 +1781,12 @@ private class BackgroundBeautyRuntime(
         }
     }
     private fun applyForActivity(activity: Activity) {
-        val traceStarted = t.mma.utils.ChatScrollDiagnostic.beginRefresh()
-        try {
         if (destroyed || activity.isFinishing || activity.isDestroyed) return
         if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) {
             clearActivity(activity)
             return
         }
-        val slot = t.mma.utils.ChatScrollDiagnostic.phase("background.target") { resolveTarget(activity) } ?: run {
+        val slot = resolveTarget(activity) ?: run {
             val animating = states[activity]?.surfaces?.keys?.any(::hasRunningChatAnimation) == true
             if (animating) {
                 // BaseConversationUI marks the container GONE before running its exit animation.
@@ -1855,7 +1843,6 @@ private class BackgroundBeautyRuntime(
             }
         }
 
-        } finally { t.mma.utils.ChatScrollDiagnostic.endRefresh(traceStarted) }
     }
 
     private fun ensureState(activity: Activity): HostState = synchronized(states) {
@@ -1883,7 +1870,7 @@ private class BackgroundBeautyRuntime(
         bitmap: Bitmap
     ) {
         if (bitmap.isRecycled) return
-        t.mma.utils.ChatScrollDiagnostic.phase("background.cleanup") {
+        run {
             state.surfaces.entries.toList().forEach { (view, snapshot) ->
                 if (!view.isAttachedToWindow) {
                     restoreSurface(view, snapshot)
@@ -1898,15 +1885,15 @@ private class BackgroundBeautyRuntime(
                 BackgroundBeautySettings.DEFAULT_OPACITY
             )
         )
-        val host = t.mma.utils.ChatScrollDiagnostic.phase("background.host") { resolveBackgroundHost(activity) } ?: return
+        val host = resolveBackgroundHost(activity) ?: return
         if (slot == BackgroundBeautySettings.Slot.CHAT) {
             // Embedded chat animates over the conversation page in the same window.
             // Its bitmap belongs to the moving chat container, never the shared decor.
-            val chatHost = t.mma.utils.ChatScrollDiagnostic.phase("background.chatHost") { chatBackgroundHost(activity) } ?: return
-            val movingContent = t.mma.utils.ChatScrollDiagnostic.phase("background.movingContent") { chatMovingContent(chatHost) }
+            val chatHost = chatBackgroundHost(activity) ?: return
+            val movingContent = chatMovingContent(chatHost)
             // The target can appear after initial layout. Retire the previous outer
             // bitmap explicitly before the transparency guard starts protecting it.
-            t.mma.utils.ChatScrollDiagnostic.phase("background.retireChatSurfaces") {
+            run {
                 state.surfaces.entries.toList().filter { (view, snapshot) ->
                     snapshot.slot == slot && snapshot.appliedBitmap != null && view !== movingContent &&
                         isDescendantOf(view, chatHost)
@@ -1915,11 +1902,11 @@ private class BackgroundBeautyRuntime(
                     state.surfaces.remove(view)
                 }
             }
-            t.mma.utils.ChatScrollDiagnostic.phase("background.imageSurface") {
+            run {
                 if (movingContent !== chatHost) setTransparentSurface(state, chatHost, slot, clearForeground = true)
                 setImageSurface(state, movingContent, slot, bitmap, opacity)
             }
-            t.mma.utils.ChatScrollDiagnostic.phase("background.chatApply") {
+            run {
                 applyChatBackground(state, bitmap, opacity)
             }
         } else {
@@ -1938,13 +1925,13 @@ private class BackgroundBeautyRuntime(
             if (content != null && content !== host) setTransparentSurface(state, content, slot)
             applyLauncherBackground(state, slot, bitmap, opacity)
         }
-        t.mma.utils.ChatScrollDiagnostic.phase("background.chrome") {
+        run {
             applyChromeTransparency(state, slot)
         }
-        t.mma.utils.ChatScrollDiagnostic.phase("background.systemBars") {
+        run {
             applySystemBars(state)
         }
-        t.mma.utils.ChatScrollDiagnostic.phase("background.invalidate") {
+        run {
             if (state.activity.javaClass.name == LAUNCHER_ACTIVITY) invalidateWechatBackdrops(state.activity)
         }
         if (state.lastLoggedSlot != slot) {
@@ -2056,7 +2043,6 @@ private class BackgroundBeautyRuntime(
         val icon = footer.findViewById<ImageView>(resourceId("bqr"))
         val drawable = icon?.drawable
         if (icon == null || drawable == null || icon.width <= 0 || icon.height <= 0) {
-
             return (footer.resources.displayMetrics.density * 1.2f).toInt().coerceAtLeast(1)
         }
         val matrix = FloatArray(9).also { icon.imageMatrix.getValues(it) }
@@ -2337,12 +2323,8 @@ private class BackgroundBeautyRuntime(
             hookOnce(method, before = { param ->
                 val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
                 val activity = findActivity(scroll) ?: return@hookOnce
-                t.mma.utils.ChatScrollTrace.watch(scroll)
-                t.mma.utils.ChatScrollDiagnostic.hit("scroll.nativeLayout")
                 states[activity]?.inputUnderlay?.beforeLayout(scroll)
-                t.mma.utils.ChatScrollTrace.nativeBegin()
             }, after = { param ->
-                t.mma.utils.ChatScrollTrace.nativeEnd()
                 val scroll = param.thisObject as? ViewGroup ?: return@hookOnce
                 val activity = findActivity(scroll) ?: return@hookOnce
                 val state = states[activity] ?: return@hookOnce
@@ -2455,8 +2437,6 @@ private class BackgroundBeautyRuntime(
         }
     }
     private fun applyChatFooterTransparency(state: HostState, root: View) {
-        val traceStarted = t.mma.utils.ChatScrollDiagnostic.begin()
-        try {
         val footer = when {
             root.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChatFooter" -> root
             else -> findVisibleDescendant(root, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter")
@@ -2520,7 +2500,6 @@ private class BackgroundBeautyRuntime(
             }
         }
 
-        } finally { t.mma.utils.ChatScrollDiagnostic.end("background.footer", traceStarted) }
     }
     private fun applyWhitelistedSurfaces(
         state: HostState,
@@ -2876,15 +2855,6 @@ private class BackgroundBeautyRuntime(
         surfaceMutationDepth++
         try {
             val snapshot = surfaceSnapshot(state, view)
-            // Capture before synchronization clears the previous marker on native replacement.
-            val writeReason = if (!t.mma.utils.ChatScrollDiagnostic.isActive()) 0 else when {
-                snapshot.appliedBackground != null && view.background !== snapshot.appliedBackground -> 1
-                snapshot.appliedBackground == null -> 2
-                snapshot.slot != slot -> 3
-                snapshot.appliedBitmap != null -> 4
-                else -> 5
-            }
-            val diagnosticPreviousSlot = if (writeReason != 0) snapshot.slot?.name else null
             synchronizeExternalBackground(snapshot, view)
             if (slot == BackgroundBeautySettings.Slot.CONTACTS) captureContactGeometry(view, snapshot)
             val backgroundMatches = snapshot.slot == slot &&
@@ -2901,7 +2871,6 @@ private class BackgroundBeautyRuntime(
                 view.backgroundTintList = null
                 view.backgroundTintMode = null
                 view.background = marker
-                if (writeReason != 0) t.mma.utils.ChatScrollDiagnostic.backgroundWrite(writeReason, view.javaClass.name, view, diagnosticPreviousSlot, slot.name)
                 marker.state = view.drawableState
                 restoreSurfaceGeometry(view, snapshot)
                 snapshot.appliedBackground = marker
@@ -3121,7 +3090,6 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun clearActivity(activity: Activity) {
-
         restoreBounceColors(activity)
         synchronized(pendingLoads) { pendingLoads.remove(activity) }
         synchronized(pendingRefreshes) { pendingRefreshes.remove(activity) }

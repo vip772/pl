@@ -28,6 +28,7 @@ object HomeExtensionSettings {
     const val WEATHER_ALPHA = "weather_alpha"
     const val MUSIC = "music"
     const val MUSIC_ALPHA = "music_alpha"
+    const val MUSIC_STYLE_TWO_HEIGHT = "music_style_two_height"
     const val LYRIC_COLOR = "music_lyric_color"
     const val LYRIC_ALPHA = "music_lyric_alpha"
     const val LYRIC_X = "music_lyric_x"

@@ -183,6 +183,7 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                             listOf(PopupChoice("样式1 · 唱片卡片", "1"), PopupChoice("样式2 · 涂鸦玻璃卡片", "2"), PopupChoice("样式3 · 黑胶唱片", "3")),
                             musicStyle.toString(), { value -> musicStyle = value.toInt(); prefs.edit().putInt(Settings.MUSIC_STYLE, musicStyle).apply() })
                         if (musicStyle == 2) {
+                            HomeExtensionSlider(context, "高度 dp", Settings.MUSIC_STYLE_TWO_HEIGHT, Settings.MUSIC_STYLE_TWO_HEIGHT_DP, 80f..500f)
                             ActionRow("自定义头像照片", "替换样式2首页和二级页面的圆形照片") { if(activity != null) SidePanelImagePicker.launch(activity, Settings.MUSIC_AVATAR_SLOT) }
                             ActionRow("使用歌曲封面", "移除自定义照片，恢复当前歌曲封面") { SidePanelImages.clear(context, Settings.MUSIC_AVATAR_SLOT) }
                             ActionRow("选择 / 更换背景图片", "首页样式2背景，长按拖动、双指缩放，松手保存") {

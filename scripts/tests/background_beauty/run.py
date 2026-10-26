@@ -141,9 +141,6 @@ public abstract class Drawable {
     files=[]
     for name in ['R.kt','Test.kt']:
         p=work/name;p.write_text(stubs[name] + (chr(10) + text[start:end].replace('ColorStateList.valueOf', 'android.content.res.ColorStateList.valueOf') + chr(10) + text[text.index('private class ScreenAlignedBitmapDrawable'):text.index('private class BackgroundBeautyRuntime')].replace('    override fun onBoundsChange(bounds: Rect) {', '    fun onBoundsForTest() { updateDestination() }\n    override fun onBoundsChange(bounds: Rect) {') if name == 'Test.kt' else ''));files.append(str(p))
-    perf=work/'Performance.kt'
-    perf.write_text('package t.mma.utils; object PerformanceSample {fun start()=0L;fun finish(n:String,t:Long){}}')
-    files.append(str(perf))
     (work/'PixelFormat.kt').write_text('package android.graphics\nobject PixelFormat { const val TRANSLUCENT=-3;const val OPAQUE=-1 }')
 
     prod=repo/'app/src/main/java/t/mma/hooks/items/homesidepanel/SidePanelEdgeGesture.kt'

@@ -24,7 +24,6 @@ import androidx.compose.ui.unit.sp
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.core.HookRegistry
 import t.mma.utils.KavaReflector
-import t.mma.utils.ChatScrollDiagnostic
 import t.mma.utils.RuntimeLogStore
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -69,7 +68,6 @@ internal fun RuntimeLogMiuixPage(
             item {
                 SettingsCard {
                     SwitchRow(enabled, "开启运行日志", "开启后记录，关闭后停止记录") { value ->
-                        if (!value) ChatScrollDiagnostic.stop()
                         RuntimeLogStore.setEnabled(activity, value)
                         enabled = value
                         refreshVersion += 1
@@ -77,24 +75,6 @@ internal fun RuntimeLogMiuixPage(
                 }
             }
             if (enabled) {
-                item {
-                    SettingsCard {
-                        for ((group, description) in listOf(
-                            "A" to "输入框开、标题栏开", "B" to "输入框关、标题栏开",
-                            "C" to "输入框开、标题栏关", "D" to "输入框关、标题栏关"
-                        )) {
-                            ActionRow("采集 $group 组滚动诊断", "$description；先手动设置开关，最多采集5分钟") {
-                                ChatScrollDiagnostic.start(activity, group)
-                                Toast.makeText(activity, "$group 组诊断已开始，请返回聊天滚动", Toast.LENGTH_SHORT).show()
-                            }
-                            InsetDivider()
-                        }
-                        ActionRow("停止滚动诊断", "输出最后一份汇总，复测后再导出日志") {
-                            ChatScrollDiagnostic.stop()
-                            Toast.makeText(activity, "专项诊断已停止", Toast.LENGTH_SHORT).show()
-                        }
-                    }
-                }
                 item {
                     SettingsCard {
                         ActionRow("刷新", "重新读取最新功能状态和失效原因") {

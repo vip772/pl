@@ -13,8 +13,6 @@ class ColorDrawable(val color:Int)
 ''',
 'Log.kt': '''package t.mma.utils
 object HLog{fun i(s:String){}}
-internal object ChatScrollTrace {fun nativeBegin(){};fun nativeEnd(){};fun start(){};fun stop(){};fun watch(v:android.view.View,c:android.view.View?=null,l:android.view.View?=null,f:android.view.View?=null){};fun snapshot(n:String,v:android.view.View){};fun enter(n:String):String?=null;fun leave(n:String?){}}
-object ChatScrollDiagnostic {fun isActive()=false;fun begin()=0L;fun end(n:String,t:Long){};fun hit(n:String){};fun geometry(a:Int,b:Int,c:Int){}}
 ''',
 'View.kt': '''package android.view
 interface ViewParent

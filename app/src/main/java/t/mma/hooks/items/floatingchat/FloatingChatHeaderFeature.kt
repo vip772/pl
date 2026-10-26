@@ -255,9 +255,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun apply(sourceLayout: ViewGroup) {
-        val traceStarted = t.mma.utils.ChatScrollDiagnostic.begin()
-        try {
-
         if (!isEnabled()) {
             restore(sourceLayout)
             visibleChatLayout(sourceLayout)?.takeIf { it !== sourceLayout }?.let(::restore)
@@ -271,7 +268,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val header = headersByLayout[layout]?.takeIf { it.isAttachedToWindow && states[it] != null }
             ?: find(layout) { it.javaClass.name == headerClass }?.also { headersByLayout[layout] = it }
             ?: run {
-
                 return
             }
         fun named(name: String): View? {
@@ -306,16 +302,13 @@ private class HeaderRuntime(private val context: FeatureContext) {
             marginLp.topMargin = top
             header.layoutParams = marginLp
         }
-        val cardsStarted = t.mma.utils.ChatScrollDiagnostic.begin()
-        try {
+
         applyHeaderZoneCards(layout, header)
         tipsCardBottoms.remove(layout)
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
-        } finally { t.mma.utils.ChatScrollDiagnostic.end("header.cards", cardsStarted) }
-        val capsuleStarted = t.mma.utils.ChatScrollDiagnostic.begin()
-        val split = try { (header as? ViewGroup)?.let { capsule.apply(it) } == true }
-            finally { t.mma.utils.ChatScrollDiagnostic.end("header.capsule", capsuleStarted) }
+
+        val split = (header as? ViewGroup)?.let { capsule.apply(it) } == true
         val tracker = layoutTrackers.getOrPut(layout) { HeaderLayoutTracker() }
 
         val elevation = if (split) 0f else dp(ELEVATION_DP).toFloat()
@@ -329,8 +322,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
             header.bringToFront()
         }
 
-
-        } finally { t.mma.utils.ChatScrollDiagnostic.end("header.apply", traceStarted) }
     }
 
     private fun visibleChatLayout(source: ViewGroup): ViewGroup? {

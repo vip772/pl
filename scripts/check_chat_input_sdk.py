@@ -20,8 +20,6 @@ with tempfile.TemporaryDirectory() as td:
     helpers = folder / 'Helpers.kt'
     helpers.write_text('''package t.mma.utils
 object HLog { fun i(message: String) {} }
-internal object ChatScrollTrace {fun nativeBegin(){};fun nativeEnd(){};fun start(){};fun stop(){};fun watch(v:android.view.View,c:android.view.View?=null,l:android.view.View?=null,f:android.view.View?=null){};fun snapshot(n:String,v:android.view.View){};fun enter(n:String):String?=null;fun leave(n:String?){}}
-object ChatScrollDiagnostic {fun isActive()=false;fun begin()=0L;fun end(n:String,t:Long){};fun hit(n:String){};fun geometry(a:Int,b:Int,c:Int){}}
 object KavaReflector {
  fun findMethodRecursive(type: Class<*>, name: String): java.lang.reflect.Method? = null
  fun invokeOrThrow(method: java.lang.reflect.Method, owner: Any): Any? = null

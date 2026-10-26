@@ -30,3 +30,7 @@
 聊天底部留白排查：FloatingChatFooterFeature.applyChatListPadding原实现无条件叠加occupiedHeight+gap；即使原生布局已将消息列表底部上移，也会再次添加完整输入区高度。改为稳定布局阶段测量列表屏幕底部与悬浮输入区屏幕顶部的实际交叠，仅增加该重叠量，保留原生底部padding、标题栏顶部避让及恢复路径。无重叠恢复原生底部值，重复调用不累加。不新增消息扫描、滚动回调或主动滚动。该源码问题可确认，设备具体留白是否完全消失仍需新包验收。
 
 定向验证包含生产底部padding方法的完整/部分/零重叠与pending-layout场景，顶部避让回归、面板切换/尺寸回归、收藏导航边界、Canvas SDK编译、背景共享手势。未运行Gradle、未构建APK；本组改动随后与发送按钮动画收尾一并获授权提交推送，详见FLOATING_SEND_BUTTON.md。
+
+## 样式二高度调节
+
+首页音乐样式二设置新增“高度 dp”，复用首页照片的HomeExtensionSlider及80–500dp范围，独立配置键music_style_two_height，属于Hchat_home_extension_config，随统一配置备份导出导入。仅首页样式二测量读取，二级播放器与其它样式不读取。未设置时保留普通105dp/双列123dp默认值；用户调节后两种布局均使用所选高度。该键不属于musicDataKeys，沿用首页配置监听与签名更新重新渲染，背景变换随尺寸变化重算。

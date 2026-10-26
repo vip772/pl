@@ -61,6 +61,7 @@ private class SnsAntiRecallHooker(
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
     private val internalQuery = ThreadLocal.withInitial { false }
 
+    @Synchronized
     fun install(): Boolean {
         var count = 0
         val wrapperClass = context.dexFinder().sqliteDbWrapperClass
@@ -89,23 +90,33 @@ private class SnsAntiRecallHooker(
         var count = 0
         for (method in KavaReflector.declaredMethods(dbClass)) {
             if (!isSnsWriteMethod(method) && !isSnsRawQueryMethod(method)) continue
-            if (!hookedMethods.add(method)) continue
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    try {
-                        if (isSnsWriteMethod(method)) {
-                            handleSnsWrite(param.thisObject, param.args, isSnsUpdateMethod(method))
-                        } else if (isSnsRawQueryMethod(method)) {
-                            if (internalQuery.get() == true) return
-                            if (!isMomentAntiRecallEnabled()) return
-                            handleSnsQuery(param.args)
-                        }
+            // Count confirmed existing hooks as available, not only newly added hooks.
+            if (!hookedMethods.add(method)) {
+                count++
+                continue
+            }
+            try {
+                HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        try {
+                            if (isSnsWriteMethod(method)) {
+                                handleSnsWrite(param.thisObject, param.args, isSnsUpdateMethod(method))
+                            } else if (isSnsRawQueryMethod(method)) {
+                                if (internalQuery.get() == true) return
+                                if (!isMomentAntiRecallEnabled()) return
+                                handleSnsQuery(param.args)
+                            }
                     } catch (e: Throwable) {
                         HLog.e("[Hchat:SnsAntiRecall] Hook处理失败", e)
                     }
                 }
             })
             count++
+            } catch (e: Throwable) {
+                // Failed installation must remain eligible for the next scheduler attempt.
+                hookedMethods.remove(method)
+                HLog.e("[Hchat:SnsAntiRecall] 数据库Hook安装失败: ${method.toGenericString()}", e)
+            }
         }
         return count
     }
@@ -226,7 +237,7 @@ private class SnsAntiRecallHooker(
 
     private fun hookLegacySnsUserPageSwitch(): Int {
         val method = findEnableFlutterSnsPageMethod() ?: return 0
-        if (!hookedMethods.add(method)) return 0
+        if (!hookedMethods.add(method)) return 1
         return try {
             HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
@@ -237,6 +248,7 @@ private class SnsAntiRecallHooker(
             })
             1
         } catch (e: Throwable) {
+            hookedMethods.remove(method)
             HLog.e("[Hchat:SnsAntiRecall] Hook旧版朋友圈主页开关失败: ${e.message}", e)
             0
         }

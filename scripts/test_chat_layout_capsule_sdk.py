@@ -17,6 +17,7 @@ fun hookOnce(m:java.lang.reflect.Method,before:((Param)->Unit)?=null,after:((Par
 fun findActivity(v:View):Activity?=null
 fun chatChromeVersionName()="8.0.78"
 fun floatingFooterEnabled()=false
+fun hasBackgroundImage(s:BackgroundBeautySettings.Slot)=true
 fun install(){
 '''+s[a:b]+'''}}
 object BackgroundBeautySettings {const val KEY_ENABLE="enabled";const val DEFAULT_ENABLE=false;enum class Slot {CHAT}}
@@ -31,8 +32,6 @@ fun findMethodRecursive(c:Class<*>,n:String):java.lang.reflect.Method?=null
 fun invokeOrThrow(m:java.lang.reflect.Method,o:Any):Any?=null
 }
 object HLog {fun e(s:String,e:Throwable){}}
-internal object ChatScrollTrace {fun nativeBegin(){};fun nativeEnd(){};fun watch(v:android.view.View,c:android.view.View?=null,l:android.view.View?=null,f:android.view.View?=null){};fun snapshot(n:String,v:android.view.View){};fun enter(n:String):String?=null;fun leave(n:String?){}}
-object ChatScrollDiagnostic {fun isActive()=false;fun begin()=0L;fun end(n:String,t:Long){};fun hit(n:String){};fun geometry(a:Int,b:Int,c:Int){}}
 ''')
  src=r/'app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt';text=src.read_text();a=text.index('    private fun applyMessageDetailsColors(');b=text.index('    private fun rememberMessageDetailsLabel',a)
  (p/'Time.kt').write_text('''import android.widget.TextView

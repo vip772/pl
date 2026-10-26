@@ -429,7 +429,6 @@ private class FooterRuntime(private val context: FeatureContext) {
                             ?.getInsets(android.view.WindowInsets.Type.ime())?.bottom ?: 0
                     } else 0
                     if (panel.visibility == View.VISIBLE) {
-
                         param.args[0] = imeHeight
                     }
                 }
@@ -657,7 +656,6 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
 
     private fun apply(footer: View): Boolean {
-
         if (!isEnabled()) {
             restore(footer)
             return false
@@ -916,8 +914,6 @@ private class FooterRuntime(private val context: FeatureContext) {
     private fun ensurePreDrawTracking(footer: View) {
         if (preDrawListeners[footer] != null) return
         val listener = ViewTreeObserver.OnPreDrawListener {
-            val traceStarted = t.mma.utils.ChatScrollDiagnostic.begin()
-            try {
             if (isEnabled() && footer.isAttachedToWindow) {
                 run {
                     // Recheck cached surfaces only; do not scan the tree or request layout.
@@ -929,7 +925,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                 }
             }
             true
-            } finally { t.mma.utils.ChatScrollDiagnostic.end("footer.preDraw", traceStarted) }
+
         }
         preDrawListeners[footer] = listener
         footer.viewTreeObserver.addOnPreDrawListener(listener)

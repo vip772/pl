@@ -9,7 +9,7 @@ object HchatStorage { fun preferences(c:android.content.Context,n:String):androi
 'Log.kt':'package t.mma.utils\nobject HLog {fun e(s:String,t:Throwable){}}',
 'Stubs.kt':'''package t.mma.hooks.items.homeextension
 object HomeMusic {fun setListener(f:()->Unit){};fun removeListener(f:()->Unit){}}
-object HomeExtensionSettings {const val MUSIC_AVATAR_SLOT="home_music_avatar";const val MUSIC_THREE_AVATAR_SLOT="home_music_three_avatar";const val MUSIC_ALPHA="music_alpha";const val MUSIC_STYLE_TWO_HEIGHT_DP=100;fun preferences(c:android.content.Context):android.content.SharedPreferences=TODO()}
+object HomeExtensionSettings {const val MUSIC_AVATAR_SLOT="home_music_avatar";const val MUSIC_THREE_AVATAR_SLOT="home_music_three_avatar";const val MUSIC_ALPHA="music_alpha";const val MUSIC_STYLE_TWO_HEIGHT="music_style_two_height";const val MUSIC_STYLE_TWO_HEIGHT_DP=100;fun preferences(c:android.content.Context):android.content.SharedPreferences=TODO()}
 class MusicIcon(c:android.content.Context,s:String):android.widget.TextView(c)
 ''',
 'Images.kt':'''package t.mma.hooks.items.homesidepanel
@@ -44,3 +44,8 @@ assert 'GradientOrbitStroke.draw' in (r/'app/src/main/java/t/mma/hooks/items/hom
 assert 'if(homeCompact)123' in view
 assert 'MUSIC_STYLE_TWO_HEIGHT_DP = CALENDAR_CONTENT_HEIGHT_DP - 45' in (base/'HomeExtensionFeature.kt').read_text()
 print('PASS time endpoints/no dots/orange progress/no mask/+5dp controls and height/shared 3dp orbit with 1dp core gap')
+
+ui=(r/'app/src/main/java/t/mma/ui/miuix/HomeExtensionMiuixPage.kt').read_text()
+assert 'HomeExtensionSlider(context, "高度 dp", Settings.MUSIC_STYLE_TWO_HEIGHT, Settings.MUSIC_STYLE_TWO_HEIGHT_DP, 80f..500f)' in ui
+assert 'getInt(HomeExtensionSettings.MUSIC_STYLE_TWO_HEIGHT,if(homeCompact)123 else HomeExtensionSettings.MUSIC_STYLE_TWO_HEIGHT_DP).coerceIn(80,500)' in view
+print('PASS style2 independent height slider and bounded measurement; unset defaults preserved')
