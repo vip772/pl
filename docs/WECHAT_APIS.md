@@ -999,3 +999,10 @@ WeChatMessage内部quoteTitle()/quoteContent()只读取范围判断需要的标�
 getMessageById保持原SQL、消息表顺序和message兼容回退，直接从Cursor转换完整消息，不再构造逐行Map及两个中间结果列表。共享数据库cursorValue列解码，保留字段名大小写、重复列最后值、NULL/缺列默认、数字转换和selfWxId读取；查询/读取失败继续原回退并关闭游标。仅调整按ID单条路径，其它列表接口不变。单条SQL均LIMIT 1。
 
 scripts/test_message_single_cursor.py提取生产读取及旧实现做1215组类型/故障对照，并检查缺列、空列、重复列、大小写、查询异常、多表顺序、空结果、参数和游标关闭；新路径行Map计数为0。未运行Gradle或实机验证。
+
+
+### 艾特分类后备读取与正则按需创建
+
+`WeChatMessage.parseAtUserList()` 与 `hasPositiveAtAllFlag()` 按 XML 标签、`.msgsource.*` 键值、短键值的原优先级惰性读取，首个非空白来源命中后不再执行后备读取。`msgSourceValue()` 保持原有正则文本、匹配选项与引号/CDATA/裸值顺序，逐条创建并匹配，首个匹配立即返回（即使返回值为空也保持原行为）。不添加跨绑定缓存，不改变实体解码、引用隔离或艾特分类规则。
+
+`scripts/test_mention_lazy_readers.py` 使用 c28717d 生产模型作旧实现对照，15,880 项名单、键值提取与分类结果一致；覆盖空值、空白、冲突来源、CDATA、实体、引号、引用与不完整格式。临时编译副本计数确认 XML 名单和 atall 标志命中时键值后备调用为零；引号/CDATA/裸值分别创建 1/2/3 条键值正则。来源管线、6,750 组消息来源回退对照及引用范围回归通过。未运行 Gradle；上述结果证明行为对照和减少额外工作，不代表已测量实机分配量或长帧收益。

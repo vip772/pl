@@ -407,11 +407,9 @@ class WeChatMessage(
         @JvmStatic
         fun parseAtUserList(msgSource: String?): List<String> {
             val source = withoutQuotedMessage(msgSource.orEmpty())
-            val atUsers = firstNotBlank(
-                xmlTag(source, "atuserlist"),
-                msgSourceValue(source, ".msgsource.atuserlist"),
-                msgSourceValue(source, "atuserlist")
-            )
+            val atUsers = xmlTag(source, "atuserlist")
+                .ifBlank { msgSourceValue(source, ".msgsource.atuserlist") }
+                .ifBlank { msgSourceValue(source, "atuserlist") }
             if (atUsers.isBlank()) return emptyList()
             return atUsers.split(',', ';', '|', ' ')
                 .map { it.trim() }
@@ -513,11 +511,9 @@ class WeChatMessage(
         }
 
         private fun hasPositiveAtAllFlag(source: String): Boolean {
-            val value = firstNotBlank(
-                xmlTag(source, "atall"),
-                msgSourceValue(source, ".msgsource.atall"),
-                msgSourceValue(source, "atall")
-            ).trim()
+            val value = xmlTag(source, "atall")
+                .ifBlank { msgSourceValue(source, ".msgsource.atall") }
+                .ifBlank { msgSourceValue(source, "atall") }.trim()
             return value.toIntOrNull()?.let { it > 0 } == true ||
                 value.equals("true", ignoreCase = true)
         }
@@ -712,15 +708,12 @@ class WeChatMessage(
             val raw = unescapeXml(source.orEmpty())
             if (raw.isBlank() || key.isBlank()) return ""
             val escaped = Regex.escape(key)
-            val patterns = arrayOf(
-                Regex("$escaped\\s*=\\s*(['\"])(.*?)\\1", RegexOption.IGNORE_CASE),
-                Regex("$escaped\\s*=\\s*<!\\[CDATA\\[(.*?)]]>", RegexOption.IGNORE_CASE),
-                Regex("$escaped\\s*=\\s*([^,;\\s}]+)", RegexOption.IGNORE_CASE)
-            )
-            for (pattern in patterns) {
-                val match = pattern.find(raw)
-                if (match != null) return match.groupValues.last().trim()
-            }
+            val match1 = Regex("$escaped\\s*=\\s*(['\"])(.*?)\\1", RegexOption.IGNORE_CASE).find(raw)
+            if (match1 != null) return match1.groupValues.last().trim()
+            val match2 = Regex("$escaped\\s*=\\s*<!\\[CDATA\\[(.*?)]]>", RegexOption.IGNORE_CASE).find(raw)
+            if (match2 != null) return match2.groupValues.last().trim()
+            val match3 = Regex("$escaped\\s*=\\s*([^,;\\s}]+)", RegexOption.IGNORE_CASE).find(raw)
+            if (match3 != null) return match3.groupValues.last().trim()
             return ""
         }
 
