@@ -2,10 +2,17 @@
 from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1];lib=Path('/tmp/pl-kotlin-libs');std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
-feature=(r/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt').read_text()
-start=feature.index('    private fun installMeEntryVisibility()');end=feature.index('    private fun installFragmentHooks()',start)
+feature=(r/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/MeEntryVisibilityFeature.kt').read_text()
+start=feature.index('    private fun installMeEntryVisibility()');end=feature.index('    companion object',start)
 main='''package t.mma.hooks.items.backgroundbeauty
 fun main(){
+ val runtime=Runtime()
+ runtime.attempt();check(KavaReflector.lookups==0)
+ runtime.requestedMeHiddenKeys=setOf("settings_mm_favorite")
+ runtime.attempt();check(KavaReflector.lookups==1)
+ runtime.installed=true;runtime.attempt();check(KavaReflector.lookups==1)
+ runtime.installed=false;runtime.destroyed=true;runtime.attempt();check(KavaReflector.lookups==1)
+ println("PASS no hooks/lookup when all off; enabled install attempt; installed/destroyed guard")
  val entries=MeEntryVisibility.Entry.values()
  check(MeEntryVisibility.hiddenKeys{false}.isEmpty())
  for(mask in 0 until 32){
@@ -32,8 +39,10 @@ open class XC_MethodHook {
  open fun afterHookedMethod(param:MethodHookParam){}
 }
 object KavaReflector {
- fun loadClass(n:String,l:ClassLoader):Class<*>?=null
+ var lookups=0
+ fun loadClass(n:String,l:ClassLoader):Class<*>? {lookups++;return null}
  fun findMethod(c:Class<*>,n:String,vararg p:Class<*>):java.lang.reflect.Method?=null
+ fun findMethodRecursive(c:Class<*>,n:String,vararg p:Class<*>):java.lang.reflect.Method?=null
  fun findFieldRecursive(c:Class<*>,n:String):java.lang.reflect.Field?=null
  fun readField(f:java.lang.reflect.Field,o:Any):Any?=null
  fun invokeOrThrow(m:java.lang.reflect.Method,o:Any):Any?=null
@@ -42,15 +51,15 @@ object HookRegistry {fun get()=this;fun hook(m:java.lang.reflect.Method,c:XC_Met
 object HLog {fun e(s:String,t:Throwable){}}
 class Ctx {fun hostClassLoader()=javaClass.classLoader}
 class Prefs {fun getBoolean(k:String,d:Boolean)=d}
+object WeChatApis {fun version()=this;fun versionName()="8.0.78"}
 class Runtime {
  val context=Ctx(); val prefs=Prefs();val ownedHooks=mutableListOf<XC_MethodHook.Unhook>()
  val meEntryAdapters=Collections.newSetFromMap(WeakHashMap<Any,Boolean>())
  val meEntryOverlays=IdentityHashMap<Any,Set<String>>()
- val requestedMeHiddenKeys=emptySet<String>()
- var destroyed=false;var meEntryFailureLogged=false
+ var requestedMeHiddenKeys=emptySet<String>()
+ var destroyed=false;var meEntryFailureLogged=false;var installed=false
  val TAG="test";val ME_FRAGMENT="com.tencent.mm.ui.MoreTabUI"
- fun chatChromeVersionName()="8.0.78"
- fun readNativeField(o:Any,n:String):Any?=null
+ fun attempt()=installMeEntryVisibility()
 '''+feature[start:end]+'}\n'
 with tempfile.TemporaryDirectory() as td:
  p=Path(td);(p/'Main.kt').write_text(main);(p/'Runtime.kt').write_text(stub)

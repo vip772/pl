@@ -357,20 +357,12 @@ private class BackgroundBeautyRuntime(
     private val listAdapters = WeakHashMap<View, Any>()
     private val bounceColors = WeakHashMap<View, MutableMap<java.lang.reflect.Method, Any?>>()
     private var restoringBounce = false
-    private val meEntryAdapters = Collections.newSetFromMap(WeakHashMap<Any, Boolean>())
-    private val meEntryOverlays = IdentityHashMap<Any, Set<String>>()
-    private var meEntryFailureLogged = false
-    @Volatile private var requestedMeHiddenKeys = MeEntryVisibility.hiddenKeys { prefs.getBoolean(it, false) }
     @Volatile private var backgroundRenderingEnabled = false
     private var backgroundHooksInstalled = false
     @Volatile private var configuredBackgroundSlots = emptySet<BackgroundBeautySettings.Slot>()
     private val nativeFieldCache = NativeFieldAccessors()
     private val homeLists = WeakHashMap<View, BackgroundBeautySettings.Slot>()
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == null || MeEntryVisibility.Entry.values().any { it.key == key }) {
-            requestedMeHiddenKeys = MeEntryVisibility.hiddenKeys { prefs.getBoolean(it, false) }
-            main.post { if (!destroyed) meEntryAdapters.toList().forEach { refreshMeEntries(it) } }
-        }
         if (key == null || key == BackgroundBeautySettings.KEY_ENABLE ||
             key == BackgroundBeautySettings.KEY_REVISION ||
             BackgroundBeautySettings.Slot.values().any { slot ->
@@ -405,7 +397,6 @@ private class BackgroundBeautyRuntime(
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
-        installMeEntryVisibility()
         updateBackgroundHooks()
         main.post(::refreshAll)
         return true
@@ -453,9 +444,6 @@ private class BackgroundBeautyRuntime(
         restoreBounceColors(null)
         contactOverlays.toMap().forEach { (row, overlay) -> row.overlay.remove(overlay) }
         contactOverlays.clear()
-        meEntryAdapters.toList().forEach { refreshMeEntries(it, restoring = true) }
-        meEntryAdapters.clear()
-        meEntryOverlays.clear()
         homeLists.clear()
         listAdapters.clear()
         surfaceOwners.clear()
@@ -615,60 +603,6 @@ private class BackgroundBeautyRuntime(
             task.run()
             param.result = null
         })
-    }
-
-    // Verified 8.0.78: MoreTabUI.s -> g0; q() builds visible rows from e/f minus g,
-    // then merges empty categories. Only adapters owned by MoreTabUI are filtered.
-    private fun installMeEntryVisibility() {
-        if (chatChromeVersionName() != "8.0.78") return
-        val adapterClass = KavaReflector.loadClass("com.tencent.mm.ui.base.preference.g0", context.hostClassLoader()) ?: return
-        val fragmentClass = KavaReflector.loadClass(ME_FRAGMENT, context.hostClassLoader()) ?: return
-        val rebuild = KavaReflector.findMethod(adapterClass, "q") ?: return
-        val hiddenField = KavaReflector.findFieldRecursive(adapterClass, "g") ?: return
-        ownedHooks.add(HookRegistry.get().hook(rebuild, object : XC_MethodHook() {
-            override fun beforeHookedMethod(param: MethodHookParam) {
-                if (destroyed || param.thisObject !in meEntryAdapters) return
-                try {
-                    @Suppress("UNCHECKED_CAST")
-                    val hidden = KavaReflector.readField(hiddenField, param.thisObject) as? MutableSet<String> ?: return
-                    meEntryOverlays[param.thisObject] = MeEntryVisibility.overlay(hidden, requestedMeHiddenKeys)
-                } catch (error: Throwable) { logMeEntryFailure(error) }
-            }
-            override fun afterHookedMethod(param: MethodHookParam) {
-                val added = meEntryOverlays.remove(param.thisObject) ?: return
-                try {
-                    @Suppress("UNCHECKED_CAST")
-                    val hidden = KavaReflector.readField(hiddenField, param.thisObject) as? MutableSet<String> ?: return
-                    hidden.removeAll(added)
-                } catch (error: Throwable) { logMeEntryFailure(error) }
-            }
-        }))
-        KavaReflector.findMethod(fragmentClass, "onActivityCreated", Bundle::class.java)?.let { method ->
-            ownedHooks.add(HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    if (destroyed) return
-                    val adapter = readNativeField(param.thisObject, "s")
-                    if (adapter != null && adapterClass.isInstance(adapter)) {
-                        meEntryAdapters.add(adapter)
-                        refreshMeEntries(adapter)
-                    }
-                }
-            }))
-        }
-    }
-
-    private fun refreshMeEntries(adapter: Any, restoring: Boolean = false) {
-        try {
-            if (restoring) meEntryAdapters.remove(adapter)
-            val method = KavaReflector.findMethod(adapter.javaClass, "q") ?: return
-            KavaReflector.invokeOrThrow(method, adapter)
-        } catch (error: Throwable) { logMeEntryFailure(error) }
-    }
-
-    private fun logMeEntryFailure(error: Throwable) {
-        if (meEntryFailureLogged) return
-        meEntryFailureLogged = true
-        HLog.e("$TAG 微信8.0.78 我页 g0.q()/g 条目过滤失败", error)
     }
 
     private fun installFragmentHooks(): Boolean {

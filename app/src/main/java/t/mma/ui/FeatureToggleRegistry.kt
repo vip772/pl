@@ -19,6 +19,9 @@ object FeatureToggleRegistry {
     private data class Toggle(val prefs: String, val key: String, val defaultValue: Boolean = false)
 
     private val toggles = mapOf(
+        "home_extension" to Toggle("Hchat_home_extension_config", "enable"),
+        "chat_toolbar" to Toggle("Hchat_chat_toolbar_config", "enable"),
+        "upload_transparent_avatar" to Toggle("Hchat_upload_transparent_avatar_config", "upload_transparent_avatar_enable"),
         "step_multiplier" to Toggle("Hchat_step_multiplier", "enable"),
         "auto_cache" to Toggle("Hchat_auto_cache_config", "enable"),
         "home_side_panel" to Toggle("Hchat_home_side_panel", "enable"),
@@ -104,6 +107,10 @@ object FeatureToggleRegistry {
 
     fun isEnabled(context: Context, featureId: String): Boolean {
         return when (featureId) {
+            "me_entry_visibility" -> {
+                val sp = HchatStorage.preferences(context, t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings.PREFS_NAME)
+                t.mma.hooks.items.backgroundbeauty.MeEntryVisibility.Entry.values().any { sp.getBoolean(it.key, false) }
+            }
             "floating_chat_header", "floating_chat_footer" -> global(context, featureId)
             "floating_bottom_bar" -> boolean(context, "Hchat_custom_bottom_bar_config", "custom_bottom_bar_enable") &&
                 string(context, "Hchat_custom_bottom_bar_config", "custom_bottom_bar_style") == "floating"
@@ -152,8 +159,8 @@ object FeatureToggleRegistry {
                 boolean(context, "Hchat_quick_mark_read_config", "plus_menu_read_enable")
             "game_emoji_result" -> boolean(context, "Hchat_game_emoji_config", "game_emoji_fixed_result") ||
                 boolean(context, "Hchat_game_emoji_config", "game_emoji_pick_before_send")
-            else -> toggles[featureId]?.let { toggle -> boolean(context, toggle.prefs, toggle.key, toggle.defaultValue) } ?:
-                global(context, featureId)
+            // Unknown tools/pages do not become enabled from a guessed global key.
+            else -> toggles[featureId]?.let { toggle -> boolean(context, toggle.prefs, toggle.key, toggle.defaultValue) } ?: false
         }
     }
 

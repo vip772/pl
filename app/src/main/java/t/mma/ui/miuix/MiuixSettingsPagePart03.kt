@@ -1177,6 +1177,7 @@ internal fun FeatureSettingsPage(
         GameEmojiFeature.ID -> GameEmojiMiuixPage(context, provider, onBack)
         MessageBubbleFeature.ID -> MessageBubbleMiuixPage(context, provider, onBack)
         BackgroundBeautyFeature.ID -> BackgroundBeautyMiuixPage(context, provider, onBack)
+        t.mma.hooks.items.backgroundbeauty.MeEntryVisibilityFeature.ID -> MeEntryVisibilityMiuixPage(context, provider, onBack)
         MessageTextColorFeature.ID -> MessageTextColorMiuixPage(context, provider, onBack)
         t.mma.hooks.items.mentionextension.MentionExtensionSettingsProvider.ID -> MentionExtensionMiuixPage(context, provider, onBack)
         HomeTextColorFeature.ID -> HomeTextColorMiuixPage(context, provider, onBack)

@@ -117,6 +117,7 @@ object FeatureRegistry {
             // Visual hooks must precede optional toolbar/sidebar installation.
             // Keep the public API first so the chat-page subscription is available.
             .register(BackgroundBeautyFeature())
+            .register(t.mma.hooks.items.backgroundbeauty.MeEntryVisibilityFeature())
             .register(ChatToolbarFeature())
             .register(HomeSidePanelFeature())
             .register(t.mma.hooks.items.homeextension.HomeExtensionFeature())

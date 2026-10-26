@@ -29,7 +29,7 @@ object UIRegistry {
     }
 
     fun getEnabledProviders(): List<FeatureSettingsProvider> {
-        return providers.filter { provider ->
+        return providers.distinctBy { it.featureId() }.filter { provider ->
             runCatching { enabledChecks[provider.featureId()]?.invoke() ?: false }
                 .getOrDefault(false)
         }

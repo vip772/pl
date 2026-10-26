@@ -957,9 +957,6 @@ internal fun BackgroundBeautyMiuixPage(
                                     revision = bumpBackgroundBeautyRevision(sp)
                                 }
                             )
-                            if (slot == BackgroundBeautySettings.Slot.ME) {
-                                MeEntryVisibilityControls(sp)
-                            }
                             if (index != slots.lastIndex) InsetDivider()
                         }
                     }
@@ -2257,5 +2254,26 @@ private fun MeEntryVisibilityControls(sp: SharedPreferences) {
         InsetDivider()
         SwitchRow(title = "隐藏${entry.title}", summary = "收起我页面中的${entry.title}条目", checked = hidden,
             onCheckedChange = { hidden = it; sp.edit().putBoolean(entry.key, it).apply() })
+    }
+}
+
+@Composable
+internal fun MeEntryVisibilityMiuixPage(context: Context, provider: FeatureSettingsProvider, onBack: () -> Unit) {
+    val sp = remember { HchatStorage.preferences(context, BackgroundBeautySettings.PREFS_NAME) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    PageScaffold(
+        title = provider.title(), largeTitle = provider.title(), scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar("返回", onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 12.dp)
+        ) {
+            item { SmallTitle(text = "我页面条目") }
+            item { SettingsCard { MeEntryVisibilityControls(sp) } }
+        }
     }
 }

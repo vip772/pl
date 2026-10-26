@@ -2127,3 +2127,11 @@ DexFinder 在构造阶段、发布给 FeatureContext 和各 API 安装器之前�
 
 ## 配置与设置页布局维护
 新增功能的用户设置及资源应接入统一备份，运行数据显式排除；开发约定与验证见 [自动备份](CONFIG_BACKUP_AUTO_DISCOVERY.md)。设置页面通过 PageScaffold 的实测 bottomBar 高度避让，不再使用固定操作栏高度补偿，见 [设置底栏布局](SETTINGS_BOTTOM_BAR_LAYOUT.md)。收藏语音按需下载交互见 [收藏语音预览准备](FAVORITE_VOICE_LAZY_PREVIEW.md)。
+
+## 隐藏条目独立入口
+
+“美化”和“新功能”均通过同一 provider 打开“隐藏条目”，五个独立开关从我页面背景中移出。运行边界、旧配置与验证见 [隐藏条目](ME_ENTRY_VISIBILITY.md)。
+
+## 已开启功能统计
+
+聚合覆盖全部已注册功能分类，按功能入口去重，返回后重新读取启用状态。真实配置映射、滚动位置及验证边界见 [已开启功能](ENABLED_FEATURES.md)。

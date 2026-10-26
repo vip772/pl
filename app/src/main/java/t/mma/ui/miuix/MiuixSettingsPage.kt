@@ -1186,7 +1186,7 @@ object MiuixSettingsPage {
                 setContent {
                 val selected = detailPage.value
                 val mainListState = rememberLazyListState()
-                val featureGroupListStates = remember { mutableMapOf<FeatureGroupEntry, LazyListState>() }
+                val featureGroupListStates = remember { mutableMapOf<String, LazyListState>() }
                 CompositionLocalProvider(
                     LocalNavigationEventDispatcherOwner provides owner,
                     LocalSettingsBackHandlerRegistry provides settingsBackHandlers
@@ -1261,7 +1261,7 @@ object MiuixSettingsPage {
                             } else if (targetPage is DetailPage.FeatureGroup) {
                                 FeatureGroupSettingsPage(
                                     group = targetPage.group,
-                                    listState = featureGroupListStates.getOrPut(targetPage.group) { LazyListState() },
+                                    listState = featureGroupListStates.getOrPut(targetPage.group.title) { LazyListState() },
                                     onBack = { detailPage.value = null },
                                     onOpenProvider = {
                                         detailPage.value = DetailPage.Feature(it, targetPage.group)

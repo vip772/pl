@@ -1170,7 +1170,7 @@ internal fun enabledFeatureProviders(
     providers: List<FeatureSettingsProvider>
 ): List<FeatureSettingsProvider> {
     val enabledIds = UIRegistry.get().getEnabledProviders().mapTo(HashSet()) { it.featureId() }
-    return providers.filter { it.featureId() in enabledIds }
+    return providers.distinctBy { it.featureId() }.filter { it.featureId() in enabledIds }
 }
 
 internal fun practicalFeatureGroups(
@@ -1178,7 +1178,7 @@ internal fun practicalFeatureGroups(
     enhanceProviders: List<FeatureSettingsProvider>
 ): List<FeatureGroupEntry> {
     val newProviders = newFeatureProviders(practicalProviders + enhanceProviders)
-    val enabledProviders = enabledFeatureProviders(practicalProviders + enhanceProviders)
+    val enabledProviders = enabledFeatureProviders(UIRegistry.get().getAllProviders())
     return listOf(
         FeatureGroupEntry(
             title = "新功能",
@@ -1265,6 +1265,7 @@ internal fun practicalFeatureGroups(
         FeatureGroupEntry(
             title = "美化",
             providers = practicalProviders.filterByIds(
+                t.mma.hooks.items.backgroundbeauty.MeEntryVisibilityFeature.ID,
                 MessageBubbleFeature.ID,
                 MessageTextColorFeature.ID,
                 HomeTextColorFeature.ID,
@@ -1384,10 +1385,8 @@ internal fun SettingsSearchPage(
         it.category() == FeatureSettingsProvider.CATEGORY_ENHANCE &&
             it.featureId() != ScriptPluginFeature.ID
     }
-    val groups = remember(practicalProviders, enhanceProviders, entertainmentProviders) {
-        practicalFeatureGroups(practicalProviders, enhanceProviders) +
-            entertainmentFeatureGroups(entertainmentProviders)
-    }
+    val groups = practicalFeatureGroups(practicalProviders, enhanceProviders) +
+        entertainmentFeatureGroups(entertainmentProviders)
     val featureResults = remember(query, groups, providers) {
         filterFeatureSearchResults(query, groups, providers)
     }
@@ -1760,10 +1759,11 @@ internal fun FeatureGroupSettingsPage(
     onBack: () -> Unit,
     onOpenProvider: (FeatureSettingsProvider) -> Unit
 ) {
+    val currentGroup = refreshedFeatureGroup(group)
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
-        title = group.title,
-        largeTitle = group.title,
+        title = currentGroup.title,
+        largeTitle = currentGroup.title,
         scrollBehavior = scrollBehavior,
         bottomBar = {
             BottomActionBar("返回", onBack)
@@ -1778,7 +1778,7 @@ internal fun FeatureGroupSettingsPage(
             )
         ) {
             item { SmallTitle(text = "功能") }
-            item { FeatureListCard(group.providers, "暂无功能", onOpenProvider) }
+            item { FeatureListCard(currentGroup.providers, "暂无功能", onOpenProvider) }
         }
     }
 }
@@ -1842,6 +1842,11 @@ internal data class FeatureGroupEntry(
     val providers: List<FeatureSettingsProvider>
 )
 
+internal fun refreshedFeatureGroup(group: FeatureGroupEntry): FeatureGroupEntry =
+    if (group.title == "已开启功能") {
+        group.copy(providers = enabledFeatureProviders(UIRegistry.get().getAllProviders()))
+    } else group
+
 internal data class FeatureSearchResult(
     val provider: FeatureSettingsProvider,
     val group: FeatureGroupEntry?,
@@ -1885,7 +1890,7 @@ internal fun previousDetailPage(page: DetailPage?): DetailPage? = when (page) {
     is DetailPage.FeatureGroup -> null
     is DetailPage.Feature -> when {
         page.returnToSearch -> DetailPage.Search
-        page.sourceGroup != null -> DetailPage.FeatureGroup(page.sourceGroup)
+        page.sourceGroup != null -> DetailPage.FeatureGroup(refreshedFeatureGroup(page.sourceGroup))
         else -> null
     }
     is DetailPage.ScriptPluginAgent -> page.parentFeature
