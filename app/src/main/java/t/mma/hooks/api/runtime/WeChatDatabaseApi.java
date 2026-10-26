@@ -789,7 +789,8 @@ public final class WeChatDatabaseApi {
         return 10;
     }
 
-    private Object cursorValue(Cursor cursor, int index) {
+    /** Shared cursor decoding for internal message readers; failures retain empty values. */
+    public Object cursorValue(Cursor cursor, int index) {
         try {
             switch (cursor.getType(index)) {
                 case Cursor.FIELD_TYPE_NULL:

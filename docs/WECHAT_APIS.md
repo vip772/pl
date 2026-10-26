@@ -993,3 +993,9 @@ WeChatMessageParseApi 提取 msgsource 前统一通过 WeChatMessage.currentMess
 ### 内部引用文本按需读取
 
 WeChatMessage内部quoteTitle()/quoteContent()只读取范围判断需要的标题或引用内容，沿用isQuote资格判断与bodyContent语义，返回null表示非引用；完整getQuoteMsg与二者共享解码及引用内容回退实现。该能力供模块内部引用范围使用，不新增脚本接口，完整引用消息公开模型不变。
+
+### 按ID单条消息直接读取
+
+getMessageById保持原SQL、消息表顺序和message兼容回退，直接从Cursor转换完整消息，不再构造逐行Map及两个中间结果列表。共享数据库cursorValue列解码，保留字段名大小写、重复列最后值、NULL/缺列默认、数字转换和selfWxId读取；查询/读取失败继续原回退并关闭游标。仅调整按ID单条路径，其它列表接口不变。单条SQL均LIMIT 1。
+
+scripts/test_message_single_cursor.py提取生产读取及旧实现做1215组类型/故障对照，并检查缺列、空列、重复列、大小写、查询异常、多表顺序、空结果、参数和游标关闭；新路径行Map计数为0。未运行Gradle或实机验证。

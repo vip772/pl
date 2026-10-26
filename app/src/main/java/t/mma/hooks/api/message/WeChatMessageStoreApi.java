@@ -123,15 +123,90 @@ public final class WeChatMessageStoreApi {
         for (String table : messageTables()) {
             String quoted = quoteMessageTable(table);
             if (TextUtils.isEmpty(quoted)) continue;
-            List<WeChatMessage> tableRows = queryMessages(
+            WeChatMessage message = queryFirstMessage(
                     "SELECT * FROM " + quoted + " WHERE msgId=? LIMIT 1",
                     new String[]{String.valueOf(msgId)});
-            if (!tableRows.isEmpty()) return tableRows.get(0);
+            if (message != null) return message;
         }
-        List<WeChatMessage> rows = queryMessages(
+        return queryFirstMessage(
                 "SELECT " + selectColumns() + " FROM message WHERE msgId=? LIMIT 1",
                 new String[]{String.valueOf(msgId)});
-        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private WeChatMessage queryFirstMessage(String sql, String[] args) {
+        if (databaseApi == null) return null;
+        final Cursor cursor;
+        try {
+            cursor = databaseApi.rawQuery(sql, args);
+        } catch (Throwable e) {
+            log("消息查询失败: " + e.getMessage());
+            return null;
+        }
+        if (cursor == null) return null;
+        Object msgId = null, msgSvrId = null, type = null, status = null, isSend = null;
+        Object createTime = null, talker = null, content = null, imagePath = null;
+        Object reserved = null, translated = null, flag = null, source = null;
+        boolean read = false;
+        try {
+            String[] columns = cursor.getColumnNames();
+            if (columns == null || !cursor.moveToFirst()) return null;
+            for (int i = 0; i < columns.length; i++) {
+                // Read all columns like query(), including unknown and duplicate names.
+                Object value = databaseApi.cursorValue(cursor, i);
+                if (columns[i] == null) continue;
+                switch (columns[i]) {
+                    case "msgId": msgId = value; break;
+                    case "msgSvrId": msgSvrId = value; break;
+                    case "type": type = value; break;
+                    case "status": status = value; break;
+                    case "isSend": isSend = value; break;
+                    case "createTime": createTime = value; break;
+                    case "talker": talker = value; break;
+                    case "content": content = value; break;
+                    case "imgPath": imagePath = value; break;
+                    case "reserved": reserved = value; break;
+                    case "transContent": translated = value; break;
+                    case "flag": flag = value; break;
+                    case "msgSource": source = value; break;
+                    default: break;
+                }
+            }
+            read = true;
+            // query() also attempts this after saving the first row. A failure
+            // must not discard the row already read.
+            cursor.moveToNext();
+        } catch (Throwable e) {
+            log("SQL 结果读取异常: " + e.getMessage());
+        } finally {
+            try {
+                cursor.close();
+            } catch (Throwable ignored) {}
+        }
+        if (!read) return null;
+        return new WeChatMessage(
+                rowLong(msgId), rowLong(msgSvrId), rowInt(type), rowInt(status),
+                rowInt(isSend), rowLong(createTime), rowString(talker), rowString(content),
+                rowString(imagePath), rowString(reserved), rowString(translated), rowInt(flag),
+                rowString(source), selfWxId());
+    }
+
+    private static String rowString(Object value) {
+        return value != null ? String.valueOf(value) : "";
+    }
+
+    private static int rowInt(Object value) {
+        if (value instanceof Number) return ((Number) value).intValue();
+        if (value == null) return 0;
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Throwable ignored) {
+            return 0;
+        }
+    }
+
+    private static long rowLong(Object value) {
+        if (value instanceof Number) return ((Number) value).longValue();
+        return value == null ? 0L : parseLong(String.valueOf(value));
     }
 
     public WeChatMessage getMessageBySvrId(String talker, long msgSvrId) {
@@ -591,26 +666,15 @@ public final class WeChatMessageStoreApi {
     }
 
     private static String str(Map<String, Object> row, String key) {
-        Object value = row != null ? row.get(key) : null;
-        return value != null ? String.valueOf(value) : "";
+        return rowString(row != null ? row.get(key) : null);
     }
 
     private static int intValue(Map<String, Object> row, String key) {
-        Object value = row != null ? row.get(key) : null;
-        if (value instanceof Number) return ((Number) value).intValue();
-        if (value == null) return 0;
-        try {
-            return Integer.parseInt(String.valueOf(value));
-        } catch (Throwable ignored) {
-            return 0;
-        }
+        return rowInt(row != null ? row.get(key) : null);
     }
 
     private static long longValue(Map<String, Object> row, String key) {
-        Object value = row != null ? row.get(key) : null;
-        if (value instanceof Number) return ((Number) value).longValue();
-        if (value == null) return 0L;
-        return parseLong(String.valueOf(value));
+        return rowLong(row != null ? row.get(key) : null);
     }
 
     private static long parseLong(String value) {
