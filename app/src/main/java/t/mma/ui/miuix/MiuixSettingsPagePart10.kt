@@ -957,6 +957,9 @@ internal fun BackgroundBeautyMiuixPage(
                                     revision = bumpBackgroundBeautyRevision(sp)
                                 }
                             )
+                            if (slot == BackgroundBeautySettings.Slot.ME) {
+                                MeEntryVisibilityControls(sp)
+                            }
                             if (index != slots.lastIndex) InsetDivider()
                         }
                     }
@@ -2244,4 +2247,15 @@ internal fun MessageBlockListManagerPage(
             onDeleteBindings(targets)
         }
     )
+}
+
+
+@Composable
+private fun MeEntryVisibilityControls(sp: SharedPreferences) {
+    t.mma.hooks.items.backgroundbeauty.MeEntryVisibility.Entry.values().forEach { entry ->
+        var hidden by remember(entry.key) { mutableStateOf(sp.getBoolean(entry.key, false)) }
+        InsetDivider()
+        SwitchRow(title = "隐藏${entry.title}", summary = "收起我页面中的${entry.title}条目", checked = hidden,
+            onCheckedChange = { hidden = it; sp.edit().putBoolean(entry.key, it).apply() })
+    }
 }

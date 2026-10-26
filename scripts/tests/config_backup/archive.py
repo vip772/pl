@@ -124,6 +124,20 @@ fun main(args:Array<String>){
  val calTransform=Store.preferences(calOut,"Hchat_home_photo_transform")
  check(calTransform.getFloat("home_calendar_background_9_z",0f)==2f && calTransform.getFloat("home_calendar_background_9_x",0f)==.3f && calTransform.getFloat("home_calendar_background_9_y",0f)==.8f)
  println("PASS: calendar resource, opacity, zoom and offsets round trip; temporary files excluded")
+ // Me switches use the automatically discovered background preference store.
+ val me=Context(File(base,"me"),"com.me")
+ val meOut=Context(File(base,"me-restored"),"com.me.restored")
+ val mePrefs=Store.preferences(me,"Hchat_background_beauty_config")
+ val meKeys=listOf("me_hide_favorite","me_hide_moments","me_hide_works","me_hide_cards","me_hide_emoji")
+ meKeys.forEachIndexed { i,k -> mePrefs.edit().putBoolean(k,i%2==0).commit() }
+ Store.runtimePreferences(me,"Hchat_background_beauty_method_cache").edit().putString("locator","runtime").commit()
+ val meZip=File(base,"me.zip")
+ check(HchatConfigBackup.exportToUri(me,Uri(meZip)).stores==1)
+ HchatConfigBackup.importFromUri(meOut,Uri(meZip))
+ val meRestored=Store.preferences(meOut,"Hchat_background_beauty_config")
+ meKeys.forEachIndexed { i,k -> check(meRestored.contains(k) && meRestored.getBoolean(k,false)==(i%2==0)) }
+ check("Hchat_background_beauty_method_cache" !in Store.backupPreferenceNames(meOut))
+ println("PASS: five Me switches true/false round trip, runtime cache excluded")
  // Empty stores also round trip.
  val c=Context(File(base,"c"),"com.test.c");HchatConfigBackup.importFromUri(c,Uri(backup))
  fun legacy(value:JSONObject):File {
