@@ -26,6 +26,9 @@ object BackgroundBeautySettings {
         ME("me", "me.image", "我页面背景", "微信我的页面")
     }
 
+    internal fun needsRendering(enabled: Boolean, hasImage: (Slot) -> Boolean): Boolean =
+        enabled && Slot.values().any(hasImage)
+
     fun opacityKey(slot: Slot): String = "${slot.key}_opacity"
 
     fun opacity(value: Float): Float = value.coerceIn(0.10f, 1.0f)

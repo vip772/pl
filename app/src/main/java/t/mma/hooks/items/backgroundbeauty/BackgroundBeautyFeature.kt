@@ -360,18 +360,29 @@ private class BackgroundBeautyRuntime(
     private val meEntryAdapters = Collections.newSetFromMap(WeakHashMap<Any, Boolean>())
     private val meEntryOverlays = IdentityHashMap<Any, Set<String>>()
     private var meEntryFailureLogged = false
+    @Volatile private var requestedMeHiddenKeys = MeEntryVisibility.hiddenKeys { prefs.getBoolean(it, false) }
+    @Volatile private var backgroundRenderingEnabled = false
+    private var backgroundHooksInstalled = false
+    @Volatile private var configuredBackgroundSlots = emptySet<BackgroundBeautySettings.Slot>()
+    private val nativeFieldCache = NativeFieldAccessors()
     private val homeLists = WeakHashMap<View, BackgroundBeautySettings.Slot>()
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == null || MeEntryVisibility.Entry.values().any { it.key == key }) {
-            main.post { meEntryAdapters.toList().forEach { refreshMeEntries(it) } }
+            requestedMeHiddenKeys = MeEntryVisibility.hiddenKeys { prefs.getBoolean(it, false) }
+            main.post { if (!destroyed) meEntryAdapters.toList().forEach { refreshMeEntries(it) } }
         }
-        if (key == BackgroundBeautySettings.KEY_ENABLE ||
+        if (key == null || key == BackgroundBeautySettings.KEY_ENABLE ||
             key == BackgroundBeautySettings.KEY_REVISION ||
             BackgroundBeautySettings.Slot.values().any { slot ->
                 key == BackgroundBeautySettings.opacityKey(slot)
             }
         ) {
-            main.post(::refreshAll)
+            main.post {
+                if (!destroyed) {
+                    updateBackgroundHooks()
+                    refreshAll()
+                }
+            }
         }
     }
 
@@ -394,18 +405,31 @@ private class BackgroundBeautyRuntime(
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
+        installMeEntryVisibility()
+        updateBackgroundHooks()
+        main.post(::refreshAll)
+        return true
+    }
+    private fun updateBackgroundHooks() {
+        configuredBackgroundSlots = BackgroundBeautySettings.Slot.values().filterTo(LinkedHashSet()) {
+            BackgroundBeautyStore.hasImage(context.hostContext(), it)
+        }
+        backgroundRenderingEnabled = BackgroundBeautySettings.needsRendering(
+            prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)
+        ) { it in configuredBackgroundSlots }
+        if (!backgroundRenderingEnabled || backgroundHooksInstalled) return
+        backgroundHooksInstalled = true
         val installed = installActivityHooks() or
             installTabHooks() or
             installFragmentHooks() or
             installSurfaceHooks() or installBackgroundWriteHook() or installWechatVerifiedPaths()
-        installMeEntryVisibility()
         installChatChromeLifecycle()
         installChatBackgroundComponentHook(allowDexSearch = false)
+        DexInstallScheduler.schedule("${BackgroundBeautyFeature.ID}:chat_background", "沉浸式背景") {
+            installChatBackgroundComponentHook(allowDexSearch = true)
+        }
         if (!installed) HLog.e("$TAG 未安装任何页面 Hook")
-        main.post(::refreshAll)
-        return installed
     }
-
     fun destroy() {
         destroyed = true
         preloadedHome = null
@@ -607,8 +631,7 @@ private class BackgroundBeautyRuntime(
                 try {
                     @Suppress("UNCHECKED_CAST")
                     val hidden = KavaReflector.readField(hiddenField, param.thisObject) as? MutableSet<String> ?: return
-                    meEntryOverlays[param.thisObject] = MeEntryVisibility.overlay(hidden,
-                        MeEntryVisibility.hiddenKeys { prefs.getBoolean(it, false) })
+                    meEntryOverlays[param.thisObject] = MeEntryVisibility.overlay(hidden, requestedMeHiddenKeys)
                 } catch (error: Throwable) { logMeEntryFailure(error) }
             }
             override fun afterHookedMethod(param: MethodHookParam) {
@@ -659,7 +682,7 @@ private class BackgroundBeautyRuntime(
                     val activity = findActivity(mute) ?: return@hookOnce
                     if (activity.javaClass.name != LAUNCHER_ACTIVITY ||
                         !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
-                        !BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.ME)) return@hookOnce
+                        !hasBackgroundImage(BackgroundBeautySettings.Slot.ME)) return@hookOnce
                     if (mute.visibility == View.VISIBLE) {
                         val original = mute.visibility
                         mute.visibility = View.GONE
@@ -718,12 +741,14 @@ private class BackgroundBeautyRuntime(
         return installed
     }
 
-    private fun readNativeField(owner: Any?, name: String): Any? = owner?.let { KavaReflector.readField(it, name) }
+    private fun readNativeField(owner: Any?, name: String): Any? = nativeFieldCache.read(owner, name)
+
+    private fun hasBackgroundImage(slot: BackgroundBeautySettings.Slot): Boolean = slot in configuredBackgroundSlots
 
     private fun wechatHomepageBackdropEnabled(activity: Activity): Boolean =
         activity.javaClass.name == LAUNCHER_ACTIVITY &&
             prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
-            BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.WECHAT)
+            hasBackgroundImage(BackgroundBeautySettings.Slot.WECHAT)
     private val wechatTaskControllers = WeakHashMap<View, WeakReference<Any>>()
     private val wechatGradientControllers = WeakHashMap<View, WeakReference<Any>>()
     private fun rememberWechatTaskController(owner: Any?) {
@@ -816,7 +841,7 @@ private class BackgroundBeautyRuntime(
         val activity = findActivity(view) ?: return false
         return activity.javaClass.name == LAUNCHER_ACTIVITY &&
             prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
-            BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.WECHAT)
+            hasBackgroundImage(BackgroundBeautySettings.Slot.WECHAT)
     }
     private fun installHomepageDynamicLifecycle(): Boolean {
         val clazz = KavaReflector.loadClass("com.tencent.mm.plugin.multitask.ui.bg.DynamicBgContainer", context.hostClassLoader())
@@ -891,7 +916,7 @@ private class BackgroundBeautyRuntime(
         findWechatVerifiedMethod(gradientClass, "onDraw", android.graphics.Canvas::class.java)?.let { method ->
             ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (destroyed) return
+                    if (destroyed || !backgroundRenderingEnabled) return
                     val view = param.thisObject as? View ?: return
                     val owner = wechatControllerForGradient(view)
                     var ancestor = view.parent as? View
@@ -932,7 +957,7 @@ private class BackgroundBeautyRuntime(
             // Independent callback: visibility is not covered by the background setter hooks.
             ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (destroyed || wechatGlMutation) return
+                    if (destroyed || !backgroundRenderingEnabled || wechatGlMutation) return
                     val view = param.thisObject as? View ?: return
                     if (view.javaClass.name == "com.tencent.mm.plugin.story.ui.view.StoryMuteView") {
                         initialStoryMuteVisibility.remove(view)
@@ -949,7 +974,7 @@ private class BackgroundBeautyRuntime(
                     } else wechatGlVisibility.remove(view)
                 }
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (destroyed || wechatGlMutation) return
+                    if (destroyed || !backgroundRenderingEnabled || wechatGlMutation) return
                     val view = param.thisObject as? View ?: return
                     if (view.javaClass.name != "com.tencent.mm.ui.tools.TestTimeForChatting" || view.visibility != View.GONE) return
                     findActivity(view)?.let { activity ->
@@ -1201,7 +1226,7 @@ private class BackgroundBeautyRuntime(
                 val applied = snapshot.appliedBackground ?: return@hookOnce
                 val slot = snapshot.slot ?: return@hookOnce
                 if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
-                    !BackgroundBeautyStore.hasImage(context.hostContext(), slot)) return@hookOnce
+                    !hasBackgroundImage(slot)) return@hookOnce
                 if (decorBackgroundApplied(view, applied)) return@hookOnce
                 val host = view.background
                 if (host !== applied) {
@@ -1633,6 +1658,7 @@ private class BackgroundBeautyRuntime(
 
     @Synchronized
     fun installChatBackgroundComponentHook(allowDexSearch: Boolean): Boolean {
+        if (!backgroundRenderingEnabled) return false
         if (destroyed) return false
         val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         val cached = DexMethodCache.load(
@@ -1748,11 +1774,11 @@ private class BackgroundBeautyRuntime(
         return runCatching {
             ownedHooks += HookRegistry.get().hook(member, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!destroyed) before?.invoke(param)
+                    if (!destroyed && backgroundRenderingEnabled) before?.invoke(param)
                 }
 
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (!destroyed) after?.invoke(param)
+                    if (!destroyed && backgroundRenderingEnabled) after?.invoke(param)
                 }
             })
             true
@@ -1791,7 +1817,7 @@ private class BackgroundBeautyRuntime(
     private fun refreshAll() {
         restoreHomepageDynamicBackgrounds()
         if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
-            !BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.ME)) {
+            !hasBackgroundImage(BackgroundBeautySettings.Slot.ME)) {
             restoreInitialStoryMuteViews()
         }
         wechatTitleBackdrops.keys.toList().forEach { it.invalidate() }
@@ -1815,6 +1841,7 @@ private class BackgroundBeautyRuntime(
     }
 
     fun onChatPageChanged(entered: Boolean) {
+        if (!backgroundRenderingEnabled) return
         main.post {
             val launchers = synchronized(observedActivities) { observedActivities.keys.filter { it.javaClass.name == LAUNCHER_ACTIVITY } }
             launchers.forEach { activity ->
@@ -1846,7 +1873,7 @@ private class BackgroundBeautyRuntime(
             } else clearActivity(activity)
             return
         }
-        if (!BackgroundBeautyStore.hasImage(context.hostContext(), slot)) {
+        if (!hasBackgroundImage(slot)) {
             // LauncherUI keeps homepage behind its embedded chatting Fragment. Do not restore it during navigation.
             if (slot == BackgroundBeautySettings.Slot.CHAT && activity.javaClass.name == LAUNCHER_ACTIVITY) return
             restoreBounceColors(activity)
@@ -1885,7 +1912,7 @@ private class BackgroundBeautyRuntime(
                         BackgroundBeautySettings.DEFAULT_ENABLE
                     ) ||
                     resolveTarget(activity) != slot ||
-                    !BackgroundBeautyStore.hasImage(context.hostContext(), slot)
+                    !hasBackgroundImage(slot)
                 ) return@post
                 val currentState = ensureState(activity)
                 currentState.loadedBitmaps[slot] = LoadedBitmap(revision, bitmap)
@@ -2050,7 +2077,7 @@ private class BackgroundBeautyRuntime(
         neighbors.forEach { (fragment, root) ->
             val neighborSlot = slotForFragment(fragment) ?: return@forEach
             if (neighborSlot != slot && root != null && root.isAttachedToWindow && findActivity(root) === state.activity &&
-                BackgroundBeautyStore.hasImage(context.hostContext(), neighborSlot)) {
+                hasBackgroundImage(neighborSlot)) {
                 setTransparentSurface(state, root, neighborSlot)
                 preparePage(state, root, neighborSlot)
             }
@@ -2317,7 +2344,7 @@ private class BackgroundBeautyRuntime(
         findWechatVerifiedMethod(layoutClass, "dispatchDraw", Canvas::class.java)?.let { method ->
             ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (destroyed) return
+                    if (destroyed || !backgroundRenderingEnabled) return
                     val view = param.thisObject as? View ?: return
                     val activity = findActivity(view) ?: return
                     val owner = states[activity] ?: return
@@ -2389,7 +2416,7 @@ private class BackgroundBeautyRuntime(
                     // The verified scroll instance is already a chat-specific anchor.
                     val enabled = !destroyed && scroll.isShown &&
                         prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
-                        BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.CHAT) &&
+                        hasBackgroundImage(BackgroundBeautySettings.Slot.CHAT) &&
                         chatChromeVersionName() == "8.0.78"
                     if (enabled && !floatingFooterEnabled()) state.inputUnderlay.apply(scroll) else state.inputUnderlay.restore(scroll)
                 } catch (e: Throwable) {
@@ -3095,7 +3122,7 @@ private class BackgroundBeautyRuntime(
     private fun applyWechatStatusMasks(activity: Activity, phase: String) {
         if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY ||
             !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
-            !BackgroundBeautyStore.hasImage(context.hostContext(), BackgroundBeautySettings.Slot.WECHAT)) return
+            !hasBackgroundImage(BackgroundBeautySettings.Slot.WECHAT)) return
         val state = states[activity] ?: return
         // og9 belongs to MainUI's controller; nhm is MainUIView's own inset mask.
         // Find from decor rather than the fragment root or the current tab's scan.
@@ -3337,7 +3364,7 @@ private class BackgroundBeautyRuntime(
             return false
         }
         val slot = resolveTarget(activity) ?: return false
-        return BackgroundBeautyStore.hasImage(context.hostContext(), slot)
+        return hasBackgroundImage(slot)
     }
 
     private fun isBottomBar(view: View): Boolean {

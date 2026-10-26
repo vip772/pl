@@ -46,6 +46,7 @@ class Runtime {
  val context=Ctx(); val prefs=Prefs();val ownedHooks=mutableListOf<XC_MethodHook.Unhook>()
  val meEntryAdapters=Collections.newSetFromMap(WeakHashMap<Any,Boolean>())
  val meEntryOverlays=IdentityHashMap<Any,Set<String>>()
+ val requestedMeHiddenKeys=emptySet<String>()
  var destroyed=false;var meEntryFailureLogged=false
  val TAG="test";val ME_FRAGMENT="com.tencent.mm.ui.MoreTabUI"
  fun chatChromeVersionName()="8.0.78"
