@@ -989,3 +989,7 @@ XML有非空顶层MsgSource时，选择已核实的k0.M完整13参数签名，p8
 
 ### 消息入站引用来源隔离
 WeChatMessageParseApi 提取 msgsource 前统一通过 WeChatMessage.currentMessageXml 移除 refermsg，避免先提取丢失归属后把原消息艾特归给引用者；字段回退走相同规则。仅改变模块 XML 解析边界，无新增宿主反射入口；验证与限制见 MENTION_EXTENSION.md 的上游来源提取修正记录。
+
+### 内部引用文本按需读取
+
+WeChatMessage内部quoteTitle()/quoteContent()只读取范围判断需要的标题或引用内容，沿用isQuote资格判断与bodyContent语义，返回null表示非引用；完整getQuoteMsg与二者共享解码及引用内容回退实现。该能力供模块内部引用范围使用，不新增脚本接口，完整引用消息公开模型不变。

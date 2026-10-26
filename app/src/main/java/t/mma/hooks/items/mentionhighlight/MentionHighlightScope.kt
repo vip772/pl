@@ -27,9 +27,9 @@ internal object MentionHighlightScope {
         if (WeChatMessage.xmlTag(own, "type").toIntOrNull() != 57) return Prepared(false, null)
         val isolated = WeChatMessage(0, 0, message.type, 0, 0, 0,
             message.talker, own, "", "", "", 0)
-        val title = isolated.getQuoteMsg()?.title?.takeIf { it.isNotBlank() }
+        val title = isolated.quoteTitle()?.takeIf { it.isNotBlank() }
             ?: return Prepared(false, null)
-        val quoted = message.getQuoteMsg()?.content.orEmpty()
+        val quoted = message.quoteContent().orEmpty()
         return Prepared(false, title.takeUnless { quoted.contains(it) })
     }
 

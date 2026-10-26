@@ -273,20 +273,35 @@ class WeChatMessage(
         )
     }
 
+    // Internal text-only readers share decoding/fallback with the full model.
+    internal fun quoteTitle(): String? =
+        if (isQuote()) quoteTitleFrom(bodyContent()) else null
+
+    internal fun quoteContent(): String? {
+        if (!isQuote()) return null
+        val raw = bodyContent()
+        return quoteContentFrom(raw, firstNotBlank(xmlSection(raw, "refermsg"), raw))
+    }
+
+    private fun quoteTitleFrom(raw: String): String = cleanXmlText(xmlTag(raw, "title"))
+
+    private fun quoteContentFrom(raw: String, refer: String): String =
+        cleanXmlText(firstNotBlank(xmlTag(refer, "content"), xmlTag(raw, "refermsgcontent")))
+
     fun getQuoteMsg(): WeChatQuoteMsg? {
         if (!isQuote()) return null
         val raw = bodyContent()
         val refer = firstNotBlank(xmlSection(raw, "refermsg"), raw)
         val fromUser = cleanXmlText(firstNotBlank(xmlTag(refer, "fromusr"), xmlTag(raw, "referfromusr"), xmlTag(raw, "fromusername")))
         val chatUser = cleanXmlText(firstNotBlank(xmlTag(refer, "chatusr"), xmlTag(raw, "refertowusr")))
-        val referContent = cleanXmlText(firstNotBlank(xmlTag(refer, "content"), xmlTag(raw, "refermsgcontent")))
+        val referContent = quoteContentFrom(raw, refer)
         val emojiSender = cleanXmlText(firstNotBlank(
             xmlAttr(referContent, "fromusername"),
             xmlAttr(refer, "fromusername"),
             xmlAttr(raw, "fromusername")
         ))
         return WeChatQuoteMsg(
-            title = cleanXmlText(xmlTag(raw, "title")),
+            title = quoteTitleFrom(raw),
             msgSource = cleanXmlText(xmlTag(refer, "msgsource")),
             sendTalker = quoteSender(fromUser, chatUser, emojiSender),
             displayName = cleanXmlText(xmlTag(refer, "displayname")),
