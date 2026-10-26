@@ -400,6 +400,28 @@ class WeChatMessage(
     }
 
     companion object {
+        private val quoteTokens by lazy { Regex("<!\\[CDATA\\[.*?]]>|<!--.*?-->|</?([A-Za-z_][A-Za-z0-9_:.-]*)\\b[^>]*>",
+                setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE)) }
+        private class XmlTagRules(private val tag: String) {
+            val cdata by lazy {
+                Regex("<$tag>\\s*<!\\[CDATA\\[(.*?)]]>\\s*</$tag>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            }
+            val plain by lazy {
+                Regex("<$tag>(.*?)</$tag>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            }
+        }
+        // Only fixed literal hot tags are retained. Dynamic caller expressions keep their old path.
+        private val atUserRules = XmlTagRules("atuserlist")
+        private val atAllRules = XmlTagRules("atall")
+        private val typeRules = XmlTagRules("type")
+        private val titleRules = XmlTagRules("title")
+        private fun fixedXmlTagRules(tag: String): XmlTagRules? = when (tag) {
+            "atuserlist" -> atUserRules
+            "atall" -> atAllRules
+            "type" -> typeRules
+            "title" -> titleRules
+            else -> null
+        }
         private const val WECHAT_AT_SEPARATOR = '\u2005'
         private const val MAX_WECHAT_AT_LENGTH = 40
         private val AT_ALL_LABELS = setOf("所有人", "all", "everyone", "全員", "모두")
@@ -488,12 +510,10 @@ class WeChatMessage(
         // quoted XML must not become metadata belonging to the new sender.
         private fun withoutQuotedMessage(raw: String): String {
             if (!raw.contains("refermsg", ignoreCase = true)) return raw
-            val tokens = Regex("<!\\[CDATA\\[.*?]]>|<!--.*?-->|</?([A-Za-z_][A-Za-z0-9_:.-]*)\\b[^>]*>",
-                setOf(RegexOption.DOT_MATCHES_ALL, RegexOption.IGNORE_CASE))
             val result = StringBuilder(raw.length)
             var depth = 0
             var cursor = 0
-            for (token in tokens.findAll(raw)) {
+            for (token in quoteTokens.findAll(raw)) {
                 if (!token.groupValues[1].equals("refermsg", ignoreCase = true)) continue
                 val closing = token.value.startsWith("</")
                 val selfClosing = token.value.endsWith("/>")
@@ -680,10 +700,11 @@ class WeChatMessage(
         @JvmStatic
         fun xmlTag(xml: String?, tag: String): String {
             if (xml.isNullOrBlank() || tag.isBlank()) return ""
-            val cdata = Regex("<$tag>\\s*<!\\[CDATA\\[(.*?)]]>\\s*</$tag>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            val rules = fixedXmlTagRules(tag)
+            val cdata = (rules?.cdata ?: Regex("<$tag>\\s*<!\\[CDATA\\[(.*?)]]>\\s*</$tag>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)))
                 .find(xml)
             if (cdata != null) return cdata.groupValues[1]
-            val plain = Regex("<$tag>(.*?)</$tag>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
+            val plain = (rules?.plain ?: Regex("<$tag>(.*?)</$tag>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL)))
                 .find(xml)
             return plain?.groupValues?.getOrNull(1)?.trim().orEmpty()
         }
