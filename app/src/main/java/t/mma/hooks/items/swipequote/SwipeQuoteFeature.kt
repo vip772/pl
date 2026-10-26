@@ -87,6 +87,7 @@ private class SwipeQuoteAdapter(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    private val messageIdAccessors = MessageIdAccessors()
     private val itemMethodCache = ConcurrentHashMap<Class<*>, Method>()
     private val itemListFieldCache = ConcurrentHashMap<Class<*>, Field>()
     private val holderRootFieldCache = ConcurrentHashMap<Class<*>, Field>()
@@ -1149,18 +1150,7 @@ private class SwipeQuoteAdapter(
         return null
     }
 
-    private fun messageId(msg: Any): Long {
-        for (name in arrayOf("getMsgId", "getMsgID", "getId")) {
-            val value = KavaReflector.invoke(KavaReflector.findMethod(msg.javaClass, name), msg)
-            parseLong(value)?.let { if (it > 0L) return it }
-        }
-        for (name in arrayOf("field_msgId", "msgId", "msgID", "id")) {
-            val value = KavaReflector.readField(msg, name)
-            parseLong(value)?.let { if (it > 0L) return it }
-        }
-        return 0L
-    }
-
+    private fun messageId(msg: Any): Long = messageIdAccessors.read(msg)
     private fun resolveNativeMessage(source: Any): Any? {
         return resolveNativeMessage(source, Collections.newSetFromMap(IdentityHashMap<Any, Boolean>()), 0)
     }
