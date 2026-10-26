@@ -73,7 +73,7 @@ internal object HomeMusic {
     private fun toast(c:Context,s:String){main.post{Toast.makeText(c,s,Toast.LENGTH_SHORT).show()}}
     private fun iconButton(c:Context,s:String,action:()->Unit)=MusicIcon(c,s).apply{contentDescription=when(s){"☷"->"其他版本";"♫"->"音质";"◷"->"定时";"▤"->"悬浮歌词";"☰"->"收藏夹";"⌕"->"搜索";else->s};background=rounded(c,0x22FFFFFF,12);setOnClickListener{action()}}
     private fun spaced(c:Context)=LinearLayout.LayoutParams(0,dp(c,56),1f).apply{setMargins(dp(c,4),0,dp(c,4),0)}
-    fun card(c:Context,compact:Boolean=false):LinearLayout{val alpha=prefs(c).getInt(HomeExtensionSettings.MUSIC_ALPHA,100).coerceIn(0,100)*255/100;val root=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(c,16),dp(c,14),dp(c,16),dp(c,14));background=rounded(c,if(style(c) in 2..3)Color.TRANSPARENT else Color.argb(alpha,29,29,31),22)};if(style(c) in 2..3)root.setPadding(0,0,0,0);root.setOnClickListener{showPlayer(c)};val render={if(style(c) in 2..3&&root.childCount>0){root.invalidate()}else{root.removeAllViews();root.addView(when(style(c)){2->styleTwo(c,false,root);3->styleThree(c,false,root);else->styleOne(c,compact,root)})}};render();root.addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener{override fun onViewAttachedToWindow(v:View){setListener(render)};override fun onViewDetachedFromWindow(v:View){removeListener(render)}});return root}
+    fun card(c:Context,compact:Boolean=false):LinearLayout{val alpha=prefs(c).getInt(HomeExtensionSettings.MUSIC_ALPHA,100).coerceIn(0,100)*255/100;val root=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL;setPadding(dp(c,16),dp(c,14),dp(c,16),dp(c,14));background=rounded(c,if(style(c) in 2..3)Color.TRANSPARENT else Color.argb(alpha,29,29,31),22)};if(style(c) in 2..3)root.setPadding(0,0,0,0);if(style(c)==2)root.tag="home_music_style2";root.setOnClickListener{showPlayer(c)};val render={if(style(c) in 2..3&&root.childCount>0){root.invalidate()}else{root.removeAllViews();root.addView(when(style(c)){2->styleTwo(c,false,root).also{(it as HomeMusicPaintedView).homeCompact=compact};3->styleThree(c,false,root);else->styleOne(c,compact,root)})}};render();root.addOnAttachStateChangeListener(object:View.OnAttachStateChangeListener{override fun onViewAttachedToWindow(v:View){setListener(render)};override fun onViewDetachedFromWindow(v:View){removeListener(render)}});return root}
     private fun releaseSpectrum(){runCatching{visualizer?.release()};visualizer=null;spectrum=FloatArray(64)}
     private fun captureSpectrum(c:Context,mp:MediaPlayer){
         releaseSpectrum();if(style(c) !in 2..3)return
@@ -112,7 +112,7 @@ internal object HomeMusic {
             paintedFavoriteSong=song;paintedFavoriteRevision=favoriteRevision
             paintedFavorite=song!=null&&isFavorite(c,song)
         }
-        return MusicPaintState(song?.title?:"音乐",sampledPosition,sampledDuration,playing,spectrum,song?.lyric.orEmpty(),song?.coverUrl.orEmpty(),paintedFavorite)
+        return MusicPaintState(song?.title?:"音乐",sampledPosition,sampledDuration,playing,spectrum,song?.lyric.orEmpty(),song?.coverUrl.orEmpty(),paintedFavorite,song?.artist.orEmpty())
     }
     private fun styleTwo(c:Context,full:Boolean,host:LinearLayout):View=HomeMusicPaintedView(c,2,full,{
         paintState(c)

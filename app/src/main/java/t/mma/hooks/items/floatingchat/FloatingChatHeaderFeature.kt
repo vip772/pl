@@ -90,6 +90,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val tipsContentBackgrounds = WeakHashMap<View, Drawable?>()
     private val layoutTrackers = WeakHashMap<ViewGroup, HeaderLayoutTracker>()
     private val tipsCardBottoms = WeakHashMap<ViewGroup, Int>()
+    private val chatListPaddings = WeakHashMap<ViewGroup, Pair<ViewGroup, Int>>()
+
     private var reparentFailureReported = false
     private var installed = false
     private val headerClass = "androidx.appcompat.widget.ActionBarContainer"
@@ -594,6 +596,25 @@ private class HeaderRuntime(private val context: FeatureContext) {
             it.javaClass.name == CHATTING_CONTENT_CLASS && it.isShown
         } as? ViewGroup
     }
+    private fun applyChatListTopInset(layout: ViewGroup, header: View) {
+        // Wait for post-reparent bounds. Reuse the resolved list on later layout changes.
+        if (layout.isLayoutRequested || header.isLayoutRequested) return
+        val saved = chatListPaddings[layout]
+        val list = saved?.first ?: run {
+            val content = findVisibleChatContent(layout, header) ?: return
+            find(content) { it.javaClass.name == CHATTING_RECYCLER_CLASS } as? ViewGroup
+                ?: return
+        }
+        val original = saved?.second ?: list.paddingTop.also { chatListPaddings[layout] = list to it }
+        val headerLocation = IntArray(2).also(header::getLocationOnScreen)
+        val listLocation = IntArray(2).also(list::getLocationOnScreen)
+        val targetTop = maxOf(original, headerLocation[1] + header.height + dp(CARD_GAP_DP) - listLocation[1])
+        if (list.paddingTop != targetTop) list.setPadding(list.paddingLeft, targetTop, list.paddingRight, list.paddingBottom)
+    }
+    private fun restoreChatListTopInset(layout: ViewGroup) {
+        val (list, top) = chatListPaddings.remove(layout) ?: return
+        if (list.paddingTop != top) list.setPadding(list.paddingLeft, top, list.paddingRight, list.paddingBottom)
+    }
     private fun collect(root: View, visitor: (View) -> Unit) {
         visitor(root)
         val group = root as? ViewGroup ?: return
@@ -760,6 +781,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun restore(layout: ViewGroup) {
+        restoreChatListTopInset(layout)
         restoreChatTopInset(layout)
         restoreChatStatusWrapper(layout)
         headersByLayout.remove(layout)?.let(::restoreView)
@@ -813,6 +835,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
         headersByLayout.clear()
         contentCardTranslations.forEach { (view, translation) -> view.translationY = translation }
         contentCardTranslations.clear()
+        chatListPaddings.keys.toList().forEach(::restoreChatListTopInset)
+        chatListPaddings.clear()
+
         tipsCardStates.forEach { (view, state) ->
             view.elevation = state.elevation
             view.outlineProvider = state.outlineProvider
@@ -885,7 +910,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             is ViewGroup.MarginLayoutParams -> ViewGroup.MarginLayoutParams(params)
             else -> ViewGroup.LayoutParams(params)
         }
-    private class HeaderLayoutTracker(
+    private data class HeaderLayoutTracker(
         var settlePasses: Int = 0,
         var preDraw: android.view.ViewTreeObserver.OnPreDrawListener? = null
     )
@@ -952,6 +977,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
         private const val CARD_GAP_DP = 8
         private const val CARD_CORNER_RADIUS_DP = 24
         private const val CHATTING_CONTENT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingContent"
+        private const val CHATTING_LIST_CLASS = "com.tencent.mm.ui.chatting.view.MMChattingListView"
+        private const val CHATTING_RECYCLER_CLASS = "com.tencent.mm.pluginsdk.ui.tools.ChattingRecyclerView"
         private const val STATUS_WRAPPER_CLASS = "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout"
         private const val TIPS_BAR_GROUP_CLASS = "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup"
         private const val TIPS_RECYCLER_CLASS = "com.tencent.mm.view.recyclerview.MaxHeightWxRecyclerView"

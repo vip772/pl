@@ -185,6 +185,12 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                         if (musicStyle == 2) {
                             ActionRow("自定义头像照片", "替换样式2首页和二级页面的圆形照片") { if(activity != null) SidePanelImagePicker.launch(activity, Settings.MUSIC_AVATAR_SLOT) }
                             ActionRow("使用歌曲封面", "移除自定义照片，恢复当前歌曲封面") { SidePanelImages.clear(context, Settings.MUSIC_AVATAR_SLOT) }
+                            ActionRow("选择 / 更换背景图片", "首页样式2背景，长按拖动、双指缩放，松手保存") {
+                                if(activity != null) SidePanelImagePicker.launch(activity, t.mma.hooks.items.homeextension.HomeMusicStyleTwoBackground.SLOT) { result ->
+                                    if(result == SidePanelPickResult.FAILED) Toast.makeText(context, "音乐背景导入失败，请选择32MB以内有效图片", Toast.LENGTH_LONG).show()
+                                }
+                            }
+                            ActionRow("清除背景图片", "恢复默认背景，保留头像与透明度设置") { t.mma.hooks.items.homeextension.HomeMusicStyleTwoBackground.clear(context) }
                         }
                         if (musicStyle == 3) {
                             ActionRow("自定义样式3头像", "替换首页和二级页面黑胶中央照片") { if(activity != null) SidePanelImagePicker.launch(activity, Settings.MUSIC_THREE_AVATAR_SLOT) }

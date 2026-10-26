@@ -85,6 +85,7 @@ internal class PhotoTransformController(
         }
         return true
     }
+    fun isEditing(): Boolean = editing
     fun detach() {
         if (editing) save()
         editing = false; view.parent?.requestDisallowInterceptTouchEvent(false)

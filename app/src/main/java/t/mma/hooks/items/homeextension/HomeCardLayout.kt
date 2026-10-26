@@ -36,6 +36,7 @@ internal class HomeCardRow(context: Context) : LinearLayout(context) {
             val child = getChildAt(index)
             if (child.visibility == View.GONE) continue
             val params = child.layoutParams as LayoutParams
+            if (child.tag == "home_music_style2") continue
             child.measure(MeasureSpec.makeMeasureSpec(child.measuredWidth, MeasureSpec.EXACTLY),
                 MeasureSpec.makeMeasureSpec((target - params.topMargin - params.bottomMargin).coerceAtLeast(0), MeasureSpec.EXACTLY))
         }

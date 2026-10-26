@@ -107,6 +107,8 @@ internal object SidePanelImagePicker {
                     Thread({
                         val success = if (result.slot == t.mma.hooks.items.homeextension.CalendarBackground.SLOT)
                             t.mma.hooks.items.homeextension.CalendarBackground.save(appContext, uri)
+                        else if (result.slot == t.mma.hooks.items.homeextension.HomeMusicStyleTwoBackground.SLOT)
+                            t.mma.hooks.items.homeextension.HomeMusicStyleTwoBackground.save(appContext, uri)
                         else SidePanelImages.saveFromUri(appContext, result.slot, uri)
                         val owner = result.activity.get()
                         if (owner == null) {
