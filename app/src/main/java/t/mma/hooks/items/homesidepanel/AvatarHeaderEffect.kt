@@ -140,24 +140,7 @@ internal class AvatarHeaderEffect(private val host: View, private val content: V
             paint.shader = null
             return
         }
-        // The entire perimeter stays visible while the gradient and highlight move.
-        paint.strokeWidth = strokeDp * density
-        paint.alpha = 220
-        canvas.drawPath(outline, paint)
-        trail.reset()
-        val start = phase * perimeter
-        val end = start + perimeter * .38f
-        measure.getSegment(start, minOf(end, perimeter), trail, true)
-        if (end > perimeter) measure.getSegment(0f, end - perimeter, trail, true)
-        paint.strokeWidth = (strokeDp + 3f) * density
-        paint.alpha = 25
-        canvas.drawPath(trail, paint)
-        paint.strokeWidth = (strokeDp + 1.5f) * density
-        paint.alpha = 65
-        canvas.drawPath(trail, paint)
-        paint.strokeWidth = strokeDp * density
-        paint.alpha = 255
-        canvas.drawPath(trail, paint)
+        GradientOrbitStroke.draw(canvas, outline, trail, measure, paint, perimeter, phase, strokeDp * density, density)
         paint.shader = null
     }
     private fun noise(index: Int, tick: Long): Float {

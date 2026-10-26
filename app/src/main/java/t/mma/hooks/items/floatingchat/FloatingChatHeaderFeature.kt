@@ -323,6 +323,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (header.outlineProvider !== FloatingHeaderOutlineProvider) header.outlineProvider = FloatingHeaderOutlineProvider
         if (header.clipToOutline != !split) header.clipToOutline = !split
         if (!split) FloatingChatCardVisuals.apply(header, CORNER_RADIUS_DP)
+        applyChatListTopInset(layout, header)
         val headerParent = header.parent as? ViewGroup
         if (headerParent != null && headerParent.getChildAt(headerParent.childCount - 1) !== header) {
             header.bringToFront()
@@ -602,7 +603,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val saved = chatListPaddings[layout]
         val list = saved?.first ?: run {
             val content = findVisibleChatContent(layout, header) ?: return
-            find(content) { it.javaClass.name == CHATTING_RECYCLER_CLASS } as? ViewGroup
+            // 8.0.78 ss.xml has MMChattingListView (bm6); prefer its inner scrolling child when present.
+            val container = find(content) { it.javaClass.name == CHATTING_LIST_CLASS } as? ViewGroup
+            (container?.let { find(it) { v -> (v.javaClass.name == CHATTING_RECYCLER_CLASS || v.javaClass.name == CHATTING_SCROLL_RECYCLER_CLASS) } }
+                ?: find(content) { (it.javaClass.name == CHATTING_RECYCLER_CLASS || it.javaClass.name == CHATTING_SCROLL_RECYCLER_CLASS) }
+                ?: container) as? ViewGroup
                 ?: return
         }
         val original = saved?.second ?: list.paddingTop.also { chatListPaddings[layout] = list to it }
@@ -978,6 +983,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         private const val CARD_CORNER_RADIUS_DP = 24
         private const val CHATTING_CONTENT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingContent"
         private const val CHATTING_LIST_CLASS = "com.tencent.mm.ui.chatting.view.MMChattingListView"
+        private const val CHATTING_SCROLL_RECYCLER_CLASS = "com.tencent.mm.pluginsdk.ui.tools.ScrollControlRecyclerView"
         private const val CHATTING_RECYCLER_CLASS = "com.tencent.mm.pluginsdk.ui.tools.ChattingRecyclerView"
         private const val STATUS_WRAPPER_CLASS = "com.tencent.mm.ui.widget.EdgeToEdgeWrapperLayout"
         private const val TIPS_BAR_GROUP_CLASS = "com.tencent.mm.ui.tipsbar.ChatTipsBarGroup"

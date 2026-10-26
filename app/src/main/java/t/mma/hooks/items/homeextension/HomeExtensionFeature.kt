@@ -36,7 +36,7 @@ object HomeExtensionSettings {
     const val MUSIC_AVATAR_SLOT = "home_music_avatar"
     const val MUSIC_THREE_AVATAR_SLOT = "home_music_three_avatar"
     const val CALENDAR_CONTENT_HEIGHT_DP = 150
-    const val MUSIC_STYLE_TWO_HEIGHT_DP = CALENDAR_CONTENT_HEIGHT_DP - 50
+    const val MUSIC_STYLE_TWO_HEIGHT_DP = CALENDAR_CONTENT_HEIGHT_DP - 45
     const val PHOTO = "photo"
     const val PHOTO_SLOT = "home_extension_photo"
     const val PHOTO_HEIGHT = "photo_height"

@@ -129,7 +129,7 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     override fun onWindowFocusChanged(hasWindowFocus:Boolean){super.onWindowFocusChanged(hasWindowFocus);if(hasWindowFocus&&isAttachedToWindow){if(!customLoading)loadCustomPortrait();loadStyleTwoBackground()};resumeFrames()}
     override fun onWindowVisibilityChanged(visibility:Int){super.onWindowVisibilityChanged(visibility);resumeFrames()}
     override fun onVisibilityChanged(changedView:View,visibility:Int){super.onVisibilityChanged(changedView,visibility);if(isAttachedToWindow)post{resumeFrames()}}
-    override fun onMeasure(w:Int,h:Int){val width=MeasureSpec.getSize(w);val desired=if(style==2&&!full)((if(homeCompact)118 else HomeExtensionSettings.MUSIC_STYLE_TWO_HEIGHT_DP)*resources.displayMetrics.density).toInt() else (width*0.58f).toInt();setMeasuredDimension(width,if(full)MeasureSpec.getSize(h)else resolveSize(desired,h))}
+    override fun onMeasure(w:Int,h:Int){val width=MeasureSpec.getSize(w);val desired=if(style==2&&!full)((if(homeCompact)123 else HomeExtensionSettings.MUSIC_STYLE_TWO_HEIGHT_DP)*resources.displayMetrics.density).toInt() else (width*0.58f).toInt();setMeasuredDimension(width,if(full)MeasureSpec.getSize(h)else resolveSize(desired,h))}
     private fun fill(canvas:Canvas,rect:RectF,color:Int,r:Float=0f){p.shader=null;p.style=Paint.Style.FILL;p.color=color;if(r>0)canvas.drawRoundRect(rect,r,r,p)else canvas.drawRect(rect,p)}
     private fun stroke(canvas:Canvas,path:Path,color:Int,width:Float){p.shader=null;p.style=Paint.Style.STROKE;p.strokeCap=Paint.Cap.ROUND;p.strokeJoin=Paint.Join.ROUND;p.strokeWidth=width;p.color=color;canvas.drawPath(path,p);p.style=Paint.Style.FILL}
     override fun onDraw(canvas:Canvas){
@@ -143,7 +143,6 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
             val image=cardBackground
             if(image!=null){backgroundDrawable?.let{it.bounds=Rect(0,0,width,height);it.alpha=alpha;it.draw(canvas)}}
             else fill(canvas,rect,Color.argb(alpha,48,51,49),14*sx)
-            fill(canvas,RectF(8*sx,8*sy,w-8*sx,h-8*sy),0x33131717,12*sx)
             styleTwoHome(canvas,s)
             return
         }
@@ -177,33 +176,53 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     private fun styleTwoHome(canvas:Canvas,s:MusicPaintState){
         val coverCx=64*sx;val coverCy=height*0.40f;val radius=31*sx
         drawPortrait(canvas,coverCx,coverCy,radius)
-        canvas.save();canvas.rotate(portraitAngle,coverCx,coverCy)
-        p.color=0x66FFFFFF; p.style=Paint.Style.STROKE; p.strokeWidth=1.2f*sx
-        canvas.drawCircle(coverCx,coverCy,radius+2*sx,p);p.style=Paint.Style.FILL
-        canvas.restore()
+        drawCoverOrbit(canvas,coverCx,coverCy,radius)
         val infoLeft=108*sx;val infoRight=width-112*sx
-        text(canvas,s.title,infoLeft,coverCy-10*sy,15*sx,(infoRight-infoLeft).coerceAtLeast(20f),Color.WHITE)
-        text(canvas,s.artist.ifBlank{"${time(s.position)} / ${time(s.duration)}"},infoLeft,coverCy+12*sy,11*sx,(infoRight-infoLeft).coerceAtLeast(20f),0xFFE2E6E4.toInt())
+        text(canvas,s.title,infoLeft,coverCy-14*sy,15*sx,(infoRight-infoLeft).coerceAtLeast(20f),Color.WHITE)
+        text(canvas,s.artist.ifBlank{"${time(s.position)} / ${time(s.duration)}"},infoLeft,coverCy+17*sy,11*sx,(infoRight-infoLeft).coerceAtLeast(20f),0xFFE2E6E4.toInt())
         drawElectricArc(canvas,s,infoLeft,infoRight,coverCy+45*sy)
-        val controlX=width-82*sx;val gap=25*sx;val controlY=coverCy
+        val controlX=width-82*sx+5*resources.displayMetrics.density;val gap=25*sx;val controlY=coverCy
         icon(canvas,"|◀","previous",controlX-gap,controlY,15*sx,Color.WHITE)
         playIcon(canvas,s,controlX,controlY,15*sx,false)
         icon(canvas,"▶|","next",controlX+gap,controlY,15*sx,Color.WHITE)
         val py=height-22*sy
-        val left=35*sx;val right=width-35*sx
+        val left=65*sx;val right=width-65*sx
         drawProgress(canvas,s,left,right,py,true)
-        text(canvas,time(s.position),left,py-8*sy,9*sx,42*sx,Color.WHITE)
-        text(canvas,time(s.duration),right-42*sx,py-8*sy,9*sx,42*sx,Color.WHITE)
+        text(canvas,time(s.position),15*sx,py+3*sx,9*sx,42*sx,Color.WHITE)
+        text(canvas,time(s.duration),width-55*sx,py+3*sx,9*sx,42*sx,Color.WHITE)
         if(s.playing){
             val x=left+(right-left)*(if(s.duration>0)s.position.toFloat()/s.duration else 0f).coerceIn(0f,1f)
             val tail=(18+6*sin(animationPhase*2*PI).toFloat())*sx
             meteorMatrix.setScale(tail+3*sx,1f);meteorMatrix.postTranslate(x-tail,py);meteorShader.setLocalMatrix(meteorMatrix)
             meteorPaint.shader=meteorShader;meteorPaint.strokeWidth=5*sx;meteorPaint.alpha=(180+75*sin(animationPhase*2*PI)).toInt().coerceIn(0,255)
             canvas.save();canvas.clipRect(left,py-8*sx,right,py+8*sx);canvas.drawLine(x-tail,py,x+3*sx,py,meteorPaint);canvas.restore()
-            p.shader=null;p.color=0xFFFFA12A.toInt();canvas.drawCircle(x,py,3.5f*sx,p)
         }
     }
+    private val orbitOutline=Path()
+    private val orbitTrail=Path()
+    private val orbitMeasure=PathMeasure()
+    private val orbitPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeCap=Paint.Cap.ROUND}
+    private val orbitMatrix=Matrix()
+    private var orbitShader:SweepGradient?=null
+    private var orbitX=-1f;private var orbitY=-1f;private var orbitRadius=-1f
+    private fun drawCoverOrbit(c:Canvas,x:Float,y:Float,radius:Float){
+        val d=resources.displayMetrics.density
+        // The core stroke's inner edge sits 1dp outside the image.
+        val ringRadius=radius+2.5f*d
+        if(orbitX!=x||orbitY!=y||orbitRadius!=ringRadius){
+            orbitX=x;orbitY=y;orbitRadius=ringRadius
+            orbitOutline.reset();orbitOutline.addCircle(x,y,ringRadius,Path.Direction.CW);orbitMeasure.setPath(orbitOutline,true)
+            orbitShader=SweepGradient(x,y,intArrayOf(0xFFFF304F.toInt(),0xFFBA40FF.toInt(),0xFF357CFF.toInt(),0xFFFF304F.toInt()),floatArrayOf(0f,1f/3f,2f/3f,1f))
+        }
+        val phase=animationPhase
+        orbitMatrix.setRotate(phase*360f,x,y);orbitShader?.setLocalMatrix(orbitMatrix);orbitPaint.shader=orbitShader
+        t.mma.hooks.items.homesidepanel.GradientOrbitStroke.draw(c,orbitOutline,orbitTrail,orbitMeasure,orbitPaint,orbitMeasure.length,phase,3*d,d)
+        orbitPaint.shader=null
+    }
     private val arcPath=Path()
+    private val arcPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeCap=Paint.Cap.ROUND;strokeJoin=Paint.Join.ROUND}
+    private var arcShader:LinearGradient?=null
+    private var arcLeft=-1f;private var arcRight=-1f
     private fun drawElectricArc(canvas:Canvas,s:MusicPaintState,left:Float,right:Float,y:Float){
         if(!s.playing)return
         arcPath.reset();var peak=0f
@@ -214,9 +233,9 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
             if(i==0)arcPath.moveTo(x,y+dy)else arcPath.lineTo(x,y+dy)
         }
         if(peak<=0.01f)return
-        stroke(canvas,arcPath,0x44FF9D32,5*sx)
-        stroke(canvas,arcPath,0xFFFFA838.toInt(),1.4f*sx)
-        stroke(canvas,arcPath,0xFFFFF1CF.toInt(),0.5f*sx)
+        if(arcLeft!=left||arcRight!=right){arcLeft=left;arcRight=right;arcShader=LinearGradient(left,0f,right,0f,intArrayOf(0xFF388BFF.toInt(),0xFFAF49FF.toInt(),0xFFFFD35C.toInt()),null,Shader.TileMode.CLAMP)}
+        arcPaint.shader=arcShader;arcPaint.strokeWidth=5*sx;arcPaint.alpha=50;canvas.drawPath(arcPath,arcPaint)
+        arcPaint.strokeWidth=1.5f*sx;arcPaint.alpha=255;canvas.drawPath(arcPath,arcPaint)
     }
     override fun onSizeChanged(w:Int,h:Int,oldw:Int,oldh:Int){super.onSizeChanged(w,h,oldw,oldh);backgroundTransform?.updateMatrix()}
     private fun graffiti(c:Canvas,w:Float,h:Float){
@@ -292,8 +311,8 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         p.shader=null;p.color=if(style==2&&!full)0xAAFFFFFF.toInt()else 0xFF777D79.toInt()
         c.drawRoundRect(RectF(left,y-sx,right,y+sx),sx,sx,p)
         val x=left+(right-left)*(if(s.duration>0)s.position.toFloat()/s.duration else 0f).coerceIn(0f,1f)
-        p.color=if(style==2&&!full)Color.WHITE else if(lime)0xFFABFF00.toInt()else Color.WHITE
-        c.drawRoundRect(RectF(left,y-sx,x,y+sx),sx,sx,p);c.drawCircle(x,y,2.5f*sx,p)
+        p.color=if(style==2&&!full)0xFFFFA12A.toInt() else if(lime)0xFFABFF00.toInt()else Color.WHITE
+        c.drawRoundRect(RectF(left,y-sx,x,y+sx),sx,sx,p);if(style!=2||full)c.drawCircle(x,y,2.5f*sx,p)
         if(full){text(c,time(s.position),left,y+16*sx,9*sx,70*sx,Color.LTGRAY);text(c,time(s.duration),right-35*sx,y+16*sx,9*sx,45*sx,Color.LTGRAY)}
     }
 
