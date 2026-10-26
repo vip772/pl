@@ -9,7 +9,8 @@ end = source.index('    private fun ensurePreDrawTracking(', start)
 method = source[start:end].replace('private fun ', 'fun ')
 fixture = '''
 class View {
- var isAttachedToWindow=true
+ var isAttachedToWindow=true;var isLayoutRequested=false;var height=800;var y=0
+ fun getLocationOnScreen(a:IntArray){a[1]=y}
  var paddingLeft=3; var paddingTop=5; var paddingRight=7; var paddingBottom=11
  var writes=0; var scrolls=0
  fun setPadding(l:Int,t:Int,r:Int,b:Int) {
@@ -25,15 +26,23 @@ class Runtime(val recycler:View) {
 METHOD
 }
 fun main() {
- val list=View(); val footer=View(); val runtime=Runtime(list); val state=FooterState()
+ val list=View(); val footer=View(); val runtime=Runtime(list); val state=FooterState();footer.y=629
  runtime.applyChatListPadding(footer,171,state)
  check(list.paddingBottom==182 && list.scrolls==0)
  repeat(1000) {runtime.applyChatListPadding(footer,171,state)}
  check(list.writes==1 && list.scrolls==0)
+ footer.y=583
  runtime.applyChatListPadding(footer,217,state)
  check(list.paddingBottom==228 && list.writes==2 && list.scrolls==0)
  check(list.paddingLeft==3 && list.paddingTop==5 && list.paddingRight==7)
  check(state.recyclerPaddingBottom==11)
+ // Native layout already reserves 140px: only remaining 77px overlap belongs in padding.
+ list.height=660;runtime.applyChatListPadding(footer,217,state);check(list.paddingBottom==88)
+ // No overlap must restore base even if a full input height was supplied.
+ list.height=580;runtime.applyChatListPadding(footer,217,state);check(list.paddingBottom==11)
+ list.height=800;list.isLayoutRequested=true;runtime.applyChatListPadding(footer,217,state);check(list.paddingBottom==11)
+ list.isLayoutRequested=false;runtime.applyChatListPadding(footer,217,state);check(list.paddingBottom==228)
+
  println("PASS: production footer padding: initial entry has no explicit scroll, stable updates are no-ops, resize does not accumulate, side/top preserved")
 }
 '''.replace('METHOD', method)

@@ -31,7 +31,7 @@ internal data class HomeMusicSong(val title:String,val artist:String,val playUrl
 internal object HomeMusic {
     private val worker=Executors.newFixedThreadPool(4){Thread(it,"Hchat-HomeMusic").apply{isDaemon=true}}
     private val main=Handler(Looper.getMainLooper()); private val qq=QQMusicClient()
-    private var player:MediaPlayer?=null; private var current:HomeMusicSong?=null; private var queue=mutableListOf<HomeMusicSong>()
+    private var player:MediaPlayer?=null; private var current:HomeMusicSong?=null;
     private var shuffle=false;private var visualizer:android.media.audiofx.Visualizer?=null;@Volatile private var spectrum=FloatArray(64);private var spectrumWarned=false;private var selection=0; private var preparing=false; private var playing=false; private var liked=false; private var timerTask:Runnable?=null; private var lyricWindow:android.view.WindowManager?=null; private var lyricView:TextView?=null
     private val listeners=mutableSetOf<()->Unit>()
     private fun prefs(c:Context)=HchatStorage.preferences(c,HomeExtensionSettings.PREFS)
@@ -69,7 +69,7 @@ internal object HomeMusic {
         listOf<()->List<HomeMusicSong>>({(qq.search(query) as? QQMusicSearchResult.Success)?.track?.let{listOf(qqSong(it))}?:emptyList()}, {HomeMusicSources.searchMany(query,"网易云")},{HomeMusicSources.searchMany(query,"酷我")},{HomeMusicSources.searchMany(query,"咪咕")}).forEach{task->worker.execute{runCatching{result.addAll(task())};if(pending.decrementAndGet()==0){val songs=result.toList().distinctBy{it.source+it.sourceId}.sortedBy{if(it.source=="QQ音乐")0 else 1};main.post{done(songs)}}}}
     }
     fun search(c:Context,query:String,callback:(HomeMusicSong?)->Unit)=searchAll(query){songs->songs.firstOrNull()?.let{storeSong(c,it)};callback(songs.firstOrNull())}
-    private fun play(c:Context,s:HomeMusicSong){val request=++selection;if(s.playUrl.isBlank()){toast(c,"正在获取播放地址…");worker.execute{val resolved=HomeMusicSources.resolve(s);main.post{if(request!=selection)return@post;if(resolved==null)toast(c,"该歌曲暂无可用播放地址")else play(c,resolved)}};return};if(sameSong(s,current)&&player!=null){if(preparing)return;runCatching{if(playing){player?.pause();playing=false}else if(player?.isPlaying==false){player?.start();playing=true;if(visualizer==null)player?.let{captureSpectrum(c,it)}};changed()}.onFailure{toast(c,"播放器正在准备，请稍后再试")};return};releaseSpectrum();runCatching{player?.release()};current=s;storeSong(c,s);changed();val qi=queue.indexOfFirst{sameSong(it,s)};if(qi<0)queue.add(s)else queue[qi]=s;playing=false;preparing=true;val mp=MediaPlayer();player=mp;runCatching{if(Build.VERSION.SDK_INT>=21)mp.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());mp.setDataSource(s.playUrl);mp.setOnSeekCompleteListener{if(player===it)changed()};mp.setOnPreparedListener{if(player!==it)return@setOnPreparedListener;preparing=false;it.start();playing=true;captureSpectrum(c,it);changed();updateLyric(s)};mp.setOnCompletionListener{releaseSpectrum();playing=false;changed();if(queue.size>1)next(c)};mp.setOnErrorListener{failed,_,_->if(player!==failed)return@setOnErrorListener true;preparing=false;playing=false;releaseSpectrum();player?.release();player=null;changed();toast(c,"该音源暂时无法播放");true};mp.prepareAsync()}.onFailure{preparing=false;player=null;mp.release();toast(c,"播放地址失效或网络不可用")}}
+    private fun play(c:Context,s:HomeMusicSong){val request=++selection;if(s.playUrl.isBlank()){toast(c,"正在获取播放地址…");worker.execute{val resolved=HomeMusicSources.resolve(s);main.post{if(request!=selection)return@post;if(resolved==null)toast(c,"该歌曲暂无可用播放地址")else play(c,resolved)}};return};if(sameSong(s,current)&&player!=null){if(preparing)return;runCatching{if(playing){player?.pause();playing=false}else if(player?.isPlaying==false){player?.start();playing=true;if(visualizer==null)player?.let{captureSpectrum(c,it)}};changed()}.onFailure{toast(c,"播放器正在准备，请稍后再试")};return};releaseSpectrum();runCatching{player?.release()};current=s;storeSong(c,s);changed();playing=false;preparing=true;val mp=MediaPlayer();player=mp;runCatching{if(Build.VERSION.SDK_INT>=21)mp.setAudioAttributes(AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_MUSIC).build());mp.setDataSource(s.playUrl);mp.setOnSeekCompleteListener{if(player===it)changed()};mp.setOnPreparedListener{if(player!==it)return@setOnPreparedListener;preparing=false;it.start();playing=true;captureSpectrum(c,it);changed();updateLyric(s)};mp.setOnCompletionListener{releaseSpectrum();playing=false;changed();if(favorites(c).isNotEmpty())next(c)};mp.setOnErrorListener{failed,_,_->if(player!==failed)return@setOnErrorListener true;preparing=false;playing=false;releaseSpectrum();player?.release();player=null;changed();toast(c,"该音源暂时无法播放");true};mp.prepareAsync()}.onFailure{preparing=false;player=null;mp.release();toast(c,"播放地址失效或网络不可用")}}
     private fun toast(c:Context,s:String){main.post{Toast.makeText(c,s,Toast.LENGTH_SHORT).show()}}
     private fun iconButton(c:Context,s:String,action:()->Unit)=MusicIcon(c,s).apply{contentDescription=when(s){"☷"->"其他版本";"♫"->"音质";"◷"->"定时";"▤"->"悬浮歌词";"☰"->"收藏夹";"⌕"->"搜索";else->s};background=rounded(c,0x22FFFFFF,12);setOnClickListener{action()}}
     private fun spaced(c:Context)=LinearLayout.LayoutParams(0,dp(c,56),1f).apply{setMargins(dp(c,4),0,dp(c,4),0)}
@@ -159,7 +159,7 @@ internal object HomeMusic {
             list.removeAllViews()
             if(displayed.isEmpty())list.addView(txt(c,"暂无歌曲",15f,0xFFB7C2C9.toInt()))
             displayed.forEach{song->
-                val startPlayback={storeSong(c,song);queue=displayed.toMutableList();play(c,song);dialog.dismiss()}
+                val startPlayback={storeSong(c,song);play(c,song);dialog.dismiss()}
                 val row=LinearLayout(c).apply{gravity=Gravity.CENTER_VERTICAL;setPadding(dp(c,8),dp(c,10),dp(c,8),dp(c,10));setOnClickListener{startPlayback()}}
                 val text=LinearLayout(c).apply{orientation=LinearLayout.VERTICAL}
                 text.addView(txt(c,song.title,16f));text.addView(txt(c,"${song.artist} · ${song.source}",12f,0xFFB7C2C9.toInt()))
@@ -210,8 +210,8 @@ internal object HomeMusic {
             canvas.restoreToCount(save)
         }
     }
-    private fun searchSongRow(c:Context,song:HomeMusicSong,songs:List<HomeMusicSong>):View{
-        val startPlayback={queue=songs.toMutableList();play(c,if(sameSong(song,current)&&player!=null)current!! else song)}
+    private fun searchSongRow(c:Context,song:HomeMusicSong):View{
+        val startPlayback={play(c,if(sameSong(song,current)&&player!=null)current!! else song)}
         return LinearLayout(c).apply{
             gravity=Gravity.CENTER_VERTICAL;setPadding(dp(c,12),dp(c,10),dp(c,6),dp(c,10));background=rounded(c,0xFF203744.toInt(),12)
             val info=LinearLayout(c).apply{
@@ -267,12 +267,25 @@ internal object HomeMusic {
             if(selectedSource!=index){selectedSource=index;generation++;updateSourceButtons();results.removeAllViews();status.text="搜索 ${sourceLabels[index]} 的歌曲"}
         }}
         dialog.setOnDismissListener{generation++}
-        val doSearch={val request=++generation;val source=sourceKeys[selectedSource];val label=sourceLabels[selectedSource];val q=input.text.toString().trim();if(q.isBlank()){input.error="请输入歌曲名或歌手"}else{status.text="正在搜索 $label…";results.removeAllViews();searchSource(q,source){songs->if(!dialog.isShowing||request!=generation)return@searchSource;status.text=if(songs.isEmpty())"没有可用结果" else "$label · ${songs.size} 首歌曲，选择一首播放";songs.forEach{song->val row=searchSongRow(c,song,songs);val lp=LinearLayout.LayoutParams(-1,-2).apply{setMargins(0,dp(c,4),0,dp(c,4))};results.addView(row,lp)}}}}
+        val doSearch={val request=++generation;val source=sourceKeys[selectedSource];val label=sourceLabels[selectedSource];val q=input.text.toString().trim();if(q.isBlank()){input.error="请输入歌曲名或歌手"}else{status.text="正在搜索 $label…";results.removeAllViews();searchSource(q,source){songs->if(!dialog.isShowing||request!=generation)return@searchSource;status.text=if(songs.isEmpty())"没有可用结果" else "$label · ${songs.size} 首歌曲，选择一首播放";songs.forEach{song->val row=searchSongRow(c,song);val lp=LinearLayout.LayoutParams(-1,-2).apply{setMargins(0,dp(c,4),0,dp(c,4))};results.addView(row,lp)}}}}
         searchButton.setOnClickListener{doSearch()};input.setOnEditorActionListener{_,_,_->doSearch();true}
         dialog.setContentView(page);dialog.show();dialog.window?.setBackgroundDrawableResource(android.R.color.transparent);dialog.window?.setLayout(-1,(c.resources.displayMetrics.heightPixels*0.88f).toInt());dialog.window?.setGravity(Gravity.BOTTOM);dialog.window?.attributes=dialog.window?.attributes?.apply{windowAnimations=android.R.style.Animation_InputMethod}
     }
-    private fun previous(c:Context){if(queue.size<2){toast(c,"请先从搜索结果选择播放列表");return};val i=queue.indexOfFirst{sameSong(it,current)};play(c,queue[(i-1+queue.size)%queue.size])}
-    private fun next(c:Context){if(queue.size<2){toast(c,"请先从搜索结果选择播放列表");return};val i=queue.indexOfFirst{sameSong(it,current)};play(c,queue[if(shuffle)(queue.indices.filter{it!=i}.randomOrNull()?:0)else(i+1)%queue.size])}
+    private fun previous(c:Context) = stepFavorite(c, -1)
+    private fun next(c:Context) = stepFavorite(c, 1)
+    private fun stepFavorite(c:Context, direction:Int) {
+        val list=favorites(c)
+        if(list.isEmpty()){toast(c,"收藏夹为空，请先收藏歌曲");return}
+        val song=current?:load(c)
+        val index=list.indexOfFirst{sameSong(it,song)}
+        val target=favoriteStepIndex(list.size,index,direction,shuffle)
+        // Previous/next is a selection operation, never toggle pause for a one-song collection.
+        if(sameSong(list[target],current)&&player!=null){
+            if(!playing&&!preparing)runCatching{player?.start();playing=true;player?.let{captureSpectrum(c,it)};changed()}.onFailure{toast(c,"播放器暂时无法继续播放")}
+            return
+        }
+        play(c,list[target])
+    }
     private fun quality(c:Context,s:HomeMusicSong?){
         if(s==null)return
         val labels=if(s.source=="QQ音乐" || s.source==HomeMusicAggregate.QQ)arrayOf("当前音源（实际码率以播放流为准）")else arrayOf("标准","高品质","无损")

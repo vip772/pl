@@ -99,6 +99,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             host.packageManager.getPackageInfo(host.packageName, 0).versionName == "8.0.78"
         }.getOrDefault(false)
         if (verifiedInputSwitch) {
+            installSendAnimationSettlement(footerClass)
             KavaReflector.findDeclaredMethod(footerClass, "u0", Int::class.javaPrimitiveType!!,
                 Boolean::class.javaPrimitiveType!!)?.takeIf { it.returnType == Void.TYPE }?.let { method ->
                 HookRegistry.get().hook(method, object : XC_MethodHook() {
@@ -159,6 +160,47 @@ private class FooterRuntime(private val context: FeatureContext) {
         return installed
     }
 
+    /** 8.0.78 verified callbacks only: never run from layout, scroll or pre-draw. */
+    private fun installSendAnimationSettlement(footerClass: Class<*>) {
+        val buttonField = KavaReflector.findDeclaredField(footerClass, "n") ?: return
+        val canSendField = KavaReflector.findDeclaredField(footerClass, "l4") ?: return
+        if (buttonField.type != android.widget.Button::class.java || canSendField.type != Boolean::class.javaPrimitiveType) return
+        for (name in listOf("h0", "f0")) {
+            val callbackClass = KavaReflector.loadClass("com.tencent.mm.pluginsdk.ui.chat.$name", context.hostClassLoader()) ?: continue
+            val ownerField = KavaReflector.findDeclaredField(callbackClass, "e") ?: continue
+            if (ownerField.type != footerClass) continue
+            for (event in listOf("onAnimationStart", "onAnimationEnd", "onAnimationCancel")) {
+                val method = KavaReflector.findDeclaredMethod(callbackClass, event, android.animation.Animator::class.java) ?: continue
+                hookFooterSendCallback(method) { callback, animator ->
+                    val footer = KavaReflector.readField(ownerField, callback) as? View ?: return@hookFooterSendCallback
+                    if (!isEnabled() || states[footer]?.reparented != true || !footer.isAttachedToWindow) return@hookFooterSendCallback
+                    if (event == "onAnimationStart") {
+                        SendButtonSettlement.started(footer, animator)
+                        return@hookFooterSendCallback
+                    }
+                    SendButtonSettlement.finished(footer, animator)
+                    // Native cancel/end callbacks may start a newer animation synchronously.
+                    // Coalesce and read current can-send/animation state in the next frame.
+                    SendButtonSettlement.schedule(footer) {
+                        if (!isEnabled() || states[footer]?.reparented != true) return@schedule null
+                        val canSend = KavaReflector.readField(canSendField, footer) as? Boolean ?: return@schedule null
+                        if (!canSend) return@schedule null
+                        KavaReflector.readField(buttonField, footer) as? android.widget.Button
+                    }
+                }
+            }
+        }
+    }
+    private fun hookFooterSendCallback(method: Method, after: (Any, Any) -> Unit) {
+        if (!hooked.add(method)) return
+        runCatching {
+            HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    runCatching { after(param.thisObject, param.args[0] ?: return) }.onFailure { HLog.e("[Hchat:$TAG] 发送按钮动画收尾失败", it) }
+                }
+            })
+        }.onFailure { hooked.remove(method); HLog.e("[Hchat:$TAG] 发送按钮动画回调安装失败", it) }
+    }
     private fun locateRefreshBottomHeight(footerClass: Class<*>): Method? {
         val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         DexMethodCache.load(
@@ -856,7 +898,13 @@ private class FooterRuntime(private val context: FeatureContext) {
             ?: return
         if (state.recyclerPaddingBottom == null) state.recyclerPaddingBottom = recycler.paddingBottom
         val base = state.recyclerPaddingBottom ?: return
-        val target = base + extra
+        // Native content may already end above the input bar. Reserve only real overlap,
+        // never add the whole input/panel height a second time.
+        if (recycler.isLayoutRequested || footer.isLayoutRequested || recycler.height <= 0) return
+        val listLocation = IntArray(2).also(recycler::getLocationOnScreen)
+        val footerLocation = IntArray(2).also(footer::getLocationOnScreen)
+        val overlap = (listLocation[1] + recycler.height - footerLocation[1]).coerceIn(0, extra)
+        val target = base + overlap
         if (recycler.paddingBottom == target) {
             liftNewMessageBubble(footer)
             return
@@ -944,6 +992,7 @@ private class FooterRuntime(private val context: FeatureContext) {
 
     private fun restore(footer: View?) {
         footer ?: return
+        SendButtonSettlement.cancel(footer)
         preDrawListeners.remove(footer)?.let { listener ->
             runCatching { footer.viewTreeObserver.removeOnPreDrawListener(listener) }
         }

@@ -174,22 +174,28 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         }
     }
     private fun styleTwoHome(canvas:Canvas,s:MusicPaintState){
-        val coverCx=64*sx;val coverCy=height*0.40f;val radius=31*sx
+        val density=resources.displayMetrics.density
+        val coverCx=64*sx-4*density;val coverCy=height*0.40f+3*density;val radius=31*sx
         drawPortrait(canvas,coverCx,coverCy,radius)
         drawCoverOrbit(canvas,coverCx,coverCy,radius)
         val infoLeft=108*sx;val infoRight=width-112*sx
         text(canvas,s.title,infoLeft,coverCy-14*sy,15*sx,(infoRight-infoLeft).coerceAtLeast(20f),Color.WHITE)
         text(canvas,s.artist.ifBlank{"${time(s.position)} / ${time(s.duration)}"},infoLeft,coverCy+17*sy,11*sx,(infoRight-infoLeft).coerceAtLeast(20f),0xFFE2E6E4.toInt())
-        drawElectricArc(canvas,s,infoLeft,infoRight,coverCy+45*sy)
-        val controlX=width-82*sx+5*resources.displayMetrics.density;val gap=25*sx;val controlY=coverCy
+        val controlX=width-82*sx+15*resources.displayMetrics.density;val gap=25*sx;val controlY=coverCy
         icon(canvas,"|◀","previous",controlX-gap,controlY,15*sx,Color.WHITE)
         playIcon(canvas,s,controlX,controlY,15*sx,false)
         icon(canvas,"▶|","next",controlX+gap,controlY,15*sx,Color.WHITE)
         val py=height-22*sy
+        val singerBottom=coverCy+17*sy+3*sx
+        val spectrumTop=maxOf(singerBottom,controlY+18*sx)+3*density
+        val spectrumBottom=py-7*density
+        drawMirroredSpectrum(canvas,s,infoLeft,controlX,spectrumTop,spectrumBottom)
         val left=65*sx;val right=width-65*sx
         drawProgress(canvas,s,left,right,py,true)
         text(canvas,time(s.position),15*sx,py+3*sx,9*sx,42*sx,Color.WHITE)
-        text(canvas,time(s.duration),width-55*sx,py+3*sx,9*sx,42*sx,Color.WHITE)
+        p.textSize=9*sx;p.typeface=boldTypeface
+        val total=time(s.duration)
+        text(canvas,total,width-15*sx-p.measureText(total),py+3*sx,9*sx,p.measureText(total)+sx,Color.WHITE)
         if(s.playing){
             val x=left+(right-left)*(if(s.duration>0)s.position.toFloat()/s.duration else 0f).coerceIn(0f,1f)
             val tail=(18+6*sin(animationPhase*2*PI).toFloat())*sx
@@ -219,23 +225,30 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         t.mma.hooks.items.homesidepanel.GradientOrbitStroke.draw(c,orbitOutline,orbitTrail,orbitMeasure,orbitPaint,orbitMeasure.length,phase,3*d,d)
         orbitPaint.shader=null
     }
-    private val arcPath=Path()
-    private val arcPaint=Paint(Paint.ANTI_ALIAS_FLAG).apply{style=Paint.Style.STROKE;strokeCap=Paint.Cap.ROUND;strokeJoin=Paint.Join.ROUND}
-    private var arcShader:LinearGradient?=null
-    private var arcLeft=-1f;private var arcRight=-1f
-    private fun drawElectricArc(canvas:Canvas,s:MusicPaintState,left:Float,right:Float,y:Float){
-        if(!s.playing)return
-        arcPath.reset();var peak=0f
-        for(i in 0 until 32){
-            val amplitude=s.spectrum.getOrElse(i*2){0f}.coerceIn(0f,1f);peak=max(peak,amplitude)
-            val x=left+(right-left)*i/31f
-            val dy=sin(i*2.31f+animationPhase*2*PI).toFloat()*amplitude*11*sy
-            if(i==0)arcPath.moveTo(x,y+dy)else arcPath.lineTo(x,y+dy)
+    private val spectrumGlow=Paint(Paint.ANTI_ALIAS_FLAG).apply{strokeCap=Paint.Cap.ROUND}
+    private val spectrumCore=Paint(Paint.ANTI_ALIAS_FLAG).apply{strokeCap=Paint.Cap.ROUND}
+    private var spectrumGradient:LinearGradient?=null
+    private var spectrumLeft=-1f;private var spectrumRight=-1f
+    private fun drawMirroredSpectrum(c:Canvas,s:MusicPaintState,left:Float,right:Float,top:Float,bottom:Float){
+        if(!s.playing||bottom<=top||right<=left)return
+        if(spectrumLeft!=left||spectrumRight!=right){
+            spectrumLeft=left;spectrumRight=right
+            spectrumGradient=LinearGradient(left,0f,right,0f,intArrayOf(0xFF12CAFF.toInt(),0xFFB7F2FF.toInt(),0xFFE8EEFF.toInt(),0xFFCE70FF.toInt(),0xFFFF69DC.toInt()),floatArrayOf(0f,.3f,.5f,.75f,1f),Shader.TileMode.CLAMP)
         }
-        if(peak<=0.01f)return
-        if(arcLeft!=left||arcRight!=right){arcLeft=left;arcRight=right;arcShader=LinearGradient(left,0f,right,0f,intArrayOf(0xFF388BFF.toInt(),0xFFAF49FF.toInt(),0xFFFFD35C.toInt()),null,Shader.TileMode.CLAMP)}
-        arcPaint.shader=arcShader;arcPaint.strokeWidth=5*sx;arcPaint.alpha=50;canvas.drawPath(arcPath,arcPaint)
-        arcPaint.strokeWidth=1.5f*sx;arcPaint.alpha=255;canvas.drawPath(arcPath,arcPaint)
+        val center=(top+bottom)/2;val maxHeight=(bottom-top)/2
+        val count=48;val step=(right-left)/count
+        spectrumGlow.shader=spectrumGradient;spectrumCore.shader=spectrumGradient
+        spectrumGlow.strokeWidth=step*.95f;spectrumGlow.alpha=65
+        spectrumCore.strokeWidth=step*.43f;spectrumCore.alpha=255
+        // Mirror real FFT magnitudes around one horizontal axis. No synthetic noise/beat.
+        for(i in 0 until count){
+            val amplitude=s.spectrum.getOrElse(i*s.spectrum.size/count){0f}.coerceIn(0f,1f)
+            if(amplitude<=.01f)continue
+            val h=(sqrt(amplitude)*maxHeight).coerceAtMost(maxHeight-spectrumGlow.strokeWidth/2).coerceAtLeast(0f)
+            val x=left+(i+.5f)*step
+            c.drawLine(x,center-h,x,center+h,spectrumGlow)
+            c.drawLine(x,center-h,x,center+h,spectrumCore)
+        }
     }
     override fun onSizeChanged(w:Int,h:Int,oldw:Int,oldh:Int){super.onSizeChanged(w,h,oldw,oldh);backgroundTransform?.updateMatrix()}
     private fun graffiti(c:Canvas,w:Float,h:Float){

@@ -31,7 +31,10 @@ view=(base/'HomeMusicPaintedView.kt').read_text()
 home=view[view.index('    private fun styleTwoHome'):view.index('    private val orbitOutline')]
 assert 'py-8*sy' not in home
 assert 'val left=65*sx;val right=width-65*sx' in home
-assert '5*resources.displayMetrics.density' in home
+assert '15*resources.displayMetrics.density' in home
+assert 'width-15*sx-p.measureText(total)' in home
+assert '64*sx-4*density' in home and 'height*0.40f+3*density' in home
+assert 'drawMirroredSpectrum(canvas,s,infoLeft,controlX,spectrumTop,spectrumBottom)' in home
 assert 'drawCircle(x,py' not in home
 assert '0x33131717' not in view
 assert 'if(style!=2||full)c.drawCircle' in view
