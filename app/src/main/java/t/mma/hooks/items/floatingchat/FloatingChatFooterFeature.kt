@@ -566,7 +566,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         return tracker
     }
 
-    private fun scheduleFooterApply(footer: View, tracker: FooterTracker, requestLayout: Boolean = true) {
+    private fun scheduleFooterApply(footer: View, tracker: FooterTracker, requestLayout: Boolean = false) {
+        if (tracker.failed) return
         if (tracker.preDraw != null || !footer.isAttachedToWindow) return
         val observer = footer.viewTreeObserver
         val listener = object : ViewTreeObserver.OnPreDrawListener {
@@ -580,6 +581,19 @@ private class FooterRuntime(private val context: FeatureContext) {
                 if (!isEnabled()) {
                     footer.visibility = tracker.visibility
                     restore(footer)
+                    return true
+                }
+                // Padding settlement must never reparent or roll back the input hierarchy.
+                if (tracker.settlePasses > 0) {
+                    val state = states[footer]
+                    val settled = state != null && applyChatListPadding(footer, state.listExtra, state)
+                    if (!settled && --tracker.settlePasses > 0) {
+                        scheduleFooterApply(footer, tracker)
+                        footer.rootView.postInvalidateOnAnimation()
+                        return false
+                    }
+                    tracker.settlePasses = 0
+                    ChatBottomTrace.event(footer, "footer-settled") { "complete=$settled ready=${tracker.ready}" }
                     return true
                 }
                 val wasReady = tracker.ready
@@ -604,18 +618,23 @@ private class FooterRuntime(private val context: FeatureContext) {
                     footer.rootView.postInvalidateOnAnimation()
                     return false
                 } else {
+                    // Stop ALL layout/global callbacks from restarting a failed transaction.
+                    tracker.failed = true
+                    removeGlobalTracking(tracker)
                     // A failed apply may already have moved the native panel. Roll it back.
                     ChatBottomTrace.event(footer, "footer-rollback") { "attempts=${tracker.attempts}" }
                     restore(footer)
                     footer.visibility = tracker.visibility
                     if (!tracker.failureReported) {
                         tracker.failureReported = true
-                        HLog.w("[Hchat:$TAG] 初始布局未就绪，已恢复原始输入区和面板，等待后续布局变化")
+                        HLog.w("[Hchat:$TAG] 初始布局未就绪，已恢复原始输入区和面板，本实例停止重试")
                     }
                 }
                 // Hierarchy/margins/padding changed: finish the native relayout
                 // before revealing the first frame instead of drawing intermediate bounds.
                 if (applied && !wasReady) {
+                    tracker.settlePasses = 3
+                    scheduleFooterApply(footer, tracker)
                     // Returning false alone does not explicitly request the next draw.
                     footer.rootView.postInvalidateOnAnimation()
                     return false
@@ -730,9 +749,11 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (footer.translationZ != 0f) footer.translationZ = 0f
         FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true, borderless = true, transparency = backgroundTransparency)
         FloatingFooterInputSurfaces.apply(footer)
-        val paddingReady = applyChatListPadding(footer, occupiedHeight + gap, state)
+        state.listExtra = occupiedHeight + gap
+        applyChatListPadding(footer, state.listExtra, state)
         ensurePreDrawTracking(footer)
-        return paddingReady
+        // Structural success is independent of pending native RecyclerView layout.
+        return true
 
     }
 
@@ -1117,6 +1138,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         var layout: ViewGroup,
         val visibility: Int,
         var ready: Boolean = false,
+        var failed: Boolean = false,
+        var settlePasses: Int = 0,
         var preDraw: ViewTreeObserver.OnPreDrawListener? = null,
         var layoutListener: View.OnLayoutChangeListener? = null,
         var attempts: Int = 0,
@@ -1148,6 +1171,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         var chatContent: ViewGroup? = null,
         var chatRecycler: View? = null,
         var recyclerPaddingBottom: Int? = null,
+        var listExtra: Int = 0,
         var baseInputHeight: Int = 0
     )
 

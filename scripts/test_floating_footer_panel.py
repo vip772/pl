@@ -12,7 +12,8 @@ assert 'addRule(RelativeLayout.BELOW, state.inputColumn.id)' in reparent
 assert 'addRule(RelativeLayout.BELOW, panel.id)' not in reparent
 assert 'state.changedRules[state.inputColumn] = columnParams.rules.copyOf()' in reparent
 assert 'panel.visibility = if (isPanelState(panelState))' in reparent
-assert 'applyChatListPadding(footer, occupiedHeight + gap, state)' in source
+assert 'state.listExtra = occupiedHeight + gap' in source
+assert 'applyChatListPadding(footer, state.listExtra, state)' in source
 assert '.coerceAtLeast(dp(MIN_PANEL_HEIGHT_DP)) + dp(PANEL_EXTRA_HEIGHT_DP)' in source
 assert 'private const val PANEL_EXTRA_HEIGHT_DP = 50' in source
 assert source.count('applyCompactPanelHeight(footer,') == 2

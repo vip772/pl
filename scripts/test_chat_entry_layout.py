@@ -5,7 +5,7 @@ r=Path(__file__).resolve().parents[1]
 s=(r/'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatFooterFeature.kt').read_text()
 a=s.index('    private fun scheduleFooterApply(');b=s.index('    private fun removeGlobalTracking(',a)
 method=s[a:b]
-assert 'return paddingReady' in s
+assert 'return paddingReady' not in s
 assert 'val inputHeight = stableInputHeight' in s
 bg=(r/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt').read_text()
 a=bg.index('        if (slot == BackgroundBeautySettings.Slot.CHAT &&',bg.index('private fun applyNativeChrome'))
@@ -26,7 +26,7 @@ class View {
  fun requestLayout(){layouts++;isLayoutRequested=true};fun postInvalidateOnAnimation(){invalidations++}
  companion object{const val INVISIBLE=4}
 }
-class FooterTracker(val layout:View,val visibility:Int=0,var ready:Boolean=false,
+class FooterTracker(val layout:View,val visibility:Int=0,var ready:Boolean=false,var failed:Boolean=false,var settlePasses:Int=0,
  var preDraw:ViewTreeObserver.OnPreDrawListener?=null,var attempts:Int=0,var failureReported:Boolean=false)
 object HLog {fun w(s:String){}}
 object BackgroundBeautySettings {enum class Slot{CHAT,WECHAT}}
@@ -35,6 +35,9 @@ class Name(val name:String)
 fun skip(view:Native,slot:BackgroundBeautySettings.Slot) = PREDICATE
 class Runtime {
  val INITIAL_LAYOUT_RETRY_COUNT=3;var enabled=true;var restored=0;var untracked=0
+ val states=mutableMapOf<View,State>();var paddingCalls=0;var paddingStable=true
+ class State(val listExtra:Int=223)
+ fun applyChatListPadding(v:View,e:Int,s:State):Boolean {paddingCalls++;return paddingStable}
  val outcomes=java.util.ArrayDeque<Boolean>()
  fun isReadyChatLayout(v:View)=v.isAttachedToWindow
  fun isEnabled()=enabled
@@ -60,6 +63,7 @@ fun main(){
  r.schedule(v,t);check(!v.viewTreeObserver.frame() && !t.ready)
  check(!v.viewTreeObserver.frame() && !t.ready)
  check(!v.viewTreeObserver.frame() && t.ready && r.untracked==1)
+ r.states[v]=Runtime.State()
  check(v.viewTreeObserver.frame());check(v.viewTreeObserver.listeners.isEmpty())
  // Native layout clears the flag before pre-draw; retries must not set it again.
  val live=Runtime();live.layoutAware=true;val lv=View();val lt=FooterTracker(View())
@@ -67,19 +71,29 @@ fun main(){
  check(!lv.viewTreeObserver.frame());lv.isLayoutRequested=false
  check(!lv.viewTreeObserver.frame());lv.isLayoutRequested=false
  check(!lv.viewTreeObserver.frame() && lt.ready && live.restored==0)
- check(lv.layouts==3)
+ check(lv.layouts==2)
+ live.states[lv]=Runtime.State()
  check(lv.viewTreeObserver.frame() && lv.viewTreeObserver.listeners.isEmpty())
  // No forever pre-draw loop when native structure never becomes ready.
  val fail=Runtime();val fv=View();val ft=FooterTracker(View());fail.schedule(fv,ft)
  repeat(3){check(!fv.viewTreeObserver.frame())};check(fv.viewTreeObserver.frame())
  check(fail.restored==1 && ft.failureReported && fv.viewTreeObserver.listeners.isEmpty())
+ // Repeated layout events cannot restart failed structural work.
+ repeat(1000){fail.schedule(fv,ft);check(fv.viewTreeObserver.frame())}
+ check(fail.restored==1 && ft.attempts==4)
+ // Permanently pending padding never rolls back a successfully attached footer.
+ val pending=Runtime();pending.paddingStable=false;pending.outcomes.add(true)
+ val pv=View();val pt=FooterTracker(View());pending.states[pv]=Runtime.State()
+ pending.schedule(pv,pt);check(!pv.viewTreeObserver.frame() && pt.ready)
+ repeat(2){check(!pv.viewTreeObserver.frame())};check(pv.viewTreeObserver.frame())
+ check(pending.restored==0 && pending.paddingCalls==3 && pv.viewTreeObserver.listeners.isEmpty())
  val off=Runtime();val ov=View();val ot=FooterTracker(View());off.schedule(ov,ot);off.enabled=false
  check(ov.viewTreeObserver.frame() && off.restored==1)
  val chat=BackgroundBeautySettings.Slot.CHAT
  check(skip(Native(Name("com.tencent.mm.ui.FrostedContentView")),chat))
  check(!skip(Native(Name("androidx.appcompat.widget.ActionBarContainer")),chat))
  check(skip(Native(Name("com.tencent.mm.ui.widget.WeUIBounceViewV2")),chat))
- println("PASS production entry transaction: padding before reveal, bounded rollback, disabled cleanup, previous chat background scope, native layout flag lifecycle")
+ println("PASS production entry transaction: padding before reveal, bounded rollback, disabled cleanup, failed callback circuit breaker, pending padding independent of structural success")
 }
 '''.replace('METHOD',method).replace('PREDICATE',predicate)
 libs=Path('/tmp/pl-kotlin-libs');std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
