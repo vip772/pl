@@ -2946,10 +2946,16 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun restoreSurfaceGeometry(view: View, snapshot: SurfaceSnapshot) {
-        if (view.paddingLeft != snapshot.originalPaddingLeft ||
+        // Chat list padding belongs to native insets / floating header and footer.
+        // A background snapshot predates those owners; replaying it erases their
+        // live avoidance on every background repair (20 -> 400 -> 20 in traces).
+        val chatList = snapshot.slot == BackgroundBeautySettings.Slot.CHAT &&
+            (view.javaClass.name == "com.tencent.mm.pluginsdk.ui.tools.ChattingRecyclerView" ||
+                view.javaClass.name == "com.tencent.mm.pluginsdk.ui.tools.ScrollControlRecyclerView")
+        if (!chatList && (view.paddingLeft != snapshot.originalPaddingLeft ||
             view.paddingTop != snapshot.originalPaddingTop ||
             view.paddingRight != snapshot.originalPaddingRight ||
-            view.paddingBottom != snapshot.originalPaddingBottom) {
+            view.paddingBottom != snapshot.originalPaddingBottom)) {
             view.setPadding(snapshot.originalPaddingLeft, snapshot.originalPaddingTop,
                 snapshot.originalPaddingRight, snapshot.originalPaddingBottom)
         }

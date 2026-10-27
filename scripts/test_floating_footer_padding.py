@@ -20,8 +20,10 @@ class View {
  fun canScrollVertically(d:Int)=false
  fun scrollBy(x:Int,y:Int){scrolls++}
 }
-class FooterState(var chatRecycler:View?=null,var recyclerPaddingBottom:Int?=null,val listLocation:IntArray=IntArray(2),val footerLocation:IntArray=IntArray(2))
+class ChatListBottomInset {fun beforePadding(v:View,t:Int){}}
+class FooterState(val bottomInset:ChatListBottomInset=ChatListBottomInset(),var chatRecycler:View?=null,var recyclerPaddingBottom:Int?=null,val listLocation:IntArray=IntArray(2),val footerLocation:IntArray=IntArray(2))
 class Runtime(val recycler:View) {
+ val listOwners=mutableMapOf<View,View>()
  fun findChatRecycler(footer:View):View?=recycler
  fun liftNewMessageBubble(footer:View){}
 METHOD

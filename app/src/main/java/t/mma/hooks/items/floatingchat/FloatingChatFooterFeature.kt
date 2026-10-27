@@ -61,6 +61,7 @@ private class FooterRuntime(private val context: FeatureContext) {
     private val panelOriginalHeights = WeakHashMap<View, Int>()
     private val panelBodyOriginalHeights = WeakHashMap<View, Int>()
     private val states = WeakHashMap<View, FooterState>()
+    private val listOwners = WeakHashMap<View, View>()
     private val newMessageMargins = WeakHashMap<View, Int>()
     private val preDrawListeners = WeakHashMap<View, ViewTreeObserver.OnPreDrawListener>()
     private val footerTrackers = WeakHashMap<View, FooterTracker>()
@@ -95,6 +96,26 @@ private class FooterRuntime(private val context: FeatureContext) {
             return false
         }
 
+        // Concrete 8.0.78 override: update padding before native list layout.
+        KavaReflector.loadClass(CHATTING_RECYCLER_CLASS, context.hostClassLoader())?.let { listClass ->
+            KavaReflector.findDeclaredMethod(listClass, "onLayout", Boolean::class.javaPrimitiveType!!,
+                Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!,
+                Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { method ->
+                HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val list = param.thisObject as? View ?: return
+                        val footer = listOwners[list] ?: return
+                        val state = states[footer] ?: return
+                        if (isEnabled()) applyChatListPadding(footer, state.listExtra, state, inListLayout = true)
+                    }
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val list = param.thisObject as? View ?: return
+                        val footer = listOwners[list] ?: return
+                        states[footer]?.bottomInset?.afterLayout(list)
+                    }
+                })
+            }
+        }
         var count = 0
         // 8.0.78 ChatFooter.u0(int, boolean): false uses w()+settleInputModeSwitchViews,
         // avoiding the native G/p crossfade exposed by our transparent button surfaces.
@@ -134,7 +155,12 @@ private class FooterRuntime(private val context: FeatureContext) {
                         if (layout != null && isReadyChatLayout(layout)) {
                             val current = tracker ?: trackerForFooter(footer, layout)
                             current.layout = layout
-                            if (current.ready) refreshMeasuredInputHeight(footer, states[footer] ?: return@hookFooter)
+                            if (current.ready) {
+                                val state = states[footer] ?: return@hookFooter
+                                refreshMeasuredInputHeight(footer, state)
+                                // FORCE_LAYOUT can remain set until View.layout returns.
+                                applyChatListPadding(footer, state.listExtra, state, inListLayout = true)
+                            }
                             scheduleFooterApply(footer, current, requestLayout = false)
                         }
                     }
@@ -935,15 +961,16 @@ private class FooterRuntime(private val context: FeatureContext) {
             apply(footer)
         }
     }
-    private fun applyChatListPadding(footer: View, extra: Int, state: FooterState): Boolean {
+    private fun applyChatListPadding(footer: View, extra: Int, state: FooterState, inListLayout: Boolean = false): Boolean {
         val recycler = state.chatRecycler?.takeIf { it.isAttachedToWindow }
             ?: findChatRecycler(footer)?.also { state.chatRecycler = it }
             ?: return false
+        listOwners[recycler] = footer
         if (state.recyclerPaddingBottom == null) state.recyclerPaddingBottom = recycler.paddingBottom
         val base = state.recyclerPaddingBottom ?: return false
         // Native content may already end above the input bar. Reserve only real overlap,
         // never add the whole input/panel height a second time.
-        if (recycler.isLayoutRequested || footer.isLayoutRequested || recycler.height <= 0) return false
+        if ((!inListLayout && (recycler.isLayoutRequested || footer.isLayoutRequested)) || recycler.height <= 0) return false
         val listLocation = state.listLocation.also(recycler::getLocationOnScreen)
         val footerLocation = state.footerLocation.also(footer::getLocationOnScreen)
         val overlap = (listLocation[1] + recycler.height - footerLocation[1]).coerceIn(0, extra)
@@ -955,6 +982,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             liftNewMessageBubble(footer)
             return true
         }
+        state.bottomInset.beforePadding(recycler, target)
         recycler.setPadding(recycler.paddingLeft, recycler.paddingTop, recycler.paddingRight, target)
         liftNewMessageBubble(footer)
         // setPadding schedules native list layout; do not expose the old row bounds.
@@ -1047,6 +1075,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         runCatching {
             restorePanelHeight(state.panel)
             state.chatRecycler?.let { recycler ->
+                listOwners.remove(recycler)
+                state.bottomInset.clear()
                 state.recyclerPaddingBottom?.let { bottom ->
                     recycler.setPadding(
                         recycler.paddingLeft,
@@ -1188,6 +1218,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         var chatContent: ViewGroup? = null,
         var chatRecycler: View? = null,
         var recyclerPaddingBottom: Int? = null,
+        val bottomInset: ChatListBottomInset = ChatListBottomInset(),
         var listExtra: Int = 0,
         var baseInputHeight: Int = 0
     )
