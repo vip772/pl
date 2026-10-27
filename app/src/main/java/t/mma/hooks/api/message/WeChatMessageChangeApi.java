@@ -166,7 +166,7 @@ public final class WeChatMessageChangeApi {
                 str(change.values, "reserved"),
                 str(change.values, "transContent"),
                 intValue(change.values, "flag"),
-                str(change.values, "msgSource"),
+                WeChatStoredMsgSource.resolve(str(change.values, "msgSource"), change.values.get("lvbuffer")),
                 selfWxId());
     }
 

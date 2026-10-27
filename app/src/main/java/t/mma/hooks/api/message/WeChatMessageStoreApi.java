@@ -145,7 +145,7 @@ public final class WeChatMessageStoreApi {
         if (cursor == null) return null;
         Object msgId = null, msgSvrId = null, type = null, status = null, isSend = null;
         Object createTime = null, talker = null, content = null, imagePath = null;
-        Object reserved = null, translated = null, flag = null, source = null;
+        Object reserved = null, translated = null, flag = null, source = null, buffer = null;
         boolean read = false;
         try {
             String[] columns = cursor.getColumnNames();
@@ -168,6 +168,7 @@ public final class WeChatMessageStoreApi {
                     case "transContent": translated = value; break;
                     case "flag": flag = value; break;
                     case "msgSource": source = value; break;
+                    case "lvbuffer": buffer = value; break;
                     default: break;
                 }
             }
@@ -187,7 +188,7 @@ public final class WeChatMessageStoreApi {
                 rowLong(msgId), rowLong(msgSvrId), rowInt(type), rowInt(status),
                 rowInt(isSend), rowLong(createTime), rowString(talker), rowString(content),
                 rowString(imagePath), rowString(reserved), rowString(translated), rowInt(flag),
-                rowString(source), selfWxId());
+                WeChatStoredMsgSource.resolve(rowString(source), buffer), selfWxId());
     }
 
     private static String rowString(Object value) {
@@ -653,7 +654,7 @@ public final class WeChatMessageStoreApi {
                 str(row, "reserved"),
                 str(row, "transContent"),
                 intValue(row, "flag"),
-                str(row, "msgSource"),
+                WeChatStoredMsgSource.resolve(str(row, "msgSource"), row.get("lvbuffer")),
                 selfWxId());
     }
 

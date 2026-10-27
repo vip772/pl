@@ -14,7 +14,7 @@ parts=[method(store,s) for s in ['public WeChatMessage getMessageById(', 'privat
 legacy=method(old,'public WeChatMessage getMessageById(').replace('getMessageById(', 'legacy(')
 legacy_to=method(old,'private WeChatMessage toMessage(')
 legacy_helpers='\n'.join(method(old,s) for s in ['private static String str(', 'private static int intValue(', 'private static long longValue('])
-code='''import java.util.*;
+code='''import java.util.*; import t.mma.hooks.api.message.WeChatStoredMsgSource;
 public class Main {
  interface Cursor {
   int FIELD_TYPE_NULL=0,FIELD_TYPE_INTEGER=1,FIELD_TYPE_FLOAT=2,FIELD_TYPE_STRING=3,FIELD_TYPE_BLOB=4;
@@ -85,5 +85,5 @@ public class Main {
 '''
 with tempfile.TemporaryDirectory() as d:
  p=Path(d);(p/'Main.java').write_text(code)
- subprocess.run(['javac',str(p/'Main.java')],check=True,timeout=30)
+ subprocess.run(['javac','-classpath','/usr/lib/android-sdk/platforms/android-36/android.jar','-d',d,str(r/'app/src/main/java/t/mma/hooks/api/message/WeChatStoredMsgSource.java'),str(p/'Main.java')],check=True,timeout=30)
  subprocess.run(['java','-cp',d,'Main'],check=True,timeout=30)
