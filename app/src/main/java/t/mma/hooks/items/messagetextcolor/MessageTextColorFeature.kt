@@ -539,7 +539,7 @@ private class MessageTextColorRenderer(
     private fun isVisibleMessageBodyText(text: String, textView: TextView): Boolean {
         if (text.isBlank()) return false
         if (text.length > 1200) return false
-        if (text.matches(Regex("""\d{1,2}:\d{2}"""))) return false
+        if (text.matches(CHAT_PATTERN_0)) return false
         if (text == "已读" || text == "未读") return false
         val width = textView.width.takeIf { it > 0 } ?: textView.measuredWidth
         val height = textView.height.takeIf { it > 0 } ?: textView.measuredHeight
@@ -678,8 +678,8 @@ private class MessageTextColorRenderer(
     private fun stripMarkupText(value: String): String {
         return normalizeText(
             value
-                .replace(Regex("<[^>]+>"), "")
-                .replace(Regex("\\{\\{[^}]+}}"), "")
+                .replace(CHAT_PATTERN_1, "")
+                .replace(CHAT_PATTERN_2, "")
         )
     }
 
@@ -722,8 +722,8 @@ private class MessageTextColorRenderer(
                 }
             }
         }
-            .replace(Regex("[ \\t\\x0B\\f\\r]+"), " ")
-            .replace(Regex(" *\\n *"), "\n")
+            .replace(CHAT_PATTERN_3, " ")
+            .replace(CHAT_PATTERN_4, "\n")
             .trim()
     }
 
@@ -752,7 +752,7 @@ private class MessageTextColorRenderer(
                 .replace("&quot;", "\"")
                 .replace("&apos;", "'")
                 .replace("&amp;", "&")
-            result = Regex("&#(x[0-9a-fA-F]+|[0-9]+);").replace(result) { match ->
+            result = CHAT_PATTERN_5.replace(result) { match ->
                 val raw = match.groupValues[1]
                 val codePoint = runCatching {
                     if (raw.startsWith("x", ignoreCase = true)) raw.substring(1).toInt(16) else raw.toInt()
@@ -1120,3 +1120,10 @@ private class MessageTextColorRenderer(
         val CHAT_RECORD_TEXT_VIEW_RESOURCES = listOf("bjx", "bj2")
     }
 }
+
+private val CHAT_PATTERN_0 = Regex("""\d{1,2}:\d{2}""")
+private val CHAT_PATTERN_1 = Regex("<[^>]+>")
+private val CHAT_PATTERN_2 = Regex("\\{\\{[^}]+}}")
+private val CHAT_PATTERN_3 = Regex("[ \\t\\x0B\\f\\r]+")
+private val CHAT_PATTERN_4 = Regex(" *\\n *")
+private val CHAT_PATTERN_5 = Regex("&#(x[0-9a-fA-F]+|[0-9]+);")

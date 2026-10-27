@@ -206,7 +206,7 @@ class MemberTitleRenderer(
         if (name.isNotEmpty()) return name
         return WeChatApis.contact().contacts()?.getDisplayName(sender)
             ?.trim()
-            ?.replace(Regex("\\s+"), " ")
+            ?.replace(CHAT_PATTERN_0, " ")
             ?.takeIf { it.isNotBlank() && !it.startsWith("微信用户(") && !it.startsWith("微信用户（") }
             ?: "\u00A0"
     }
@@ -420,3 +420,5 @@ class MemberTitleRenderer(
         private const val OLD_BADGE_OBJECT = "\uFFFC"
     }
 }
+
+private val CHAT_PATTERN_0 = Regex("\\s+")

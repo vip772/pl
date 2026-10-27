@@ -2233,6 +2233,11 @@ internal fun FloatingChatToggleMiuixPage(
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     val key = "${provider.featureId()}_enabled"
+    val transparencyKey = "${provider.featureId()}_transparency"
+    var enabled by remember(key) { mutableStateOf(store.getBoolean(key, false)) }
+    var transparency by remember(transparencyKey) {
+        mutableStateOf(store.getInt(transparencyKey, 10).coerceIn(0, 100))
+    }
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -2250,7 +2255,26 @@ internal fun FloatingChatToggleMiuixPage(
             item { SmallTitle(text = "功能开关") }
             item {
                 SettingsCard {
-                    SwitchRow(store, key, provider.title(), provider.subtitle(), false)
+                    SwitchRow(enabled, provider.title(), provider.subtitle(), onCheckedChange = {
+                        enabled = it
+                        store.edit().putBoolean(key, it).apply()
+                    })
+                    if (enabled) {
+                        InsetDivider()
+                        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
+                            Text(text = "背景透明度 ${transparency}%", color = MiuixTheme.colorScheme.onSurface)
+                            Slider(
+                                value = transparency.toFloat(),
+                                onValueChange = { transparency = it.toInt().coerceIn(0, 100) },
+                                valueRange = 0f..100f,
+                                steps = 99,
+                                onValueChangeFinished = {
+                                    store.edit().putInt(transparencyKey, transparency).apply()
+                                },
+                                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+                            )
+                        }
+                    }
                 }
             }
         }

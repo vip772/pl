@@ -98,6 +98,7 @@ object FeatureToggleRegistry {
         "text_speech" to Toggle("Hchat_text_speech_config", "text_speech_enable"),
         "block_typing_report" to Toggle("Hchat_block_typing_report_config", "block_typing_report_enable"),
         "voice_forward" to Toggle("Hchat_voice_forward_config", "voice_forward_enable"),
+        "voice_to_text" to Toggle("Hchat_voice_to_text_config", "enable"),
         "voice_preview" to Toggle("Hchat_voice_preview_config", "voice_preview_enable"),
         "zombie_check" to Toggle("Hchat_zombie_check_config", "zombie_check_enable"),
         "auto_redpacket" to Toggle("Hchat_redpacket_config", "hb_auto_enable"),

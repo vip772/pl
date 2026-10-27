@@ -6,7 +6,6 @@ import android.text.SpannableStringBuilder
 import android.text.Spanned
 import t.mma.event.Events
 import t.mma.hooks.api.core.WeChatApis
-import t.mma.hooks.api.message.WeChatMessageObserveApi
 import t.mma.hooks.api.model.WeChatMessage
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
@@ -136,6 +135,7 @@ class MentionNoticeFeature : BaseFeature() {
     override fun featureId() = "mention_notice"
     override fun name() = "艾特提醒"
     private var observing = false
+    @Volatile private var observingSince = 0L
     private val pending = HashSet<String>()
     private val worker = java.util.concurrent.ThreadPoolExecutor(
         1, 1, 30, java.util.concurrent.TimeUnit.SECONDS,
@@ -149,12 +149,18 @@ class MentionNoticeFeature : BaseFeature() {
                 if (!MentionNoticeSettings.installRenderer(context)) return@schedule false
                 val local = WeChatApis.localMessages() ?: return@schedule false
                 local.ensureReady()
-                val observe = WeChatApis.message().observe() ?: return@schedule false
-                if (!local.isAvailable()) return@schedule false
+                val changes = WeChatApis.messageChanges() ?: return@schedule false
+                if (!local.isAvailable() || !changes.isInstalled()) return@schedule false
                 if (!observing) {
-                    trackSubscription(observe.subscribe { event ->
-                        if (MentionNoticeSettings.enabled(context.hostContext()) && event.group && !event.outgoing) {
-                            try { worker.execute { handle(context.hostContext(), event) } }
+                    observingSince = System.currentTimeMillis()
+                    trackSubscription(changes.subscribe { change ->
+                        // The existing DB observer already owns the stored snapshot. Do not
+                        // consume add_msg's second-resolution transient timestamp here.
+                        val msg = change.message
+                        if (MentionNoticeSettings.enabled(context.hostContext()) &&
+                            msg != null && MentionNoticeOrder.accepts(change.isInsert(), msg,
+                                observingSince, System.currentTimeMillis())) {
+                            try { worker.execute { handle(context.hostContext(), msg) } }
                             catch (error: java.util.concurrent.RejectedExecutionException) {
                                 HLog.e("[Hchat:艾特提醒] 消息处理队列已满或关闭", error)
                             }
@@ -169,31 +175,32 @@ class MentionNoticeFeature : BaseFeature() {
     override fun onFeatureDestroy(context: FeatureContext) {
         worker.shutdownNow()
         observing = false
+        observingSince = 0L
     }
-    private fun handle(context: Context, event: WeChatMessageObserveApi.ObservedMessage) {
-        if (!MentionNoticeSettings.enabled(context) || !event.group || event.outgoing) return
-        val msg = event.message ?: return
+    private fun handle(context: Context, msg: WeChatMessage) {
+        if (!MentionNoticeSettings.enabled(context)) return
         if (!msg.isIncoming() || !msg.isGroupChat()) return
+        val noticeTime = MentionNoticeOrder.after(msg.createTime) ?: return
         val self = WeChatApis.account()?.selfWxId().orEmpty()
         if (self.isBlank()) return
-        val sender = event.sender.ifBlank { msg.getSendTalker() }
-        if (sender.isBlank() || sender == self || sender == event.talker) return
+        val sender = msg.getSendTalker()
+        if (sender.isBlank() || sender == self || sender == msg.talker) return
         val type = WeChatMessage.classifyAtMention(msg.getMsgSource(), msg.bodyContent(), self)
         if (type != WeChatMessage.AtMentionType.AT_ME && type != WeChatMessage.AtMentionType.AT_ALL) return
-        // Stable server identity is shared by add_msg and fresh database-insert observations.
+        // Persisted server identity deduplicates repeated insert/upsert callbacks.
         // Unknown identity fails closed rather than merging unrelated messages by content.
         val identity = when {
             msg.msgSvrId > 0 -> "svr:${msg.msgSvrId}"
             else -> return
         }
-        val key = "$self|${event.talker}|$identity"
+        val key = "$self|${msg.talker}|$identity"
         val store = HchatStorage.preferences(context, MentionNoticeSettings.PREFS + "_seen")
         synchronized(pending) {
             if (store.getBoolean(key, false) || !pending.add(key)) return
         }
         try {
             val contacts = WeChatApis.contact().contacts()
-            val name = contacts?.getGroupMemberDisplayName(event.talker, sender).orEmpty()
+            val name = contacts?.getGroupMemberDisplayName(msg.talker, sender).orEmpty()
                 .ifBlank { contacts?.getDisplayName(sender).orEmpty() }.ifBlank { sender }
                 .replace('\n', ' ').replace('\r', ' ')
             val suffix = if (type == WeChatMessage.AtMentionType.AT_ALL) "艾特了所有人" else "艾特了你"
@@ -202,9 +209,7 @@ class MentionNoticeFeature : BaseFeature() {
             if (!store.edit().putBoolean(key, true).commit()) return
             val notice = MentionNoticeSettings.MARKER + name + " " + suffix
             val inserted = WeChatApis.localMessages()?.insertSystemMessageAt(
-                event.talker, notice,
-                msg.createTime.let { if (it in 1..99_999_999_999L) it * 1000 else it }
-                    .takeIf { it > 0 }?.plus(1) ?: System.currentTimeMillis()
+                msg.talker, notice, noticeTime
             ) ?: 0L
             if (inserted <= 0) {
                 store.edit().remove(key).commit()

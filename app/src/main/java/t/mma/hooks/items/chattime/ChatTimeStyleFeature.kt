@@ -18,9 +18,7 @@ import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Field
 import java.lang.reflect.Method
-import java.text.SimpleDateFormat
 import java.util.Collections
-import java.util.Date
 import java.util.IdentityHashMap
 import java.util.Locale
 import java.util.WeakHashMap
@@ -183,17 +181,13 @@ private class ChatTimeStyleRuntime(
         prefs.getString(ChatTimeStyleSettings.KEY_MODE, ChatTimeStyleSettings.DEFAULT_MODE)
     )
 
+    private val timeFormatter = ChatTimeFormatter()
     private fun formatTime(timestamp: Long): String {
         val pattern = prefs.getString(
             ChatTimeStyleSettings.KEY_TIME_FORMAT,
             ChatTimeStyleSettings.DEFAULT_TIME_FORMAT
         ).orEmpty().ifBlank { ChatTimeStyleSettings.DEFAULT_TIME_FORMAT }
-        return runCatching {
-            SimpleDateFormat(pattern, Locale.getDefault()).format(Date(timestamp))
-        }.getOrElse {
-            SimpleDateFormat(ChatTimeStyleSettings.DEFAULT_TIME_FORMAT, Locale.getDefault())
-                .format(Date(timestamp))
-        }
+        return timeFormatter.format(timestamp, pattern, ChatTimeStyleSettings.DEFAULT_TIME_FORMAT)
     }
 
     private fun locateBindMethod(): Method? {

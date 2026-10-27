@@ -48,9 +48,13 @@ class FloatingChatFooterFeature : BaseFeature() {
 }
 private class FooterRuntime(private val context: FeatureContext) {
     private val livePrefs = t.mma.preferences.HchatStorage.preferences(context.hostContext(), "Hchat_global_config")
+    private var backgroundTransparency = livePrefs.getInt("floating_chat_footer_transparency", -1)
     private val configHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val liveListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == "floating_chat_footer_enabled") configHandler.post { refreshVisible() }
+        if (key == "floating_chat_footer_enabled" || key == "floating_chat_footer_transparency") configHandler.post {
+            backgroundTransparency = livePrefs.getInt("floating_chat_footer_transparency", -1)
+            refreshVisible()
+        }
     }
     init { livePrefs.registerOnSharedPreferenceChangeListener(liveListener) }
     private val hooked = HashSet<Member>()
@@ -720,7 +724,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (!footer.clipToOutline) footer.clipToOutline = true
         if (footer.elevation != 0f) footer.elevation = 0f
         if (footer.translationZ != 0f) footer.translationZ = 0f
-        FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true, borderless = true)
+        FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true, borderless = true, transparency = backgroundTransparency)
         FloatingFooterInputSurfaces.apply(footer)
         applyChatListPadding(footer, occupiedHeight + gap, state)
         ensurePreDrawTracking(footer)
@@ -919,7 +923,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     // Recheck cached surfaces only; do not scan the tree or request layout.
                     if (footer.elevation != 0f) footer.elevation = 0f
                     if (footer.translationZ != 0f) footer.translationZ = 0f
-                    FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true, borderless = true)
+                    FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true, borderless = true, transparency = backgroundTransparency)
                     FloatingFooterInputSurfaces.maintain(footer)
                     liftNewMessageBubble(footer)
                 }

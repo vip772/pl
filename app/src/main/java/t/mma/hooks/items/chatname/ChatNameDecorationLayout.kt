@@ -221,6 +221,7 @@ object ChatNameDecorationLayout {
         private val color: MemberTitleStore.ColorSpec?,
         weight: Int
     ) : ReplacementSpan() {
+        private val gradient = NameGradientCache()
         private val resolvedWeight = weight.coerceIn(100, 900)
 
         override fun getSize(
@@ -259,15 +260,7 @@ object ChatNameDecorationLayout {
             if (spec != null) {
                 if (spec.isGradient) {
                     val width = paint.measureText(text, start, end).coerceAtLeast(1f)
-                    paint.shader = LinearGradient(
-                        x,
-                        0f,
-                        x + width,
-                        0f,
-                        spec.startColor,
-                        spec.endColor,
-                        Shader.TileMode.CLAMP
-                    )
+                    paint.shader = gradient.get(x, x + width, spec.startColor, spec.endColor)
                 } else {
                     paint.shader = null
                     paint.color = spec.startColor
@@ -299,6 +292,9 @@ object ChatNameDecorationLayout {
         private val textStart: Int,
         private val textEnd: Int
     ) : ReplacementSpan() {
+        private val backgroundGradient = NameGradientCache()
+        private val foregroundGradient = NameGradientCache()
+        private val rect = RectF()
         override fun getSize(
             paint: Paint,
             text: CharSequence,
@@ -334,17 +330,17 @@ object ChatNameDecorationLayout {
             val oldFakeBold = paint.isFakeBoldText
             val horizontalPadding = badgeHPadding(paint).toFloat()
             val width = paint.measureText(text, start, end) + horizontalPadding * 2
-            val rect = RectF(x, top.toFloat() + badgeTopInset(paint), x + width, bottom.toFloat() - badgeBottomInset(paint))
+            rect.set(x, top.toFloat() + badgeTopInset(paint), x + width, bottom.toFloat() - badgeBottomInset(paint))
             val radius = paint.textSize * 0.28f
             paint.shader = if (bgStart != bgEnd) {
-                LinearGradient(rect.left, 0f, rect.right, 0f, bgStart, bgEnd, Shader.TileMode.CLAMP)
+                backgroundGradient.get(rect.left, rect.right, bgStart, bgEnd)
             } else {
                 null
             }
             paint.color = bgStart
             canvas.drawRoundRect(rect, radius, radius, paint)
             paint.shader = if (textStart != textEnd) {
-                LinearGradient(rect.left, 0f, rect.right, 0f, textStart, textEnd, Shader.TileMode.CLAMP)
+                foregroundGradient.get(rect.left, rect.right, textStart, textEnd)
             } else {
                 null
             }
@@ -372,5 +368,20 @@ object ChatNameDecorationLayout {
         override fun updateDrawState(ds: TextPaint) {
             ds.isUnderlineText = false
         }
+    }
+}
+
+private class NameGradientCache {
+    private var left = Float.NaN
+    private var right = Float.NaN
+    private var first = 0
+    private var last = 0
+    private var shader: LinearGradient? = null
+    fun get(x: Float, end: Float, startColor: Int, endColor: Int): LinearGradient {
+        if (shader == null || left != x || right != end || first != startColor || last != endColor) {
+            shader = LinearGradient(x, 0f, end, 0f, startColor, endColor, Shader.TileMode.CLAMP)
+            left = x; right = end; first = startColor; last = endColor
+        }
+        return requireNotNull(shader)
     }
 }

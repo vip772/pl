@@ -212,6 +212,7 @@ object FeatureRegistry {
             .register(EditMessageFeature())
             .register(EmojiSaveFeature())
             .register(VoicePreviewFeature())
+            .register(t.mma.hooks.items.voicetotext.VoiceToTextFeature())
             .register(VoiceForwardFeature())
             .register(SelectedMessagesFeature())
             .register(MessageForwardFeature())

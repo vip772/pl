@@ -16,18 +16,18 @@ object FloatingChatCardVisuals {
     private val applied = WeakHashMap<View, GradientDrawable>()
     private val borderlessStyles = WeakHashMap<View, Boolean>()
 
-    fun apply(view: View, radiusDp: Int, translucent: Boolean = false, borderless: Boolean = false) {
+    fun apply(view: View, radiusDp: Int, translucent: Boolean = false, borderless: Boolean = false, transparency: Int = -1) {
         if (!originals.containsKey(view)) originals[view] = view.background
         val density = view.resources.displayMetrics.density
         val drawable = applied[view] ?: GradientDrawable().also { applied[view] = it }
         val radius = radiusDp * density
         if (drawable.cornerRadius != radius) drawable.cornerRadius = radius
-        val darkColor = if (translucent) 0xE6242424.toInt() else DARK_SURFACE_COLOR
-        val lightColor = if (translucent) 0xE6F7F7F7.toInt() else LIGHT_SURFACE_COLOR
+        val darkColor = FloatingChatOpacity.color(if (translucent) 0xE6242424.toInt() else DARK_SURFACE_COLOR, transparency)
+        val lightColor = FloatingChatOpacity.color(if (translucent) 0xE6F7F7F7.toInt() else LIGHT_SURFACE_COLOR, transparency)
         if (view.context.isDarkMode()) {
             if (drawable.color?.defaultColor != darkColor || borderlessStyles[view] != borderless) {
                 drawable.setColor(darkColor)
-                drawable.setStroke(if (borderless) 0 else density.roundToInt().coerceAtLeast(1), DARK_STROKE_COLOR)
+                drawable.setStroke(if (borderless) 0 else density.roundToInt().coerceAtLeast(1), FloatingChatOpacity.color(DARK_STROKE_COLOR, transparency))
             }
         } else {
             if (drawable.color?.defaultColor != lightColor || borderlessStyles[view] != borderless) {

@@ -1170,6 +1170,7 @@ internal fun FeatureSettingsPage(
         TextVoiceFeature.ID -> TextVoiceMiuixPage(context, provider, onBack)
         FakeVoiceDurationFeature.ID -> FakeVoiceDurationMiuixPage(context, provider, onBack)
         VoicePreviewFeature.ID -> VoicePreviewMiuixPage(context, provider, onBack)
+        t.mma.hooks.items.voicetotext.VoiceToTextFeature.ID -> VoiceToTextMiuixPage(context, provider, onBack)
         FakeMiniProgramBaseLibFeature.ID -> FakeMiniProgramBaseLibMiuixPage(context, provider, onBack)
         SkipMiniProgramVideoAdsFeature.ID -> SkipMiniProgramVideoAdsMiuixPage(context, provider, onBack)
         SkipGlobalMiniProgramSplashAdsFeature.ID -> SkipGlobalMiniProgramSplashAdsMiuixPage(context, provider, onBack)

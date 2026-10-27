@@ -138,6 +138,7 @@ private class MessageBubbleRenderer(
     }
 
     private fun applyBubble(args: Array<Any?>?, state: BindState) {
+        if (!prefs.getBoolean(MessageBubbleSettings.KEY_ENABLE, MessageBubbleSettings.DEFAULT_ENABLE)) return
         val root = state.root ?: return
         val message = resolveNativeMessageFromArgs(args)
         val messageType = message?.let {
@@ -511,8 +512,8 @@ private class MessageBubbleRenderer(
                 }
             }
         }
-            .replace(Regex("[ \\t\\x0B\\f\\r]+"), " ")
-            .replace(Regex(" *\\n *"), "\n")
+            .replace(CHAT_PATTERN_0, " ")
+            .replace(CHAT_PATTERN_1, "\n")
             .trim()
     }
 
@@ -1015,11 +1016,11 @@ private class MessageBubbleRenderer(
         const val VOICE_MESSAGE_TYPE = 34
         const val MIN_TEXT_CONTRAST = 4.5
         val VOIP_MESSAGE_TYPES = setOf(50, 1000052, 1000053)
-        val RED_PACKET_TYPE_PATTERN = Regex("<type>\\s*2001\\s*</type>")
-        val TRANSFER_TYPE_PATTERN = Regex("<type>\\s*(2000|2011)\\s*</type>")
-        val QUOTE_TYPE_PATTERN = Regex("<type>\\s*57\\s*</type>", RegexOption.IGNORE_CASE)
-        val CHAT_RECORD_TYPE_PATTERN = Regex("<type>\\s*19\\s*</type>", RegexOption.IGNORE_CASE)
-        val GROUP_SOLITAIRE_TYPE_PATTERN = Regex("<type>\\s*53\\s*</type>", RegexOption.IGNORE_CASE)
+        val RED_PACKET_TYPE_PATTERN = CHAT_PATTERN_2
+        val TRANSFER_TYPE_PATTERN = CHAT_PATTERN_3
+        val QUOTE_TYPE_PATTERN = CHAT_PATTERN_4
+        val CHAT_RECORD_TYPE_PATTERN = CHAT_PATTERN_5
+        val GROUP_SOLITAIRE_TYPE_PATTERN = CHAT_PATTERN_6
         val EXTRA_SYSTEM_BUBBLE_MESSAGE_TYPES = setOf(
             64,
             570425393,
@@ -1044,3 +1045,11 @@ private class MessageBubbleRenderer(
         ) + SPECIALIZED_BUBBLE_VIEW_RESOURCES
     }
 }
+
+private val CHAT_PATTERN_0 = Regex("[ \\t\\x0B\\f\\r]+")
+private val CHAT_PATTERN_1 = Regex(" *\\n *")
+private val CHAT_PATTERN_2 = Regex("<type>\\s*2001\\s*</type>")
+private val CHAT_PATTERN_3 = Regex("<type>\\s*(2000|2011)\\s*</type>")
+private val CHAT_PATTERN_4 = Regex("<type>\\s*57\\s*</type>", RegexOption.IGNORE_CASE)
+private val CHAT_PATTERN_5 = Regex("<type>\\s*19\\s*</type>", RegexOption.IGNORE_CASE)
+private val CHAT_PATTERN_6 = Regex("<type>\\s*53\\s*</type>", RegexOption.IGNORE_CASE)

@@ -152,6 +152,17 @@ fun main(args:Array<String>){
  meKeys.forEachIndexed { i,k -> check(meRestored.contains(k) && meRestored.getBoolean(k,false)==(i%2==0)) }
  check("Hchat_background_beauty_method_cache" !in Store.backupPreferenceNames(meOut))
  println("PASS: five Me switches true/false round trip, runtime cache excluded")
+ val voice=Context(File(base,"voice-source"),"com.voice.source");val voicePrefs=Store.preferences(voice,"Hchat_voice_to_text_config")
+ check(!voicePrefs.getBoolean("enable",false))
+ voicePrefs.edit().putBoolean("enable",true).commit()
+ Store.runtimePreferences(voice,"Hchat_voice_to_text_method_cache").edit().putString("runtime","exclude").commit()
+ val voiceZip=File(base,"voice.zip");HchatConfigBackup.exportToUri(voice,Uri(voiceZip))
+ val voiceOut=Context(File(base,"voice-dest"),"com.voice.dest");HchatConfigBackup.importFromUri(voiceOut,Uri(voiceZip))
+ check(Store.preferences(voiceOut,"Hchat_voice_to_text_config").getBoolean("enable",false))
+ check("Hchat_voice_to_text_method_cache" !in Store.backupPreferenceNames(voiceOut))
+ voicePrefs.edit().putBoolean("enable",false).commit();HchatConfigBackup.exportToUri(voice,Uri(voiceZip));HchatConfigBackup.importFromUri(voiceOut,Uri(voiceZip))
+ check(!Store.preferences(voiceOut,"Hchat_voice_to_text_config").getBoolean("enable",true))
+ println("PASS: voice-to-text toggle true/false round trip and runtime exclusion")
  // Empty stores also round trip.
  val c=Context(File(base,"c"),"com.test.c");HchatConfigBackup.importFromUri(c,Uri(backup))
  fun legacy(value:JSONObject):File {

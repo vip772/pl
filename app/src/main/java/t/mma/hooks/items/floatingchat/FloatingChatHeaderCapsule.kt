@@ -63,7 +63,7 @@ internal class FloatingChatHeaderCapsule {
     }
     @Volatile private var closed = false
 
-    fun apply(header: ViewGroup): Boolean {
+    fun apply(header: ViewGroup, transparency: Int = -1): Boolean {
         if (closed) return false
         if (header.width <= 0 || header.height <= 0) return fail(header)
         val version = hostVersionName()
@@ -96,12 +96,13 @@ internal class FloatingChatHeaderCapsule {
         val dark = header.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         val ink = if (dark) Color.WHITE else 0xFF191D21.toInt()
         state.back.ink = ink; state.more.ink = ink; if (state.title.currentTextColor != ink) state.title.setTextColor(ink)
-        val strokeStyle = dp(header, 1) to if (dark) 0x30FFFFFF else 0x88FFFFFF.toInt()
+        val strokeStyle = dp(header, 1) to FloatingChatOpacity.color(if (dark) 0x30FFFFFF else 0x88FFFFFF.toInt(), transparency)
         for (surface in listOf(state.back, state.center, state.more)) {
             val bg = surface.background as GradientDrawable
-            val color = if (dark) 0xE6242424.toInt() else 0xE6F7F7F7.toInt()
-            val stroke = if (dark) 0x30FFFFFF else 0x88FFFFFF.toInt()
+            val color = FloatingChatOpacity.color(if (dark) 0xE6242424.toInt() else 0xE6F7F7F7.toInt(), transparency)
+            val stroke = strokeStyle.second
             if (bg.color?.defaultColor != color) bg.setColor(color)
+            if (bg.alpha != 255) bg.alpha = 255
             if (state.strokeStyle != strokeStyle) bg.setStroke(strokeStyle.first, stroke)
         }
         state.strokeStyle = strokeStyle

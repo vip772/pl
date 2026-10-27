@@ -1924,6 +1924,46 @@ internal fun VoicePreviewMiuixPage(
 }
 
 @Composable
+internal fun VoiceToTextMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, t.mma.hooks.items.voicetotext.VoiceToTextFeature.PREFS) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar("返回", onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 12.dp
+            )
+        ) {
+            item { SmallTitle(text = "聊天语音") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        sp,
+                        t.mma.hooks.items.voicetotext.VoiceToTextFeature.ENABLE,
+                        "语音转文字",
+                        "聊天中收到的语音自动显示文字",
+                        false
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
 internal fun FakeMiniProgramBaseLibMiuixPage(
     context: Context,
     provider: FeatureSettingsProvider,

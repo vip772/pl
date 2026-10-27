@@ -252,7 +252,7 @@ class RealNameTailRenderer(
         if (name.isNotEmpty()) return name
         return WeChatApis.contact().contacts()?.getDisplayName(sender)
             ?.trim()
-            ?.replace(Regex("\\s+"), " ")
+            ?.replace(CHAT_PATTERN_0, " ")
             ?.takeIf { it.isNotBlank() && !it.startsWith("微信用户(") && !it.startsWith("微信用户（") }
             ?: "\u00A0"
     }
@@ -267,7 +267,7 @@ class RealNameTailRenderer(
     private fun regionText(sender: String): String {
         return WeChatApis.contact().contacts()?.getRegion(sender)
             ?.trim()
-            ?.replace(Regex("\\s+"), " ")
+            ?.replace(CHAT_PATTERN_0, " ")
             .orEmpty()
     }
 
@@ -541,3 +541,5 @@ class RealNameTailRenderer(
     companion object {
     }
 }
+
+private val CHAT_PATTERN_0 = Regex("\\s+")

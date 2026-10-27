@@ -52,9 +52,13 @@ class FloatingChatHeaderFeature : BaseFeature() {
 
 private class HeaderRuntime(private val context: FeatureContext) {
     private val livePrefs = t.mma.preferences.HchatStorage.preferences(context.hostContext(), "Hchat_global_config")
+    private var backgroundTransparency = livePrefs.getInt("floating_chat_header_transparency", -1)
     private val configHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val liveListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == "floating_chat_header_enabled") configHandler.post { refreshVisible() }
+        if (key == "floating_chat_header_enabled" || key == "floating_chat_header_transparency") configHandler.post {
+            backgroundTransparency = livePrefs.getInt("floating_chat_header_transparency", -1)
+            refreshVisible()
+        }
     }
     init { livePrefs.registerOnSharedPreferenceChangeListener(liveListener) }
     private val hooked = HashSet<Member>()
@@ -308,14 +312,14 @@ private class HeaderRuntime(private val context: FeatureContext) {
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
 
-        val split = (header as? ViewGroup)?.let { capsule.apply(it) } == true
+        val split = (header as? ViewGroup)?.let { capsule.apply(it, backgroundTransparency) } == true
         val tracker = layoutTrackers.getOrPut(layout) { HeaderLayoutTracker() }
 
         val elevation = if (split) 0f else dp(ELEVATION_DP).toFloat()
         if (header.elevation != elevation) header.elevation = elevation
         if (header.outlineProvider !== FloatingHeaderOutlineProvider) header.outlineProvider = FloatingHeaderOutlineProvider
         if (header.clipToOutline != !split) header.clipToOutline = !split
-        if (!split) FloatingChatCardVisuals.apply(header, CORNER_RADIUS_DP)
+        if (!split) FloatingChatCardVisuals.apply(header, CORNER_RADIUS_DP, transparency = backgroundTransparency)
         applyChatListTopInset(layout, header)
         val headerParent = header.parent as? ViewGroup
         if (headerParent != null && headerParent.getChildAt(headerParent.childCount - 1) !== header) {
@@ -439,7 +443,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 lp.topMargin = top
                 child.layoutParams = lp
             }
-            FloatingChatCardVisuals.apply(child, CARD_CORNER_RADIUS_DP)
+            FloatingChatCardVisuals.apply(child, CARD_CORNER_RADIUS_DP, transparency = backgroundTransparency)
         }
     }
 
@@ -508,7 +512,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 body.paddingBottom
             )
         }
-        FloatingChatCardVisuals.apply(body, CARD_CORNER_RADIUS_DP)
+        FloatingChatCardVisuals.apply(body, CARD_CORNER_RADIUS_DP, transparency = backgroundTransparency)
         if (body.outlineProvider !== FloatingTipsCardOutlineProvider) body.outlineProvider = FloatingTipsCardOutlineProvider
         if (!body.clipToOutline) body.clipToOutline = true
         if (body.elevation != 0f) body.elevation = 0f
@@ -633,7 +637,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             val delta = nextTop - currentTop
             val targetTranslation = baseTranslation + delta
             if (child.translationY != targetTranslation) child.translationY = targetTranslation
-            FloatingChatCardVisuals.apply(child, CARD_CORNER_RADIUS_DP)
+            FloatingChatCardVisuals.apply(child, CARD_CORNER_RADIUS_DP, transparency = backgroundTransparency)
             nextTop += child.height + gap
         }
         val layoutGroup = layout as? ViewGroup

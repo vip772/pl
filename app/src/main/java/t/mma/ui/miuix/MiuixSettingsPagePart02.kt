@@ -1218,6 +1218,7 @@ internal fun practicalFeatureGroups(
                 TextVoiceFeature.ID,
                 FakeVoiceDurationFeature.ID,
                 VoicePreviewFeature.ID,
+                t.mma.hooks.items.voicetotext.VoiceToTextFeature.ID,
                 VoiceForwardFeature.ID
             )
         ),
