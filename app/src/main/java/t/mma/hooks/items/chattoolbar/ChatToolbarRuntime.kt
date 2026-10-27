@@ -7,8 +7,8 @@ import android.content.ContextWrapper
 import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
+import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.RippleDrawable
 import android.os.Handler
 import android.os.Looper
@@ -43,8 +43,6 @@ class ChatToolbarRuntime(
     private val featureContext: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
-    private val toolbarNormalizedIds = setOf("album", "camera", "voice_call", "location", "red_packet")
-    private val toolbarIcons = WeakHashMap<Drawable.ConstantState, Drawable>()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val preferences = ChatToolbarSettings.preferences(featureContext.hostContext())
     private val methodCache = DexMethodCache.prefs(
@@ -327,19 +325,9 @@ class ChatToolbarRuntime(
                     grid.getChildAt(visibleIndex) ?: adapter.getView(position, null, grid)
                 }.getOrNull() ?: continue
                 val spec = resolveTool(itemView) ?: continue
-                val icon = findFirstImageView(itemView)?.drawable?.let { source ->
-                    if (spec.id !in toolbarNormalizedIds) return@let source.copyFor(itemView.context)
-                    val state = source.constantState
-                    state?.let { toolbarIcons[it] } ?: runCatching {
-                        ChatToolbarIcon.normalize(itemView.resources, source.copyFor(itemView.context))
-                    }.getOrElse { source.copyFor(itemView.context) }.also { normalized ->
-                        if (state != null) toolbarIcons[state] = normalized
-                    }
-                }
                 result += NativeTool(
                     id = spec.id,
                     title = spec.title,
-                    icon = icon,
                     grid = WeakReference(grid),
                     position = position,
                     clickListener = click,
@@ -413,7 +401,7 @@ class ChatToolbarRuntime(
                 else -> nativeById[config.id]?.let { tool -> ({ tool.invokeClick() }) }
             }
             if (action != null) {
-                row.addView(createToolButton(activity, spec.title, nativeById[config.id]?.icon ?: album?.icon, action))
+                row.addView(createToolButton(activity, spec.id, spec.title, action))
             }
         }
         binding.root.visibility = if (row.childCount > 0) View.VISIBLE else View.GONE
@@ -421,8 +409,8 @@ class ChatToolbarRuntime(
 
     private fun createToolButton(
         context: Context,
+        id: String,
         title: String,
-        icon: Drawable?,
         action: () -> Unit
     ): View {
         val mode = preferences.getString(
@@ -449,7 +437,7 @@ class ChatToolbarRuntime(
         }
         if (mode != ChatToolbarSettings.DISPLAY_TEXT) {
             content.addView(ImageView(context).apply {
-                setImageDrawable(icon?.copyFor(context) ?: context.getDrawable(android.R.drawable.ic_menu_send))
+                setImageDrawable(ChatToolbarGlyph(id, foreground))
                 scaleType = ImageView.ScaleType.FIT_CENTER
                 imageTintList = null
                 contentDescription = title
@@ -687,9 +675,6 @@ class ChatToolbarRuntime(
         return current as? Activity
     }
 
-    private fun Drawable.copyFor(context: Context): Drawable =
-        constantState?.newDrawable(context.resources)?.mutate() ?: mutate()
-
     private fun dp(context: Context, value: Int): Int =
         (value * context.resources.displayMetrics.density + 0.5f).toInt()
 
@@ -718,7 +703,6 @@ class ChatToolbarRuntime(
     private data class NativeTool(
         val id: String,
         val title: String,
-        val icon: Drawable?,
         val grid: WeakReference<GridView>,
         val position: Int,
         val clickListener: AdapterView.OnItemClickListener,
