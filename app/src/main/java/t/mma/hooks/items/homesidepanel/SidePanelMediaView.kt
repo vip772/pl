@@ -29,6 +29,9 @@ internal class SidePanelMediaView(context: Context, private val recoverPlayback:
     private var animated: Animatable? = null
     private var movieView: GifView? = null
     private var image: ImageView? = null
+    var onPlaybackRequirementChanged: (() -> Unit)? = null
+    val needsPlaybackChecks: Boolean
+        get() = decodePending || texture != null || animated != null || movieView != null
     private var decodePending = false
     private var restartPending = false
     private var recoveryAttempts = 0
@@ -121,6 +124,7 @@ internal class SidePanelMediaView(context: Context, private val recoverPlayback:
                         else ImageView(context).apply { scaleType=ImageView.ScaleType.CENTER_CROP }).apply { setImageDrawable(drawable) }
                     addView(image,LayoutParams(-1,-1))
                 }
+                onPlaybackRequirementChanged?.invoke()
                 if(active) resumePlayback(restartPending)
             }
         }
@@ -183,6 +187,7 @@ internal class SidePanelMediaView(context: Context, private val recoverPlayback:
         if(disposed) return
         setPlayback(false)
         removeCallbacks(recovery); recoveryQueued = false
+        onPlaybackRequirementChanged=null
         disposed=true;generation++;loader.shutdownNow()
         image?.setImageDrawable(null);removeAllViews()
     }

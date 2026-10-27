@@ -12,6 +12,10 @@ internal object ConversationGroupParentPolicy {
     fun isModuleParent(value: String): Boolean =
         value.startsWith("wxid_hchat_group_") || value.startsWith("hchat_conv_group:")
 
+    /** Invalid primary values must not hide a trusted same-account backup. */
+    fun mergeOriginals(primary: Map<String, String>, backup: Map<String, String>): Map<String, String> =
+        backup.filterValues { !isModuleParent(it) } + primary.filterValues { !isModuleParent(it) }
+
     fun isOfficial(talker: String, verifyFlag: Int, originalParent: String?): Boolean =
         talker.startsWith("gh_") || verifyFlag != 0 ||
             originalParent == "officialaccounts" ||

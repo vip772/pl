@@ -30,6 +30,25 @@ fun main(){
  val text=RuntimeLogStore.readRuntimeLog(context);check(text.indexOf("entry-0")<text.indexOf("entry-99"));check(text.contains("entry-99"))
  RuntimeLogStore.clearRuntimeLog(context);check(RuntimeLogStore.readRuntimeLog(context).isEmpty())
  RuntimeLogStore.append("ERROR","failure",IllegalStateException("problem"));check(RuntimeLogStore.buildDiagnosticReport(context).contains("problem"))
+ RuntimeLogStore.clearRuntimeLog(context)
+ val workers=(0..3).map { worker -> Thread { repeat(200){RuntimeLogStore.append("INFO","burst-$worker-$it",null)} }.apply{start()} }
+ workers.forEach{it.join()}
+ val burst=RuntimeLogStore.readRuntimeLog(context)
+ repeat(4){worker -> repeat(200){check(burst.contains("burst-$worker-$it\\n"))}}
+ RuntimeLogStore.setEnabled(context,false);RuntimeLogStore.append("INFO","disabled-entry",null)
+ check(!RuntimeLogStore.readRuntimeLog(context).contains("disabled-entry"))
+ RuntimeLogStore.setEnabled(context,true)
+ val timeline=t.mma.hooks.items.homeextension.HomeMusicLyricTimeline()
+ val lyric="[00:03]third\\n[00:01][00:02]first\\n[00:03]last"
+ check(timeline.text(lyric,0,"song")=="song")
+ check(timeline.text(lyric,1000,"song")=="first")
+ check(timeline.text(lyric,2000,"song")=="first")
+ check(timeline.text(lyric,3000,"song")=="last")
+ check(timeline.text(lyric,500,"song")=="song")
+ repeat(1000){check(timeline.text(lyric,4000,"song")=="last")}
+ check(timeline.text("[00:01]new",1000,"song")=="new")
+ check(timeline.text("",0,"other")=="other · 暂无同步歌词")
+ println("PASS concurrent 800-entry burst, disabled logging, lyric multi-tag/ties/seek/source replacement")
  val paint=Paint();val rect=RectF();val canvas=Canvas();repeat(120){t.mma.hooks.items.dynamicbadge.RotatingGradientStroke.draw(canvas,paint,rect,2f,1,2,it.toFloat())};check(SweepGradient.created==1);check(paint.shader==null)
  t.mma.hooks.items.dynamicbadge.RotatingGradientStroke.draw(canvas,paint,rect,2f,1,3,0f);check(SweepGradient.created==2)
  rect.x=9f;t.mma.hooks.items.dynamicbadge.RotatingGradientStroke.draw(canvas,paint,rect,2f,1,3,0f);check(SweepGradient.created==3)
@@ -41,7 +60,7 @@ with tempfile.TemporaryDirectory() as d:
  p=Path(d);files=[]
  for n,s in sources.items():
   f=p/n;f.write_text(s);files.append(str(f))
- production=['utils/RuntimeLogStore.kt','hooks/items/dynamicbadge/RotatingGradientStroke.kt']
+ production=['utils/RuntimeLogStore.kt','hooks/items/dynamicbadge/RotatingGradientStroke.kt','hooks/items/homeextension/HomeMusicLyricTimeline.kt']
  cmd=['java','-Xmx256m','-cp',':'.join(map(str,jars)),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(stdlib),'-d',str(p/'test.jar'),*files,*[str(repo/'app/src/main/java/t/mma'/x) for x in production]]
  subprocess.run(cmd,check=True)
  subprocess.run(['java','-cp',str(p/'test.jar')+':'+str(stdlib),'TestKt'],check=True,timeout=20)

@@ -52,11 +52,15 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         if (key == null || key !in musicDataKeys) main.post { sessions.values.toList().forEach { it.safeRender() } }
     }
     private var changeSubscription: t.mma.hooks.api.conversation.WeChatConversationChangeApi.Subscription? = null
-    private val updateRecent = Runnable { if (!destroyed) sessions.values.toList().forEach { it.invalidateContacts() } }
+    private val updateRecent = Runnable { if (!destroyed && !prefs.getBoolean(HomeExtensionSettings.FAVORITES, false)) sessions.values.toList().forEach { it.invalidateContacts() } }
     fun install() {
         changeSubscription = WeChatApis.conversationChanges()?.subscribe {
-            main.removeCallbacks(updateRecent)
-            main.postDelayed(updateRecent, 600)
+            if (prefs.getBoolean(HomeExtensionSettings.ENABLE, false) &&
+                !prefs.getBoolean(HomeExtensionSettings.FAVORITES, false) &&
+                prefs.getBoolean(HomeExtensionSettings.RECENT, true)) {
+                main.removeCallbacks(updateRecent)
+                main.postDelayed(updateRecent, 600)
+            }
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
         val owner = KavaReflector.loadClass("com.tencent.mm.ui.conversation.ConversationListView", context.hostClassLoader()) ?: return
@@ -186,16 +190,27 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     private inner class Session(list: ListView) {
         private val ctx = list.context
         val root: LinearLayout = object : LinearLayout(ctx), HomeExtensionSurface.Root {
+            override fun onAttachedToWindow() {
+                super.onAttachedToWindow()
+                observeContactVisibility()
+                post { refreshVisibleContacts() }
+            }
+            override fun onDetachedFromWindow() {
+                stopContactVisibility()
+                super.onDetachedFromWindow()
+            }
             override fun onWindowVisibilityChanged(visibility: Int) {
                 super.onWindowVisibilityChanged(visibility)
-                if (visibility != View.VISIBLE) media?.setPlayback(false) else updatePlayback()
+                if (visibility != View.VISIBLE) media?.setPlayback(false) else {
+                    updatePlayback()
+                    post { refreshVisibleContacts() }
+                }
             }
             override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
                 super.onWindowFocusChanged(hasWindowFocus)
                 updatePlayback()
                 if (hasWindowFocus) {
-                    retryMissingAvatars()
-                    if (missingAvatars.isNotEmpty()) loadedAt = 0L
+                    refreshVisibleContacts()
                     safeRender()
                 }
             }
@@ -212,15 +227,46 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         private var photoSignature: String? = null
         private val mediaVisibleRect = android.graphics.Rect()
         private fun updatePlayback() {
+            val current = media ?: return
+            if (!current.needsPlaybackChecks) return
             val frame = playbackFrame
-            media?.ensurePlayback(frame != null && frame.isShown && frame.hasWindowFocus() && frame.getGlobalVisibleRect(mediaVisibleRect))
+            current.ensurePlayback(frame != null && frame.isShown && frame.hasWindowFocus() && frame.getGlobalVisibleRect(mediaVisibleRect))
         }
         private var scrollObserver: android.view.ViewTreeObserver? = null
         private var scrollListener: android.view.ViewTreeObserver.OnScrollChangedListener? = null
-        fun dispose() { clearMedia() }
+        private val contactVisibleArea = android.graphics.Rect()
+        private var contactObserver: android.view.ViewTreeObserver? = null
+        private var contactsWereVisible = false
+        private val contactScroll = android.view.ViewTreeObserver.OnScrollChangedListener {
+            val visible = contactsVisible()
+            if (visible && !contactsWereVisible) refreshVisibleContacts()
+            contactsWereVisible = visible
+        }
+        private fun contactsVisible(): Boolean {
+            val panel = contactsPanel ?: return false
+            return panel.isAttachedToWindow && panel.isShown && panel.hasWindowFocus() &&
+                panel.getGlobalVisibleRect(contactVisibleArea)
+        }
+        private fun observeContactVisibility() {
+            stopContactVisibility()
+            contactObserver = root.viewTreeObserver.also { it.addOnScrollChangedListener(contactScroll) }
+        }
+        private fun stopContactVisibility() {
+            contactObserver?.takeIf { it.isAlive }?.removeOnScrollChangedListener(contactScroll)
+            contactObserver = null
+            contactsWereVisible = false
+        }
+        private fun refreshVisibleContacts() {
+            if (!contactsVisible()) return
+            if (contactsDirty) { contactsDirty = false; updateContactsPanel() }
+            refreshContactsIfNeeded()
+            retryMissingAvatars()
+        }
+        fun dispose() { stopContactVisibility(); clearMedia(); cardCache.clear() }
         private fun clearMedia() {
             scrollListener?.let { callback -> scrollObserver?.takeIf { it.isAlive }?.removeOnScrollChangedListener(callback) }
             scrollListener = null; scrollObserver = null; playbackFrame = null
+            media?.onPlaybackRequirementChanged = null
             media?.dispose(); media = null
             photoHolder = null; photoSignature = null
         }
@@ -232,6 +278,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         private val activeAvatarTargets = mutableSetOf<ImageView>()
         private val missingAvatars = mutableSetOf<String>()
         private val avatarTargets = mutableMapOf<String, Pair<WeakReference<ImageView>, List<String>>>()
+        private var contactsDirty = false
         private var loadedAt = 0L
         private val textForegroundColor: Int get() = if (dark()) Color.WHITE else Color.rgb(35, 39, 45)
         private fun dark() = ctx.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
@@ -271,7 +318,8 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             if (destroyed) return
             val date = LocalDate.now()
             if (today != date) { today = date; week = date }
-            val signature = listOf(prefs.all.filterKeys { it !in musicDataKeys }.toSortedMap().toString(), today.toString(),
+            renderConfig = prefs.all.filterKeys { it !in musicDataKeys }
+            val signature = listOf(renderConfig.toSortedMap().toString(), today.toString(),
                 (if (prefs.getBoolean(HomeExtensionSettings.WEATHER, false)) System.currentTimeMillis() / (30*60_000L) else 0L).toString(),
                 ctx.resources.configuration.uiMode.toString(),
                 HomeSidePanelSettings.preferences(ctx).getLong(SidePanelAppearance.photoRevision(HomeExtensionSettings.PHOTO_SLOT), 0L).toString()).joinToString("|")
@@ -280,9 +328,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 refreshContactsIfNeeded()
                 return
             }
-            contactsGeneration++
             root.removeAllViews()
-            contactsPanel = null
             val enabled = prefs.getBoolean(HomeExtensionSettings.ENABLE, false)
             val calendar = enabled && prefs.getBoolean(HomeExtensionSettings.CALENDAR, true)
             val recent = enabled && (prefs.getBoolean(HomeExtensionSettings.FAVORITES, false) || prefs.getBoolean(HomeExtensionSettings.RECENT, true))
@@ -301,14 +347,22 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             rows.map { it.filter { id -> id in active } }.filter { it.isNotEmpty() }.forEach { row ->
                 val cards = row.map { id ->
                     compactCard = row.size == 2
-                    when(id) {
+                    val cardKey = cardSignature(id, compactCard)
+                    val cached = cardCache[id]?.takeIf { it.first == cardKey }?.second
+                    if (cached != null && id != "photo") {
+                        (cached.parent as? android.view.ViewGroup)?.removeView(cached)
+                        root.addView(cached)
+                    } else when(id) {
                         "calendar" -> renderCalendar()
                         "contacts" -> renderRecent()
                         "photo" -> renderPhoto()
                         "weather" -> root.addView(HomeWeather.card(ctx, compactCard))
                         "music" -> root.addView(HomeMusic.card(ctx, compactCard))
                     }
-                    root.getChildAt(root.childCount - 1).also { root.removeView(it) }
+                    root.getChildAt(root.childCount - 1).also {
+                        root.removeView(it)
+                        cardCache[id] = cardKey to it
+                    }
                 }
                 if(cards.size == 1) {
                     cards[0].layoutParams = LinearLayout.LayoutParams(-1, -2).apply {
@@ -329,11 +383,32 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                     root.addView(line)
                 }
             }
+            cardCache.keys.retainAll(active)
+            if (!recent) { contactsPanel = null; contactsGeneration++ }
             compactCard = false
+            root.post { refreshVisibleContacts() }
             renderedSignature = signature
             refreshContactsIfNeeded()
         }
+        private var renderConfig: Map<String, *> = emptyMap<String, Any>()
+        private val cardCache = mutableMapOf<String, Pair<String, View>>()
+        private fun cardSignature(id: String, compact: Boolean): String {
+            val keys = when(id) {
+                "calendar" -> setOf("greeting", "calendar_alpha", "calendar_effect", "calendar_effect_style")
+                "contacts" -> setOf("favorites", "recent", "favorite_ids", "recent_alpha", "avatar_orbit", "orbit_color", "orbit_size", "orbit_gap")
+                else -> emptySet()
+            }
+            val values = renderConfig.filterKeys { key ->
+                key in keys || (id == "calendar" && key.startsWith("calendar_")) ||
+                    (id == "music" && key.startsWith("music_") && key !in musicDataKeys) ||
+                    (id == "weather" && key.startsWith("weather"))
+            }.toSortedMap()
+            return "$compact|${ctx.resources.configuration.uiMode}|$values|" +
+                (if (id == "calendar") today.toString() else "") +
+                (if (id == "weather") (System.currentTimeMillis() / (30 * 60_000L)).toString() else "")
+        }
         private fun refreshContactsIfNeeded() {
+            if (!contactsVisible()) return
             if (!prefs.getBoolean(HomeExtensionSettings.ENABLE, false)) return
             if (!prefs.getBoolean(HomeExtensionSettings.FAVORITES, false) && !prefs.getBoolean(HomeExtensionSettings.RECENT, true)) return
             val config = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false).toString() + prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")
@@ -348,7 +423,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             worker.execute {
                 val bitmap = CalendarBackground.load(ctx)
                 if (bitmap != null) main.post {
-                    if (!destroyed && panel.parent != null &&
+                    if (!destroyed && cardCache["calendar"]?.second === panel &&
                         backgroundRevision == prefs.getLong(CalendarBackground.REVISION, 0L)) {
                         (panel as AdjustableCalendarPanel).setBackgroundImage(bitmap, dp(18).toFloat(),
                             prefs.getInt(HomeExtensionSettings.CALENDAR_ALPHA, 75).coerceIn(0, 100) * 255 / 100,
@@ -391,6 +466,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             root.addView(panel)
         }
         private fun renderRecent() {
+            contactsDirty = false
             missingAvatars.clear(); avatarTargets.clear(); activeAvatarTargets.clear()
             val panel = card(HomeExtensionSettings.RECENT_ALPHA)
             val config = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false).toString() + prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")
@@ -470,6 +546,12 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             scrollObserver = root.viewTreeObserver
             scrollListener = callback
             scrollObserver?.addOnScrollChangedListener(callback)
+            view.onPlaybackRequirementChanged = {
+                if (media === view && !view.needsPlaybackChecks) {
+                    scrollObserver?.takeIf { it.isAlive }?.removeOnScrollChangedListener(callback)
+                    scrollListener = null; scrollObserver = null
+                } else if (media === view) playback()
+            }
             frame.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> playback() }
             frame.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(v: View) { playback() }
@@ -485,10 +567,26 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                     val conversations = WeChatApis.conversations() ?: error("会话 API 未就绪")
                     val favorites = config.startsWith("true")
                     val ids = if (favorites) HomeExtensionSettings.favorites(config.removePrefix("true")) else conversations.getRecentConversationUsernames(200)
-                    ids.asSequence().filter { favorites || contacts.isGroup(it) || contacts.isFriend(it) }.take(8).map { id ->
+                    // Keep the exact native friendship filter and source order. Only batch
+                    // presentation data for the final eight selected rows.
+                    val selected = ids.asSequence().filter { favorites || contacts.isGroup(it) || contacts.isFriend(it) }.take(8).toList()
+                    val byId = contacts.getContactsByIds(selected).associateBy { it.wxId }
+                    selected.map { id ->
                         val group = contacts.isGroup(id)
-                        Contact(id, contacts.getDisplayName(id).orEmpty().ifBlank { id }, contacts.getAvatarUrl(id, false).orEmpty(), group, contacts.getAvatarUrl(id, true).orEmpty())
-                    }.toList()
+                        val item = byId[id]
+                        // The batch API supplies placeholders for absent rcontact rows.
+                        // Keep legacy avatar lookup for those rows (img_flag may still exist).
+                        val placeholder = item == null || (item.type == 0 && item.nickname.isBlank() &&
+                            item.remarkName.isBlank() && item.avatarUrl.isBlank() && item.avatarBackupUrl.isBlank())
+                        if (placeholder) {
+                            Contact(id, contacts.getDisplayName(id).orEmpty().ifBlank { id },
+                                contacts.getAvatarUrl(id, false).orEmpty(), group, contacts.getAvatarUrl(id, true).orEmpty())
+                        } else {
+                            Contact(id, item!!.displayName().ifBlank { id },
+                                item.avatarBackupUrl.ifBlank { item.avatarUrl }, group,
+                                item.avatarUrl.ifBlank { item.avatarBackupUrl })
+                        }
+                    }
                 }
                 if (!destroyed) main.post {
                     loading = false
@@ -497,7 +595,9 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                     result.onSuccess { next ->
                         val changed = next != cache || loadedConfig != config
                         cache = next; loadedConfig = config; loadedAt = System.currentTimeMillis()
-                        if (changed) updateContactsPanel() else retryMissingAvatars()
+                        if (changed) {
+                            if (contactsVisible()) updateContactsPanel() else contactsDirty = true
+                        } else retryMissingAvatars()
                     }.onFailure {
                         // Keep the last good list; allow another attempt after a short backoff.
                         loadedAt = System.currentTimeMillis() - 25_000L
@@ -519,9 +619,11 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 root.removeView(replacement)
                 parent.removeView(old)
                 parent.addView(replacement, index, params)
+                cardCache["contacts"] = cardSignature("contacts", compactCard) to replacement
             } finally { compactCard = previousCompact }
         }
         private fun retryMissingAvatars() {
+            if (!contactsVisible()) return
             for (id in missingAvatars.toList()) {
                 val entry = avatarTargets[id] ?: continue
                 val view = entry.first.get() ?: continue
@@ -531,6 +633,10 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         }
         private fun loadAvatar(url: String, target: ImageView, token: Int, attempt: Int = 0, fallback: String? = null) {
             avatars.get(url)?.let { target.setImageBitmap(it); missingAvatars.removeAll { avatarTargets[it]?.first?.get() === target }; return }
+            if (!contactsVisible()) {
+                avatarTargets.entries.firstOrNull { it.value.first.get() === target }?.key?.let { missingAvatars.add(it) }
+                return
+            }
             if (!activeAvatarTargets.add(target)) return
             val id = avatarTargets.entries.firstOrNull { it.value.first.get() === target }?.key
             if (id != null) missingAvatars.add(id)
@@ -546,7 +652,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                         main.postDelayed({
                             ref.get()?.let {
                                 activeAvatarTargets.remove(it)
-                                if (!destroyed && contactsGeneration == token) loadAvatar(url, it, token, attempt + 1)
+                                if (!destroyed && contactsGeneration == token && contactsVisible()) loadAvatar(url, it, token, attempt + 1)
                             }
                         }, (attempt + 1) * 2000L)
                     }

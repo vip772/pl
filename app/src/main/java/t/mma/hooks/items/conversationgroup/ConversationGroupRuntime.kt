@@ -1963,30 +1963,67 @@ object ConversationGroupRuntime {
         syncAsync(context)
     }
 
+    /** User-requested only; use the same executor as sync to avoid stale backup writes. */
+    internal fun repairMissingOriginalParents(
+        context: Context,
+        account: String,
+        groupId: String,
+        talkers: Set<String>,
+        onComplete: (Int, String?) -> Unit
+    ) {
+        val appContext = context.applicationContext
+        executor.execute {
+            val result = runCatching {
+                check(active.get() && account.isNotBlank() && account == ConversationGroupStore.accountKey()) {
+                    "账号已切换或功能已停止"
+                }
+                check(talkers.isNotEmpty()) { "未选择会话" }
+                val group = ConversationGroupStore.load(appContext).firstOrNull { it.id == groupId }
+                    ?: error("分组已不存在")
+                check(talkers.all { it in group.conversationIds }) { "会话分组已变化，请重新选择" }
+                val database = WeChatApis.database() ?: error("微信数据库尚未就绪")
+                check(database.prepare()) { "微信数据库尚未就绪" }
+                val state = loadConversationParents(database, talkers)
+                val prefs = HchatStorage.preferences(appContext, ConversationGroupStore.PREFS_NAME)
+                val originals = loadOriginalParentRefs(prefs, account)
+                val repairs = talkers.filter { talker ->
+                    check(state.parents.containsKey(talker)) { "会话不存在，停止修复" }
+                    check(state.parents[talker] == virtualTalker(groupId)) { "会话归属已变化，请重新选择" }
+                    talker !in originals
+                }
+                check(account == ConversationGroupStore.accountKey()) { "账号已切换，停止修复" }
+                // Empty parent is an explicitly selected future restore target, not inferred history.
+                if (repairs.isNotEmpty()) {
+                    saveOriginalParentRefs(prefs, account, originals + repairs.associateWith { "" })
+                    repairs.forEach { parentRestoreFailures.remove("$account|$it") }
+                    syncAsync(appContext)
+                }
+                repairs.size
+            }
+            result.exceptionOrNull()?.let { HLog.e("$TAG 修复会话恢复目标失败: ${it.message}", it) }
+            main.post { onComplete(result.getOrDefault(0), result.exceptionOrNull()?.message) }
+        }
+    }
+
     private fun loadOriginalParentRefs(
         prefs: SharedPreferences,
         account: String
     ): Map<String, String> {
         val root = JSONObject(prefs.getString(KEY_ORIGINAL_PARENT_REFS, "{}").orEmpty().ifBlank { "{}" })
         val backup = JSONObject(prefs.getString(KEY_ORIGINAL_PARENT_REFS_BACKUP, "{}").orEmpty().ifBlank { "{}" })
-        val accountObject = backup.optJSONObject(account) ?: JSONObject()
-        // Both copies are scoped to the same account. Never infer root/empty parent.
-        root.optJSONObject(account)?.let { primary ->
-            val keys = primary.keys()
-            while (keys.hasNext()) {
-                val key = keys.next()
-                accountObject.put(key, primary.get(key))
-            }
-        }
-        return buildMap {
-            val keys = accountObject.keys()
+        fun read(source: JSONObject?): Map<String, String> = buildMap {
+            if (source == null) return@buildMap
+            val keys = source.keys()
             while (keys.hasNext()) {
                 val talker = keys.next()
-                val parent = accountObject.get(talker)
+                val parent = source.get(talker)
                 require(parent is String) { "原始会话父级格式异常: account=$account talker=$talker" }
                 if (talker.isNotBlank()) put(talker, parent)
             }
         }
+        return ConversationGroupParentPolicy.mergeOriginals(
+            read(root.optJSONObject(account)), read(backup.optJSONObject(account))
+        )
     }
 
     private fun saveOriginalParentRefs(

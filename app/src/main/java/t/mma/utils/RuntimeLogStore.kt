@@ -86,38 +86,59 @@ object RuntimeLogStore {
         flushPending()
         return synchronized(lock) { readLimited(runtimeLogFile(appContext)) }
     }
+    private data class LogEntry(val time: Long, val level: String, val message: String, val throwable: Throwable?)
+    private val queueLock = Any()
+    private val queue = java.util.ArrayDeque<LogEntry>()
+    private var drainScheduled = false
     @JvmStatic
     fun append(level: String, message: String, throwable: Throwable?) {
-        if (!enabled) return
-        val context = applicationContext ?: return
-        val time = System.currentTimeMillis()
-        if (pending.incrementAndGet() > 1024) {
-            pending.decrementAndGet()
-            dropped.incrementAndGet()
-            // ERROR/WARN are also recorded by HLog in LSPosed; never block the caller on disk.
-            return
+        if (!enabled || applicationContext == null) return
+        synchronized(queueLock) {
+            if (pending.get() >= 1024) {
+                dropped.incrementAndGet()
+                return
+            }
+            pending.incrementAndGet()
+            queue.addLast(LogEntry(System.currentTimeMillis(), level, message, throwable))
+            if (!drainScheduled) {
+                drainScheduled = true
+                writer.execute { drainQueue() }
+            }
         }
-        writer.execute {
+    }
+    private fun drainQueue() {
+        while (true) {
+            val batch = synchronized(queueLock) {
+                if (queue.isEmpty()) {
+                    drainScheduled = false
+                    return
+                }
+                ArrayList<LogEntry>(minOf(queue.size, 64)).also { entries ->
+                    repeat(minOf(queue.size, 64)) { entries.add(queue.removeFirst()) }
+                }
+            }
             try {
-                if (!enabled) return@execute
+                if (!enabled) continue
+                val context = applicationContext ?: continue
                 val lost = dropped.getAndSet(0)
-                val entry = buildString {
+                val text = buildString {
                     if (lost > 0) append("[Hchat:RuntimeLog] queue overflow dropped=").append(lost).append('\n')
-                    append(formatter.format(Date(time))).append(' ').append(level).append(' ').append(message).append('\n')
-                    if (throwable != null) append(android.util.Log.getStackTraceString(throwable)).append('\n')
+                    batch.forEach { entry ->
+                        append(formatter.format(Date(entry.time))).append(' ').append(entry.level)
+                            .append(' ').append(entry.message).append('\n')
+                        entry.throwable?.let { append(android.util.Log.getStackTraceString(it)).append('\n') }
+                    }
                 }
                 runCatching {
                     synchronized(lock) {
                         if (!enabled) return@synchronized
                         val file = runtimeLogFile(context)
                         file.parentFile?.mkdirs()
-                        if (file.length() > MAX_LOG_BYTES) {
-                            file.writeBytes(readTail(file, RETAIN_BYTES))
-                        }
-                        file.appendText(entry, Charsets.UTF_8)
+                        if (file.length() > MAX_LOG_BYTES) file.writeBytes(readTail(file, RETAIN_BYTES))
+                        file.appendText(text, Charsets.UTF_8)
                     }
                 }
-            } finally { pending.decrementAndGet() }
+            } finally { pending.addAndGet(-batch.size) }
         }
     }
     @JvmStatic

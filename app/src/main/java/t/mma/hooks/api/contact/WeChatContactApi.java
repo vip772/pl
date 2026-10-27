@@ -36,6 +36,18 @@ import java.util.concurrent.ConcurrentHashMap;
  * 微信联系人/群聊 API。
  */
 public final class WeChatContactApi {
+    private final java.util.Map<String, String> displayNameMismatchLogs =
+            new java.util.LinkedHashMap<String, String>(64, 0.75f, true) {
+                @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, String> entry) {
+                    return size() > 256;
+                }
+            };
+    private boolean shouldLogDisplayNameMismatch(String group, int members, int names, int roomNames) {
+        String signature = members + ":" + names + ":" + roomNames;
+        synchronized (displayNameMismatchLogs) {
+            return !signature.equals(displayNameMismatchLogs.put(group, signature));
+        }
+    }
     private static final int SELF_FIELD_WXID = 2;
     private static final int SELF_FIELD_GENDER = 12290;
     private static final int SELF_FIELD_CITY = 12292;
@@ -240,13 +252,15 @@ public final class WeChatContactApi {
                 // displayname is not a reliable parallel array on newer WeChat
                 // versions. roomdata remains usable, so keep those entries and
                 // skip only the unsafe positional mapping below.
-                log("chatroom.displayname无法对齐，保留roomdata映射: group=" + groupId
+                if (shouldLogDisplayNameMismatch(groupId, members.length, names.length, result.size()))
+                    log("chatroom.displayname无法对齐，保留roomdata映射: group=" + groupId
                         + " members=" + members.length
                         + " names=" + names.length
                         + " roomdataNames=" + result.size());
                 return result;
             }
 
+            synchronized (displayNameMismatchLogs) { displayNameMismatchLogs.remove(groupId); }
             for (int i = 0; i < members.length; i++) {
                 String member = members[i];
                 String name = names[i] != null ? names[i].trim() : "";

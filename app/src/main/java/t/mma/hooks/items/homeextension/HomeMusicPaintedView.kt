@@ -17,8 +17,16 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     private val meteorMatrix=Matrix()
     private val meteorShader=LinearGradient(0f,0f,1f,0f,0x00FF7A1A,0xFFFFB02E.toInt(),Shader.TileMode.CLAMP)
     private val p=Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val portraitClip=Path()
+    private val portraitSource=Rect()
+    private val portraitTarget=RectF()
+    private val progressTrack=RectF()
+    private var barGradient:LinearGradient?=null
+    private var barGradientLeft=Float.NaN
+    private var barGradientRight=Float.NaN
     private val icons=mutableMapOf<String,MusicIcon>()
     private val hits=mutableListOf<Pair<RectF,String>>()
+    private val hitPool=mutableListOf<Pair<RectF,String>>()
     private var progress=RectF();private var tracking=false;private var downX=0f;private var downY=0f
     private var decoration:Bitmap?=null;private var decorationStyle=0;private var cardBackground:Bitmap?=null;private var backgroundRevision=-1L;private var backgroundGeneration=0;private var portrait:Bitmap?=null;private var custom=false;private var coverKey="";private var generation=0
     private var animationPhase=0f
@@ -292,7 +300,7 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
         val arm=Path().apply{moveTo(tx,ty);lineTo(tx-2*sx,ty+27*sx)}
         stroke(c,arm,0xFF949694.toInt(),3*sx);p.color=0xFF686B68.toInt();c.drawCircle(tx,ty,5*sx,p)
     }
-    private fun drawPortrait(c:Canvas,x:Float,y:Float,r:Float){val save=c.save();c.clipPath(Path().apply{addCircle(x,y,r,Path.Direction.CW)});if(style==3||style==2&&!full)c.rotate(portraitAngle,x,y);val b=portrait;if(b!=null){val n=min(b.width,b.height);p.color=Color.WHITE;c.drawBitmap(b,Rect((b.width-n)/2,(b.height-n)/2,(b.width+n)/2,(b.height+n)/2),RectF(x-r,y-r,x+r,y+r),p)}else{p.color=0xFF535A57.toInt();c.drawCircle(x,y,r,p);p.color=0xFFB7C0BB.toInt();c.drawCircle(x,y-r*0.23f,r*0.25f,p);c.drawOval(RectF(x-r*0.55f,y+r*0.08f,x+r*0.55f,y+r*0.86f),p)};c.restoreToCount(save);if(style==3)drawVinylArm(c)}
+    private fun drawPortrait(c:Canvas,x:Float,y:Float,r:Float){val save=c.save();portraitClip.reset();portraitClip.addCircle(x,y,r,Path.Direction.CW);c.clipPath(portraitClip);if(style==3||style==2&&!full)c.rotate(portraitAngle,x,y);val b=portrait;if(b!=null){val n=min(b.width,b.height);p.color=Color.WHITE;portraitSource.set((b.width-n)/2,(b.height-n)/2,(b.width+n)/2,(b.height+n)/2);portraitTarget.set(x-r,y-r,x+r,y+r);c.drawBitmap(b,portraitSource,portraitTarget,p)}else{p.color=0xFF535A57.toInt();c.drawCircle(x,y,r,p);p.color=0xFFB7C0BB.toInt();c.drawCircle(x,y-r*0.23f,r*0.25f,p);portraitTarget.set(x-r*0.55f,y+r*0.08f,x+r*0.55f,y+r*0.86f);c.drawOval(portraitTarget,p)};c.restoreToCount(save);if(style==3)drawVinylArm(c)}
     private fun loadCover(url:String){
         if(custom)return
         // Cache lookup is immediate, even while the optional custom photo is checked.
@@ -318,18 +326,18 @@ internal open class HomeMusicPaintedView(c:Context,private val style:Int,private
     }
 
     private fun text(c:Canvas,s:String,x:Float,y:Float,size:Float,max:Float,color:Int,center:Boolean=false){p.shader=null;p.color=color;p.typeface=boldTypeface;p.textSize=size;textPaint.set(p);val t=android.text.TextUtils.ellipsize(s,textPaint,max,android.text.TextUtils.TruncateAt.END).toString();c.drawText(t,if(center)x-p.measureText(t)/2 else x,y,p)}
-    private fun spectrum(c:Canvas,s:MusicPaintState,area:RectF){p.shader=LinearGradient(area.left,0f,area.right,0f,if(style==2)intArrayOf(0xFFFF109A.toInt(),0xFF08F6DE.toInt())else intArrayOf(0xFFC2FF00.toInt(),0xFF00FFD9.toInt(),0xFFFF139C.toInt()),null,Shader.TileMode.CLAMP);for(i in 0..63){val value=if(s.playing)s.spectrum.getOrElse(i){0f}else 0f;val bw=area.width()/64;val hh=max(sx,value*area.height());c.drawRect(area.left+i*bw,area.bottom-hh,area.left+(i+0.65f)*bw,area.bottom,p)};p.shader=null}
+    private fun spectrum(c:Canvas,s:MusicPaintState,area:RectF){if(barGradient==null||barGradientLeft!=area.left||barGradientRight!=area.right){barGradientLeft=area.left;barGradientRight=area.right;barGradient=LinearGradient(area.left,0f,area.right,0f,if(style==2)intArrayOf(0xFFFF109A.toInt(),0xFF08F6DE.toInt())else intArrayOf(0xFFC2FF00.toInt(),0xFF00FFD9.toInt(),0xFFFF139C.toInt()),null,Shader.TileMode.CLAMP)};p.shader=barGradient;for(i in 0..63){val value=if(s.playing)s.spectrum.getOrElse(i){0f}else 0f;val bw=area.width()/64;val hh=max(sx,value*area.height());c.drawRect(area.left+i*bw,area.bottom-hh,area.left+(i+0.65f)*bw,area.bottom,p)};p.shader=null}
     private fun drawProgress(c:Canvas,s:MusicPaintState,left:Float,right:Float,y:Float,lime:Boolean){
-        progress=RectF(left,y-14*sx,right,y+14*sx)
+        progress.set(left,y-14*sx,right,y+14*sx)
         p.shader=null;p.color=if(style==2&&!full)0xAAFFFFFF.toInt()else 0xFF777D79.toInt()
-        c.drawRoundRect(RectF(left,y-sx,right,y+sx),sx,sx,p)
+        progressTrack.set(left,y-sx,right,y+sx);c.drawRoundRect(progressTrack,sx,sx,p)
         val x=left+(right-left)*(if(s.duration>0)s.position.toFloat()/s.duration else 0f).coerceIn(0f,1f)
         p.color=if(style==2&&!full)0xFFFFA12A.toInt() else if(lime)0xFFABFF00.toInt()else Color.WHITE
-        c.drawRoundRect(RectF(left,y-sx,x,y+sx),sx,sx,p);if(style!=2||full)c.drawCircle(x,y,2.5f*sx,p)
+        progressTrack.set(left,y-sx,x,y+sx);c.drawRoundRect(progressTrack,sx,sx,p);if(style!=2||full)c.drawCircle(x,y,2.5f*sx,p)
         if(full){text(c,time(s.position),left,y+16*sx,9*sx,70*sx,Color.LTGRAY);text(c,time(s.duration),right-35*sx,y+16*sx,9*sx,45*sx,Color.LTGRAY)}
     }
 
-    private fun icon(c:Canvas,key:String,act:String,x:Float,y:Float,size:Float,color:Int){val bounds=size/0.52f;val v=icons.getOrPut(key){MusicIcon(context,key)};v.setTextColor(color);if(v.width!=bounds.toInt()||v.height!=bounds.toInt())v.layout(0,0,bounds.toInt(),bounds.toInt());val save=c.save();c.translate(x-bounds/2,y-bounds/2);v.draw(c);c.restoreToCount(save);val hit=max(18*sx,size*0.7f);hits+=RectF(x-hit,y-hit,x+hit,y+hit) to act}
+    private fun icon(c:Canvas,key:String,act:String,x:Float,y:Float,size:Float,color:Int){val bounds=size/0.52f;val v=icons.getOrPut(key){MusicIcon(context,key)};v.setTextColor(color);if(v.width!=bounds.toInt()||v.height!=bounds.toInt())v.layout(0,0,bounds.toInt(),bounds.toInt());val save=c.save();c.translate(x-bounds/2,y-bounds/2);v.draw(c);c.restoreToCount(save);val hit=max(18*sx,size*0.7f);val index=hits.size;val entry=hitPool.getOrNull(index)?.takeIf{it.second==act}?: (RectF() to act).also{if(index<hitPool.size)hitPool[index]=it else hitPool.add(it)};entry.first.set(x-hit,y-hit,x+hit,y+hit);hits.add(entry)}
     private fun playIcon(c:Canvas,s:MusicPaintState,x:Float,y:Float,r:Float,dark:Boolean){p.color=if(dark)Color.BLACK else Color.WHITE;if(dark)c.drawCircle(x,y,r,p)else{p.style=Paint.Style.STROKE;p.strokeWidth=1.5f*sx;c.drawCircle(x,y,r,p);p.style=Paint.Style.FILL};icon(c,if(s.playing)"Ⅱ"else"▶","play",x,y,r*0.9f,if(dark)0xFFB4FF00.toInt()else Color.WHITE)}
     private fun favoriteIcon(c:Canvas,s:MusicPaintState,x:Float,y:Float,size:Float,color:Int){
         icon(c,if(s.favorite)"♥" else "♡","favorite",x,y,size,if(s.favorite)Color.RED else color)

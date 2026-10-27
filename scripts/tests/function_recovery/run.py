@@ -4,7 +4,9 @@ from pathlib import Path
 import subprocess, tempfile
 repo=Path(__file__).resolve().parents[3]
 cache=Path.home()/'.gradle/caches/modules-2/files-2.1'
-def jar(g,n,v): return next((cache/g/n/v).glob('*/'+n+'-'+v+'.jar'))
+def jar(g,n,v):
+ found=list((cache/g/n/v).glob('*/'+n+'-'+v+'.jar'))
+ return found[0] if found else Path('/tmp/pl-kotlin-libs')/(n+'-'+v+'.jar')
 std=jar('org.jetbrains.kotlin','kotlin-stdlib','2.4.0')
 cp=[jar('org.jetbrains.kotlin','kotlin-compiler-embeddable','2.4.0'),std,
     jar('org.jetbrains.kotlin','kotlin-reflect','2.3.20'),jar('org.jetbrains.kotlin','kotlin-script-runtime','2.4.0'),
@@ -38,6 +40,10 @@ import t.mma.hooks.items.conversationgroup.ConversationGroupParentPolicy as P
 import android.view.View
 fun main(){
  val parent="wxid_hchat_group_test"
+ check(P.mergeOriginals(mapOf("room" to parent),mapOf("room" to "native"))["room"]=="native")
+ check(P.mergeOriginals(mapOf("room" to ""),mapOf("room" to "native"))["room"]=="")
+ check(P.mergeOriginals(emptyMap(),mapOf("room" to parent)).isEmpty())
+ println("PASS: trusted backup survives invalid primary; explicit root retained; invalid-only rejected")
  val unknown=P.plan(emptyMap(),mapOf("room" to parent),emptySet(),emptyMap())
  check(unknown.unresolved==setOf("room") && unknown.updates.isEmpty())
  val restored=P.plan(emptyMap(),mapOf("room" to parent),emptySet(),mapOf("room" to ""))

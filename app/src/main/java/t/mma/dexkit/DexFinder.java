@@ -4950,7 +4950,7 @@ public class DexFinder {
     private void saveCache() {
         if (cachePrefs == null || runtimeCacheKey.length() == 0) return;
         try {
-            SharedPreferences.Editor editor = cachePrefs.edit().clear();
+            SharedPreferences.Editor editor = new CacheSnapshotEditor(cachePrefs);
             editor.putString(CACHE_KEY, runtimeCacheKey);
             editor.putString("addMsgClasses", joinClassNames(addMsgClasses));
             putClass(editor, "receiveLuckyMoneyClass", receiveLuckyMoneyClass);

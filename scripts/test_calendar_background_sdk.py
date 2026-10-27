@@ -30,6 +30,7 @@ val ctx:android.content.Context=TODO();val prefs:android.content.SharedPreferenc
 val week=LocalDate.now();val today=LocalDate.now();val compactCard=false;val destroyed=false
 val worker=java.util.concurrent.Executors.newSingleThreadExecutor();val main=android.os.Handler(android.os.Looper.getMainLooper())
 val root=LinearLayout(ctx)
+val cardCache=mutableMapOf<String,Pair<String,View>>()
 fun dp(v:Int)=v
 fun card(s:String,calendar:Boolean=false):LinearLayout=if(calendar)AdjustableCalendarPanel(ctx)else LinearLayout(ctx)
 fun text(s:String,f:Float=14f)=TextView(ctx)

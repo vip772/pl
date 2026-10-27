@@ -375,7 +375,15 @@ object QuickMarkReadRuntime {
     }
 
     private fun preparationFailed(reason: String): Boolean {
-        if (preparationFailures.add(reason)) HLog.w("$TAG 原生已读准备未完成 reason=$reason")
+        if (preparationFailures.add(reason)) {
+            // Storage/API availability during startup is transient. The shared scheduler
+            // retains its bounded retries and reports persistent installation failures.
+            if (reason.startsWith("native_storage_not_ready:") || reason == "database_api_not_ready") {
+                HLog.d("$TAG 等待原生已读准备 reason=$reason")
+            } else {
+                HLog.w("$TAG 原生已读准备未完成 reason=$reason")
+            }
+        }
         return false
     }
     private fun observeNativeStorage(method: Method) {

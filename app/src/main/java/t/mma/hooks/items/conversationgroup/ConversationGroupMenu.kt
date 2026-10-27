@@ -41,7 +41,8 @@ internal object ConversationGroupMenu {
                 "移出" to "将直属会话移回微信首页",
                 "移至" to "将直属会话移到其他分组",
                 "搜索" to "搜索当前分组及子分组内会话",
-                "设置" to "设置当前分组的显示方式"
+                "设置" to "设置当前分组的显示方式",
+                "修复会话恢复目标" to "为缺少备份的直属会话指定今后移出时回到微信首页"
             ),
             onSelected = { index ->
                 when (index) {
@@ -58,6 +59,7 @@ internal object ConversationGroupMenu {
                     10 -> moveConversations(activity, groupId, onChanged)
                     11 -> searchConversations(activity, groupId)
                     12 -> showSettings(activity, groupId, onChanged)
+                    13 -> repairOriginalParents(activity, groupId, onChanged)
                 }
             },
             onDismiss = {}
@@ -621,6 +623,34 @@ internal object ConversationGroupMenu {
             )
             toast(activity, if (success) "已添加 ${selected.size} 个会话" else "添加会话失败")
             if (success) onChanged()
+        }
+    }
+
+    private fun repairOriginalParents(activity: Activity, groupId: String, onChanged: () -> Unit) {
+        val account = ConversationGroupStore.accountKey()
+        val ids = group(activity, groupId)?.conversationIds.orEmpty()
+        showConversationPicker(activity, ids, "修复会话恢复目标", "继续") { selected ->
+            val talkers = selected.map { it.id }.toSet()
+            if (talkers.isEmpty()) return@showConversationPicker
+            activity.window?.decorView?.postOnAnimation {
+                if (activity.isFinishing || activity.isDestroyed) return@postOnAnimation
+                VoiceForwardMiuixDialog.showConfirm(
+                activity = activity,
+                title = "指定恢复到微信首页",
+                message = "仅为所选会话中缺少可信备份的项目指定恢复目标：今后移出分组时回到微信首页。当前分组保持不变，已有可信备份不会覆盖。此操作不能找回历史归属。",
+                onResult = { confirmed ->
+                    if (confirmed) ConversationGroupRuntime.repairMissingOriginalParents(
+                        activity, account, groupId, talkers
+                    ) { count, error ->
+                        if (!activity.isFinishing && !activity.isDestroyed) {
+                            toast(activity, if (error == null) "已修复 $count 个会话的恢复目标" else "修复失败：$error")
+                            if (error == null) onChanged()
+                        }
+                    }
+                },
+                onDismiss = {}
+                )
+            }
         }
     }
 
