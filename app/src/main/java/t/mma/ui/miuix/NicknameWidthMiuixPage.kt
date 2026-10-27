@@ -12,6 +12,7 @@ import t.mma.hooks.items.nicknamewidth.NicknameWidthSettings
 import t.mma.preferences.HchatStorage
 import t.mma.ui.FeatureSettingsProvider
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
+import top.yukonga.miuix.kmp.basic.SmallTitle
 
 @Composable
 internal fun NicknameWidthMiuixPage(context: Context, provider: FeatureSettingsProvider, onBack: () -> Unit) {

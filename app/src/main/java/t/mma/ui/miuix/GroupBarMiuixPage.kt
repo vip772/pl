@@ -33,7 +33,7 @@ internal fun GroupBarMiuixPage(context: Context, provider: FeatureSettingsProvid
     val current = picker
     if (current != null) {
         // Supply only this independent group, preserving selected members outside recent chats.
-        ConversationGroupConversationPickerPage(context,
+        ConversationGroupSettingsUi.ConversationGroupConversationPickerPage(context,
             ConversationGroup(current.id, current.name, conversationIds = current.members.toList()),
             listOf(ConversationGroup(current.id, current.name, conversationIds = current.members.toList())),
             onBack = { picker = null }, onConfirm = { ids ->
@@ -98,9 +98,11 @@ internal fun GroupBarMiuixPage(context: Context, provider: FeatureSettingsProvid
                                 groups = groups.filterNot { it.id == group.id }; Store.save(context, groups)
                             }
                         }
-                        Row(Modifier.fillMaxWidth()) {
-                            androidx.compose.material3.TextButton(onClick = { Store.move(context, group.id, -1); groups = Store.load(context) }) { Text("左移") }
-                            androidx.compose.material3.TextButton(onClick = { Store.move(context, group.id, 1); groups = Store.load(context) }) { Text("右移") }
+                        ActionRow("左移", "将分组向左移动一位") {
+                            Store.move(context, group.id, -1); groups = Store.load(context)
+                        }
+                        ActionRow("右移", "将分组向右移动一位") {
+                            Store.move(context, group.id, 1); groups = Store.load(context)
                         }
                     } }
                 }

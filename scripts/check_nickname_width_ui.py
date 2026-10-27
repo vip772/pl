@@ -4,7 +4,7 @@ import subprocess,tempfile
 r=Path(__file__).resolve().parents[1];libs=Path('/tmp/pl-kotlin-libs')
 std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
 plugin=next((Path.home()/'.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compose-compiler-plugin-embeddable/2.4.0').glob('*/*.jar'))
-cp=[std,Path('/usr/lib/android-sdk/platforms/android-36/android.jar'),*Path('/tmp/favorite-compose-cp').glob('*.jar')]
+cp=[std,Path('/usr/lib/android-sdk/platforms/android-36/android.jar'),*[p for p in Path('/tmp/favorite-compose-cp').glob('*.jar') if 'material' not in p.name.lower()]]
 stubs={
 'Shell.kt':'''package t.mma.ui.miuix
 import androidx.compose.runtime.Composable
@@ -16,7 +16,6 @@ import top.yukonga.miuix.kmp.basic.ScrollBehavior
 @Composable fun BottomActionBar(primaryText:String,onPrimaryClick:()->Unit){}
 @Composable fun SettingsCard(content:@Composable ()->Unit){content()}
 @Composable fun SwitchRow(sp:SharedPreferences,key:String,title:String,summary:String,defaultValue:Boolean){}
-@Composable fun SmallTitle(text:String){}
 ''',
 'Ui.kt':'''package t.mma.ui
 interface FeatureSettingsProvider {fun title():String}
