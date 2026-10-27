@@ -19,7 +19,7 @@ class View {
  fun canScrollVertically(d:Int)=false
  fun scrollBy(x:Int,y:Int){scrolls++}
 }
-class FooterState(var chatRecycler:View?=null,var recyclerPaddingBottom:Int?=null)
+class FooterState(var chatRecycler:View?=null,var recyclerPaddingBottom:Int?=null,val listLocation:IntArray=IntArray(2),val footerLocation:IntArray=IntArray(2))
 class Runtime(val recycler:View) {
  fun findChatRecycler(footer:View):View?=recycler
  fun liftNewMessageBubble(footer:View){}
@@ -29,7 +29,7 @@ fun main() {
  val list=View(); val footer=View(); val runtime=Runtime(list); val state=FooterState();footer.y=629
  runtime.applyChatListPadding(footer,171,state)
  check(list.paddingBottom==182 && list.scrolls==0)
- repeat(1000) {runtime.applyChatListPadding(footer,171,state)}
+ repeat(1000) {check(runtime.applyChatListPadding(footer,171,state))}
  check(list.writes==1 && list.scrolls==0)
  footer.y=583
  runtime.applyChatListPadding(footer,217,state)
@@ -40,7 +40,7 @@ fun main() {
  list.height=660;runtime.applyChatListPadding(footer,217,state);check(list.paddingBottom==88)
  // No overlap must restore base even if a full input height was supplied.
  list.height=580;runtime.applyChatListPadding(footer,217,state);check(list.paddingBottom==11)
- list.height=800;list.isLayoutRequested=true;runtime.applyChatListPadding(footer,217,state);check(list.paddingBottom==11)
+ list.height=800;list.isLayoutRequested=true;check(!runtime.applyChatListPadding(footer,217,state));check(list.paddingBottom==11)
  list.isLayoutRequested=false;runtime.applyChatListPadding(footer,217,state);check(list.paddingBottom==228)
 
  println("PASS: production footer padding: initial entry has no explicit scroll, stable updates are no-ops, resize does not accumulate, side/top preserved")

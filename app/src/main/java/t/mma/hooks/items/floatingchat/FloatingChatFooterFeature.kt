@@ -593,11 +593,11 @@ private class FooterRuntime(private val context: FeatureContext) {
                         removeGlobalTracking(tracker)
                     }
                 } else if (tracker.attempts++ < INITIAL_LAYOUT_RETRY_COUNT) {
-                    footer.postOnAnimation {
-                        if (footer.isAttachedToWindow && isReadyChatLayout(tracker.layout)) {
-                            scheduleFooterApply(footer, tracker)
-                        }
-                    }
+                    // Keep the incomplete entry transaction off screen. A bounded
+                    // retry finishes native layout and list padding before first draw.
+                    scheduleFooterApply(footer, tracker)
+                    footer.rootView.postInvalidateOnAnimation()
+                    return false
                 } else {
                     // A failed apply may already have moved the native panel. Roll it back.
                     restore(footer)
@@ -680,12 +680,10 @@ private class FooterRuntime(private val context: FeatureContext) {
             ?: state.baseInputHeight.takeIf { it > 0 }
             ?: footer.height.takeIf { it > 0 }
             ?: return false
-        if (state.baseInputHeight <= 0 && !isPanelState(panelState)) state.baseInputHeight = stableInputHeight
-        val inputHeight = if (isPanelState(panelState)) {
-            stableInputHeight
-        } else {
-            state.baseInputHeight.takeIf { it > 0 } ?: stableInputHeight
-        }
+        // The toolbar can be inserted after the first native measurement.
+        // Refresh the measured input stack instead of freezing its initial height.
+        if (!isPanelState(panelState)) state.baseInputHeight = stableInputHeight
+        val inputHeight = stableInputHeight
 
         // Do not mutate hierarchy until native input height is available.
         if (!state.reparented && !reparentPanel(state)) return false
@@ -726,10 +724,9 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (footer.translationZ != 0f) footer.translationZ = 0f
         FloatingChatCardVisuals.apply(footer, CORNER_RADIUS_DP, translucent = true, borderless = true, transparency = backgroundTransparency)
         FloatingFooterInputSurfaces.apply(footer)
-        applyChatListPadding(footer, occupiedHeight + gap, state)
+        val paddingReady = applyChatListPadding(footer, occupiedHeight + gap, state)
         ensurePreDrawTracking(footer)
-
-        return true
+        return paddingReady
 
     }
 
@@ -894,25 +891,27 @@ private class FooterRuntime(private val context: FeatureContext) {
         return total
     }
 
-    private fun applyChatListPadding(footer: View, extra: Int, state: FooterState) {
+    private fun applyChatListPadding(footer: View, extra: Int, state: FooterState): Boolean {
         val recycler = state.chatRecycler?.takeIf { it.isAttachedToWindow }
             ?: findChatRecycler(footer)?.also { state.chatRecycler = it }
-            ?: return
+            ?: return false
         if (state.recyclerPaddingBottom == null) state.recyclerPaddingBottom = recycler.paddingBottom
-        val base = state.recyclerPaddingBottom ?: return
+        val base = state.recyclerPaddingBottom ?: return false
         // Native content may already end above the input bar. Reserve only real overlap,
         // never add the whole input/panel height a second time.
-        if (recycler.isLayoutRequested || footer.isLayoutRequested || recycler.height <= 0) return
-        val listLocation = IntArray(2).also(recycler::getLocationOnScreen)
-        val footerLocation = IntArray(2).also(footer::getLocationOnScreen)
+        if (recycler.isLayoutRequested || footer.isLayoutRequested || recycler.height <= 0) return false
+        val listLocation = state.listLocation.also(recycler::getLocationOnScreen)
+        val footerLocation = state.footerLocation.also(footer::getLocationOnScreen)
         val overlap = (listLocation[1] + recycler.height - footerLocation[1]).coerceIn(0, extra)
         val target = base + overlap
         if (recycler.paddingBottom == target) {
             liftNewMessageBubble(footer)
-            return
+            return true
         }
         recycler.setPadding(recycler.paddingLeft, recycler.paddingTop, recycler.paddingRight, target)
         liftNewMessageBubble(footer)
+        // setPadding schedules native list layout; do not expose the old row bounds.
+        return false
     }
 
     private fun ensurePreDrawTracking(footer: View) {
@@ -1136,6 +1135,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         var reparented: Boolean = false,
         val footerLocation: IntArray = IntArray(2),
         val contentLocation: IntArray = IntArray(2),
+        val listLocation: IntArray = IntArray(2),
         var chatContent: ViewGroup? = null,
         var chatRecycler: View? = null,
         var recyclerPaddingBottom: Int? = null,

@@ -2728,7 +2728,11 @@ private class BackgroundBeautyRuntime(
     private fun applyNativeChrome(view: View, slot: BackgroundBeautySettings.Slot) {
         if (restoringBounce || initializedChrome[view] == true) return
         // ActionBarContainer draws primary/stacked/split layers independently of View.background.
-        if (slot == BackgroundBeautySettings.Slot.CHAT && view.javaClass.name != "androidx.appcompat.widget.ActionBarContainer") return
+        // Both the embedded and standalone chat can own a FrostedContentView.
+        // Its native blur is drawn independently of the transparent background.
+        if (slot == BackgroundBeautySettings.Slot.CHAT &&
+            view.javaClass.name != "androidx.appcompat.widget.ActionBarContainer" &&
+            view.javaClass.name != "com.tencent.mm.ui.FrostedContentView") return
         if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW) ||
             view.javaClass.name == "com.tencent.mm.ui.FrostedContentView" || view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") initializedChrome[view] = true
         if (hasClassName(view, BOUNCE_VIEW) || hasClassName(view, NESTED_BOUNCE_VIEW)) {
