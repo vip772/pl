@@ -343,6 +343,23 @@ object ConversationGroupRuntime {
         }
     }
 
+    /** Serialize the bar handoff after any in-flight parentRef writes, without blocking UI. */
+    @JvmStatic
+    fun afterDisabledRestore(context: Context, complete: (Boolean) -> Unit) {
+        val app = context.applicationContext
+        executor.execute {
+            val success = runCatching {
+                check(!ConversationGroupStore.isEnabled(app)) { "聊天分组仍开启" }
+                val database = WeChatApis.database() ?: error("数据库未就绪")
+                check(database.prepare()) { "数据库未就绪" }
+                check(ConversationGroupStore.accountKey().isNotBlank()) { "账号未就绪" }
+                syncDatabase(app, requireRestored = true)
+                check(!ConversationGroupStore.isEnabled(app)) { "聊天分组已重新开启" }
+            }.onFailure { HLog.e("$TAG 切换到分组横栏前恢复失败", it) }.isSuccess
+            main.post { complete(success) }
+        }
+    }
+
     @JvmStatic
     fun destroy() {
         active.set(false)
@@ -1500,7 +1517,7 @@ object ConversationGroupRuntime {
         return successful
     }
 
-    private fun syncDatabase(context: Context) {
+    private fun syncDatabase(context: Context, requireRestored: Boolean = false) {
         val account = ConversationGroupStore.accountKey()
         if (account.isBlank()) return
         val database = WeChatApis.database() ?: return
@@ -1518,7 +1535,10 @@ object ConversationGroupRuntime {
                 protected = official,
                 originals = originals
             )
-            applyParentPlan(database, prefs, account, plan)
+            val restored = applyParentPlan(database, prefs, account, plan)
+            if (requireRestored) check(plan.unresolved.isEmpty() && restored.containsAll(plan.updates.keys)) {
+                "部分会话归属未恢复"
+            }
             return
         }
         val automaticResolution = if (enabled) {

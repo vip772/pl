@@ -1778,8 +1778,16 @@ internal fun FeatureGroupSettingsPage(
                 bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
-            item { SmallTitle(text = "功能") }
-            item { FeatureListCard(currentGroup.providers, "暂无功能", onOpenProvider) }
+            if (currentGroup.title == "增强") {
+                val chatGroupIds = setOf(ConversationGroupFeature.ID, "conversation_group_bar")
+                item { SmallTitle(text = "聊天分组") }
+                item { FeatureListCard(currentGroup.providers.filter { it.featureId() in chatGroupIds }, "暂无功能", onOpenProvider) }
+                item { SmallTitle(text = "其他增强功能") }
+                item { FeatureListCard(currentGroup.providers.filterNot { it.featureId() in chatGroupIds }, "暂无功能", onOpenProvider) }
+            } else {
+                item { SmallTitle(text = "功能") }
+                item { FeatureListCard(currentGroup.providers, "暂无功能", onOpenProvider) }
+            }
         }
     }
 }
@@ -1972,6 +1980,8 @@ internal fun matchedFeatureSubTerms(query: String, provider: FeatureSettingsProv
 
 internal fun featureSubSearchTerms(featureId: String): List<String> {
     return when (featureId) {
+        "conversation_group_bar" -> listOf("分组横栏", "顶部聊天分组", "标准分组", "悬浮分组", "管理分组")
+        "group_nickname_width" -> listOf("解除群成员昵称长度限制", "群昵称宽度", "长昵称", "昵称截断", "240dp")
         "step_multiplier" -> listOf("步数倍增", "微信运动", "运动步数", "倍率", "步数")
         "auto_cache" -> listOf("自动缓存", "自动下载", "图片", "视频", "文件", "文档", "防过期", "适用聊天")
         "home_side_panel" -> listOf("首页侧边栏", "快捷面板", "首页头像", "昵称头像", "左边缘右划", "侧边抽屉")

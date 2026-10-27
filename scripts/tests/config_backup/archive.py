@@ -28,6 +28,8 @@ interface SharedPreferences {
  fun getInt(k:String,d:Int):Int=all[k] as? Int?:d
  fun getLong(k:String,d:Long):Long=all[k] as? Long?:d
  fun getFloat(k:String,d:Float):Float=all[k] as? Float?:d
+ fun registerOnSharedPreferenceChangeListener(listener:OnSharedPreferenceChangeListener){}
+ fun interface OnSharedPreferenceChangeListener {fun onSharedPreferenceChanged(prefs:SharedPreferences,key:String?)}
  interface Editor {
  fun clear():Editor
  fun putBoolean(k:String,v:Boolean):Editor
@@ -53,6 +55,8 @@ import java.io.File
 class FastKV(val name:String):SharedPreferences {
  companion object{val stores=mutableMapOf<String,FastKV>();var failName="";var failOnce=false}
  val values=linkedMapOf<String,Any?>()
+ val listeners=mutableListOf<SharedPreferences.OnSharedPreferenceChangeListener>()
+ override fun registerOnSharedPreferenceChangeListener(listener:SharedPreferences.OnSharedPreferenceChangeListener){listeners.add(listener)}
  override val all get()=values.toMap()
  fun close(){}
  class Builder(val path:String,val name:String){fun build():FastKV {
@@ -68,7 +72,7 @@ class FastKV(val name:String):SharedPreferences {
  override fun putFloat(k:String,v:Float)=apply{next[k]=v}
  override fun putString(k:String,v:String?)=apply{next[k]=v}
  override fun putStringSet(k:String,v:Set<String>?)=apply{next[k]=v}
- override fun commit():Boolean{if(failOnce&&name==failName){failOnce=false;return false};values.clear();values.putAll(next);return true}
+ override fun commit():Boolean{if(failOnce&&name==failName){failOnce=false;return false};val changed=(values.keys+next.keys).filter{values[it]!=next[it]};values.clear();values.putAll(next);for(k in changed)for(listener in listeners.toList())listener.onSharedPreferenceChanged(this@FastKV,k);return true}
  }
 }
 ''',
@@ -163,6 +167,19 @@ fun main(args:Array<String>){
  voicePrefs.edit().putBoolean("enable",false).commit();HchatConfigBackup.exportToUri(voice,Uri(voiceZip));HchatConfigBackup.importFromUri(voiceOut,Uri(voiceZip))
  check(!Store.preferences(voiceOut,"Hchat_voice_to_text_config").getBoolean("enable",true))
  println("PASS: voice-to-text toggle true/false round trip and runtime exclusion")
+ val nick=Context(File(base,"nick-source"),"com.nick.source")
+ val nickPrefs=Store.preferences(nick,"Hchat_group_nickname_width_config")
+ check(!nickPrefs.getBoolean("enable",false))
+ val nickOut=Context(File(base,"nick-dest"),"com.nick.dest");val nickZip=File(base,"nick.zip")
+ Store.runtimePreferences(nick,"Hchat_group_nickname_width_method_cache").edit().putString("runtime","exclude").commit()
+ for(value in listOf(true,false)) {
+ nickPrefs.edit().putBoolean("enable",value).commit()
+ HchatConfigBackup.exportToUri(nick,Uri(nickZip));HchatConfigBackup.importFromUri(nickOut,Uri(nickZip))
+ check(Store.preferences(nickOut,"Hchat_group_nickname_width_config").getBoolean("enable",!value)==value)
+ check("Hchat_group_nickname_width_method_cache" !in Store.backupPreferenceNames(nickOut))
+ }
+ println("PASS nickname width default-off and true/false round trip, runtime exclusion")
+
  // Empty stores also round trip.
  val c=Context(File(base,"c"),"com.test.c");HchatConfigBackup.importFromUri(c,Uri(backup))
  fun legacy(value:JSONObject):File {
@@ -178,6 +195,41 @@ fun main(args:Array<String>){
 
  check(runCatching{HchatConfigBackup.importFromUri(b,Uri(legacy(JSONObject().put("type","int").put("value","bad"))))}.isFailure)
  check(out.all==before)
+ // Group bar user configuration is automatically discovered; projection caches stay in memory.
+ val bar=Context(File(base,"bar"),"com.bar")
+ val barOut=Context(File(base,"bar-out"),"com.bar.out")
+ val barPrefs=Store.preferences(bar,"Hchat_conversation_group_bar_config")
+ check(!barPrefs.getBoolean("enable",false))
+ val groupJson="""[{"id":"custom_1","name":"家人","enabled":true,"members":["friend","room@chatroom"]},{"id":"all","name":"全部","enabled":false}]"""
+ barPrefs.edit().putBoolean("enable",true).putInt("style",1).putInt("transparency",37).putString("groups",groupJson).putInt("next_number",8).commit()
+ Store.runtimePreferences(bar,"Hchat_group_bar_method_cache").edit().putString("method","runtime").commit()
+ val barZip=File(base,"bar.zip");check(HchatConfigBackup.exportToUri(bar,Uri(barZip)).stores==2)
+ HchatConfigBackup.importFromUri(barOut,Uri(barZip))
+ val restoredBar=Store.preferences(barOut,"Hchat_conversation_group_bar_config")
+ check(restoredBar.getBoolean("enable",false)&&restoredBar.getInt("style",0)==1)
+ check(restoredBar.getInt("transparency",0)==37&&restoredBar.getString("groups","")==groupJson&&restoredBar.getInt("next_number",0)==8)
+ barPrefs.edit().putBoolean("enable",false).commit()
+ HchatConfigBackup.exportToUri(bar,Uri(barZip));HchatConfigBackup.importFromUri(barOut,Uri(barZip))
+ check(!restoredBar.getBoolean("enable",true))
+ check("Hchat_group_bar_method_cache" !in Store.backupPreferenceNames(bar))
+ println("PASS: group bar default/off/on, style, transparency, ordered group/member JSON, next number round trip; runtime cache excluded")
+ // Direct settings writes, quick toggles and import use these same production preference listeners.
+ val grouped=Store.preferences(bar,"Hchat_conversation_groups")
+ grouped.edit().putString("groups_v1","preserved").putBoolean("enabled",true).commit()
+ check(!barPrefs.getBoolean("enable",false))
+ barPrefs.edit().putBoolean("enable",true).commit()
+ check(!grouped.getBoolean("enabled",true)&&grouped.getString("groups_v1","")=="preserved")
+ grouped.edit().putBoolean("enabled",true).commit()
+ check(!barPrefs.getBoolean("enable",true)&&barPrefs.getString("groups","")==groupJson)
+ // Importing the enabled-bar backup must disable an already enabled chat-group feature.
+ HchatConfigBackup.importFromUri(bar,Uri(barZip))
+ check(!barPrefs.getBoolean("enable",true)) // latest backup explicitly saved bar off
+ barPrefs.edit().putBoolean("enable",true).commit()
+ HchatConfigBackup.exportToUri(bar,Uri(barZip))
+ grouped.edit().putBoolean("enabled",true).commit()
+ HchatConfigBackup.importFromUri(bar,Uri(barZip))
+ check(!(barPrefs.getBoolean("enable",false)&&grouped.getBoolean("enabled",false)))
+ println("PASS bidirectional grouping exclusion for direct/quick preference writes; both group configurations preserved")
  // Commit failure after resource replacement must restore both preferences and resource.
  val target=File(Store.resourceDirectory(b,"future"),"image.png");target.writeText("before")
  out.edit().putInt("i",99).commit();FastKV.failName="Hchat_brand_new_feature";FastKV.failOnce=true
@@ -199,6 +251,6 @@ with tempfile.TemporaryDirectory() as td:
  p=Path(td)
  for n,s in sources.items():(p/n).write_text(s)
  jar=p/'test.jar'
- production=[repo/'app/src/main/java/t/mma/preferences/HchatStorage.kt',repo/'app/src/main/java/t/mma/ui/miuix/HchatConfigBackup.kt']
+ production=[repo/'app/src/main/java/t/mma/preferences/HchatStorage.kt',repo/'app/src/main/java/t/mma/preferences/ConversationGroupingExclusion.kt',repo/'app/src/main/java/t/mma/ui/miuix/HchatConfigBackup.kt']
  subprocess.run(['java','-Xmx384m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',f'{stdlib}:{jsonjar}','-d',str(jar),*[str(p/n) for n in sources],*map(str,production)],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{jar}:{stdlib}:{jsonjar}','t.mma.ui.miuix.MainKt',str(p/'data')],check=True,timeout=30)

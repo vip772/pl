@@ -20,7 +20,7 @@ object HchatStorage {
 
         val created = create(appContext, name)
         val existing = cache.putIfAbsent(cacheKey, created)
-        return existing ?: created
+        return (existing ?: created).also { ConversationGroupingExclusion.bind(appContext, name, it) }
     }
 
     @JvmStatic

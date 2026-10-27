@@ -22,6 +22,8 @@ object FeatureToggleRegistry {
         "home_extension" to Toggle("Hchat_home_extension_config", "enable"),
         "chat_toolbar" to Toggle("Hchat_chat_toolbar_config", "enable"),
         "upload_transparent_avatar" to Toggle("Hchat_upload_transparent_avatar_config", "upload_transparent_avatar_enable"),
+        "conversation_group_bar" to Toggle("Hchat_conversation_group_bar_config", "enable"),
+        "group_nickname_width" to Toggle("Hchat_group_nickname_width_config", "enable"),
         "step_multiplier" to Toggle("Hchat_step_multiplier", "enable"),
         "auto_cache" to Toggle("Hchat_auto_cache_config", "enable"),
         "home_side_panel" to Toggle("Hchat_home_side_panel", "enable"),

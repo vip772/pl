@@ -1087,6 +1087,7 @@ internal fun FeatureSettingsPage(
     onOpenScriptPluginManager: () -> Unit = {}
 ) {
     when (provider.featureId()) {
+        t.mma.hooks.items.nicknamewidth.NicknameWidthSettings.ID -> NicknameWidthMiuixPage(context, provider, onBack)
         t.mma.hooks.items.stepmultiplier.StepMultiplierFeature.ID -> StepMultiplierMiuixPage(context,provider,onBack)
         AutoRedPacketFeature.ID -> RedPacketMiuixPage(context, provider, onBack)
         AutoTransferFeature.ID -> AutoTransferMiuixPage(context, provider, onBack)
@@ -1155,6 +1156,7 @@ internal fun FeatureSettingsPage(
         DynamicBadgeSettings.ID -> DynamicBadgeMiuixPage(context, provider, onBack)
         AutoReplyFeature.ID -> AutoReplyMiuixPage(context, provider, onBack)
         AutoMessageForwardFeature.ID -> AutoMessageForwardMiuixPage(context, provider, onBack)
+        t.mma.hooks.items.groupbar.GroupBarStore.ID -> GroupBarMiuixPage(context, provider, onBack)
         ConversationGroupFeature.ID -> ConversationGroupMiuixPage(context, provider, onBack)
         ConversationAnalysisFeature.ID -> ConversationAnalysisMiuixPage(context, provider, onBack)
         CustomNotificationFeature.ID -> CustomNotificationMiuixPage(context, provider, onBack)
