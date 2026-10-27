@@ -129,11 +129,13 @@ private class FooterRuntime(private val context: FeatureContext) {
                 if (isEnabled()) {
                     FloatingFooterInputSurfaces.apply(footer)
                     val tracker = footerTrackers[footer]
-                    if (tracker == null || !tracker.ready) {
+                    if (tracker?.failed != true) {
                         val layout = findAncestorChatLayout(footer)
-                        if (layout != null) {
-                            val pending = trackerForFooter(footer, layout)
-                            if (isReadyChatLayout(layout)) scheduleFooterApply(footer, pending, requestLayout = false)
+                        if (layout != null && isReadyChatLayout(layout)) {
+                            val current = tracker ?: trackerForFooter(footer, layout)
+                            current.layout = layout
+                            if (current.ready) refreshMeasuredInputHeight(footer, states[footer] ?: return@hookFooter)
+                            scheduleFooterApply(footer, current, requestLayout = false)
                         }
                     }
                 }
@@ -529,7 +531,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         val layout = findAncestorChatLayout(footer) ?: return
         val tracker = trackerForFooter(footer, layout)
         if (!isReadyChatLayout(layout)) return
-        if (!tracker.ready) footer.visibility = View.INVISIBLE
+        if (!tracker.ready && !tracker.failed) footer.visibility = View.INVISIBLE
         scheduleFooterApply(footer, tracker)
     }
 
@@ -568,6 +570,12 @@ private class FooterRuntime(private val context: FeatureContext) {
 
     private fun scheduleFooterApply(footer: View, tracker: FooterTracker, requestLayout: Boolean = false) {
         if (tracker.failed) return
+        if (tracker.ready && tracker.settlePasses == 0) {
+            val state = states[footer] ?: return
+            refreshMeasuredInputHeight(footer, state)
+            applyChatListPadding(footer, state.listExtra, state)
+            return
+        }
         if (tracker.preDraw != null || !footer.isAttachedToWindow) return
         val observer = footer.viewTreeObserver
         val listener = object : ViewTreeObserver.OnPreDrawListener {
@@ -575,7 +583,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                 if (observer.isAlive) observer.removeOnPreDrawListener(this)
                 if (tracker.preDraw === this) tracker.preDraw = null
                 if (!footer.isAttachedToWindow || !isReadyChatLayout(tracker.layout)) {
-                    if (!tracker.ready && footer.visibility == View.INVISIBLE) footer.visibility = tracker.visibility
+                    if (!tracker.ready && !tracker.failed && footer.visibility == View.INVISIBLE) footer.visibility = tracker.visibility
                     return true
                 }
                 if (!isEnabled()) {
@@ -586,6 +594,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                 // Padding settlement must never reparent or roll back the input hierarchy.
                 if (tracker.settlePasses > 0) {
                     val state = states[footer]
+                    if (state != null) refreshMeasuredInputHeight(footer, state)
                     val settled = state != null && applyChatListPadding(footer, state.listExtra, state)
                     if (!settled && --tracker.settlePasses > 0) {
                         scheduleFooterApply(footer, tracker)
@@ -918,6 +927,14 @@ private class FooterRuntime(private val context: FeatureContext) {
         return total
     }
 
+    private fun refreshMeasuredInputHeight(footer: View, state: FooterState) {
+        // A late toolbar can grow descendants while footer bounds stay unchanged.
+        // Reuse existing state; never reparent or roll back for padding settlement.
+        val height = visibleHeightExcludingPanel(state.inputColumn, state.panel)
+        if (!isPanelState(panelState) && height > 0 && height != state.baseInputHeight) {
+            apply(footer)
+        }
+    }
     private fun applyChatListPadding(footer: View, extra: Int, state: FooterState): Boolean {
         val recycler = state.chatRecycler?.takeIf { it.isAttachedToWindow }
             ?: findChatRecycler(footer)?.also { state.chatRecycler = it }

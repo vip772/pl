@@ -7,6 +7,8 @@ a=s.index('    private fun scheduleFooterApply(');b=s.index('    private fun rem
 method=s[a:b]
 assert 'return paddingReady' not in s
 assert 'val inputHeight = stableInputHeight' in s
+assert 'if (tracker?.failed != true)' in s
+assert 'refreshMeasuredInputHeight(footer, state)' in s
 bg=(r/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt').read_text()
 a=bg.index('        if (slot == BackgroundBeautySettings.Slot.CHAT &&',bg.index('private fun applyNativeChrome'))
 b=bg.index(' return',a)
@@ -37,6 +39,7 @@ class Runtime {
  val INITIAL_LAYOUT_RETRY_COUNT=3;var enabled=true;var restored=0;var untracked=0
  val states=mutableMapOf<View,State>();var paddingCalls=0;var paddingStable=true
  class State(val listExtra:Int=223)
+ fun refreshMeasuredInputHeight(v:View,s:State){}
  fun applyChatListPadding(v:View,e:Int,s:State):Boolean {paddingCalls++;return paddingStable}
  val outcomes=java.util.ArrayDeque<Boolean>()
  fun isReadyChatLayout(v:View)=v.isAttachedToWindow
