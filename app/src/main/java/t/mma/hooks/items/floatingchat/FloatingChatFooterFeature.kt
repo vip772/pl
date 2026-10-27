@@ -584,6 +584,9 @@ private class FooterRuntime(private val context: FeatureContext) {
                 }
                 val wasReady = tracker.ready
                 val applied = apply(footer)
+                ChatBottomTrace.event(footer, if (applied) "footer-ready" else "footer-wait") {
+                    "wasReady=$wasReady attempts=${tracker.attempts} panelState=$panelState"
+                }
                 if (applied) {
                     tracker.attempts = 0
                     tracker.failureReported = false
@@ -595,11 +598,14 @@ private class FooterRuntime(private val context: FeatureContext) {
                 } else if (tracker.attempts++ < INITIAL_LAYOUT_RETRY_COUNT) {
                     // Keep the incomplete entry transaction off screen. A bounded
                     // retry finishes native layout and list padding before first draw.
-                    scheduleFooterApply(footer, tracker)
+                    // apply() already requests layout for actual geometry/padding changes.
+                    // Requesting it again here keeps isLayoutRequested true on every pass.
+                    scheduleFooterApply(footer, tracker, requestLayout = false)
                     footer.rootView.postInvalidateOnAnimation()
                     return false
                 } else {
                     // A failed apply may already have moved the native panel. Roll it back.
+                    ChatBottomTrace.event(footer, "footer-rollback") { "attempts=${tracker.attempts}" }
                     restore(footer)
                     footer.visibility = tracker.visibility
                     if (!tracker.failureReported) {
@@ -904,6 +910,9 @@ private class FooterRuntime(private val context: FeatureContext) {
         val footerLocation = state.footerLocation.also(footer::getLocationOnScreen)
         val overlap = (listLocation[1] + recycler.height - footerLocation[1]).coerceIn(0, extra)
         val target = base + overlap
+        ChatBottomTrace.event(footer, "list-padding") {
+            "extra=$extra listY=${listLocation[1]} listH=${recycler.height} footerY=${footerLocation[1]} base=$base current=${recycler.paddingBottom} target=$target overlap=$overlap"
+        }
         if (recycler.paddingBottom == target) {
             liftNewMessageBubble(footer)
             return true

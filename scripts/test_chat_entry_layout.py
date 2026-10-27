@@ -12,6 +12,7 @@ a=bg.index('        if (slot == BackgroundBeautySettings.Slot.CHAT &&',bg.index(
 b=bg.index(' return',a)
 predicate=bg[a:b].strip()[4:-1]
 code='''
+object ChatBottomTrace {fun event(v:View,p:String,d:()->String){}}
 class ViewTreeObserver {
  interface OnPreDrawListener {fun onPreDraw():Boolean}
  var isAlive=true;val listeners=mutableListOf<OnPreDrawListener>()
@@ -21,8 +22,8 @@ class ViewTreeObserver {
 }
 class View {
  var isAttachedToWindow=true;var visibility=0;val rootView get()=this
- val viewTreeObserver=ViewTreeObserver();var invalidations=0;var layouts=0
- fun requestLayout(){layouts++};fun postInvalidateOnAnimation(){invalidations++}
+ val viewTreeObserver=ViewTreeObserver();var invalidations=0;var layouts=0;var isLayoutRequested=false
+ fun requestLayout(){layouts++;isLayoutRequested=true};fun postInvalidateOnAnimation(){invalidations++}
  companion object{const val INVISIBLE=4}
 }
 class FooterTracker(val layout:View,val visibility:Int=0,var ready:Boolean=false,
@@ -37,9 +38,18 @@ class Runtime {
  val outcomes=java.util.ArrayDeque<Boolean>()
  fun isReadyChatLayout(v:View)=v.isAttachedToWindow
  fun isEnabled()=enabled
- fun apply(v:View)=if(outcomes.isEmpty())false else outcomes.removeFirst()
+ var layoutAware=false;var passes=0
+ fun apply(v:View):Boolean {
+  if(!layoutAware)return if(outcomes.isEmpty())false else outcomes.removeFirst()
+  passes++
+  if(passes==1){v.requestLayout();return false}
+  if(v.isLayoutRequested)return false
+  if(passes==2){v.requestLayout();return false}
+  return true
+ }
  fun restore(v:View){restored++}
  fun removeGlobalTracking(t:FooterTracker){untracked++}
+ val panelState=0
  val TAG="test"
  METHOD
  fun schedule(v:View,t:FooterTracker)=scheduleFooterApply(v,t)
@@ -51,6 +61,14 @@ fun main(){
  check(!v.viewTreeObserver.frame() && !t.ready)
  check(!v.viewTreeObserver.frame() && t.ready && r.untracked==1)
  check(v.viewTreeObserver.frame());check(v.viewTreeObserver.listeners.isEmpty())
+ // Native layout clears the flag before pre-draw; retries must not set it again.
+ val live=Runtime();live.layoutAware=true;val lv=View();val lt=FooterTracker(View())
+ live.schedule(lv,lt);lv.isLayoutRequested=false
+ check(!lv.viewTreeObserver.frame());lv.isLayoutRequested=false
+ check(!lv.viewTreeObserver.frame());lv.isLayoutRequested=false
+ check(!lv.viewTreeObserver.frame() && lt.ready && live.restored==0)
+ check(lv.layouts==3)
+ check(lv.viewTreeObserver.frame() && lv.viewTreeObserver.listeners.isEmpty())
  // No forever pre-draw loop when native structure never becomes ready.
  val fail=Runtime();val fv=View();val ft=FooterTracker(View());fail.schedule(fv,ft)
  repeat(3){check(!fv.viewTreeObserver.frame())};check(fv.viewTreeObserver.frame())
@@ -58,10 +76,10 @@ fun main(){
  val off=Runtime();val ov=View();val ot=FooterTracker(View());off.schedule(ov,ot);off.enabled=false
  check(ov.viewTreeObserver.frame() && off.restored==1)
  val chat=BackgroundBeautySettings.Slot.CHAT
- check(!skip(Native(Name("com.tencent.mm.ui.FrostedContentView")),chat))
+ check(skip(Native(Name("com.tencent.mm.ui.FrostedContentView")),chat))
  check(!skip(Native(Name("androidx.appcompat.widget.ActionBarContainer")),chat))
  check(skip(Native(Name("com.tencent.mm.ui.widget.WeUIBounceViewV2")),chat))
- println("PASS production entry transaction: padding before reveal, bounded rollback, disabled cleanup, chat frosted scope")
+ println("PASS production entry transaction: padding before reveal, bounded rollback, disabled cleanup, previous chat background scope, native layout flag lifecycle")
 }
 '''.replace('METHOD',method).replace('PREDICATE',predicate)
 libs=Path('/tmp/pl-kotlin-libs');std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
