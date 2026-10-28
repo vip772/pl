@@ -8,19 +8,22 @@ methods=s[a:z]
 a=s.index('        private val resetAfterData = Runnable');z=s.index('        private val switchObserver',a)
 reset=s[a:z]
 code='''import java.lang.ref.WeakReference
-class View
+class View {var footerReady=false}
+class NativeFooter {fun invoke(v:View){v.footerReady=true}}
+object KavaReflector {fun findMethodRecursive(c:Class<*>,n:String)=NativeFooter()}
+object HLog {fun e(s:String,t:Throwable){throw t}}
 class Field {var open=false;fun getBoolean(v:View)=open}
 class Main {val tasks=mutableListOf<Runnable>();fun removeCallbacks(r:Runnable){tasks.removeAll{it===r}};fun post(r:Runnable){tasks+=r};fun drain(){val q=tasks.toList();tasks.clear();q.forEach{it.run()}}}
 class Runtime {var disposed=false;var enabled=true;var pendingSwitchReset=false;var userInteracting=false;var headerOpen=false
- val view=View();val viewRef=WeakReference(view);val openField=Field();val main=Main();var selects=0;var reloads=0
+ val isNativeList=true;val view=View();val viewRef=WeakReference(view);val openField=Field();val main=Main();var selects=0;var reloads=0
  val drainReload=Runnable{}
- fun traceState(s:String){};fun selectNativeTop(v:View){selects++};fun reload(){reloads++}
+ fun traceState(s:String){};fun selectNativeTop(v:View){check(v.footerReady);selects++};fun reload(){reloads++}
 '''+reset+methods+'''
  fun notifyData(){resetAfterData.run()}
 }
 fun main(){
- val r=Runtime();r.switchGroup();check(r.selects==0&&r.reloads==1)
- r.userTouchStarted();r.notifyData();check(r.selects==0&&!r.pendingSwitchReset)
+ val r=Runtime();r.switchGroup();check(r.selects==0&&r.reloads==1&&!r.view.footerReady)
+ r.userTouchStarted();r.notifyData();check(r.selects==0&&!r.pendingSwitchReset&&!r.view.footerReady)
  r.userTouchEnded();r.main.drain();check(r.selects==0)
  r.switchGroup();r.notifyData();check(r.selects==1&&!r.pendingSwitchReset)
  r.notifyData();check(r.selects==1)

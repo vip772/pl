@@ -555,7 +555,14 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private val resetAfterData = Runnable {
             if (!disposed && enabled && pendingSwitchReset && !userInteracting && !nativeHeaderOpen()) {
                 pendingSwitchReset = false
-                viewRef.get()?.let { selectNativeTop(it) }
+                viewRef.get()?.let { list ->
+                    // Recompute the footer from NEW adapter data before the first layout.
+                    // Native h() may select internally; our final selection stays last.
+                    if (isNativeList) runCatching {
+                        KavaReflector.findMethodRecursive(list.javaClass, "h")?.invoke(list)
+                    }.onFailure { HLog.e("[Hchat:GroupBar] 切组页脚协调失败", it) }
+                    selectNativeTop(list)
+                }
             }
         }
         private val switchObserver = object : DataSetObserver() {
