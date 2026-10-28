@@ -1,5 +1,9 @@
 package t.mma.hooks.items.emojiat
 
+import android.app.Activity
+import android.app.Application
+import android.os.Bundle
+import java.lang.ref.WeakReference
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
@@ -18,7 +22,6 @@ import java.util.Collections
 import java.util.WeakHashMap
 import java.util.IdentityHashMap
 import java.util.concurrent.Executors
-import java.util.concurrent.atomic.AtomicBoolean
 
 internal class EmojiAtRuntime(private val context: FeatureContext) {
     private val prefs = EmojiAtSettings.preferences(context.hostContext())
@@ -46,6 +49,7 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
     }
     fun install() {
         prefs.registerOnSharedPreferenceChangeListener(listener)
+        (context.hostContext().applicationContext as? Application)?.registerActivityLifecycleCallbacks(lifecycle)
         main.postDelayed(cleanup, 30_000)
         if (enabled) schedule()
     }
@@ -131,50 +135,108 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 if (!enabled || scope.get() != null) return
                 val talker = (param.args.firstOrNull() as? String)?.takeIf { it.endsWith("@chatroom") } ?: return
-                val foreground = WeChatApis.currentActivity()?.currentActivity() ?: return
-                // Search LiteApp closes its transparent activity after dispatching send. Its d2
-                // is the verified underlying chat Activity; keep the choice on that stable host.
-                val searchHost = if (foreground.javaClass.name == "com.tencent.mm.plugin.emoji.ui.liteapp.EmojiSearchLiteAppTransparentUI")
-                    R.readField(foreground, "d2") as? android.app.Activity else null
-                val activity = (searchHost ?: foreground).takeUnless { it.isFinishing || it.isDestroyed } ?: return
                 val receiver = param.thisObject
                 val args = param.args.clone()
                 val epoch = generation
-                val used = AtomicBoolean(false)
-                val choose = {
-                  try {
-                    VoiceForwardMiuixDialog.showChoices(activity, "发送表情", "艾特发送为表情附带隐藏成员名单，不额外发送文字。", listOf(
-                        "普通发送" to "保持微信原有发送方式", "艾特发送" to "最多附带499位其他成员的艾特名单"
-                    ), onSelected = { index ->
-                        if (used.compareAndSet(false, true) && alive && enabled && epoch == generation && !activity.isFinishing && !activity.isDestroyed) {
-                            if (index == 0) resume(t, receiver, args, talker, emptyList(), epoch)
-                            else worker.execute {
-                                try {
-                                    val account = WeChatApis.contact().account()?.selfWxId().orEmpty()
-                                    val ids = WeChatApis.contact().chatrooms()?.getMemberIds(talker).orEmpty().ifEmpty {
-                                        WeChatApis.contact().contacts()?.getGroupMemberIds(talker).orEmpty()
-                                    }
-                                    val users = EmojiAtText.users(ids, account)
-                                    main.post {
-                                        if (activity.isFinishing || activity.isDestroyed) return@post
-                                        if (users.isEmpty()) notice("未取得当前账号或群成员，未发送，请重试或选择普通发送")
-                                        else resume(t, receiver, args, talker, users, epoch)
-                                    }
-                                } catch (e: Throwable) { report("读取成员失败，未发送", e); notice("读取群成员失败，未发送") }
-                            }
-                        }
-                    }, onDismiss = {})
-                  } catch (e: Throwable) {
-                      report("显示选择失败，未发送", e)
-                      notice("发送选择未能显示，请重试")
-                  }
-                }
-                // Search/download callbacks may arrive off-main; retain the complete native
-                // arguments and show on main instead of silently skipping the chooser.
+                // Keep the request before suppressing the native call. Downloads
+                // may finish while the search Activity is paused or being destroyed.
+                val foreground = WeChatApis.currentActivity()?.currentActivity()
                 param.result = null
-                main.post { if (alive && enabled && epoch == generation && !activity.isFinishing && !activity.isDestroyed) choose() }
+                main.post {
+                    if (!alive || !enabled || epoch != generation) return@post
+                    choices.offer(Choice(t, receiver, args, talker, epoch))
+                    drainChoices(foreground)
+                }
             }
         })
+    }
+    private class Choice(val targets: EmojiAtLocator.Targets, val receiver: Any,
+        val args: Array<Any?>, val talker: String, val epoch: Int) {
+        var host = WeakReference<Activity>(null)
+        var handle: VoiceForwardMiuixDialog.DialogHandle? = null
+        var selected = false
+        var presentation = 0
+    }
+    private val choices = EmojiAtChoiceQueue<Choice>()
+    private var shown: Choice? = null
+    private var resumed = WeakReference<Activity>(null)
+    private val lifecycle = object : Application.ActivityLifecycleCallbacks {
+        override fun onActivityResumed(activity: Activity) {
+            resumed = WeakReference(activity)
+            main.post { drainChoices(activity) }
+        }
+        override fun onActivityDestroyed(activity: Activity) {
+            val request = shown ?: return
+            if (request.host.get() !== activity || request.selected) return
+            shown = null
+            request.presentation++
+            choices.retry(request)
+            request.handle?.close()
+            request.handle = null
+            drainChoices()
+        }
+        override fun onActivityPaused(activity: Activity) {
+            if (resumed.get() === activity) resumed.clear()
+            val request = shown ?: return
+            if (request.host.get() !== activity || request.selected) return
+            shown = null
+            request.presentation++
+            choices.retry(request)
+            request.handle?.close()
+            request.handle = null
+        }
+        override fun onActivityCreated(activity: Activity, state: Bundle?) = Unit
+        override fun onActivityStarted(activity: Activity) = Unit
+        override fun onActivityStopped(activity: Activity) = Unit
+        override fun onActivitySaveInstanceState(activity: Activity, state: Bundle) = Unit
+    }
+    private fun drainChoices(candidate: Activity? = null) {
+        if (!alive || !enabled || shown != null) return
+        // Use only a resumed window. d2 can be a paused page hidden beneath search.
+        val activity = resumed.get() ?: candidate ?: WeChatApis.currentActivity()?.currentActivity() ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
+        val request = choices.acquire() ?: return
+        if (request.epoch != generation) { choices.complete(request); drainChoices(activity); return }
+        shown = request
+        request.host = WeakReference(activity)
+        val presentation = ++request.presentation
+        try {
+            request.handle = VoiceForwardMiuixDialog.showChoices(activity, "发送表情",
+                "艾特发送为表情附带隐藏成员名单，不额外发送文字。", listOf(
+                    "普通发送" to "保持微信原有发送方式", "艾特发送" to "最多附带499位其他成员的艾特名单"
+                ), onSelected = { index ->
+                    if (request.presentation != presentation || request.selected || shown !== request || !alive || !enabled || request.epoch != generation) return@showChoices
+                    request.selected = true
+                    shown = null
+                    choices.complete(request)
+                    if (index == 0) resume(request.targets, request.receiver, request.args, request.talker, emptyList(), request.epoch)
+                    else worker.execute {
+                        try {
+                            val self = WeChatApis.contact().account()?.selfWxId().orEmpty()
+                            val ids = WeChatApis.contact().chatrooms()?.getMemberIds(request.talker).orEmpty().ifEmpty {
+                                WeChatApis.contact().contacts()?.getGroupMemberIds(request.talker).orEmpty()
+                            }
+                            val users = EmojiAtText.users(ids, self)
+                            main.post {
+                                if (users.isEmpty()) notice("未取得当前账号或群成员，未发送，请重试或选择普通发送")
+                                else resume(request.targets, request.receiver, request.args, request.talker, users, request.epoch)
+                            }
+                        } catch (e: Throwable) { report("读取成员失败，未发送", e); notice("读取群成员失败，未发送") }
+                    }
+                    main.post { drainChoices() }
+                }, onDismiss = {
+                    // showChoices dismisses before it dispatches onSelected.
+                    // Defer cancellation until the synchronous selection callback completes.
+                    main.post {
+                        if (request.presentation == presentation && shown === request && !request.selected && !activity.isDestroyed) {
+                            shown = null; choices.complete(request); drainChoices()
+                        }
+                    }
+                }, dispatchAfterClose = false)
+        } catch (e: Throwable) {
+            shown = null; choices.complete(request)
+            report("显示选择失败，未发送", e); notice("发送选择未能显示，请重试")
+        }
     }
     private fun resume(t: EmojiAtLocator.Targets, receiver: Any, args: Array<Any?>, talker: String, users: List<String>, epoch: Int) {
         if (!alive || !enabled || epoch != generation) return
@@ -190,10 +252,14 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
         generation++
         handles.forEach { HookRegistry.get().unhook(it) }; handles.clear(); storageHandle?.close(); storageHandle = null
         targets = null; pending.clear(); requests.clear()
+        main.post {
+            choices.clear(); val old = shown; shown = null; old?.handle?.close()
+        }
     }
     fun destroy() {
         alive = false; enabled = false
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
+        (context.hostContext().applicationContext as? Application)?.unregisterActivityLifecycleCallbacks(lifecycle)
         stop(); main.removeCallbacks(cleanup); worker.shutdownNow(); scope.remove()
     }
 }

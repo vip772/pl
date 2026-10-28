@@ -27,6 +27,11 @@ fun main(){
  val inset=ChatListBottomInset();val v=list()
  inset.beforePadding(v,400);v.paddingBottom=400;inset.afterLayout(v)
  check(v.distance==380);repeat(1000){inset.afterLayout(v)};check(v.scrolls==1)
+ val shrinking=list();shrinking.paddingBottom=400;shrinking.bottom=600
+ inset.beforePadding(shrinking,20);shrinking.paddingBottom=20;inset.afterLayout(shrinking)
+ check(shrinking.distance == -380)
+ val repeated=list();inset.beforePadding(repeated,400);repeated.paddingBottom=400
+ inset.beforePadding(repeated,400);inset.afterLayout(repeated);check(repeated.distance==380)
  val native=list();inset.beforePadding(native,400);native.paddingBottom=400;native.bottom=600
  inset.afterLayout(native);check(native.scrolls==0)
  val history=list();history.down=true;inset.beforePadding(history,400);history.paddingBottom=400

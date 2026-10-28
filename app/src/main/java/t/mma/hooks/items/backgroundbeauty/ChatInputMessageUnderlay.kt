@@ -57,6 +57,7 @@ internal class ChatInputMessageUnderlay {
             State(content, list, lp.bottomMargin, list.clipToPadding).also { states[scroll] = it; it.targets = target }
         }
         state.targets = target
+        owners[scroll] = this
         val bottomAnchor = if (state.touching) null else state.bottomAnchor ?: captureBottomAnchor(list)
         state.bottomAnchor = null
         val stripRect = strip.screenRect(stripBounds)
@@ -229,6 +230,7 @@ internal class ChatInputMessageUnderlay {
 
     fun restore(scroll: ViewGroup) {
         val state = states.remove(scroll) ?: return
+        owners.remove(scroll)
         if (state.expandedHeight >= 0 && state.content.height == state.expandedHeight) {
             resizeContent(state, state.nativeHeight)
         }
@@ -245,5 +247,14 @@ internal class ChatInputMessageUnderlay {
     }
 
     fun restoreAll() { states.keys.toList().forEach(::restore) }
-    companion object { const val SCROLL = "com.tencent.mm.pluginsdk.ui.chat.ChattingScrollLayout" }
+    companion object {
+        const val SCROLL = "com.tencent.mm.pluginsdk.ui.chat.ChattingScrollLayout"
+        private val owners = WeakHashMap<ViewGroup, ChatInputMessageUnderlay>()
+        // Release the previous padding/expanded content BEFORE another feature
+        // captures its native baseline; config callback order must not matter.
+        fun releaseForFloatingFooter(footer: View) {
+            val scroll = footer.parent as? ViewGroup ?: return
+            owners[scroll]?.restore(scroll)
+        }
+    }
 }

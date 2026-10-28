@@ -14,6 +14,7 @@ internal class ChatListBottomInset {
     private var gap = 0
 
     fun beforePadding(list: View, target: Int) {
+        if (count != 0 && owner === list) return
         clear()
         if (list !is ViewGroup || target == list.paddingBottom ||
             !list.canScrollVertically(-1) || list.canScrollVertically(1)) return
@@ -44,7 +45,7 @@ internal class ChatListBottomInset {
         val overflow = row.bottom - (list.height - list.paddingBottom - gap)
         // Native LinearLayoutManager may already have compensated. Never move twice,
         // select another item, follow an append, or pull history back to the bottom.
-        if (overflow > 0) list.scrollBy(0, overflow)
+        if (overflow != 0) list.scrollBy(0, overflow)
     }
 
     fun clear() { count = 0 }

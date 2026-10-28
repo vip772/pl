@@ -620,7 +620,8 @@ object VoiceForwardMiuixDialog {
         choices: List<Pair<String, String>>,
         onSelected: (Int) -> Unit,
         onDismiss: () -> Unit,
-        position: DialogPosition = DialogPosition.BOTTOM
+        position: DialogPosition = DialogPosition.BOTTOM,
+        dispatchAfterClose: Boolean = true
     ): DialogHandle {
         return show(activity, onDismiss) { close ->
             PositionedWindowDialog(
@@ -641,7 +642,8 @@ object VoiceForwardMiuixDialog {
                         choices.forEachIndexed { index, choice ->
                             ModeRow(choice.first, choice.second) {
                                 close()
-                                postAfterDialogClose(activity) { onSelected(index) }
+                                if (dispatchAfterClose) postAfterDialogClose(activity) { onSelected(index) }
+                                else onSelected(index)
                             }
                         }
                         TextButton(

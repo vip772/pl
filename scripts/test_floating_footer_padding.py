@@ -10,7 +10,7 @@ method = source[start:end].replace('private fun ', 'fun ')
 fixture = '''
 object ChatBottomTrace {fun event(v:View,p:String,d:()->String){}}
 class View {
- var isAttachedToWindow=true;var isLayoutRequested=false;var height=800;var y=0
+ var parent:View?=null;var isAttachedToWindow=true;var isLayoutRequested=false;var height=800;var y=0
  fun getLocationOnScreen(a:IntArray){a[1]=y}
  var paddingLeft=3; var paddingTop=5; var paddingRight=7; var paddingBottom=11
  var writes=0; var scrolls=0
@@ -39,6 +39,10 @@ fun main() {
  check(list.paddingBottom==228 && list.writes==2 && list.scrolls==0)
  check(list.paddingLeft==3 && list.paddingTop==5 && list.paddingRight==7)
  check(state.recyclerPaddingBottom==11)
+ // Parent may still have old bounds during recycler.onLayout: defer baseline/coordinates.
+ val parent=View();list.parent=parent;parent.isLayoutRequested=true
+ val before=list.writes;check(!runtime.applyChatListPadding(footer,217,state,true));check(list.writes==before)
+ parent.isLayoutRequested=false;list.parent=null
  // Native layout already reserves 140px: only remaining 77px overlap belongs in padding.
  list.height=660;runtime.applyChatListPadding(footer,217,state);check(list.paddingBottom==88)
  // No overlap must restore base even if a full input height was supplied.

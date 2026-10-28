@@ -1,13 +1,14 @@
-"""Verify search payloads retain chooser arguments and stable host selection."""
+"""Structural integration guards; behavior covered by test_emoji_at_choice_queue.py."""
 from pathlib import Path
-import subprocess, tempfile
 r=Path(__file__).resolve().parents[1]
 s=(r/'app/src/main/java/t/mma/hooks/items/emojiat/EmojiAtRuntime.kt').read_text()
-assert 'param.args.getOrNull(2) != null || param.args.getOrNull(4) != null' not in s
 assert 'val args = param.args.clone()' in s
-assert 'R.readField(foreground, "d2")' in s
-assert 'main.post { if (alive && enabled && epoch == generation' in s
-assert 'resume(t, receiver, args, talker, emptyList(), epoch)' in s
-assert 'resume(t, receiver, args, talker, users, epoch)' in s
-assert 'if (Looper.myLooper() != Looper.getMainLooper()) return' not in s
-print('PASS search payloads retain both choices, original args, stable chat host, main-thread dispatch and generation guards')
+assert 'R.readField(foreground, "d2")' not in s
+assert 'choices.offer(Choice(t, receiver, args, talker, epoch))' in s
+assert 'choices.retry(request)' in s
+assert 'dispatchAfterClose = false' in s
+assert 'resume(request.targets, request.receiver, request.args, request.talker, emptyList(), request.epoch)' in s
+assert 'resume(request.targets, request.receiver, request.args, request.talker, users, request.epoch)' in s
+assert 'registerActivityLifecycleCallbacks(lifecycle)' in s and 'unregisterActivityLifecycleCallbacks(lifecycle)' in s
+assert 'if (activity.isFinishing || activity.isDestroyed) return' in s
+print('PASS cloned native args, main queue, resumed host migration, both send choices, exact-once selection and lifecycle cleanup')

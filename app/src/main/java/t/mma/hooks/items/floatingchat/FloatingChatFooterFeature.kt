@@ -615,8 +615,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (tracker.ready && tracker.settlePasses == 0) {
             val state = states[footer] ?: return
             refreshMeasuredInputHeight(footer, state)
-            applyChatListPadding(footer, state.listExtra, state)
-            return
+            if (applyChatListPadding(footer, state.listExtra, state)) return
+            tracker.settlePasses = 3
         }
         if (tracker.preDraw != null || !footer.isAttachedToWindow) return
         val observer = footer.viewTreeObserver
@@ -748,6 +748,9 @@ private class FooterRuntime(private val context: FeatureContext) {
         if (panel == null) {
             reportStructureFailureOnce("未找到 $FOOTER_BOTTOM_CLASS")
             return false
+        }
+        if (states[footer] == null) {
+            t.mma.hooks.items.backgroundbeauty.ChatInputMessageUnderlay.releaseForFloatingFooter(footer)
         }
         val state = states[footer] ?: createState(footer, panel, marginParams) ?: return false
         if (isPanelState(panelState)) applyCompactPanelHeight(footer, state.panel)
@@ -982,6 +985,13 @@ private class FooterRuntime(private val context: FeatureContext) {
             ?: findChatRecycler(footer)?.also { state.chatRecycler = it }
             ?: return false
         listOwners[recycler] = footer
+        // Parent layout can still move both views after recycler.onLayout.
+        // Do not capture a baseline or combine coordinates from different passes.
+        var ancestor = recycler.parent as? View
+        while (ancestor != null) {
+            if (ancestor.isLayoutRequested) return false
+            ancestor = ancestor.parent as? View
+        }
         if (state.recyclerPaddingBottom == null) state.recyclerPaddingBottom = recycler.paddingBottom
         val base = state.recyclerPaddingBottom ?: return false
         // Native content may already end above the input bar. Reserve only real overlap,
