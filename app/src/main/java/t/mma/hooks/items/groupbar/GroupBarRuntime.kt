@@ -1,7 +1,6 @@
 package t.mma.hooks.items.groupbar
 
 import android.database.DataSetObserver
-import android.os.SystemClock
 import android.app.Activity
 import android.content.SharedPreferences
 import t.mma.hooks.items.homeextension.HomeExtensionSurface
@@ -166,14 +165,23 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             fun nativeListHook(owner: Class<*>, name: String, vararg args: Class<*>, before: (Session) -> Unit = {}, after: (Session) -> Unit = {}) {
                 val method = KavaReflector.findMethodRecursive(owner, name, *args) ?: error("Missing native list method: $name")
                 hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) { sessions[param.thisObject as? View]?.let(before) }
-                    override fun afterHookedMethod(param: MethodHookParam) { sessions[param.thisObject as? View]?.let(after) }
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        sessions[param.thisObject as? View]?.let { session ->
+                            runCatching { before(session) }.onFailure { HLog.e("[Hchat:GroupBar] 原生前置协调失败: $name", it) }
+                        }
+                    }
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        sessions[param.thisObject as? View]?.let { session ->
+                            runCatching { after(session) }.onFailure { HLog.e("[Hchat:GroupBar] 原生后置协调失败: $name", it) }
+                        }
+                    }
                 })
             }
             nativeListHook(list, "C", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
             nativeListHook(list, "o", after = { it.headerState(true) })
             nativeListHook(list, "q", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.headerState(false) })
             // Constant-time state reads only; no view search, layout mutation, SQL or reload on scroll.
+
             nativeListHook(list, "onScroll", android.widget.AbsListView::class.java, Int::class.javaPrimitiveType!!,
                 Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.syncHeaderVisibility() })
             val recycler = type("com.tencent.mm.ui.conversation.recycler.ConversationRecyclerView")
@@ -182,6 +190,22 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             nativeListHook(recycler, "o", after = { it.headerState(true) })
             nativeListHook(recycler, "q", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.headerState(false) })
             nativeListHook(recycler, "u1", after = { it.syncHeaderVisibility() })
+            for (owner in listOf(list, recycler)) {
+                val dispatch = KavaReflector.findMethodRecursive(owner, "dispatchTouchEvent", android.view.MotionEvent::class.java)
+                    ?: error("Missing homepage dispatchTouchEvent")
+                hooks += HookRegistry.get().hook(dispatch, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val event = param.args.firstOrNull() as? android.view.MotionEvent ?: return
+                        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN)
+                            sessions[param.thisObject as? View]?.userTouchStarted()
+                    }
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val event = param.args.firstOrNull() as? android.view.MotionEvent ?: return
+                        if (event.actionMasked == android.view.MotionEvent.ACTION_UP || event.actionMasked == android.view.MotionEvent.ACTION_CANCEL)
+                            sessions[param.thisObject as? View]?.userTouchEnded()
+                    }
+                })
+            }
             val launcher = type("com.tencent.mm.ui.LauncherUI")
             KavaReflector.findMethodRecursive(launcher, "onResume")?.let { method ->
                 hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
@@ -189,7 +213,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                         if (!destroyed) main.post {
                             if (!destroyed) {
                                 discoverHomepage(param.thisObject as? Activity)
-                                if (enabled) { contactsLoaded = false; loadContacts() }
+                                if (enabled) loadContacts()
                             }
                         }
                     }
@@ -262,9 +286,9 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 return
             }
             reset.isAccessible = true
-            sessions[view]?.let { if (it.adapter === adapter) { it.render(); return } else it.dispose() }
+            sessions[view]?.let { if (it.adapter === adapter) { it.refreshPosition(); return } else it.dispose() }
             val session = Session(view, parent, adapter, reset)
-            sessions[view] = session; session.render(); if (enabled) { session.closeNativeHeader(); session.reload() }
+            sessions[view] = session; session.render(); if (enabled) { session.reload() }
             HLog.i("[Hchat:GroupBar] 横栏已挂载: list=${view.javaClass.name} parent=${parent.javaClass.name} adapter=${adapter.javaClass.name} enabled=$enabled priority=title_first")
         }.onFailure { HLog.e("[Hchat:GroupBar] 挂载失败", it) }
     }
@@ -279,8 +303,9 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             main.post {
                 loadingContacts = false
                 if (!destroyed) result.onSuccess { (a, b) ->
-                    friends = a; officials = b; contactsLoaded = true; updateFilter()
-                    if (enabled) reload()
+                    val changed = friends != a || officials != b
+                    friends = a; officials = b; contactsLoaded = true
+                    if (changed) { updateFilter(); if (enabled) reload() }
                 }
             }
         }
@@ -294,7 +319,6 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private val scrollField = KavaReflector.findFieldRecursive(view.javaClass, if (isNativeList) "s" else "v2")!!.apply { isAccessible = true }
         private val controllerField = KavaReflector.findFieldRecursive(view.javaClass, if (isNativeList) "m" else "Z2")!!.apply { isAccessible = true }
         private val openField = KavaReflector.findFieldRecursive(view.javaClass, if (isNativeList) "x" else "d3")!!.apply { isAccessible = true }
-        private val translationField = if (isNativeList) KavaReflector.findFieldRecursive(view.javaClass, "I")!!.apply { isAccessible = true } else null
         private val reserveHeight = (44 * view.resources.displayMetrics.density + .5f).toInt()
         private var hasVisibleGroups = false
         private var nativeOffsetUpdating = false
@@ -311,19 +335,77 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private val positionListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             if (!disposed && bar.visibility == View.VISIBLE) safePosition()
         }
-        private val bar = object : HorizontalScrollView(view.context), HomeExtensionSurface.Root {}.apply {
+        private val bar = object : HorizontalScrollView(view.context), HomeExtensionSurface.Root {
+            private var down: android.view.MotionEvent? = null
+            private var vertical = false
+            private val slop = android.view.ViewConfiguration.get(view.context).scaledTouchSlop
+            private val fromLocation = IntArray(2)
+            private val toLocation = IntArray(2)
+            private fun forward(event: android.view.MotionEvent): Boolean {
+                val list = viewRef.get() ?: return false
+                getLocationOnScreen(fromLocation); list.getLocationOnScreen(toLocation)
+                val copy = android.view.MotionEvent.obtain(event)
+                return try {
+                    copy.offsetLocation((fromLocation[0] - toLocation[0]).toFloat(), (fromLocation[1] - toLocation[1]).toFloat())
+                    list.dispatchTouchEvent(copy)
+                } finally { copy.recycle() }
+            }
+            override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+                when (event.actionMasked) {
+                    android.view.MotionEvent.ACTION_DOWN -> {
+                        down?.recycle(); down = android.view.MotionEvent.obtain(event); vertical = false
+                    }
+                    android.view.MotionEvent.ACTION_MOVE -> {
+                        val start = down
+                        if (!vertical && start != null && kotlin.math.abs(event.y - start.y) > slop &&
+                            kotlin.math.abs(event.y - start.y) > kotlin.math.abs(event.x - start.x)) {
+                            val cancel = android.view.MotionEvent.obtain(event)
+                            cancel.action = android.view.MotionEvent.ACTION_CANCEL
+                            try { super.dispatchTouchEvent(cancel) } finally { cancel.recycle() }
+                            vertical = true
+                            parent.requestDisallowInterceptTouchEvent(true)
+                            forward(start)
+                        }
+                    }
+                }
+                val handled = if (vertical) { forward(event); true } else super.dispatchTouchEvent(event)
+                if (event.actionMasked == android.view.MotionEvent.ACTION_UP || event.actionMasked == android.view.MotionEvent.ACTION_CANCEL) {
+                    down?.recycle(); down = null; vertical = false
+                    parent.requestDisallowInterceptTouchEvent(false)
+                }
+                return handled
+            }
+            override fun onDetachedFromWindow() {
+                down?.recycle(); down = null; vertical = false
+                super.onDetachedFromWindow()
+            }
+        }.apply {
             id = View.generateViewId(); isHorizontalScrollBarEnabled = false; isFillViewport = true
         }
         private val strip = LinearLayout(view.context).apply { gravity = Gravity.CENTER_VERTICAL }
         private val layoutListener = View.OnLayoutChangeListener { _, l, _, r, _, oldL, _, oldR, _ -> if (r-l != oldR-oldL) resize(r-l) }
         private var disposed = false
-        private var switchDeadline = 0L
+        private var pendingSwitchReset = false
+        private var userInteracting = false
+        private var reloadDeferred = false
+        private val drainReload = Runnable {
+            if (!disposed && !userInteracting && !nativeHeaderOpen() && reloadDeferred) {
+                reloadDeferred = false
+                reload()
+            }
+        }
+        private val resetAfterData = Runnable {
+            if (!disposed && enabled && pendingSwitchReset && !userInteracting && !nativeHeaderOpen()) {
+                pendingSwitchReset = false
+                viewRef.get()?.let { selectNativeTop(it) }
+            }
+        }
         private val switchObserver = object : DataSetObserver() {
             override fun onChanged() {
-                if (switchDeadline == 0L) return
-                val shouldClose = SystemClock.uptimeMillis() <= switchDeadline
-                switchDeadline = 0L
-                if (shouldClose) main.post { if (!disposed && enabled) closeNativeHeader() }
+                if (pendingSwitchReset && !userInteracting) {
+                    main.removeCallbacks(resetAfterData)
+                    main.post(resetAfterData)
+                }
             }
         }
         private val detachListener = object : View.OnAttachStateChangeListener {
@@ -353,34 +435,45 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             parent.addOnLayoutChangeListener(titleLayoutListener)
             HLog.i("[Hchat:GroupBar] 标题锚点=${titleAnchor?.javaClass?.name} nativeMargin=$nativeTopMargin")
         }
+        fun refreshPosition() { if (!disposed) { safePosition(); syncHeaderVisibility() } }
         fun nativeInsetChanged() {
             val list = viewRef.get() ?: return
             val lp = list.layoutParams as RelativeLayout.LayoutParams
             nativeTopMargin = lp.topMargin
             if (bar.visibility == View.VISIBLE) positionBar()
         }
+        fun userTouchStarted() {
+            // Every touch event cancels stale programmatic positioning. We do not consume it,
+            // install an OnTouchListener, or change native taskbar/bounce state.
+            userInteracting = true
+            pendingSwitchReset = false
+            main.removeCallbacks(resetAfterData)
+        }
+        fun userTouchEnded() {
+            userInteracting = false
+            // Post after native dispatch so onOpenHeader state has been committed first.
+            main.removeCallbacks(drainReload); main.post(drainReload)
+        }
         fun switchGroup() {
-            // S2 loads asynchronously; close again after its first data notification, not only
-            // in the click frame, otherwise sparse/empty custom groups can reveal TaskBar.
-            switchDeadline = SystemClock.uptimeMillis() + 2000L
-            closeNativeHeader()
+            pendingSwitchReset = true
+            userInteracting = false
+            // The tab is only interactive on the closed homepage. One native selection, no
+            // force-close command and no second posted close competing with a new gesture.
+            viewRef.get()?.let { if (!nativeHeaderOpen()) selectNativeTop(it) }
             reload()
         }
-        fun closeNativeHeader() {
-            val list = viewRef.get() ?: return
-            if (list !is ListView) { selectNativeTop(list); return }
-            runCatching {
-                val close = KavaReflector.findMethodRecursive(list.javaClass, "l", Long::class.javaPrimitiveType!!,
-                    Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!) ?: return
-                close.invoke(list, 0L, 0, true)
-                list.post { if (!disposed && enabled) runCatching { close.invoke(list, 0L, 0, true) }.onFailure { HLog.e("[Hchat:GroupBar] 切组原生头回位失败", it) } }
-            }.onFailure { HLog.e("[Hchat:GroupBar] 切组关闭原生下拉头失败", it) }
+        private fun nativeHeaderOpen(): Boolean {
+            val list = viewRef.get() ?: return headerOpen
+            return headerOpen || openField.getBoolean(list)
         }
         private fun selectNativeTop(list: View) {
             if (list is ListView) list.setSelection(0)
             else KavaReflector.findMethodRecursive(list.javaClass, "setSelectionWithOffset", Int::class.javaPrimitiveType!!)?.invoke(list, 0)
         }
         fun reload() {
+            if (disposed) return
+            if (userInteracting || nativeHeaderOpen()) { reloadDeferred = true; return }
+            reloadDeferred = false
             if (!disposed && viewRef.get()?.isAttachedToWindow == true) runCatching { reset.invoke(adapter) }
                 .onFailure { HLog.e("[Hchat:GroupBar] 原生重载失败", it) }
         }
@@ -482,18 +575,30 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             nativeOffsetUpdating = false
             nativeScrollOffset = scrollField.getInt(list)
             applyNativeOffset(enabled && hasVisibleGroups)
-            if (enabled && !headerOpen) selectNativeTop(list)
+            // Native C/y1 already owns orientation/inset positioning. Never force a second
+            // selection here: it can run during a pull gesture or TaskBar transition.
         }
         fun headerState(open: Boolean) {
             headerOpen = open
+            if (open) {
+                pendingSwitchReset = false
+                main.removeCallbacks(resetAfterData)
+            }
             syncHeaderVisibility()
-            if (!open) safePosition()
+            if (!open) {
+                safePosition()
+                main.removeCallbacks(drainReload); main.post(drainReload)
+            }
         }
         fun syncHeaderVisibility() {
-            val list = viewRef.get() ?: return
-            val open = headerOpen || openField.getBoolean(list) || (translationField?.getInt(list) ?: 0) > 0
+            // Positive title translation also occurs during a harmless bounce. Only the
+            // verified native open state owns visibility; never infer open from distance.
+            val open = nativeHeaderOpen()
             val visibility = if (enabled && hasVisibleGroups && !open) View.VISIBLE else View.INVISIBLE
-            if (bar.visibility != visibility) bar.visibility = visibility
+            if (bar.visibility != visibility) {
+                bar.visibility = visibility
+                if (visibility == View.VISIBLE) safePosition()
+            }
         }
         private fun restoreAvoidance() {
             applyNativeOffset(false)
@@ -511,7 +616,10 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         fun dispose() {
             if (disposed) return
             disposed = true
-            switchDeadline = 0L
+            pendingSwitchReset = false
+            main.removeCallbacks(resetAfterData)
+            main.removeCallbacks(drainReload)
+            reloadDeferred = false
             (adapter as? ListAdapter)?.unregisterDataSetObserver(switchObserver)
             viewRef.get()?.let { view ->
                 view.removeOnAttachStateChangeListener(detachListener)

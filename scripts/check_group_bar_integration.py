@@ -25,6 +25,7 @@ assert 'onBindViewHolder' not in runtime and 'getView' not in runtime and 'state
 assert 'afterDisabledRestore' in runtime and 'enabled && ready' in runtime
 assert 'if (changed && (enabled || wasEnabled)' in runtime
 assert 'worker.execute' in runtime and 'getPickerContacts' in runtime
+assert 'reloadDeferred = true' in runtime and 'copy.offsetLocation(' in runtime
 for banned in ('OnDrawListener','OnScrollListener','postOnAnimation','Timer('):assert banned not in runtime
 assert 'ConversationGroupingExclusion.bind' in read(base+'preferences/HchatStorage.kt')
 restore=read(base+'hooks/items/conversationgroup/ConversationGroupRuntime.kt')
@@ -47,7 +48,7 @@ assert 'lp.topMargin = 0' not in runtime
 assert '.setPadding(' not in runtime and 'restoreAvoidance' in runtime
 assert 'scrollField.setInt(list, base + reserve)' in runtime
 assert 'main.post { if (!v.isAttachedToWindow)' in runtime
-assert 'close.invoke(list, 0L, 0, true)' in runtime
+assert 'close.invoke(' not in runtime and 'userTouchStarted' in runtime
 beauty=read(base+'hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt')
 assert 'HomeExtensionSurface.ownsGeometry(view)' not in beauty
 print('PASS native viewport/rules/padding retained; native list/taskbar offsets coordinated; deferred detach')
@@ -61,3 +62,9 @@ for contract in ['.method public final y1()V','.method public final u1()V','.met
 assert 'titleTranslation(anchor)' in runtime
 assert 'openField.getBoolean(list)' in runtime and 'View.INVISIBLE' in runtime
 print('PASS 8.0.78 ListView/RecyclerView offset and taskbar contracts, animation translation excluded, native header visibility gates')
+
+assert 'switchDeadline' not in runtime
+assert 'for (owner in listOf(list, recycler))' in runtime
+assert 'event.actionMasked == android.view.MotionEvent.ACTION_DOWN' in runtime
+assert '(translationField?.getInt(list) ?: 0) > 0' not in runtime
+print('PASS native open-only visibility, no forced close/deadline, touches cancel deferred tab reset')

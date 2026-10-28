@@ -24,11 +24,11 @@ fun main() {
  repeat(100){s.apply(true)};check(l.offset==166) // no accumulation
  s.beforeNativeOffset();check(l.offset==120)
  l.offset=140 // native C/y1 recomputes orientation/statusbar baseline
- s.afterNativeOffset();check(l.offset==186&&l.controller.n==186&&l.selections==1)
+ s.afterNativeOffset();check(l.offset==186&&l.controller.n==186&&l.selections==0)
  s.beforeNativeOffset();check(l.offset==140);s.afterNativeOffset();check(l.offset==186)
  s.apply(false);check(l.offset==140&&l.controller.n==140)
  s.apply(true);check(l.offset==186)
- s.headerOpen=true;s.beforeNativeOffset();l.offset=150;s.afterNativeOffset();check(l.offset==196&&l.controller.n==196&&l.selections==2)
+ s.headerOpen=true;s.beforeNativeOffset();l.offset=150;s.afterNativeOffset();check(l.offset==196&&l.controller.n==196&&l.selections==0)
  // Native onScroll: translated = max(0, childTop - s). At rest childTop == s.
  check(maxOf(0,l.offset-l.offset)==0)
  check(maxOf(0,(l.offset+20)-l.offset)==20)
