@@ -179,6 +179,15 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     }
                 })
             }
+            // C/y1 invokes TaskBarContainer.q before its own selection. Its animation
+            // consumers must see the same reserved offset, not the temporary native base.
+            val taskBarResize = KavaReflector.findMethodRecursive(type("com.tencent.mm.plugin.taskbar.ui.TaskBarContainer"), "q", Int::class.javaPrimitiveType!!)
+                ?: error("Missing TaskBarContainer.q")
+            hooks += HookRegistry.get().hook(taskBarResize, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    sessions.values.forEach { it.beforeTaskBarResize(param.thisObject) }
+                }
+            })
             nativeListHook(list, "C", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
             nativeListHook(list, "setSelection", Int::class.javaPrimitiveType!!, before = { it.beforeNativeSelection() })
             nativeListHook(list, "o", after = { it.headerState(true) })
@@ -575,12 +584,6 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     var dragged = false
                     var downRawX = 0f
                     var targetIndex = -1
-                    fun showMoveMenu() {
-                        val menu = PopupMenu(list.context, this)
-                        menu.menu.add(0, 1, 0, "向左移动"); menu.menu.add(0, 2, 1, "向右移动")
-                        menu.setOnMenuItemClickListener { item -> GroupBarStore.move(list.context, group.id, if (item.itemId == 1) -1 else 1); true }
-                        menu.show()
-                    }
                     setOnLongClickListener {
                         longPressed = true; sortingTab = true
                         bar.requestDisallowInterceptTouchEvent(true)
@@ -620,7 +623,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                                             ordered.add(to, ordered.removeAt(from))
                                             GroupBarStore.save(list.context, ordered)
                                         }
-                                    } else showMoveMenu()
+                                    }
                                     longPressed = false; sortingTab = false
                                     true
                                 }
@@ -702,11 +705,18 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             appliedScrollInset = reserve
         }
         fun beforeNativeOffset() {
-            val list = viewRef.get() ?: return
-            val base = nativeScrollOffset
-            if (base != null) scrollField.setInt(list, base)
+            // C/y1 first snapshots the PREVIOUS final offset, then overwrites s/v2
+            // with a fresh base. Retain that final value for its equality comparison.
             nativeOffsetUpdating = true
             offsetAppliedDuringUpdate = false
+        }
+        fun beforeTaskBarResize(taskBar: Any) {
+            if (!nativeOffsetUpdating) return
+            val list = viewRef.get() ?: return
+            // This field holds the actual native TaskBar; ignore unrelated containers.
+            if (KavaReflector.findFieldRecursive(list.javaClass, if (list is ListView) "i" else "Y2")?.apply { isAccessible = true }?.get(list) === taskBar) {
+                beforeNativeSelection()
+            }
         }
         fun beforeNativeSelection() {
             if (!nativeOffsetUpdating || offsetAppliedDuringUpdate) return

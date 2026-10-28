@@ -75,5 +75,14 @@ assert 'offsetAppliedDuringUpdate' in runtime
 assert 'if (!sortingTab && !vertical' in runtime
 assert 'ordered.add(to, ordered.removeAt(from))' in runtime
 assert 'Spacer(Modifier.width(12.dp))' in page
-assert 'TextButton(text = "↑"' in page and 'TextButton(text = "↓"' in page
-print('PASS initial visible-row alignment, pre-native-selection reserve, drag/menu ordering, management arrows and action spacing')
+assert 'TextButton(text = "↑"' not in page and 'TextButton(text = "↓"' not in page
+assert "showMoveMenu" not in runtime
+assert "beforeTaskBarResize(param.thisObject)" in runtime
+print('PASS initial visible-row alignment, pre-native-selection reserve, drag-only ordering, removed menus/arrows and action spacing')
+
+feature=(r/'app/src/main/java/t/mma/hooks/items/groupbar/GroupBarFeature.kt').read_text()
+assert 'Stage.BRIDGE, priority = -100' in feature
+assert 'if (list is ListView) "i" else "Y2"' in runtime
+before=runtime[runtime.index('        fun beforeNativeOffset()'):runtime.index('        fun beforeTaskBarResize(')]
+assert 'scrollField.setInt' not in before
+print('PASS startup priority retains bridge readiness; native old-final comparison retained; both taskbar owner fields verified')

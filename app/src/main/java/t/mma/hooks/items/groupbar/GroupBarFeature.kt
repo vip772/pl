@@ -16,7 +16,7 @@ class GroupBarFeature : BaseFeature() {
     override fun name() = "分组横栏"
     override fun onFeatureInit(context: FeatureContext) { registerSettingsProvider(GroupBarSettingsProvider()) }
     override fun onFeatureInstall(context: FeatureContext) {
-        DexInstallScheduler.schedule(featureId(), name(), stage = DexInstallScheduler.Stage.BRIDGE) {
+        DexInstallScheduler.schedule(featureId(), name(), stage = DexInstallScheduler.Stage.BRIDGE, priority = -100) {
             runtime?.destroy()
             val candidate = GroupBarRuntime(context)
             runtime = candidate
