@@ -13,7 +13,7 @@ class Field(val name:String) {var isAccessible=false;fun getInt(o:Any)=if(o is L
 object KavaReflector {fun findFieldRecursive(c:Class<*>,n:String):Field?=Field(n)}
 class Session(val list:ListView) {
  val viewRef=WeakReference<View>(list);val scrollField=Field("offset");val controllerField=Field("controller")
- var nativeScrollOffset:Int?=null;var appliedScrollInset=0;var nativeOffsetUpdating=false
+ var nativeScrollOffset:Int?=null;var appliedScrollInset=0;var nativeOffsetUpdating=false;var offsetAppliedDuringUpdate=false
  val reserveHeight=44;var floatingInset=2;var enabled=true;var hasVisibleGroups=true;var headerOpen=false
  fun selectNativeTop(v:View){list.selections++}
  fun apply(a:Boolean)=applyNativeOffset(a)
@@ -26,6 +26,11 @@ fun main() {
  l.offset=140 // native C/y1 recomputes orientation/statusbar baseline
  s.afterNativeOffset();check(l.offset==186&&l.controller.n==186&&l.selections==0)
  s.beforeNativeOffset();check(l.offset==140);s.afterNativeOffset();check(l.offset==186)
+ // Native C/y1 invokes selection inside the update: reserve must exist beforehand.
+ s.beforeNativeOffset();l.offset=140;s.beforeNativeSelection()
+ check(l.offset==186&&l.controller.n==186)
+ s.beforeNativeSelection();check(l.offset==186) // repeated nested selection never doubles inset
+ s.afterNativeOffset();check(l.offset==186&&s.nativeScrollOffset==140)
  s.apply(false);check(l.offset==140&&l.controller.n==140)
  s.apply(true);check(l.offset==186)
  s.headerOpen=true;s.beforeNativeOffset();l.offset=150;s.afterNativeOffset();check(l.offset==196&&l.controller.n==196&&l.selections==0)

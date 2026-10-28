@@ -69,13 +69,15 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val changed = dataDirty; dataDirty = false
             val wasEnabled = enabled
             enabled = prefs.getBoolean(GroupBarStore.ENABLE, false)
+            val previousMembership = groups.associate { it.id to (it.enabled to it.members) }
             groups = GroupBarStore.load(context.hostContext())
+            val membershipChanged = previousMembership != groups.associate { it.id to (it.enabled to it.members) }
             if (!enabled) { ready = false; handoff++ }
             if (changed) updateFilter()
             if (enabled && !wasEnabled) prepareHandoff()
             if (enabled) loadContacts()
             sessions.values.toList().forEach { it.render() }
-            if (changed && (enabled || wasEnabled) && !(enabled && !wasEnabled)) reload()
+            if (changed && (membershipChanged || enabled != wasEnabled) && (enabled || wasEnabled) && !(enabled && !wasEnabled)) reload()
         }
     }
     private fun updateFilter() {
@@ -178,6 +180,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 })
             }
             nativeListHook(list, "C", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
+            nativeListHook(list, "setSelection", Int::class.javaPrimitiveType!!, before = { it.beforeNativeSelection() })
             nativeListHook(list, "o", after = { it.headerState(true) })
             nativeListHook(list, "q", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.headerState(false) })
             // Constant-time state reads only; no view search, layout mutation, SQL or reload on scroll.
@@ -187,6 +190,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val recycler = type("com.tencent.mm.ui.conversation.recycler.ConversationRecyclerView")
             hookAttach(recycler, "setAdapter", type("androidx.recyclerview.widget.f2")); hookAttach(recycler, "onAttachedToWindow")
             nativeListHook(recycler, "y1", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
+            nativeListHook(recycler, "setSelectionWithOffset", Int::class.javaPrimitiveType!!, before = { it.beforeNativeSelection() })
             nativeListHook(recycler, "o", after = { it.headerState(true) })
             nativeListHook(recycler, "q", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.headerState(false) })
             nativeListHook(recycler, "u1", after = { it.syncHeaderVisibility() })
@@ -346,7 +350,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 if (!destroyed) result.onSuccess { (a, b) ->
                     val changed = friends != a || officials != b
                     friends = a; officials = b; contactsLoaded = true
-                    if (changed) { updateFilter(); if (enabled) reload() }
+                    if (changed) { updateFilter(); if (enabled && selected in setOf("friends", "official")) reload() }
                 }
             }
         }
@@ -363,6 +367,9 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private val reserveHeight = (44 * view.resources.displayMetrics.density + .5f).toInt()
         private var hasVisibleGroups = false
         private var nativeOffsetUpdating = false
+        private var offsetAppliedDuringUpdate = false
+        private var initialAlignmentPending = true
+        private var sortingTab = false
         private var headerOpen = false
         // MainUI places its list below the title using a dynamic top margin.
         private var nativeTopMargin = (view.layoutParams as RelativeLayout.LayoutParams).topMargin
@@ -405,7 +412,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     }
                     android.view.MotionEvent.ACTION_MOVE -> {
                         val start = down
-                        if (!vertical && start != null && kotlin.math.abs(event.y - start.y) > slop &&
+                        if (!sortingTab && !vertical && start != null && kotlin.math.abs(event.y - start.y) > slop &&
                             kotlin.math.abs(event.y - start.y) > kotlin.math.abs(event.x - start.x)) {
                             val cancel = android.view.MotionEvent.obtain(event)
                             cancel.action = android.view.MotionEvent.ACTION_CANCEL
@@ -564,16 +571,83 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
 
                         }
                     }
-                    setOnLongClickListener {
+                    var longPressed = false
+                    var dragged = false
+                    var downRawX = 0f
+                    var targetIndex = -1
+                    fun showMoveMenu() {
                         val menu = PopupMenu(list.context, this)
                         menu.menu.add(0, 1, 0, "向左移动"); menu.menu.add(0, 2, 1, "向右移动")
                         menu.setOnMenuItemClickListener { item -> GroupBarStore.move(list.context, group.id, if (item.itemId == 1) -1 else 1); true }
-                        menu.show(); true
+                        menu.show()
+                    }
+                    setOnLongClickListener {
+                        longPressed = true; sortingTab = true
+                        bar.requestDisallowInterceptTouchEvent(true)
+                        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                        true
+                    }
+                    setOnTouchListener { _, event ->
+                        when (event.actionMasked) {
+                            android.view.MotionEvent.ACTION_DOWN -> {
+                                downRawX = event.rawX; longPressed = false; dragged = false
+                                targetIndex = visibleGroups.indexOfFirst { it.id == group.id }
+                                false
+                            }
+                            android.view.MotionEvent.ACTION_MOVE -> {
+                                if (!longPressed) false else {
+                                    val delta = event.rawX - downRawX
+                                    if (kotlin.math.abs(delta) > android.view.ViewConfiguration.get(context).scaledTouchSlop) dragged = true
+                                    if (dragged) {
+                                        translationX = delta
+                                        this.alpha = 0.7f
+                                        val cell = width.coerceAtLeast(1)
+                                        targetIndex = ((left + cell / 2f + delta) / cell).toInt().coerceIn(0, visibleGroups.lastIndex)
+                                    }
+                                    true
+                                }
+                            }
+                            android.view.MotionEvent.ACTION_UP -> {
+                                if (!longPressed) false else {
+                                    translationX = 0f; this.alpha = 1f
+                                    parent?.requestDisallowInterceptTouchEvent(false)
+                                    if (dragged) {
+                                        val targetId = visibleGroups.getOrNull(targetIndex)?.id
+                                        val ordered = groups.toMutableList()
+                                        val from = ordered.indexOfFirst { it.id == group.id }
+                                        val to = ordered.indexOfFirst { it.id == targetId }
+                                        if (from >= 0 && to >= 0 && from != to) {
+                                            ordered.add(to, ordered.removeAt(from))
+                                            GroupBarStore.save(list.context, ordered)
+                                        }
+                                    } else showMoveMenu()
+                                    longPressed = false; sortingTab = false
+                                    true
+                                }
+                            }
+                            android.view.MotionEvent.ACTION_CANCEL -> {
+                                translationX = 0f; this.alpha = 1f; longPressed = false; sortingTab = false
+                                parent?.requestDisallowInterceptTouchEvent(false)
+                                false
+                            }
+                            else -> longPressed
+                        }
                     }
                 }
                 strip.addView(text, LinearLayout.LayoutParams(1, -1))
             }
+            val previousInset = appliedScrollInset
             applyNativeOffset(visible)
+            val insetDelta = appliedScrollInset - previousInset
+            if (insetDelta != 0 && !userInteracting && !nativeHeaderOpen()) {
+                if (list is ListView && list.childCount > 0) {
+                    val first = list.firstVisiblePosition
+                    val firstTop = list.getChildAt(0).top
+                    // ListView's native method uses this top verbatim (no second s addition).
+                    list.setSelectionFromTop(first, firstTop - list.paddingTop + insetDelta)
+                    initialAlignmentPending = false
+                } else initialAlignmentPending = true
+            }
             syncHeaderVisibility()
             resize(bar.width)
         }
@@ -632,12 +706,23 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val base = nativeScrollOffset
             if (base != null) scrollField.setInt(list, base)
             nativeOffsetUpdating = true
+            offsetAppliedDuringUpdate = false
+        }
+        fun beforeNativeSelection() {
+            if (!nativeOffsetUpdating || offsetAppliedDuringUpdate) return
+            val list = viewRef.get() ?: return
+            nativeScrollOffset = scrollField.getInt(list)
+            nativeOffsetUpdating = false
+            applyNativeOffset(enabled && hasVisibleGroups)
+            nativeOffsetUpdating = true
+            offsetAppliedDuringUpdate = true
         }
         fun afterNativeOffset() {
             val list = viewRef.get() ?: return
             nativeOffsetUpdating = false
-            nativeScrollOffset = scrollField.getInt(list)
+            if (!offsetAppliedDuringUpdate) nativeScrollOffset = scrollField.getInt(list)
             applyNativeOffset(enabled && hasVisibleGroups)
+            offsetAppliedDuringUpdate = false
             // Native C/y1 already owns orientation/inset positioning. Never force a second
             // selection here: it can run during a pull gesture or TaskBar transition.
         }
@@ -659,6 +744,12 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val open = nativeHeaderOpen()
             val titleReady = titleAnchor?.let { it.isShown && it.height > 0 } == true && titleOpaque()
             val visible = enabled && hasVisibleGroups && !open && titleReady
+            if (visible && initialAlignmentPending && !userInteracting) {
+                viewRef.get()?.let { list ->
+                    initialAlignmentPending = false
+                    selectNativeTop(list)
+                }
+            }
             if (visible && (positionDirty || bar.visibility != View.VISIBLE)) safePosition()
             val visibility = if (visible && stableTitleTop != null) View.VISIBLE else View.INVISIBLE
             if (bar.visibility != visibility) {

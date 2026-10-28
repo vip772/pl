@@ -62,7 +62,7 @@ internal fun GroupBarMiuixPage(context: Context, provider: FeatureSettingsProvid
                         PopupChoiceRow("顶部聊天分组样式", "选择横栏显示方式",
                             listOf(PopupChoice("标准分组", "0"), PopupChoice("悬浮分组", "1")),
                             style.toString(), { value -> style = value.toInt(); prefs.edit().putInt(Store.STYLE, style).apply() })
-                        ActionRow("管理分组", "固定分组开关和自定义成员") { managing = true }
+                        ActionRow("管理分组", "固定分组开关、自定义成员和上下排序") { managing = true }
                         ActionRow("透明度调节", "当前背景透明度 ${alpha.roundToInt()}%") {
                             if (activity != null) VoiceForwardMiuixDialog.showNumberInput(
                                 activity = activity, title = "背景透明度", initialValue = alpha.roundToInt(),
@@ -77,12 +77,13 @@ internal fun GroupBarMiuixPage(context: Context, provider: FeatureSettingsProvid
                         }
                     }
                 } } }
-                item { SmallTitle(text = "适配微信8.0.78两种首页列表；与聊天分组互斥，分别保留配置；最多10组，一屏显示6组，可左右滑动。长按首页分组名称可调整左右位置。") }
+                item { SmallTitle(text = "适配微信8.0.78两种首页列表；与聊天分组互斥，分别保留配置；最多10组，一屏显示6组，可左右滑动。长按首页分组可左右拖动排序；长按后不拖动，松手显示左右移动菜单。") }
             } else {
                 item { SmallTitle(text = "固定分组") }
                 items(groups.size, key = { groups[it].id }) { index ->
                     val group = groups[index]
-                    SettingsCard { Column {
+                    SettingsCard { Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
                         if (group.fixed) {
                             SwitchRow(group.enabled, group.name, "关闭后不在横栏显示") { value ->
                                 groups = groups.map { if (it.id == group.id) it.copy(enabled = value) else it }; Store.save(context, groups)
@@ -103,10 +104,20 @@ internal fun GroupBarMiuixPage(context: Context, provider: FeatureSettingsProvid
                                             }
                                         }, onDismiss = {})
                                 })
+                                Spacer(Modifier.width(12.dp))
                                 TextButton(text = "移除", onClick = {
                                     groups = groups.filterNot { it.id == group.id }; Store.save(context, groups)
                                 })
                             }
+                        }
+                        }
+                        Column(Modifier.padding(end = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                            TextButton(text = "↑", enabled = index > 0, onClick = {
+                                Store.move(context, group.id, -1); groups = Store.load(context)
+                            })
+                            TextButton(text = "↓", enabled = index < groups.lastIndex, onClick = {
+                                Store.move(context, group.id, 1); groups = Store.load(context)
+                            })
                         }
                     } }
                 }

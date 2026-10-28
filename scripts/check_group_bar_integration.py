@@ -23,7 +23,7 @@ assert 'priority=title_first' in runtime and 'bar.bringToFront()' in runtime
 assert 'filter.accepts' in runtime and 'getDeclaredMethod("l", row)' in runtime
 assert 'onBindViewHolder' not in runtime and 'getView' not in runtime and 'stateFields' not in runtime
 assert 'afterDisabledRestore' in runtime and 'enabled && ready' in runtime
-assert 'if (changed && (enabled || wasEnabled)' in runtime
+assert 'membershipChanged || enabled != wasEnabled' in runtime
 assert 'worker.execute' in runtime and 'getPickerContacts' in runtime
 assert 'reloadDeferred = true' in runtime and 'copy.offsetLocation(' in runtime
 for banned in ('OnDrawListener','OnScrollListener','postOnAnimation','Timer('):assert banned not in runtime
@@ -68,3 +68,12 @@ assert 'for (owner in listOf(list, recycler))' in runtime
 assert 'event.actionMasked == android.view.MotionEvent.ACTION_DOWN' in runtime
 assert '(translationField?.getInt(list) ?: 0) > 0' not in runtime
 print('PASS native open-only visibility, no forced close/deadline, touches cancel deferred tab reset')
+
+assert 'before = { it.beforeNativeSelection() }' in runtime
+assert 'setSelectionFromTop(first, firstTop - list.paddingTop + insetDelta)' in runtime
+assert 'offsetAppliedDuringUpdate' in runtime
+assert 'if (!sortingTab && !vertical' in runtime
+assert 'ordered.add(to, ordered.removeAt(from))' in runtime
+assert 'Spacer(Modifier.width(12.dp))' in page
+assert 'TextButton(text = "↑"' in page and 'TextButton(text = "↓"' in page
+print('PASS initial visible-row alignment, pre-native-selection reserve, drag/menu ordering, management arrows and action spacing')
