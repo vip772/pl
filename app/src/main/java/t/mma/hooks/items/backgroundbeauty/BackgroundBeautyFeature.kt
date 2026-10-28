@@ -2241,20 +2241,8 @@ private class BackgroundBeautyRuntime(
                 }
             })
         }
-        val folderClass = KavaReflector.loadClass("com.tencent.mm.ui.conversation.ConversationFolderItemView", context.hostClassLoader())
-        KavaReflector.findMethodRecursive(folderClass, "draw", Canvas::class.java)?.let { method ->
-            hookOnce(method, before = { param ->
-                if (destroyed) return@hookOnce
-                val view = param.thisObject as? View ?: return@hookOnce
-                if (view.javaClass.name != "com.tencent.mm.ui.conversation.ConversationFolderItemView") return@hookOnce
-                val activity = findActivity(view) ?: return@hookOnce
-                if (!wechatHomepageBackdropEnabled(activity) || !isOpenDesktopBottomClip(view)) return@hookOnce
-                // TaskBarContainer reserves 52 px; the next conversation row remains clipped at the bottom.
-                // Skip that row's entire drawing (including text/foreground), without changing layout or touch.
-                param.result = null
-
-            })
-        }
+        // Preserve conversation row drawing across TaskBar transitions. Skipping draw()
+        // can leave an empty retained display list even when position and alpha recover.
         // Track actual native measurement, not equality with cached expanded sizes.
         val contentClass = KavaReflector.loadClass("com.tencent.mm.pluginsdk.ui.chat.ChattingContent", context.hostClassLoader())
         findWechatVerifiedMethod(contentClass, "onMeasure", Int::class.javaPrimitiveType!!,
@@ -2571,14 +2559,6 @@ private class BackgroundBeautyRuntime(
         return false
     }
 
-    private fun isOpenDesktopBottomClip(view: View): Boolean {
-        if (view.javaClass.name != "com.tencent.mm.ui.conversation.ConversationFolderItemView") return false
-        val activity = findActivity(view) ?: return false
-        val rect = Rect()
-        if (!view.getGlobalVisibleRect(rect) || rect.bottom < activity.window.decorView.height - 2) return false
-        val controller = wechatTaskControllers.entries.firstOrNull { findActivity(it.key) === activity }?.value?.get() ?: return false
-        return readNativeField(controller, "P") as? Boolean == true && rect.top > activity.window.decorView.height * 0.94f
-    }
     private fun isWechatTaskSurface(view: View): Boolean =
         view.javaClass.name == "com.tencent.mm.plugin.taskbar.ui.TaskBarContainer" ||
             view.javaClass.name == APP_BRAND_DESKTOP_CONTAINER
