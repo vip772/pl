@@ -206,13 +206,21 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     }
                 })
             }
+            KavaReflector.findMethodRecursive(Activity::class.java, "onResume")?.let { method ->
+                hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val activity = param.thisObject as? Activity ?: return
+                        if (activity.javaClass.name == "com.tencent.mm.ui.LauncherUI") main.post { watchHomepage(activity) }
+                    }
+                })
+            }
             val launcher = type("com.tencent.mm.ui.LauncherUI")
             KavaReflector.findMethodRecursive(launcher, "onResume")?.let { method ->
                 hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         if (!destroyed) main.post {
                             if (!destroyed) {
-                                discoverHomepage(param.thisObject as? Activity)
+                                watchHomepage(param.thisObject as? Activity)
                                 if (enabled) loadContacts()
                             }
                         }
@@ -231,7 +239,11 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             KavaReflector.findMethodRecursive(mainUi, "onResume")?.let { method ->
                 hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        main.post { if (!destroyed) discoverHomepage(WeChatApis.currentActivity()?.currentActivity()) }
+                        if (!destroyed) {
+                            bootAttempts = 0
+                            main.removeCallbacks(bootstrapHomepage)
+                            main.post(bootstrapHomepage)
+                        }
                     }
                 })
             }
@@ -248,13 +260,34 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             installed = true; updateFilter()
             if (enabled) { prepareHandoff(); loadContacts() }
             // BRIDGE installation can happen after setAdapter/onAttachedToWindow already ran.
-            main.post { if (!destroyed) discoverHomepage(WeChatApis.currentActivity()?.currentActivity()) }
+            bootAttempts = 0
+            main.post(bootstrapHomepage)
             return true
         } catch (error: Throwable) {
             HLog.e("[Hchat:GroupBar] 安装失败", error); destroy(); return false
         }
     }
     private val reloadChanged = Runnable { reloadQueued.set(false); if (!destroyed && enabled && ready) reload() }
+    private var bootAttempts = 0
+    private val bootstrapHomepage = object : Runnable {
+        override fun run() {
+            if (destroyed) return
+            val activity = WeChatApis.currentActivity()?.currentActivity()?.takeIf {
+                it.javaClass.name == "com.tencent.mm.ui.LauncherUI" && !it.isDestroyed && !it.isFinishing
+            } ?: runCatching {
+                val launcher = context.hostClassLoader().loadClass("com.tencent.mm.ui.LauncherUI")
+                launcher.getDeclaredMethod("getInstance").invoke(null) as? Activity
+            }.getOrNull()
+            watchHomepage(activity)
+            if (sessions.isEmpty() && ++bootAttempts < 40) main.postDelayed(this, 250)
+        }
+    }
+    private fun watchHomepage(activity: Activity?) {
+        if (destroyed || activity == null || activity.isFinishing || activity.isDestroyed ||
+            activity.javaClass.name != "com.tencent.mm.ui.LauncherUI") return
+        if (sessions.keys.any { it.rootView === activity.window?.decorView }) return
+        discoverHomepage(activity)
+    }
     private fun discoverHomepage(activity: Activity?) {
         if (destroyed || activity == null || activity.javaClass.name != "com.tencent.mm.ui.LauncherUI") return
         val root = activity.window?.decorView ?: return
@@ -286,9 +319,17 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 return
             }
             reset.isAccessible = true
+            if (!sessions.containsKey(view)) {
+                val root = view.rootView
+                val titleExists = listOf("ez", "hb", "ih").any { name ->
+                    val id = view.resources.getIdentifier(name, "id", view.context.packageName)
+                    id != 0 && root.findViewById<View>(id) != null
+                }
+                if (!titleExists) return
+            }
             sessions[view]?.let { if (it.adapter === adapter) { it.refreshPosition(); return } else it.dispose() }
             val session = Session(view, parent, adapter, reset)
-            sessions[view] = session; session.render(); if (enabled) { session.reload() }
+            sessions[view] = session; session.render(); if (enabled && ready) session.reload()
             HLog.i("[Hchat:GroupBar] 横栏已挂载: list=${view.javaClass.name} parent=${parent.javaClass.name} adapter=${adapter.javaClass.name} enabled=$enabled priority=title_first")
         }.onFailure { HLog.e("[Hchat:GroupBar] 挂载失败", it) }
     }
@@ -327,13 +368,20 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private var nativeTopMargin = (view.layoutParams as RelativeLayout.LayoutParams).topMargin
         private var floatingInset = 0
         private var titleAnchor: View? = null
+        private var stableTitleTop: Int? = null
+        private var positionDirty = true
+        private var titleChain = emptyList<View>()
+        private val preDrawListener = android.view.ViewTreeObserver.OnPreDrawListener {
+            if (!disposed) syncHeaderVisibility()
+            true
+        }
         private val titlePosition = IntArray(2)
         private val parentPosition = IntArray(2)
         private val titleLayoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (!disposed && bar.visibility == View.VISIBLE) safePosition()
+            if (!disposed) { positionDirty = true; if (bar.visibility == View.VISIBLE) safePosition() }
         }
         private val positionListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (!disposed && bar.visibility == View.VISIBLE) safePosition()
+            if (!disposed) { positionDirty = true; if (bar.visibility == View.VISIBLE) safePosition() }
         }
         private val bar = object : HorizontalScrollView(view.context), HomeExtensionSurface.Root {
             private var down: android.view.MotionEvent? = null
@@ -381,6 +429,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             }
         }.apply {
             id = View.generateViewId(); isHorizontalScrollBarEnabled = false; isFillViewport = true
+            visibility = View.INVISIBLE
         }
         private val strip = LinearLayout(view.context).apply { gravity = Gravity.CENTER_VERTICAL }
         private val layoutListener = View.OnLayoutChangeListener { _, l, _, r, _, oldL, _, oldR, _ -> if (r-l != oldR-oldL) resize(r-l) }
@@ -428,15 +477,21 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 val candidate = if (id != 0) decor.findViewById<View>(id) else null
                 if (candidate != null && candidate !== parent && candidate !== view) {
                     titleAnchor = candidate
+                    val chain = ArrayList<View>()
+                    var node: View? = candidate
+                    while (node != null) { chain += node; node = node.parent as? View }
+                    titleChain = chain
                     candidate.addOnLayoutChangeListener(titleLayoutListener)
                     break
                 }
             }
             parent.addOnLayoutChangeListener(titleLayoutListener)
+            parent.viewTreeObserver.addOnPreDrawListener(preDrawListener)
             HLog.i("[Hchat:GroupBar] 标题锚点=${titleAnchor?.javaClass?.name} nativeMargin=$nativeTopMargin")
         }
         fun refreshPosition() { if (!disposed) { safePosition(); syncHeaderVisibility() } }
         fun nativeInsetChanged() {
+            positionDirty = true
             val list = viewRef.get() ?: return
             val lp = list.layoutParams as RelativeLayout.LayoutParams
             nativeTopMargin = lp.topMargin
@@ -471,7 +526,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             else KavaReflector.findMethodRecursive(list.javaClass, "setSelectionWithOffset", Int::class.javaPrimitiveType!!)?.invoke(list, 0)
         }
         fun reload() {
-            if (disposed) return
+            if (disposed || !enabled || !ready) return
             if (userInteracting || nativeHeaderOpen()) { reloadDeferred = true; return }
             reloadDeferred = false
             if (!disposed && viewRef.get()?.isAttachedToWindow == true) runCatching { reset.invoke(adapter) }
@@ -481,7 +536,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val list = viewRef.get() ?: return
             hasVisibleGroups = groups.any { it.enabled }
             val visible = enabled && hasVisibleGroups
-            bar.visibility = if (visible) View.VISIBLE else View.GONE
+            if (!visible) bar.visibility = View.GONE
             strip.removeAllViews()
             val floating = prefs.getInt(GroupBarStore.STYLE, 0) == 1
             val alpha = ((100 - prefs.getInt(GroupBarStore.ALPHA, 0).coerceIn(0, 100)) * 255 / 100)
@@ -522,6 +577,9 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             syncHeaderVisibility()
             resize(bar.width)
         }
+        private fun titleOpaque(): Boolean = titleChain.isNotEmpty() && titleChain.all {
+            it.visibility == View.VISIBLE && it.alpha >= 0.99f && it.scaleY >= 0.99f
+        }
         private fun titleTranslation(view: View): Int {
             var current: View? = view
             var translation = 0f
@@ -542,13 +600,18 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val bp = bar.layoutParams as RelativeLayout.LayoutParams
             val parent = parentRef.get() ?: return
             val anchor = titleAnchor
-            val titleBottom = if (anchor != null && anchor.isShown && anchor.height > 0) {
+            // A hidden title is a TaskBar transition, never a new zero-height anchor.
+            // Retain the last measured closed-home coordinate until native geometry is valid.
+            val titleBottom = if (anchor != null && anchor.isShown && anchor.height > 0 && !nativeHeaderOpen()) {
                 anchor.getLocationInWindow(titlePosition)
                 parent.getLocationInWindow(parentPosition)
-                (titlePosition[1] + anchor.height - titleTranslation(anchor) - parentPosition[1] - parent.paddingTop).coerceAtLeast(0)
-            } else nativeTopMargin
+                val measured = (titlePosition[1] + anchor.height - titleTranslation(anchor) - parentPosition[1] - parent.paddingTop).coerceAtLeast(0)
+                if (measured > 0) stableTitleTop = measured
+                stableTitleTop ?: return
+            } else stableTitleTop ?: return
             val top = titleBottom + floatingInset
             if (bp.topMargin != top) { bp.topMargin = top; bar.layoutParams = bp }
+            positionDirty = false
         }
         private fun applyNativeOffset(active: Boolean) {
             val list = viewRef.get() ?: return
@@ -594,10 +657,12 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             // Positive title translation also occurs during a harmless bounce. Only the
             // verified native open state owns visibility; never infer open from distance.
             val open = nativeHeaderOpen()
-            val visibility = if (enabled && hasVisibleGroups && !open) View.VISIBLE else View.INVISIBLE
+            val titleReady = titleAnchor?.let { it.isShown && it.height > 0 } == true && titleOpaque()
+            val visible = enabled && hasVisibleGroups && !open && titleReady
+            if (visible && (positionDirty || bar.visibility != View.VISIBLE)) safePosition()
+            val visibility = if (visible && stableTitleTop != null) View.VISIBLE else View.INVISIBLE
             if (bar.visibility != visibility) {
                 bar.visibility = visibility
-                if (visibility == View.VISIBLE) safePosition()
             }
         }
         private fun restoreAvoidance() {
@@ -628,7 +693,11 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             }
             titleAnchor?.removeOnLayoutChangeListener(titleLayoutListener)
             titleAnchor = null
-            parentRef.get()?.removeOnLayoutChangeListener(titleLayoutListener)
+            titleChain = emptyList()
+            parentRef.get()?.let { host ->
+                host.removeOnLayoutChangeListener(titleLayoutListener)
+                if (host.viewTreeObserver.isAlive) host.viewTreeObserver.removeOnPreDrawListener(preDrawListener)
+            }
             bar.removeOnLayoutChangeListener(layoutListener)
             val parent = parentRef.get()
             main.post { if (parent != null && bar.parent === parent) parent.removeView(bar) }
