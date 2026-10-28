@@ -106,6 +106,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val conversation = KavaReflector.findFieldRecursive(row, "d")!!.apply { isAccessible = true }
             val user = KavaReflector.findFieldRecursive(type("com.tencent.mm.storage.k4"), "field_username")!!.apply { isAccessible = true }
             val unread = KavaReflector.findFieldRecursive(type("com.tencent.mm.storage.k4"), "field_unReadCount")!!.apply { isAccessible = true }
+            val parent = KavaReflector.findFieldRecursive(type("com.tencent.mm.storage.k4"), "field_parentRef")!!.apply { isAccessible = true }
             val load = source.getDeclaredMethod("g", type("jo5.m0"))
             val membership = source.getDeclaredMethod("l", row)
             load.isAccessible = true; membership.isAccessible = true
@@ -125,11 +126,12 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             // RecyclerView incremental add/update uses this same native parent-membership gate.
             hooks += HookRegistry.get().hook(membership, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (destroyed || !enabled || !ready || !sources.containsKey(param.thisObject) || param.result != true) return
+                    if (destroyed || !enabled || !ready || !sources.containsKey(param.thisObject)) return
                     val item = param.args.firstOrNull() ?: return
                     runCatching {
                         val native = conversation.get(item) ?: return
-                        param.result = filter.accepts(user.get(native) as? String ?: "", unread.getInt(native))
+                        param.result = filter.acceptsNativeParent(param.result == true, parent.get(native) as? String) &&
+                            filter.accepts(user.get(native) as? String ?: "", unread.getInt(native))
                     }.onFailure { HLog.e("[Hchat:GroupBar] 增量筛选失败，保留原生结果", it) }
                 }
             })
@@ -216,6 +218,12 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private val viewRef = WeakReference(view)
         private val parentRef = WeakReference(parent)
         private val originalRules = (view.layoutParams as RelativeLayout.LayoutParams).rules.copyOf()
+        // MainUI places its list below the title using a dynamic top margin.
+        private var nativeTopMargin = (view.layoutParams as RelativeLayout.LayoutParams).topMargin
+        private var floatingInset = 0
+        private val positionListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (!disposed && bar.visibility == View.VISIBLE) positionBar()
+        }
         private val bar = HorizontalScrollView(view.context).apply {
             id = View.generateViewId(); isHorizontalScrollBarEnabled = false; isFillViewport = true
         }
@@ -230,6 +238,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             bar.addView(strip, ViewGroup.LayoutParams(-2, -1))
             parent.addView(bar, RelativeLayout.LayoutParams(-1, dp(44)))
             bar.addOnLayoutChangeListener(layoutListener); view.addOnAttachStateChangeListener(detachListener)
+            view.addOnLayoutChangeListener(positionListener)
         }
         fun reload() {
             if (!disposed && viewRef.get()?.isAttachedToWindow == true) runCatching { reset.invoke(adapter) }
@@ -244,6 +253,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 lp.removeRule(RelativeLayout.ALIGN_PARENT_TOP)
                 lp.addRule(RelativeLayout.BELOW, bar.id)
             } else {
+                lp.topMargin = nativeTopMargin
                 for (i in originalRules.indices) { lp.removeRule(i); if (originalRules[i] != 0) lp.addRule(i, originalRules[i]) }
             }
             list.layoutParams = lp
@@ -256,18 +266,21 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 cornerRadius = if (floating) dp(22).toFloat() else 0f
             }
             val params = bar.layoutParams as RelativeLayout.LayoutParams
-            params.setMargins(if (floating) dp(8) else 0, dp(2), if (floating) dp(8) else 0, 0)
+            floatingInset = if (floating) dp(2) else 0
+            params.setMargins(if (floating) dp(8) else 0, nativeTopMargin + floatingInset, if (floating) dp(8) else 0, 0)
+            params.addRule(RelativeLayout.ALIGN_PARENT_TOP)
             bar.layoutParams = params
+            if (visible) positionBar()
             val visibleGroups = groups.filter { it.enabled }
             visibleGroups.forEach { group ->
                 val text = TextView(list.context).apply {
                     this.text = group.name; textSize = 14f; gravity = Gravity.CENTER; isSingleLine = true
-                    setTextColor(if (group.id == selected) 0xff07a960.toInt() else if (dark) Color.WHITE else Color.DKGRAY)
+                    setTextColor(if (group.id == selected) 0xff1677ff.toInt() else if (dark) Color.WHITE else Color.DKGRAY)
                     setOnClickListener {
                         if (selected != group.id) {
                             select(group.id)
                             for (i in 0 until strip.childCount) (strip.getChildAt(i) as TextView).setTextColor(
-                                if (visibleGroups.getOrNull(i)?.id == selected) 0xff07a960.toInt() else if (dark) Color.WHITE else Color.DKGRAY)
+                                if (visibleGroups.getOrNull(i)?.id == selected) 0xff1677ff.toInt() else if (dark) Color.WHITE else Color.DKGRAY)
 
                         }
                     }
@@ -282,6 +295,16 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             }
             resize(bar.width)
         }
+        private fun positionBar() {
+            val list = viewRef.get() ?: return
+            val lp = list.layoutParams as RelativeLayout.LayoutParams
+            // A later native title/inset update is transferred to the bar once.
+            if (lp.topMargin != 0) nativeTopMargin = lp.topMargin
+            val bp = bar.layoutParams as RelativeLayout.LayoutParams
+            val top = nativeTopMargin + floatingInset
+            if (bp.topMargin != top) { bp.topMargin = top; bar.layoutParams = bp }
+            if (lp.topMargin != 0) { lp.topMargin = 0; list.layoutParams = lp }
+        }
         private fun resize(width: Int) {
             if (width <= 0 || strip.childCount == 0) return
             val cell = width / minOf(6, strip.childCount)
@@ -295,7 +318,9 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             disposed = true
             viewRef.get()?.let { view ->
                 view.removeOnAttachStateChangeListener(detachListener)
+                view.removeOnLayoutChangeListener(positionListener)
                 val lp = view.layoutParams as RelativeLayout.LayoutParams
+                lp.topMargin = nativeTopMargin
                 for (i in originalRules.indices) { lp.removeRule(i); if (originalRules[i] != 0) lp.addRule(i, originalRules[i]) }
                 view.layoutParams = lp
             }

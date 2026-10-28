@@ -4,6 +4,10 @@ import android.app.Activity
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.sp
+import top.yukonga.miuix.kmp.basic.TextButton
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -58,7 +62,7 @@ internal fun GroupBarMiuixPage(context: Context, provider: FeatureSettingsProvid
                         PopupChoiceRow("顶部聊天分组样式", "选择横栏显示方式",
                             listOf(PopupChoice("标准分组", "0"), PopupChoice("悬浮分组", "1")),
                             style.toString(), { value -> style = value.toInt(); prefs.edit().putInt(Store.STYLE, style).apply() })
-                        ActionRow("管理分组", "固定分组开关、自定义成员和分组顺序") { managing = true }
+                        ActionRow("管理分组", "固定分组开关和自定义成员") { managing = true }
                         ActionRow("透明度调节", "当前背景透明度 ${alpha.roundToInt()}%") {
                             if (activity != null) VoiceForwardMiuixDialog.showNumberInput(
                                 activity = activity, title = "背景透明度", initialValue = alpha.roundToInt(),
@@ -84,25 +88,25 @@ internal fun GroupBarMiuixPage(context: Context, provider: FeatureSettingsProvid
                                 groups = groups.map { if (it.id == group.id) it.copy(enabled = value) else it }; Store.save(context, groups)
                             }
                         } else {
-                            ActionRow(group.name, "${group.members.size} 个成员 · 点击添加好友或群聊") { picker = group }
-                            ActionRow("重命名", group.name) {
-                                if (activity != null) VoiceForwardMiuixDialog.showTextInput(activity = activity,
-                                    title = "重命名分组", summary = "输入分组名称", initialValue = group.name, placeholder = "分组名称", maxLength = 20, onConfirm = { name ->
-                                        if (name.isNotBlank()) {
-                                            groups = groups.map { if (it.id == group.id) it.copy(name = name.trim().take(20)) else it }
-                                            Store.save(context, groups)
-                                        }
-                                    }, onDismiss = {})
+                            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Column(Modifier.weight(1f).clickable { picker = group }.padding(vertical = 8.dp)) {
+                                    Text(group.name, color = MiuixTheme.colorScheme.onSurface)
+                                    Text("${group.members.size} 个成员 · 点击添加好友或群聊", fontSize = 12.sp,
+                                        color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+                                }
+                                TextButton(text = "重命名", onClick = {
+                                    if (activity != null) VoiceForwardMiuixDialog.showTextInput(activity = activity,
+                                        title = "重命名分组", summary = "输入分组名称", initialValue = group.name, placeholder = "分组名称", maxLength = 20, onConfirm = { name ->
+                                            if (name.isNotBlank()) {
+                                                groups = groups.map { if (it.id == group.id) it.copy(name = name.trim().take(20)) else it }
+                                                Store.save(context, groups)
+                                            }
+                                        }, onDismiss = {})
+                                })
+                                TextButton(text = "移除", onClick = {
+                                    groups = groups.filterNot { it.id == group.id }; Store.save(context, groups)
+                                })
                             }
-                            ActionRow("移除", "移除该分组，聊天记录不受影响") {
-                                groups = groups.filterNot { it.id == group.id }; Store.save(context, groups)
-                            }
-                        }
-                        ActionRow("左移", "将分组向左移动一位") {
-                            Store.move(context, group.id, -1); groups = Store.load(context)
-                        }
-                        ActionRow("右移", "将分组向右移动一位") {
-                            Store.move(context, group.id, 1); groups = Store.load(context)
                         }
                     } }
                 }

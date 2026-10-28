@@ -26,7 +26,7 @@ assert 'worker.execute' in runtime and 'getPickerContacts' in runtime
 for banned in ('OnDrawListener','OnScrollListener','postOnAnimation','Timer('):assert banned not in runtime
 assert 'ConversationGroupingExclusion.bind' in read(base+'preferences/HchatStorage.kt')
 restore=read(base+'hooks/items/conversationgroup/ConversationGroupRuntime.kt')
-assert 'syncDatabase(app, requireRestored = true)' in restore and 'restored.containsAll(plan.updates.keys)' in restore
+assert 'syncDatabase(app, requireRestored = true, allowUnresolved = true)' in restore and 'restored.containsAll(plan.updates.keys)' in restore
 assert 'override fun onViewDetachedFromWindow' in runtime and 'removeOnAttachStateChangeListener' in runtime
 d=Path('/sdcard/Download/wechat8078_decoded')
 source=(d/'smali_classes11/jo5/e.smali').read_text()

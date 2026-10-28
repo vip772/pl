@@ -6,6 +6,7 @@ internal class GroupBarFilter(
 ) {
     fun accepts(id: String, unread: Int): Boolean {
         val current = group ?: return true
+        if (id.startsWith("wxid_hchat_group_") || id.startsWith("hchat_conv_group:")) return false
         val room = id.endsWith("@chatroom") || id.endsWith("@im.chatroom")
         val official = id in officials || id.startsWith("gh_") || id == "officialaccounts"
         return when (current.id) {
@@ -18,7 +19,12 @@ internal class GroupBarFilter(
         }
     }
     private val cachedPredicate: String? by lazy(LazyThreadSafetyMode.PUBLICATION) { buildPredicate() }
-    fun predicate(): String? = cachedPredicate
+    fun predicate(): String? = if (group == null) null else {
+        val real = "rconversation.username NOT LIKE 'wxid!_hchat!_group!_%' ESCAPE '!' AND rconversation.username NOT LIKE 'hchat!_conv!_group:%' ESCAPE '!'"
+        cachedPredicate?.let { "($real) AND ($it)" } ?: real
+    }
+    fun acceptsNativeParent(native: Boolean, parent: String?): Boolean = native ||
+        (group != null && parent != null && (parent.startsWith("wxid_hchat_group_") || parent.startsWith("hchat_conv_group:")))
     private fun buildPredicate(): String? {
         val current = group ?: return null
         fun quote(value: String) = "'" + value.replace("'", "''") + "'"
@@ -43,6 +49,7 @@ internal object GroupBarSql {
         if (predicate == null || "hchat_group_bar" in sql) return sql
         // Tokens exclude strings, quoted identifiers and comments; track nesting for ORDER/LIMIT.
         val tokens = ArrayList<Pair<String, Int>>()
+        val allTokens = ArrayList<Pair<String, Int>>()
         var depth = 0; var i = 0
         while (i < sql.length) {
             val c = sql[i]
@@ -67,7 +74,9 @@ internal object GroupBarSql {
             else if (c.isLetter() || c == '_') {
                 val start = i++
                 while (i < sql.length && (sql[i].isLetterOrDigit() || sql[i] == '_')) i++
-                if (depth == 0) tokens += sql.substring(start, i).lowercase(java.util.Locale.ROOT) to start
+                val token = sql.substring(start, i).lowercase(java.util.Locale.ROOT) to start
+                allTokens += token
+                if (depth == 0) tokens += token
             } else i++
         }
         if (depth != 0 || tokens.firstOrNull()?.first != "select") return sql
@@ -77,7 +86,21 @@ internal object GroupBarSql {
             ?: sql.trimEnd().removeSuffix(";").length
         // Parenthesize the existing WHERE to preserve OR precedence and placeholder ordering.
         val conditionStart = where.second + 5
-        return sql.substring(0, conditionStart) + " (" + sql.substring(conditionStart, suffix).trim() +
+        // Expand only the native parent-null atom, retaining all other native filters.
+        var condition = sql.substring(conditionStart, suffix)
+        allTokens.windowed(3).asReversed().forEach { atom ->
+            if (atom.map { it.first } == listOf("parentref", "is", "null") &&
+                atom[0].second >= conditionStart && atom[2].second < suffix) {
+                val start = atom[0].second
+                val end = atom[2].second + 4
+                val text = sql.substring(start, end)
+                if (Regex("parentRef\\s+is\\s+null", RegexOption.IGNORE_CASE).matches(text) && sql.getOrNull(start - 1) != '.') {
+                    condition = condition.replaceRange(start - conditionStart, end - conditionStart,
+                        "($text OR parentRef LIKE 'wxid!_hchat!_group!_%' ESCAPE '!' OR parentRef LIKE 'hchat!_conv!_group:%' ESCAPE '!')")
+                }
+            }
+        }
+        return sql.substring(0, conditionStart) + " (" + condition.trim() +
             ") AND (" + predicate + ") /*hchat_group_bar*/ " + sql.substring(suffix)
     }
 }

@@ -353,7 +353,7 @@ object ConversationGroupRuntime {
                 val database = WeChatApis.database() ?: error("数据库未就绪")
                 check(database.prepare()) { "数据库未就绪" }
                 check(ConversationGroupStore.accountKey().isNotBlank()) { "账号未就绪" }
-                syncDatabase(app, requireRestored = true)
+                syncDatabase(app, requireRestored = true, allowUnresolved = true)
                 check(!ConversationGroupStore.isEnabled(app)) { "聊天分组已重新开启" }
             }.onFailure { HLog.e("$TAG 切换到分组横栏前恢复失败", it) }.isSuccess
             main.post { complete(success) }
@@ -1517,10 +1517,17 @@ object ConversationGroupRuntime {
         return successful
     }
 
-    private fun syncDatabase(context: Context, requireRestored: Boolean = false) {
+    private fun syncDatabase(context: Context, requireRestored: Boolean = false, allowUnresolved: Boolean = false) {
         val account = ConversationGroupStore.accountKey()
-        if (account.isBlank()) return
-        val database = WeChatApis.database() ?: return
+        if (account.isBlank()) {
+            check(!requireRestored) { "账号未就绪" }
+            return
+        }
+        val database = WeChatApis.database()
+        if (database == null) {
+            check(!requireRestored) { "数据库未就绪" }
+            return
+        }
         val prefs = HchatStorage.preferences(context, ConversationGroupStore.PREFS_NAME)
         val originals = loadOriginalParentRefs(prefs, account)
         var groups = ConversationGroupStore.load(context)
@@ -1536,9 +1543,13 @@ object ConversationGroupRuntime {
                 originals = originals
             )
             val restored = applyParentPlan(database, prefs, account, plan)
-            if (requireRestored) check(plan.unresolved.isEmpty() && restored.containsAll(plan.updates.keys)) {
+            if (requireRestored) check((allowUnresolved || plan.unresolved.isEmpty()) && restored.containsAll(plan.updates.keys)) {
                 "部分会话归属未恢复"
             }
+            if (allowUnresolved && plan.unresolved.isNotEmpty()) {
+                HLog.w("$TAG 保留 ${plan.unresolved.size} 条缺失备份的归属，交由横栏首页筛选兼容")
+            }
+            if (requireRestored) check(account == ConversationGroupStore.accountKey()) { "账号已切换" }
             return
         }
         val automaticResolution = if (enabled) {
