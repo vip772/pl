@@ -204,6 +204,23 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     }
                 })
             }
+            // Observation only: never alter arguments, return values or layout.
+            for ((name, signature) in listOf(
+                "h" to emptyArray<Class<*>>(),
+                "i" to arrayOf(Boolean::class.javaPrimitiveType!!),
+                "g" to arrayOf(Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!),
+                "onLayout" to arrayOf(Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)
+            )) {
+                val method = KavaReflector.findMethodRecursive(list, name, *signature) ?: continue
+                hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        runCatching { sessions[param.thisObject as? View]?.traceLayout("before:$name", param.args) }
+                    }
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        runCatching { sessions[param.thisObject as? View]?.traceLayout("after:$name", param.args) }
+                    }
+                })
+            }
             nativeListHook(list, "o", after = { it.headerState(true) })
             nativeListHook(list, "q", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.headerState(false) })
             // Constant-time state reads only; no view search, layout mutation, SQL or reload on scroll.
@@ -408,13 +425,14 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         // Bounded diagnostic window: no idle logging or view-tree search.
         private var traceUntil = 0L
         private var traceCount = 0
+        private var traceStructuralCount = 0
         private var traceSequence = 0
         private var traceLast = ""
         private var traceCalls = 0
         private val traceEnd = Runnable { traceState("end"); traceUntil = 0L }
         fun beginTrace(reason: String) {
             traceUntil = android.os.SystemClock.uptimeMillis() + 1800
-            traceCount = 0; traceCalls = 0; traceSequence++; traceLast = ""
+            traceCount = 0; traceStructuralCount = 0; traceCalls = 0; traceLayoutCount = 0; traceSequence++; traceLast = ""
             HLog.i("[Hchat:GroupBarDiag] begin=$traceSequence reason=$reason")
             main.removeCallbacks(traceEnd); main.postDelayed(traceEnd, 1700)
             traceState("begin")
@@ -426,8 +444,23 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             HLog.i("[Hchat:GroupBarDiag] seq=$traceSequence call=$name args=${args.joinToString()} origin=$origin")
             traceState("call:$name")
         }
+        private var traceLayoutCount = 0
+        fun traceLayout(phase: String, args: Array<Any?>) {
+            if (traceUntil == 0L || android.os.SystemClock.uptimeMillis() > traceUntil || traceLayoutCount >= 80) return
+            traceLayoutCount++
+            HLog.i("[Hchat:GroupBarDiag] seq=$traceSequence t=${android.os.SystemClock.uptimeMillis()} layout=$phase args=${args.joinToString()}")
+            traceState(phase)
+        }
+        private fun diagnosticView(view: View?): String {
+            if (view == null) return "absent"
+            val rect = android.graphics.Rect()
+            val visible = view.getGlobalVisibleRect(rect)
+            return "${System.identityHashCode(view)}:${view.top}:${view.bottom}:${view.height}:${view.measuredHeight}:${view.layoutParams?.height}:${view.visibility}:${view.alpha}:${view.translationY}:shown=${view.isShown}:global=$visible,$rect:layout=${view.isLayoutRequested}"
+        }
         private fun traceState(phase: String) {
-            if (traceUntil == 0L || android.os.SystemClock.uptimeMillis() > traceUntil || traceCount >= 60) return
+            if (traceUntil == 0L || android.os.SystemClock.uptimeMillis() > traceUntil) return
+            val frameSample = phase == "frame" || phase == "begin" || phase == "end"
+            if (frameSample && traceCount >= 60 || !frameSample && traceStructuralCount >= 80) return
             val list = viewRef.get() ?: return
             val lv = list as? ListView
             val child = if (lv != null && lv.childCount > 0) lv.getChildAt(0) else null
@@ -438,9 +471,17 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 val v = lv.getChildAt(i)
                 "${lv.firstVisiblePosition+i}:${System.identityHashCode(v)}:${v.top}:${v.bottom}:${v.visibility}:${v.alpha}"
             } else "recycler"
-            val state = "rows=$rows group=$selected count=${lv?.count} headers=${lv?.headerViewsCount} first=${lv?.firstVisiblePosition} top=${child?.top} bottom=${child?.bottom} child=${child?.let { System.identityHashCode(it) }} scroll=${scrollField.getInt(list)} base=$nativeScrollOffset reserve=$appliedScrollInset controller=$offset open=${nativeHeaderOpen()} task=${task?.top}/${task?.bottom}/${task?.visibility}/${task?.translationY} bar=${bar.visibility}/${bar.top} title=${titleAnchor?.visibility}/${titleAnchor?.alpha} pending=$pendingSwitchReset deferred=$reloadDeferred touch=$userInteracting"
+            // Header count is an adapter offset, not a conversation child index.
+            val conversationPosition = lv?.headerViewsCount ?: -1
+            val conversationIndex = if (lv != null) conversationPosition - lv.firstVisiblePosition else -1
+            val conversation = if (lv != null && conversationIndex in 0 until lv.childCount) lv.getChildAt(conversationIndex) else null
+            val conversationParent = conversation?.parent as? View
+            val footer = if (lv != null) KavaReflector.findFieldRecursive(list.javaClass, "T")?.apply { isAccessible = true }?.get(list) as? View else null
+            val evidence = "conversationPos=$conversationPosition conversationIndex=$conversationIndex conversation=${diagnosticView(conversation)} conversationParent=${diagnosticView(conversationParent)} footer=${diagnosticView(footer)} listHeight=${list.height} listScrollY=${list.scrollY}"
+            val state = "$evidence rows=$rows group=$selected count=${lv?.count} headers=${lv?.headerViewsCount} first=${lv?.firstVisiblePosition} top=${child?.top} bottom=${child?.bottom} child=${child?.let { System.identityHashCode(it) }} scroll=${scrollField.getInt(list)} base=$nativeScrollOffset reserve=$appliedScrollInset controller=$offset open=${nativeHeaderOpen()} task=${task?.top}/${task?.bottom}/${task?.visibility}/${task?.translationY} bar=${bar.visibility}/${bar.top} title=${titleAnchor?.visibility}/${titleAnchor?.alpha} pending=$pendingSwitchReset deferred=$reloadDeferred touch=$userInteracting"
             if (phase == "frame" && state == traceLast) return
-            traceLast = state; traceCount++
+            traceLast = state
+            if (frameSample) traceCount++ else traceStructuralCount++
             HLog.i("[Hchat:GroupBarDiag] seq=$traceSequence t=${android.os.SystemClock.uptimeMillis()} phase=$phase $state")
         }
         private val titlePosition = IntArray(2)
