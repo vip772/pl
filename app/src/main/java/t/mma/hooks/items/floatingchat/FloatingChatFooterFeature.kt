@@ -195,8 +195,29 @@ private class FooterRuntime(private val context: FeatureContext) {
     /** 8.0.78 verified callbacks only: never run from layout, scroll or pre-draw. */
     private fun installSendAnimationSettlement(footerClass: Class<*>) {
         val buttonField = KavaReflector.findDeclaredField(footerClass, "n") ?: return
+        val attachField = KavaReflector.findDeclaredField(footerClass, "z") ?: return
         val canSendField = KavaReflector.findDeclaredField(footerClass, "l4") ?: return
-        if (buttonField.type != android.widget.Button::class.java || canSendField.type != Boolean::class.javaPrimitiveType) return
+        val modeField = KavaReflector.findDeclaredField(footerClass, "r2") ?: return
+        if (buttonField.type != android.widget.Button::class.java || !android.widget.ImageButton::class.java.isAssignableFrom(attachField.type) || modeField.type != Int::class.javaPrimitiveType || canSendField.type != Boolean::class.javaPrimitiveType) return
+        fun settle(footer: View) {
+            SendButtonSettlement.schedule(footer) {
+                if (!isEnabled() || states[footer]?.reparented != true) return@schedule null
+                val canSend = KavaReflector.readField(canSendField, footer) as? Boolean ?: return@schedule null
+                if (KavaReflector.readField(modeField, footer) != 1) return@schedule null
+                val send = KavaReflector.readField(buttonField, footer) as? View ?: return@schedule null
+                val attach = KavaReflector.readField(attachField, footer) as? View ?: return@schedule null
+                if ((send.parent as? View)?.isShown != true) return@schedule null
+                SendButtonSettlement.settleControls(send, attach, canSend)
+            }
+        }
+        // B() also has a zero-width legacy-animation branch without h0 callbacks.
+        for (name in listOf("A", "B")) {
+            KavaReflector.findDeclaredMethod(footerClass, name)?.let { method ->
+                hookFooter(method, footerClass) { footer ->
+                    if (isEnabled() && states[footer]?.reparented == true) settle(footer)
+                }
+            }
+        }
         for (name in listOf("h0", "f0")) {
             val callbackClass = KavaReflector.loadClass("com.tencent.mm.pluginsdk.ui.chat.$name", context.hostClassLoader()) ?: continue
             val ownerField = KavaReflector.findDeclaredField(callbackClass, "e") ?: continue
@@ -213,12 +234,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     SendButtonSettlement.finished(footer, animator)
                     // Native cancel/end callbacks may start a newer animation synchronously.
                     // Coalesce and read current can-send/animation state in the next frame.
-                    SendButtonSettlement.schedule(footer) {
-                        if (!isEnabled() || states[footer]?.reparented != true) return@schedule null
-                        val canSend = KavaReflector.readField(canSendField, footer) as? Boolean ?: return@schedule null
-                        if (!canSend) return@schedule null
-                        KavaReflector.readField(buttonField, footer) as? android.widget.Button
-                    }
+                    settle(footer)
                 }
             }
         }

@@ -2,8 +2,9 @@
 from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1];lib=Path('/tmp/pl-kotlin-libs');std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
-files={'View.kt':'''package android.view
-open class View {var isAttachedToWindow=true;var visibility=0;var isShown=true;var alpha=1f;val tasks=mutableListOf<Runnable>();fun postOnAnimation(r:Runnable){tasks.add(r)};fun removeCallbacks(r:Runnable):Boolean=tasks.remove(r);fun flush(){val copy=tasks.toList();tasks.clear();copy.forEach{it.run()}};companion object{const val VISIBLE=0}}
+files={'Animator.kt':'package android.animation\nopen class Animator {var isStarted=false;var isRunning=false}', 'View.kt':'''package android.view
+open class View {var layoutParams:ViewGroup.LayoutParams?=null;var isAttachedToWindow=true;var visibility=0;var isShown=true;var alpha=1f;val tasks=mutableListOf<Runnable>();fun postOnAnimation(r:Runnable){tasks.add(r)};fun removeCallbacks(r:Runnable):Boolean=tasks.remove(r);fun flush(){val copy=tasks.toList();tasks.clear();copy.forEach{it.run()}};companion object{const val VISIBLE=0;const val GONE=8}}
+class ViewGroup {class LayoutParams(var width:Int){companion object{const val WRAP_CONTENT=-2}}}
 ''','Button.kt':'package android.widget\nclass Button:android.view.View()','Test.kt':'''package t.mma.hooks.items.floatingchat
 import android.view.View
 import android.widget.Button
@@ -18,6 +19,14 @@ fun main(){
  b.visibility=0;b.isShown=false;SendButtonSettlement.schedule(f,current);f.flush();check(b.alpha==0f)
  b.isShown=true;SendButtonSettlement.schedule(f,current);val newer=Any();SendButtonSettlement.started(f,newer);f.flush();check(b.alpha==0f)
  SendButtonSettlement.finished(f,newer);SendButtonSettlement.schedule(f,current);SendButtonSettlement.cancel(f);check(f.tasks.isEmpty())
+ val stale=android.animation.Animator();SendButtonSettlement.started(f,stale)
+ b.alpha=0f;SendButtonSettlement.schedule(f,current);f.flush();check(b.alpha==1f)
+ val plus=View();b.layoutParams=android.view.ViewGroup.LayoutParams(0)
+ b.visibility=8;plus.visibility=0
+ check(SendButtonSettlement.settleControls(b,plus,true)===b)
+ check(b.visibility==0&&plus.visibility==8&&b.layoutParams!!.width == -2)
+ check(SendButtonSettlement.settleControls(b,plus,false)===plus)
+ check(b.visibility==8&&plus.visibility==0)
  repeat(1000){check(f.tasks.isEmpty())}
  println("PASS active/new animation guard, current can-send, hidden parent/button, NaN alpha, coalescing, cleanup and zero idle scheduling")
 }'''}

@@ -131,8 +131,9 @@ internal class FloatingChatHeaderCapsule {
         return true
     }
     private fun fail(header: ViewGroup): Boolean {
-
-        restore(header); return false
+        // Native menu/title rebuilding is transient. Keep an installed capsule instead
+        // of replacing it with the fallback card; lifecycle/disable owns restoration.
+        return states[header]?.let { it.row.parent === header } == true
     }
     private fun findVerifiedMore(menu: ViewGroup, header: ViewGroup): View? {
         val candidates = mutableListOf<View>()

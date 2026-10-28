@@ -304,16 +304,14 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
     private fun discoverHomepage(activity: Activity?) {
         if (destroyed || activity == null || activity.javaClass.name != "com.tencent.mm.ui.LauncherUI") return
         val root = activity.window?.decorView ?: return
-        var found = 0
         fun visit(view: View) {
             if (view.javaClass.name in setOf("com.tencent.mm.ui.conversation.ConversationListView", "com.tencent.mm.ui.conversation.recycler.ConversationRecyclerView")) {
-                found++; attach(view)
+                attach(view)
                 return
             }
             if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
         }
         visit(root)
-        if (found == 0) HLog.d("[Hchat:GroupBar] 当前首页尚无会话列表，等待原生挂载事件")
     }
     private fun attach(view: View) {
         if (!view.isAttachedToWindow || destroyed) return
@@ -343,7 +341,6 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             sessions[view]?.let { if (it.adapter === adapter) { it.refreshPosition(); return } else it.dispose() }
             val session = Session(view, parent, adapter, reset)
             sessions[view] = session; session.render(); if (enabled && ready) session.reload()
-            HLog.i("[Hchat:GroupBar] 横栏已挂载: list=${view.javaClass.name} parent=${parent.javaClass.name} adapter=${adapter.javaClass.name} enabled=$enabled priority=title_first")
         }.onFailure { HLog.e("[Hchat:GroupBar] 挂载失败", it) }
     }
     private fun loadContacts() {
@@ -393,9 +390,6 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         }
         private val titlePosition = IntArray(2)
         private val parentPosition = IntArray(2)
-        private val titleLayoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (!disposed) { positionDirty = true; if (bar.visibility == View.VISIBLE) safePosition() }
-        }
         private val positionListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             if (!disposed) { positionDirty = true; if (bar.visibility == View.VISIBLE) safePosition() }
         }
@@ -506,13 +500,12 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     var node: View? = candidate
                     while (node != null) { chain += node; node = node.parent as? View }
                     titleChain = chain
-                    candidate.addOnLayoutChangeListener(titleLayoutListener)
+                    candidate.addOnLayoutChangeListener(positionListener)
                     break
                 }
             }
-            parent.addOnLayoutChangeListener(titleLayoutListener)
+            parent.addOnLayoutChangeListener(positionListener)
             parent.viewTreeObserver.addOnPreDrawListener(preDrawListener)
-            HLog.i("[Hchat:GroupBar] 标题锚点=${titleAnchor?.javaClass?.name} nativeMargin=$nativeTopMargin")
         }
         fun refreshPosition() { if (!disposed) { safePosition(); syncHeaderVisibility() } }
         fun nativeInsetChanged() {
@@ -803,11 +796,11 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 view.removeOnLayoutChangeListener(positionListener)
                 restoreAvoidance()
             }
-            titleAnchor?.removeOnLayoutChangeListener(titleLayoutListener)
+            titleAnchor?.removeOnLayoutChangeListener(positionListener)
             titleAnchor = null
             titleChain = emptyList()
             parentRef.get()?.let { host ->
-                host.removeOnLayoutChangeListener(titleLayoutListener)
+                host.removeOnLayoutChangeListener(positionListener)
                 if (host.viewTreeObserver.isAlive) host.viewTreeObserver.removeOnPreDrawListener(preDrawListener)
             }
             bar.removeOnLayoutChangeListener(layoutListener)

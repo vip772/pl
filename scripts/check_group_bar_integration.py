@@ -19,7 +19,7 @@ assert 'database.subscribeQuery' in runtime
 assert 'findMethodRecursive(adapter.javaClass, "S2")' in runtime and 'reset.invoke(adapter)' in runtime
 assert '"jo5.y", "po5.l"' in runtime
 assert 'discoverHomepage' in runtime and 'HomeExtensionSurface.Root' in runtime
-assert 'priority=title_first' in runtime and 'bar.bringToFront()' in runtime
+assert 'bar.bringToFront()' in runtime
 assert 'filter.accepts' in runtime and 'getDeclaredMethod("l", row)' in runtime
 assert 'onBindViewHolder' not in runtime and 'getView' not in runtime and 'stateFields' not in runtime
 assert 'afterDisabledRestore' in runtime and 'enabled && ready' in runtime

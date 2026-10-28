@@ -13,6 +13,7 @@ import android.widget.EditText
 import android.widget.ImageButton
 import android.widget.ImageView
 import java.util.WeakHashMap
+import java.util.IdentityHashMap
 
 /** Own native input/button backgrounds, never icon drawables or the detached emoji panel. */
 internal object FloatingFooterInputSurfaces {
@@ -34,38 +35,45 @@ internal object FloatingFooterInputSurfaces {
             val colors = if (dark) originalTextColors ?: return else lightTextColors
             if (button.textColors !== colors) button.setTextColor(colors)
         }
+        private val icon = view is ImageView
+        fun needsClear(): Boolean =
+            (!icon && view.background !== marker) ||
+                (icon && view.background != null && view.background !== marker) ||
+                view.backgroundTintList != null || (!icon && view.foreground != null)
         fun clear() {
-            val padding = intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom)
+            val left = view.paddingLeft; val top = view.paddingTop
+            val right = view.paddingRight; val bottom = view.paddingBottom
             val minWidth = view.minimumWidth
             val minHeight = view.minimumHeight
-            if (view.background !== marker) view.background = marker
+            if (view.background !== marker && (!icon || view.background != null)) view.background = marker
             if (view.backgroundTintList != null) view.backgroundTintList = null
-            if (view.foreground != null) view.foreground = null
+            if (!icon && view.foreground != null) view.foreground = null
             if (view.minimumWidth != minWidth) view.minimumWidth = minWidth
             if (view.minimumHeight != minHeight) view.minimumHeight = minHeight
-            if (view.paddingLeft != padding[0] || view.paddingTop != padding[1] || view.paddingRight != padding[2] || view.paddingBottom != padding[3]) {
-                view.setPadding(padding[0], padding[1], padding[2], padding[3])
+            if (view.paddingLeft != left || view.paddingTop != top || view.paddingRight != right || view.paddingBottom != bottom) {
+                view.setPadding(left, top, right, bottom)
             }
         }
         fun restore() {
             if (originalTextColors != null) sendButton?.setTextColor(originalTextColors)
             FloatingChatCardVisuals.releasePresentation(view)
-            val padding = intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom)
+            val left = view.paddingLeft; val top = view.paddingTop
+            val right = view.paddingRight; val bottom = view.paddingBottom
             val minWidth = view.minimumWidth
             val minHeight = view.minimumHeight
             view.background = background
-            view.setPadding(padding[0], padding[1], padding[2], padding[3])
+            view.setPadding(left, top, right, bottom)
             view.minimumWidth = minWidth
             view.minimumHeight = minHeight
-            view.foreground = foreground
+            if (!icon) view.foreground = foreground
             view.backgroundTintList = tint
             view.backgroundTintMode = tintMode
         }
     }
-    private val surfaces = WeakHashMap<View, MutableList<Surface>>()
+    private val surfaces = WeakHashMap<View, IdentityHashMap<View, Surface>>()
     fun apply(footer: View) {
         val group = footer as? ViewGroup ?: return
-        val tracked = surfaces.getOrPut(footer) { ArrayList() }
+        val tracked = surfaces.getOrPut(footer) { IdentityHashMap() }
         val queue = ArrayDeque<View>()
         for (i in 0 until group.childCount) queue.add(group.getChildAt(i))
         var visited = 0
@@ -91,11 +99,11 @@ internal object FloatingFooterInputSurfaces {
                 hasAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout")
             val container = view is ViewGroup
             if (input || container || speechBackdrop || speechLayer || speechImage) {
-                val surface = tracked.firstOrNull { it.view === view } ?: Surface(view).also {
-                    tracked.add(it)
+                val surface = tracked[view] ?: Surface(view).also {
+                    tracked[view] = it
                     FloatingChatCardVisuals.ownPresentation(view)
                 }
-                if (view.background !== surface.marker || view.backgroundTintList != null || view.foreground != null) {
+                if (surface.needsClear()) {
                     surface.clear()
                 }
                 surface.maintainTextContrast()
@@ -125,14 +133,13 @@ internal object FloatingFooterInputSurfaces {
     // Native mode changes can rewrite a background without requesting layout.
     // Only revisit captured input surfaces; never traverse panel descendants.
     fun maintain(footer: View) {
-        surfaces[footer]?.forEach { surface ->
-            val view = surface.view
-            if (view.background !== surface.marker || view.backgroundTintList != null || view.foreground != null) {
+        surfaces[footer]?.values?.forEach { surface ->
+            if (surface.needsClear()) {
                 surface.clear()
             }
             surface.maintainTextContrast()
         }
     }
 
-    fun restore(footer: View) { surfaces.remove(footer)?.forEach { it.restore() } }
+    fun restore(footer: View) { surfaces.remove(footer)?.values?.forEach { it.restore() } }
 }

@@ -1093,7 +1093,11 @@ private class BackgroundBeautyRuntime(
         restoringBounce = true
         try {
             entries.forEach { (view, colors) ->
-                colors.forEach { (method, color) -> KavaReflector.invoke(method, view, color) }
+                colors.forEach { (method, color) ->
+                    if (t.mma.hooks.items.floatingchat.FloatingChatActionBarBackgrounds.contains(view)) {
+                        t.mma.hooks.items.floatingchat.FloatingChatActionBarBackgrounds.onNativeWrite(view, method, color as? Drawable)
+                    } else KavaReflector.invoke(method, view, color)
+                }
                 bounceColors.remove(view)
                 initializedChrome.remove(view)
             }
@@ -2411,7 +2415,7 @@ private class BackgroundBeautyRuntime(
             } else if (view is ImageView) {
                 // Footer icons retain their image drawable. Only their independent button surface is cleared.
                 val inSpeech = findAncestor(view, "com.tencent.mm.pluginsdk.ui.SpeechInputLayout") != null
-                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = !inSpeech)
+                setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = inSpeech, preserveFeedback = !inSpeech)
             }
         }
 
@@ -2694,6 +2698,7 @@ private class BackgroundBeautyRuntime(
             })
         }
         if (view.javaClass.name == "androidx.appcompat.widget.ActionBarContainer") {
+            if (t.mma.hooks.items.floatingchat.FloatingChatActionBarBackgrounds.contains(view)) return
             listOf("setPrimaryBackground" to "h", "setStackedBackground" to "i", "setSplitBackground" to "m").forEach { (name, field) ->
                 val setter = KavaReflector.findMethodRecursive(view.javaClass, name, Drawable::class.java) ?: return@forEach
                 val values = bounceColors.getOrPut(view) { LinkedHashMap() }
@@ -2704,6 +2709,7 @@ private class BackgroundBeautyRuntime(
                 }
                 hookOnce(setter, before = { param ->
                     val target = param.thisObject as? View ?: return@hookOnce
+                    if (t.mma.hooks.items.floatingchat.FloatingChatActionBarBackgrounds.contains(target)) return@hookOnce
                     if (!restoringBounce && surfaceMutationDepth == 0 && bounceColors[target]?.containsKey(setter) == true) {
                         bounceColors[target]!![setter] = param.args[0]
                         param.args[0] = null

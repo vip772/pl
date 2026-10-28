@@ -145,6 +145,17 @@ private class HeaderRuntime(private val context: FeatureContext) {
         KavaReflector.findMethodRecursive(clazz, "fitSystemWindows", Rect::class.java)?.let {
             count += hook(it) { param -> (param.thisObject as? ViewGroup)?.let(::scheduleApply) }
         }
+        val actionBar = KavaReflector.loadClass(headerClass, context.hostClassLoader())
+        for (name in listOf("setPrimaryBackground", "setStackedBackground", "setSplitBackground")) {
+            KavaReflector.findMethodRecursive(actionBar, name, Drawable::class.java)?.let { method ->
+                count += hookBefore(method) { param ->
+                    val view = param.thisObject as? View ?: return@hookBefore
+                    if (FloatingChatActionBarBackgrounds.onNativeWrite(view, method, param.args.firstOrNull() as? Drawable)) {
+                        param.args[0] = null
+                    }
+                }
+            }
+        }
         installTipsGroupTracking()?.let { count += it }
         installed = count > 0
         if (installed) configHandler.post { refreshVisible() }
@@ -209,6 +220,19 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val root = view.rootView
         val source = find(root) { it.javaClass.name == layoutClass } as? ViewGroup ?: return null
         return visibleChatLayout(source)
+    }
+
+    private fun hookBefore(method: Member, before: (XC_MethodHook.MethodHookParam) -> Unit): Int {
+        if (!hooked.add(method)) return 1
+        return runCatching {
+            HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    runCatching { before(param) }
+                        .onFailure { HLog.e("[Hchat:$TAG] 背景更新失败", it) }
+                }
+            })
+            1
+        }.getOrElse { hooked.remove(method); HLog.e("[Hchat:$TAG] Hook 安装失败", it); 0 }
     }
 
     private fun hook(method: Member, after: (XC_MethodHook.MethodHookParam) -> Unit): Int {
@@ -307,6 +331,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             header.layoutParams = marginLp
         }
 
+        FloatingChatActionBarBackgrounds.claim(header)
         applyHeaderZoneCards(layout, header)
         tipsCardBottoms.remove(layout)
         applyTrackedTipsGroup(layout, header)
@@ -797,6 +822,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
     private fun restoreView(view: View) {
         (view as? ViewGroup)?.let(capsule::restore)
+        FloatingChatActionBarBackgrounds.restore(view)
         val state = states.remove(view) ?: return
         runCatching {
             if (state.reparented) {
