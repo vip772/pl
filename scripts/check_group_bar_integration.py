@@ -97,6 +97,8 @@ print('PASS direct lifecycle registration with queued failure retry; synchronous
 
 assert 'closedHeaderIndex' not in runtime
 assert 'traceCount >= 60' in runtime and 'traceCalls >= 12' in runtime
-assert 'traceUntil = android.os.SystemClock.uptimeMillis() + 1800' in runtime
+assert 'val duration = if (reason == "header:false") 3000L else 1800L' in runtime
+assert 'traceDrawCount >= 32' in runtime and 'traceDispatchDrawCount >= 8' in runtime
+assert 'traceCall("groupbar.reload"' in runtime
 assert 'main.removeCallbacks(traceEnd)' in runtime
-print('PASS bounded diagnostic window and call budget, no native index rewrite, timer cleanup')
+print('PASS bounded return trace, draw-call budget, native index preserved, timer cleanup')
