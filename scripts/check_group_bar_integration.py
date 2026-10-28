@@ -16,8 +16,10 @@ assert 'FeatureSettingsProvider.CATEGORY_ENHANCE, true' in feature
 assert 'prefs.getBoolean(GroupBarStore.ENABLE, false)' in runtime
 assert 'queryScope.get()' in runtime and 'queryScope.remove()' in runtime
 assert 'database.subscribeQuery' in runtime
-assert 'getDeclaredMethod("S2")' in runtime and 'reset.invoke(adapter)' in runtime
-assert '"jo5.y0", "po5.u"' in runtime and '"jo5.y", "po5.l"' in runtime
+assert 'findMethodRecursive(adapter.javaClass, "S2")' in runtime and 'reset.invoke(adapter)' in runtime
+assert '"jo5.y", "po5.l"' in runtime
+assert 'discoverHomepage' in runtime and 'HomeExtensionSurface.Root' in runtime
+assert 'priority=title_first' in runtime and 'bar.bringToFront()' in runtime
 assert 'filter.accepts' in runtime and 'getDeclaredMethod("l", row)' in runtime
 assert 'onBindViewHolder' not in runtime and 'getView' not in runtime and 'stateFields' not in runtime
 assert 'afterDisabledRestore' in runtime and 'enabled && ready' in runtime

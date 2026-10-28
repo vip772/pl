@@ -1,6 +1,8 @@
 package t.mma.hooks.items.groupbar
 
+import android.app.Activity
 import android.content.SharedPreferences
+import t.mma.hooks.items.homeextension.HomeExtensionSurface
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
@@ -29,6 +31,8 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
     private val hooks = ArrayList<XC_MethodHook.Unhook>()
     private val sessions = WeakHashMap<View, Session>()
     private val sources = java.util.Collections.synchronizedMap(WeakHashMap<Any, Boolean>())
+    private var homepageSourceTypes = emptyList<Class<*>>()
+    private fun isHomepageSource(value: Any): Boolean = sources.containsKey(value) || homepageSourceTypes.any { it.isInstance(value) }
     private val pending = java.util.Collections.newSetFromMap(WeakHashMap<View, Boolean>())
     private var groups = GroupBarStore.load(context.hostContext())
     @Volatile private var enabled = prefs.getBoolean(GroupBarStore.ENABLE, false)
@@ -112,21 +116,22 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             load.isAccessible = true; membership.isAccessible = true
             check(load.returnType.name == "jo5.n0" && membership.returnType == Boolean::class.javaPrimitiveType)
             // Constructors identify only the two verified homepage data sources, excluding forward pickers.
-            for (name in listOf("jo5.y", "po5.l")) for (ctor in type(name).declaredConstructors) {
+            homepageSourceTypes = listOf("jo5.y", "po5.l").map(::type)
+            for (sourceType in homepageSourceTypes) for (ctor in sourceType.declaredConstructors) {
                 hooks += HookRegistry.get().hook(ctor, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) { sources[param.thisObject] = true }
                 })
             }
             hooks += HookRegistry.get().hook(load, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!destroyed && enabled && ready && sources.containsKey(param.thisObject)) queryScope.set(filter)
+                    if (!destroyed && enabled && ready && isHomepageSource(param.thisObject)) queryScope.set(filter)
                 }
                 override fun afterHookedMethod(param: MethodHookParam) { queryScope.remove() }
             })
             // RecyclerView incremental add/update uses this same native parent-membership gate.
             hooks += HookRegistry.get().hook(membership, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (destroyed || !enabled || !ready || !sources.containsKey(param.thisObject)) return
+                    if (destroyed || !enabled || !ready || !isHomepageSource(param.thisObject)) return
                     val item = param.args.firstOrNull() ?: return
                     runCatching {
                         val native = conversation.get(item) ?: return
@@ -161,7 +166,12 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             KavaReflector.findMethodRecursive(launcher, "onResume")?.let { method ->
                 hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        if (enabled && !destroyed) main.post { if (!destroyed) { contactsLoaded = false; loadContacts() } }
+                        if (!destroyed) main.post {
+                            if (!destroyed) {
+                                discoverHomepage(param.thisObject as? Activity)
+                                if (enabled) { contactsLoaded = false; loadContacts() }
+                            }
+                        }
                     }
                 })
             }
@@ -172,29 +182,70 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     if (reloadQueued.compareAndSet(false, true)) main.postDelayed(reloadChanged, 120)
                 }
             }
+            // Native MainUI changes title/multiwindow insets even when list bounds do not change.
+            val mainUi = type("com.tencent.mm.ui.conversation.MainUI")
+            KavaReflector.findMethodRecursive(mainUi, "onResume")?.let { method ->
+                hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        main.post { if (!destroyed) discoverHomepage(WeChatApis.currentActivity()?.currentActivity()) }
+                    }
+                })
+            }
+            KavaReflector.findMethodRecursive(mainUi, "F0", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { method ->
+                hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (!destroyed) main.post {
+                            if (!destroyed) sessions.values.toList().forEach { it.nativeInsetChanged() }
+                        }
+                    }
+                })
+            }
             prefs.registerOnSharedPreferenceChangeListener(listener)
             installed = true; updateFilter()
             if (enabled) { prepareHandoff(); loadContacts() }
+            // BRIDGE installation can happen after setAdapter/onAttachedToWindow already ran.
+            main.post { if (!destroyed) discoverHomepage(WeChatApis.currentActivity()?.currentActivity()) }
             return true
         } catch (error: Throwable) {
             HLog.e("[Hchat:GroupBar] 安装失败", error); destroy(); return false
         }
     }
     private val reloadChanged = Runnable { reloadQueued.set(false); if (!destroyed && enabled && ready) reload() }
+    private fun discoverHomepage(activity: Activity?) {
+        if (destroyed || activity == null || activity.javaClass.name != "com.tencent.mm.ui.LauncherUI") return
+        val root = activity.window?.decorView ?: return
+        var found = 0
+        fun visit(view: View) {
+            if (view.javaClass.name in setOf("com.tencent.mm.ui.conversation.ConversationListView", "com.tencent.mm.ui.conversation.recycler.ConversationRecyclerView")) {
+                found++; attach(view)
+                return
+            }
+            if (view is ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
+        }
+        visit(root)
+        if (found == 0) HLog.d("[Hchat:GroupBar] 当前首页尚无会话列表，等待原生挂载事件")
+    }
     private fun attach(view: View) {
-        if (!view.isAttachedToWindow) return
-        val parent = view.parent as? RelativeLayout ?: return
-        if (parent.javaClass.name != "com.tencent.mm.ui.conversation.MainUIView") return
-        var adapter: Any = if (view is ListView) view.adapter ?: return else
-            KavaReflector.findMethodRecursive(view.javaClass, "getAdapter")?.invoke(view) ?: return
-        while (adapter is HeaderViewListAdapter) adapter = adapter.wrappedAdapter ?: return
-        if (adapter.javaClass.name !in setOf("jo5.y0", "po5.u")) return
-        val reset = adapter.javaClass.getDeclaredMethod("S2")
-        check(reset.returnType == Void.TYPE)
-        sessions[view]?.let { if (it.adapter === adapter) return else it.dispose() }
+        if (!view.isAttachedToWindow || destroyed) return
         runCatching {
+            val parent = view.parent as? RelativeLayout
+            if (parent == null) {
+                HLog.w("[Hchat:GroupBar] 首页容器不匹配: list=${view.javaClass.name} parent=${view.parent?.javaClass?.name}")
+                return
+            }
+            var adapter: Any = if (view is ListView) view.adapter ?: return else
+                KavaReflector.findMethodRecursive(view.javaClass, "getAdapter")?.invoke(view) ?: return
+            while (adapter is HeaderViewListAdapter) adapter = adapter.wrappedAdapter ?: return
+            val reset = KavaReflector.findMethodRecursive(adapter.javaClass, "S2")
+            if (reset == null || reset.returnType != Void.TYPE) {
+                HLog.w("[Hchat:GroupBar] 首页适配器无重载入口: ${adapter.javaClass.name}")
+                return
+            }
+            reset.isAccessible = true
+            sessions[view]?.let { if (it.adapter === adapter) { it.render(); return } else it.dispose() }
             val session = Session(view, parent, adapter, reset)
             sessions[view] = session; session.render(); if (enabled) session.reload()
+            HLog.i("[Hchat:GroupBar] 横栏已挂载: list=${view.javaClass.name} parent=${parent.javaClass.name} adapter=${adapter.javaClass.name} enabled=$enabled priority=title_first")
         }.onFailure { HLog.e("[Hchat:GroupBar] 挂载失败", it) }
     }
     private fun loadContacts() {
@@ -224,7 +275,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private val positionListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             if (!disposed && bar.visibility == View.VISIBLE) positionBar()
         }
-        private val bar = HorizontalScrollView(view.context).apply {
+        private val bar = object : HorizontalScrollView(view.context), HomeExtensionSurface.Root {}.apply {
             id = View.generateViewId(); isHorizontalScrollBarEnabled = false; isFillViewport = true
         }
         private val strip = LinearLayout(view.context).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -239,6 +290,12 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             parent.addView(bar, RelativeLayout.LayoutParams(-1, dp(44)))
             bar.addOnLayoutChangeListener(layoutListener); view.addOnAttachStateChangeListener(detachListener)
             view.addOnLayoutChangeListener(positionListener)
+        }
+        fun nativeInsetChanged() {
+            val list = viewRef.get() ?: return
+            val lp = list.layoutParams as RelativeLayout.LayoutParams
+            nativeTopMargin = lp.topMargin
+            if (bar.visibility == View.VISIBLE) positionBar()
         }
         fun reload() {
             if (!disposed && viewRef.get()?.isAttachedToWindow == true) runCatching { reset.invoke(adapter) }
@@ -270,7 +327,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             params.setMargins(if (floating) dp(8) else 0, nativeTopMargin + floatingInset, if (floating) dp(8) else 0, 0)
             params.addRule(RelativeLayout.ALIGN_PARENT_TOP)
             bar.layoutParams = params
-            if (visible) positionBar()
+            if (visible) { positionBar(); bar.bringToFront() }
             val visibleGroups = groups.filter { it.enabled }
             visibleGroups.forEach { group ->
                 val text = TextView(list.context).apply {
