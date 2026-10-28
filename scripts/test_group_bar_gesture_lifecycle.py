@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1]
 s=(r/'app/src/main/java/t/mma/hooks/items/groupbar/GroupBarRuntime.kt').read_text()
-a=s.index('        fun userTouchStarted()');z=s.index('        fun closedHeaderIndex()',a)
+a=s.index('        fun userTouchStarted()');z=s.index('        private fun selectNativeTop',a)
 methods=s[a:z]
 a=s.index('        private val resetAfterData = Runnable');z=s.index('        private val switchObserver',a)
 reset=s[a:z]
@@ -14,7 +14,7 @@ class Main {val tasks=mutableListOf<Runnable>();fun removeCallbacks(r:Runnable){
 class Runtime {var disposed=false;var enabled=true;var pendingSwitchReset=false;var userInteracting=false;var headerOpen=false
  val view=View();val viewRef=WeakReference(view);val openField=Field();val main=Main();var selects=0;var reloads=0
  val drainReload=Runnable{}
- fun selectNativeTop(v:View){selects++};fun reload(){reloads++}
+ fun traceState(s:String){};fun selectNativeTop(v:View){selects++};fun reload(){reloads++}
 '''+reset+methods+'''
  fun notifyData(){resetAfterData.run()}
 }

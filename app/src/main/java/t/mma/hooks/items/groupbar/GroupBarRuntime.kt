@@ -99,6 +99,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         }
     }
     private fun select(id: String) {
+        sessions.values.toList().forEach { it.beginTrace("switch:$selected->$id") }
         selected = id; updateFilter()
         sessions.values.toList().forEach { it.switchGroup() }
     }
@@ -190,25 +191,19 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             })
             nativeListHook(list, "C", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
             nativeListHook(list, "setSelection", Int::class.javaPrimitiveType!!, before = { it.beforeNativeSelection() })
-            val layoutSelection = ThreadLocal<Boolean>()
-            for ((owner, methodName, args) in listOf(
-                Triple(list, "onLayout", arrayOf(Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)),
-                Triple(type("com.tencent.mm.ui.conversation.l3"), "run", emptyArray<Class<*>>())
+            // Diagnostic build: observe native selection without rewriting its index.
+            for ((name, args) in listOf(
+                "setSelection" to arrayOf(Int::class.javaPrimitiveType!!),
+                "setSelectionFromTop" to arrayOf(Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!),
+                "smoothScrollBy" to arrayOf(Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)
             )) {
-                val method = KavaReflector.findMethodRecursive(owner, methodName, *args) ?: error("Missing native layout selection owner")
+                val method = KavaReflector.findMethodRecursive(list, name, *args) ?: continue
                 hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) { layoutSelection.set(true) }
-                    override fun afterHookedMethod(param: MethodHookParam) { layoutSelection.remove() }
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        sessions[param.thisObject as? View]?.traceCall(name, param.args)
+                    }
                 })
             }
-            val selection = KavaReflector.findMethodRecursive(list, "setSelection", Int::class.javaPrimitiveType!!)!!
-            hooks += HookRegistry.get().hook(selection, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (layoutSelection.get() != true || param.args[0] != 1) return
-                    val session = sessions[param.thisObject as? View] ?: return
-                    session.closedHeaderIndex()?.let { param.args[0] = it }
-                }
-            })
             nativeListHook(list, "o", after = { it.headerState(true) })
             nativeListHook(list, "q", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.headerState(false) })
             // Constant-time state reads only; no view search, layout mutation, SQL or reload on scroll.
@@ -407,8 +402,46 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private var positionDirty = true
         private var titleChain = emptyList<View>()
         private val preDrawListener = android.view.ViewTreeObserver.OnPreDrawListener {
-            if (!disposed) syncHeaderVisibility()
+            if (!disposed) { syncHeaderVisibility(); traceState("frame") }
             true
+        }
+        // Bounded diagnostic window: no idle logging or view-tree search.
+        private var traceUntil = 0L
+        private var traceCount = 0
+        private var traceSequence = 0
+        private var traceLast = ""
+        private var traceCalls = 0
+        private val traceEnd = Runnable { traceState("end"); traceUntil = 0L }
+        fun beginTrace(reason: String) {
+            traceUntil = android.os.SystemClock.uptimeMillis() + 1800
+            traceCount = 0; traceCalls = 0; traceSequence++; traceLast = ""
+            HLog.i("[Hchat:GroupBarDiag] begin=$traceSequence reason=$reason")
+            main.removeCallbacks(traceEnd); main.postDelayed(traceEnd, 1700)
+            traceState("begin")
+        }
+        fun traceCall(name: String, args: Array<Any?>) {
+            if (android.os.SystemClock.uptimeMillis() > traceUntil || traceCalls >= 12) return
+            traceCalls++
+            val origin = Throwable().stackTrace.take(18).joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" }
+            HLog.i("[Hchat:GroupBarDiag] seq=$traceSequence call=$name args=${args.joinToString()} origin=$origin")
+            traceState("call:$name")
+        }
+        private fun traceState(phase: String) {
+            if (traceUntil == 0L || android.os.SystemClock.uptimeMillis() > traceUntil || traceCount >= 60) return
+            val list = viewRef.get() ?: return
+            val lv = list as? ListView
+            val child = if (lv != null && lv.childCount > 0) lv.getChildAt(0) else null
+            val task = KavaReflector.findFieldRecursive(list.javaClass, if (lv != null) "i" else "Y2")?.apply { isAccessible = true }?.get(list) as? View
+            val controller = controllerField.get(list)
+            val offset = if (controller != null) KavaReflector.findFieldRecursive(controller.javaClass, "n")?.apply { isAccessible = true }?.getInt(controller) else null
+            val rows = if (lv != null) (0 until minOf(4, lv.childCount)).joinToString(";") { i ->
+                val v = lv.getChildAt(i)
+                "${lv.firstVisiblePosition+i}:${System.identityHashCode(v)}:${v.top}:${v.bottom}:${v.visibility}:${v.alpha}"
+            } else "recycler"
+            val state = "rows=$rows group=$selected count=${lv?.count} headers=${lv?.headerViewsCount} first=${lv?.firstVisiblePosition} top=${child?.top} bottom=${child?.bottom} child=${child?.let { System.identityHashCode(it) }} scroll=${scrollField.getInt(list)} base=$nativeScrollOffset reserve=$appliedScrollInset controller=$offset open=${nativeHeaderOpen()} task=${task?.top}/${task?.bottom}/${task?.visibility}/${task?.translationY} bar=${bar.visibility}/${bar.top} title=${titleAnchor?.visibility}/${titleAnchor?.alpha} pending=$pendingSwitchReset deferred=$reloadDeferred touch=$userInteracting"
+            if (phase == "frame" && state == traceLast) return
+            traceLast = state; traceCount++
+            HLog.i("[Hchat:GroupBarDiag] seq=$traceSequence t=${android.os.SystemClock.uptimeMillis()} phase=$phase $state")
         }
         private val titlePosition = IntArray(2)
         private val parentPosition = IntArray(2)
@@ -486,6 +519,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         }
         private val switchObserver = object : DataSetObserver() {
             override fun onChanged() {
+                traceState("dataChanged")
                 if (pendingSwitchReset && !userInteracting) {
                     main.removeCallbacks(resetAfterData)
                     // DataSetObservable notifies before ListView's next layout. Commit
@@ -557,11 +591,6 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val list = viewRef.get() ?: return headerOpen
             return headerOpen || openField.getBoolean(list)
         }
-        fun closedHeaderIndex(): Int? {
-            if (!enabled || !hasVisibleGroups || userInteracting || nativeHeaderOpen()) return null
-            val list = viewRef.get() as? ListView ?: return null
-            return KavaReflector.findMethodRecursive(list.javaClass, "getFirstHeaderVisible")?.invoke(list) as? Int
-        }
         private fun selectNativeTop(list: View) {
             if (list is ListView) {
                 val first = KavaReflector.findMethodRecursive(list.javaClass, "getFirstHeaderVisible")?.invoke(list) as? Int ?: return
@@ -573,6 +602,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             if (disposed || !enabled || !ready) return
             if (userInteracting || nativeHeaderOpen()) { reloadDeferred = true; return }
             reloadDeferred = false
+            traceState("reload")
             if (!disposed && viewRef.get()?.isAttachedToWindow == true) runCatching { reset.invoke(adapter) }
                 .onFailure { HLog.e("[Hchat:GroupBar] 原生重载失败", it) }
         }
@@ -765,6 +795,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             // selection here: it can run during a pull gesture or TaskBar transition.
         }
         fun headerState(open: Boolean) {
+            beginTrace("header:$open")
             headerOpen = open
             if (open) {
                 pendingSwitchReset = false
@@ -810,6 +841,8 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         fun dispose() {
             if (disposed) return
             disposed = true
+            main.removeCallbacks(traceEnd)
+            traceUntil = 0L
             pendingSwitchReset = false
             main.removeCallbacks(resetAfterData)
             main.removeCallbacks(drainReload)

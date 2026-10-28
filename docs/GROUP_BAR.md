@@ -135,3 +135,12 @@ SDK编译、源码契约检查、生产偏移方法的基线重算/不累加/控
 公众号保留getPickerOfficialAccounts的gh_及verifyFlag!=0识别（含旧名称认证账号），增补微信原生服务号聚合conversationboxservice、服务通知notifymessage；SQL与增量同语义，不主动改变原生隐藏会话归属。服务号用例纳入SQL对等回归。
 
 当前验证为SDK、SQL、手势、偏移/生命周期定向检查，未完成新APK构建安装和真机动画/秒显验收。
+
+
+### 诊断版：撤回未经实测验证的索引改写
+
+用户授权清理无效补丁并采集真实运行记录。本次删除cdd242d新增的onLayout/l3.run作用域索引参数改写及closedHeaderIndex，恢复这两个原生调用原始参数；其余偏移协调保留为固定诊断基线，避免同时撤销曾改善留白、透显与手势的代码。此版不声称修复闪动。启动提前注册、服务号、拖动排序保留。
+
+新增[Hchat:GroupBarDiag]，切组或header开关触发1800ms窗口，1700ms结束记录，最多60条状态/12条定位堆栈。记录单调时钟、分组、总条目/头数量、前4个child的内存标识及几何可见状态、列表/TaskBar偏移、原生open、横栏、重载与手势标记。无聊天正文/昵称/消息读取；窗口外不反射、搜索或构造状态字符串。定位Hook不修改参数；追踪setSelection/setSelectionFromTop/smoothScrollBy来源，DataSetObserver记录数据变更，PreDraw只在窗口内采集变化。此开销是临时诊断开销，不能拿该包进行正式性能验收。卸载清理定时器及Hook。
+
+用户安装诊断包后授权通过UI执行分组切换和下拉小程序收回，并同步录屏/取日志；当前未操作微信、未声称复现。最新附件日志在当前cleanOnExit路径不存在，不能声称已读取该附件。

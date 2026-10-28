@@ -91,6 +91,12 @@ assert 'if (!candidate.install())' in feature
 assert feature.index('candidate.install()') < feature.index('DexInstallScheduler.schedule(')
 assert 'resetAfterData.run()' in runtime
 assert 'main.post(resetAfterData)' not in runtime
-assert 'session.closedHeaderIndex()?.let { param.args[0] = it }' in runtime
-assert 'com.tencent.mm.ui.conversation.l3' in runtime
+assert 'param.args[0] = it' not in runtime
+assert '[Hchat:GroupBarDiag]' in runtime
 print('PASS direct lifecycle registration with queued failure retry; synchronous result positioning; scoped native index correction')
+
+assert 'closedHeaderIndex' not in runtime
+assert 'traceCount >= 60' in runtime and 'traceCalls >= 12' in runtime
+assert 'traceUntil = android.os.SystemClock.uptimeMillis() + 1800' in runtime
+assert 'main.removeCallbacks(traceEnd)' in runtime
+print('PASS bounded diagnostic window and call budget, no native index rewrite, timer cleanup')
