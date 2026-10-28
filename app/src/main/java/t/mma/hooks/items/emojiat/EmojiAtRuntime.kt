@@ -130,17 +130,19 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
         hook(t.send, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 if (!enabled || scope.get() != null) return
-                // sj also handles native retry/search payloads. Those callers own the message,
-                // download metadata and continuation; do not defer them behind a second dialog.
-                if (param.args.getOrNull(2) != null || param.args.getOrNull(4) != null) return
                 val talker = (param.args.firstOrNull() as? String)?.takeIf { it.endsWith("@chatroom") } ?: return
-                val activity = WeChatApis.currentActivity()?.currentActivity()?.takeUnless { it.isFinishing || it.isDestroyed } ?: return
-                if (Looper.myLooper() != Looper.getMainLooper()) return
+                val foreground = WeChatApis.currentActivity()?.currentActivity() ?: return
+                // Search LiteApp closes its transparent activity after dispatching send. Its d2
+                // is the verified underlying chat Activity; keep the choice on that stable host.
+                val searchHost = if (foreground.javaClass.name == "com.tencent.mm.plugin.emoji.ui.liteapp.EmojiSearchLiteAppTransparentUI")
+                    R.readField(foreground, "d2") as? android.app.Activity else null
+                val activity = (searchHost ?: foreground).takeUnless { it.isFinishing || it.isDestroyed } ?: return
                 val receiver = param.thisObject
                 val args = param.args.clone()
                 val epoch = generation
                 val used = AtomicBoolean(false)
-                try {
+                val choose = {
+                  try {
                     VoiceForwardMiuixDialog.showChoices(activity, "发送表情", "艾特发送为表情附带隐藏成员名单，不额外发送文字。", listOf(
                         "普通发送" to "保持微信原有发送方式", "艾特发送" to "最多附带499位其他成员的艾特名单"
                     ), onSelected = { index ->
@@ -162,8 +164,15 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
                             }
                         }
                     }, onDismiss = {})
-                    param.result = null
-                } catch (e: Throwable) { report("显示选择失败，保留原发送", e) }
+                  } catch (e: Throwable) {
+                      report("显示选择失败，未发送", e)
+                      notice("发送选择未能显示，请重试")
+                  }
+                }
+                // Search/download callbacks may arrive off-main; retain the complete native
+                // arguments and show on main instead of silently skipping the chooser.
+                param.result = null
+                main.post { if (alive && enabled && epoch == generation && !activity.isFinishing && !activity.isDestroyed) choose() }
             }
         })
     }

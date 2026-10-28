@@ -64,3 +64,12 @@ MainUI 通过列表 topMargin 留出标题区域；横栏承接该边距并让�
 
 ### 标题真实坐标定位
 09:10 日志已证明挂载成功，截图却显示在状态栏，说明原生列表 topMargin 不能代表标题底边（MainUI 的 header 分支会给 F0 传零）。改用侧栏源码已确认的 ez/hb/ih 标题容器，通过 getLocationInWindow 计算标题底边相对 MainUIView 的位置并扣除父级 paddingTop；标题和父容器布局变化时重算，卸载移除监听。横栏仍在列表外，优先于列表内首页扩展，选中文字保持蓝色。SDK 定向编译通过，真机位置待验收。
+
+
+### 原生 TaskBar 头部与列表边界复核
+
+ConversationListView 实际位于 smali_classes16。其 i 是原生 TaskBar 头容器；getFirstHeaderVisible 跳过该容器，setSelection(0) 会映射到原生可见头并使用字段 s 偏移。原先 BELOW 横栏把整个列表下移，叠加原生头空间且截断顶部透显；已取消所有列表 RelativeLayout 规则和 topMargin 改写，仅增加横栏自身44dp的 paddingTop，clipToPadding=false。背景美化恢复旧 padding 会撤销新布局，现通过弱引用几何所有权协调。停用时仅恢复本功能持有的偏移与裁剪状态。
+
+显式切组调用已核实的 l(0L,0,true) 关闭原生下拉头，下一次UI投递再次回位；不在滚动回调中扫描/强制关闭，用户主动下拉仍由微信处理。横栏卸载时通过主线程投递删除兄弟视图，避免在 ViewGroup.dispatchDetachedFromWindow 的子数组遍历中同步删除。
+
+系统 crash buffer 的09:14堆栈包含 dispatchDetachedFromWindow 空引用；09:36还有 NewChattingTabUI.yf.queueIdle 在预加载后 c 为空的异常，后续数据库关闭异常发生在主线程故障之后。后者尚未证实与横栏的直接因果关系，未添加广泛异常吞噬。真机崩溃与空分组、稀疏分组切换仍需验收。

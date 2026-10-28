@@ -41,3 +41,13 @@ for f in ['jo5/y0','po5/u']:
 for f in ['jo5/m','po5/l']:assert 'Ljo5/e;->g(Ljo5/m0;)' in (d/f'smali_classes11/{f}.smali').read_text()
 assert 'Ljo5/e;->l(Ljo5/z;)Z' in (d/'smali_classes11/po5/l.smali').read_text()
 print('PASS production integration and actual smali: both native loaders, S2 resets, scoped SQL, incremental membership, mutual exclusion/restore guards and detach cleanup')
+
+assert 'RelativeLayout.BELOW, bar.id' not in runtime
+assert 'lp.topMargin = 0' not in runtime
+assert 'clipToPadding = false' in runtime and 'restoreAvoidance' in runtime
+assert 'HomeExtensionSurface.ownGeometry(list, true)' in runtime
+assert 'main.post { if (!v.isAttachedToWindow)' in runtime
+assert 'close.invoke(list, 0L, 0, true)' in runtime
+beauty=read(base+'hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt')
+assert 'HomeExtensionSurface.ownsGeometry(view)' in beauty
+print('PASS native viewport/rules retained, one bar-height inset, transparent scroll, deferred detach, native taskbar closure and beauty geometry coordination')

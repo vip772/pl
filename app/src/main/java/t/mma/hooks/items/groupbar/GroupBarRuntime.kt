@@ -1,5 +1,7 @@
 package t.mma.hooks.items.groupbar
 
+import android.database.DataSetObserver
+import android.os.SystemClock
 import android.app.Activity
 import android.content.SharedPreferences
 import t.mma.hooks.items.homeextension.HomeExtensionSurface
@@ -96,7 +98,8 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         }
     }
     private fun select(id: String) {
-        selected = id; updateFilter(); reload()
+        selected = id; updateFilter()
+        sessions.values.toList().forEach { it.switchGroup() }
     }
     private fun reload() { sessions.values.toList().forEach { it.reload() } }
     fun install(): Boolean {
@@ -268,7 +271,10 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
     private inner class Session(view: View, parent: RelativeLayout, val adapter: Any, private val reset: Method) {
         private val viewRef = WeakReference(view)
         private val parentRef = WeakReference(parent)
-        private val originalRules = (view.layoutParams as RelativeLayout.LayoutParams).rules.copyOf()
+        private val originalPaddingTop = view.paddingTop
+        private val originalClipToPadding = (view as? ViewGroup)?.clipToPadding ?: true
+        private var appliedPadding = 0
+        private var positioning = false
         // MainUI places its list below the title using a dynamic top margin.
         private var nativeTopMargin = (view.layoutParams as RelativeLayout.LayoutParams).topMargin
         private var floatingInset = 0
@@ -276,10 +282,10 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private val titlePosition = IntArray(2)
         private val parentPosition = IntArray(2)
         private val titleLayoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (!disposed && bar.visibility == View.VISIBLE) positionBar()
+            if (!disposed && bar.visibility == View.VISIBLE) safePosition()
         }
         private val positionListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (!disposed && bar.visibility == View.VISIBLE) positionBar()
+            if (!disposed && bar.visibility == View.VISIBLE) safePosition()
         }
         private val bar = object : HorizontalScrollView(view.context), HomeExtensionSurface.Root {}.apply {
             id = View.generateViewId(); isHorizontalScrollBarEnabled = false; isFillViewport = true
@@ -287,11 +293,24 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private val strip = LinearLayout(view.context).apply { gravity = Gravity.CENTER_VERTICAL }
         private val layoutListener = View.OnLayoutChangeListener { _, l, _, r, _, oldL, _, oldR, _ -> if (r-l != oldR-oldL) resize(r-l) }
         private var disposed = false
+        private var switchDeadline = 0L
+        private val switchObserver = object : DataSetObserver() {
+            override fun onChanged() {
+                if (switchDeadline == 0L) return
+                val shouldClose = SystemClock.uptimeMillis() <= switchDeadline
+                switchDeadline = 0L
+                if (shouldClose) main.post { if (!disposed && enabled) closeNativeHeader() }
+            }
+        }
         private val detachListener = object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(v: View) {}
-            override fun onViewDetachedFromWindow(v: View) { dispose(); sessions.remove(v) }
+            override fun onViewDetachedFromWindow(v: View) {
+                // Removing a sibling while ViewGroup dispatches detach corrupts its child loop.
+                main.post { if (!v.isAttachedToWindow) { dispose(); if (sessions[v] === this@Session) sessions.remove(v) } }
+            }
         }
         init {
+            (adapter as? ListAdapter)?.registerDataSetObserver(switchObserver)
             bar.addView(strip, ViewGroup.LayoutParams(-2, -1))
             parent.addView(bar, RelativeLayout.LayoutParams(-1, dp(44)))
             bar.addOnLayoutChangeListener(layoutListener); view.addOnAttachStateChangeListener(detachListener)
@@ -316,6 +335,22 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             nativeTopMargin = lp.topMargin
             if (bar.visibility == View.VISIBLE) positionBar()
         }
+        fun switchGroup() {
+            // S2 loads asynchronously; close again after its first data notification, not only
+            // in the click frame, otherwise sparse/empty custom groups can reveal TaskBar.
+            switchDeadline = SystemClock.uptimeMillis() + 2000L
+            closeNativeHeader()
+            reload()
+        }
+        fun closeNativeHeader() {
+            val list = viewRef.get() ?: return
+            if (list is ListView) runCatching {
+                val close = KavaReflector.findMethodRecursive(list.javaClass, "l", Long::class.javaPrimitiveType!!,
+                    Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!) ?: return
+                close.invoke(list, 0L, 0, true)
+                list.post { if (!disposed && enabled) runCatching { close.invoke(list, 0L, 0, true) }.onFailure { HLog.e("[Hchat:GroupBar] 切组原生头回位失败", it) } }
+            }.onFailure { HLog.e("[Hchat:GroupBar] 切组关闭原生下拉头失败", it) }
+        }
         fun reload() {
             if (!disposed && viewRef.get()?.isAttachedToWindow == true) runCatching { reset.invoke(adapter) }
                 .onFailure { HLog.e("[Hchat:GroupBar] 原生重载失败", it) }
@@ -324,15 +359,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val list = viewRef.get() ?: return
             val visible = enabled && groups.any { it.enabled }
             bar.visibility = if (visible) View.VISIBLE else View.GONE
-            val lp = list.layoutParams as RelativeLayout.LayoutParams
-            if (visible) {
-                lp.removeRule(RelativeLayout.ALIGN_PARENT_TOP)
-                lp.addRule(RelativeLayout.BELOW, bar.id)
-            } else {
-                lp.topMargin = nativeTopMargin
-                for (i in originalRules.indices) { lp.removeRule(i); if (originalRules[i] != 0) lp.addRule(i, originalRules[i]) }
-            }
-            list.layoutParams = lp
+            if (!visible) restoreAvoidance(list)
             strip.removeAllViews()
             val floating = prefs.getInt(GroupBarStore.STYLE, 0) == 1
             val alpha = ((100 - prefs.getInt(GroupBarStore.ALPHA, 0).coerceIn(0, 100)) * 255 / 100)
@@ -371,11 +398,14 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             }
             resize(bar.width)
         }
+        private fun safePosition() {
+            runCatching { positionBar() }.onFailure { HLog.e("[Hchat:GroupBar] 横栏定位失败", it) }
+        }
         private fun positionBar() {
             val list = viewRef.get() ?: return
             val lp = list.layoutParams as RelativeLayout.LayoutParams
             // A later native title/inset update is transferred to the bar once.
-            if (lp.topMargin != 0) nativeTopMargin = lp.topMargin
+            nativeTopMargin = lp.topMargin
             val bp = bar.layoutParams as RelativeLayout.LayoutParams
             val parent = parentRef.get() ?: return
             val anchor = titleAnchor
@@ -386,7 +416,27 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             } else nativeTopMargin
             val top = titleBottom + floatingInset
             if (bp.topMargin != top) { bp.topMargin = top; bar.layoutParams = bp }
-            if (lp.topMargin != 0) { lp.topMargin = 0; list.layoutParams = lp }
+            if (!positioning) {
+                positioning = true
+                try {
+                    // Keep the native taskbar/header viewport and its selection offsets intact.
+                    val reserve = dp(44) + floatingInset
+                    val expected = originalPaddingTop + reserve
+                    if (list.paddingTop != expected) list.setPadding(list.paddingLeft, expected, list.paddingRight, list.paddingBottom)
+                    appliedPadding = reserve
+                    (list as? ViewGroup)?.clipToPadding = false
+                    HomeExtensionSurface.ownGeometry(list, true)
+                } finally { positioning = false }
+            }
+        }
+        private fun restoreAvoidance(list: View) {
+            HomeExtensionSurface.ownGeometry(list, false)
+            if (appliedPadding != 0) {
+                if (list.paddingTop == originalPaddingTop + appliedPadding)
+                    list.setPadding(list.paddingLeft, originalPaddingTop, list.paddingRight, list.paddingBottom)
+                (list as? ViewGroup)?.clipToPadding = originalClipToPadding
+                appliedPadding = 0
+            }
         }
         private fun resize(width: Int) {
             if (width <= 0 || strip.childCount == 0) return
@@ -399,18 +449,19 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         fun dispose() {
             if (disposed) return
             disposed = true
+            switchDeadline = 0L
+            (adapter as? ListAdapter)?.unregisterDataSetObserver(switchObserver)
             viewRef.get()?.let { view ->
                 view.removeOnAttachStateChangeListener(detachListener)
                 view.removeOnLayoutChangeListener(positionListener)
-                val lp = view.layoutParams as RelativeLayout.LayoutParams
-                lp.topMargin = nativeTopMargin
-                for (i in originalRules.indices) { lp.removeRule(i); if (originalRules[i] != 0) lp.addRule(i, originalRules[i]) }
-                view.layoutParams = lp
+                restoreAvoidance(view)
             }
             titleAnchor?.removeOnLayoutChangeListener(titleLayoutListener)
             titleAnchor = null
             parentRef.get()?.removeOnLayoutChangeListener(titleLayoutListener)
-            bar.removeOnLayoutChangeListener(layoutListener); parentRef.get()?.removeView(bar)
+            bar.removeOnLayoutChangeListener(layoutListener)
+            val parent = parentRef.get()
+            main.post { if (parent != null && bar.parent === parent) parent.removeView(bar) }
         }
         private fun dp(value: Int) = (value * bar.resources.displayMetrics.density + .5f).toInt()
     }
