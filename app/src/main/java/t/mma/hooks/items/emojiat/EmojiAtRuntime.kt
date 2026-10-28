@@ -130,6 +130,9 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
         hook(t.send, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 if (!enabled || scope.get() != null) return
+                // sj also handles native retry/search payloads. Those callers own the message,
+                // download metadata and continuation; do not defer them behind a second dialog.
+                if (param.args.getOrNull(2) != null || param.args.getOrNull(4) != null) return
                 val talker = (param.args.firstOrNull() as? String)?.takeIf { it.endsWith("@chatroom") } ?: return
                 val activity = WeChatApis.currentActivity()?.currentActivity()?.takeUnless { it.isFinishing || it.isDestroyed } ?: return
                 if (Looper.myLooper() != Looper.getMainLooper()) return

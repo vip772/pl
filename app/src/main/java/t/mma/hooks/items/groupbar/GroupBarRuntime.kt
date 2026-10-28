@@ -272,6 +272,12 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         // MainUI places its list below the title using a dynamic top margin.
         private var nativeTopMargin = (view.layoutParams as RelativeLayout.LayoutParams).topMargin
         private var floatingInset = 0
+        private var titleAnchor: View? = null
+        private val titlePosition = IntArray(2)
+        private val parentPosition = IntArray(2)
+        private val titleLayoutListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            if (!disposed && bar.visibility == View.VISIBLE) positionBar()
+        }
         private val positionListener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             if (!disposed && bar.visibility == View.VISIBLE) positionBar()
         }
@@ -290,6 +296,19 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             parent.addView(bar, RelativeLayout.LayoutParams(-1, dp(44)))
             bar.addOnLayoutChangeListener(layoutListener); view.addOnAttachStateChangeListener(detachListener)
             view.addOnLayoutChangeListener(positionListener)
+            // HomeSidePanel verifies hb in Toolbar and ez/ih as the 8.0.78 title hosts.
+            val decor = view.rootView
+            for (name in listOf("ez", "hb", "ih")) {
+                val id = view.resources.getIdentifier(name, "id", view.context.packageName)
+                val candidate = if (id != 0) decor.findViewById<View>(id) else null
+                if (candidate != null && candidate !== parent && candidate !== view) {
+                    titleAnchor = candidate
+                    candidate.addOnLayoutChangeListener(titleLayoutListener)
+                    break
+                }
+            }
+            parent.addOnLayoutChangeListener(titleLayoutListener)
+            HLog.i("[Hchat:GroupBar] 标题锚点=${titleAnchor?.javaClass?.name} nativeMargin=$nativeTopMargin")
         }
         fun nativeInsetChanged() {
             val list = viewRef.get() ?: return
@@ -358,7 +377,14 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             // A later native title/inset update is transferred to the bar once.
             if (lp.topMargin != 0) nativeTopMargin = lp.topMargin
             val bp = bar.layoutParams as RelativeLayout.LayoutParams
-            val top = nativeTopMargin + floatingInset
+            val parent = parentRef.get() ?: return
+            val anchor = titleAnchor
+            val titleBottom = if (anchor != null && anchor.isShown && anchor.height > 0) {
+                anchor.getLocationInWindow(titlePosition)
+                parent.getLocationInWindow(parentPosition)
+                (titlePosition[1] + anchor.height - parentPosition[1] - parent.paddingTop).coerceAtLeast(0)
+            } else nativeTopMargin
+            val top = titleBottom + floatingInset
             if (bp.topMargin != top) { bp.topMargin = top; bar.layoutParams = bp }
             if (lp.topMargin != 0) { lp.topMargin = 0; list.layoutParams = lp }
         }
@@ -381,6 +407,9 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 for (i in originalRules.indices) { lp.removeRule(i); if (originalRules[i] != 0) lp.addRule(i, originalRules[i]) }
                 view.layoutParams = lp
             }
+            titleAnchor?.removeOnLayoutChangeListener(titleLayoutListener)
+            titleAnchor = null
+            parentRef.get()?.removeOnLayoutChangeListener(titleLayoutListener)
             bar.removeOnLayoutChangeListener(layoutListener); parentRef.get()?.removeView(bar)
         }
         private fun dp(value: Int) = (value * bar.resources.displayMetrics.density + .5f).toInt()
