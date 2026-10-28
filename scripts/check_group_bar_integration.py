@@ -44,10 +44,20 @@ print('PASS production integration and actual smali: both native loaders, S2 res
 
 assert 'RelativeLayout.BELOW, bar.id' not in runtime
 assert 'lp.topMargin = 0' not in runtime
-assert 'clipToPadding = false' in runtime and 'restoreAvoidance' in runtime
-assert 'HomeExtensionSurface.ownGeometry(list, true)' in runtime
+assert '.setPadding(' not in runtime and 'restoreAvoidance' in runtime
+assert 'scrollField.setInt(list, base + reserve)' in runtime
 assert 'main.post { if (!v.isAttachedToWindow)' in runtime
 assert 'close.invoke(list, 0L, 0, true)' in runtime
 beauty=read(base+'hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt')
-assert 'HomeExtensionSurface.ownsGeometry(view)' in beauty
-print('PASS native viewport/rules retained, one bar-height inset, transparent scroll, deferred detach, native taskbar closure and beauty geometry coordination')
+assert 'HomeExtensionSurface.ownsGeometry(view)' not in beauty
+print('PASS native viewport/rules/padding retained; native list/taskbar offsets coordinated; deferred detach')
+
+listSource=(d/'smali_classes16/com/tencent/mm/ui/conversation/ConversationListView.smali').read_text()
+for contract in ['.method public final C()V','.method public o()V','.method public q(II)V','->s:I','->n:I','computeActionBarTranslation %d']:
+ assert contract in listSource
+recyclerSource=(d/'smali_classes16/com/tencent/mm/ui/conversation/recycler/ConversationRecyclerView.smali').read_text()
+for contract in ['.method public final y1()V','.method public final u1()V','.method public o()V','.method public q(II)V','->v2:I','->n:I']:
+ assert contract in recyclerSource
+assert 'titleTranslation(anchor)' in runtime
+assert 'openField.getBoolean(list)' in runtime and 'View.INVISIBLE' in runtime
+print('PASS 8.0.78 ListView/RecyclerView offset and taskbar contracts, animation translation excluded, native header visibility gates')

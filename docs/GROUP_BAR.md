@@ -73,3 +73,14 @@ ConversationListView 实际位于 smali_classes16。其 i 是原生 TaskBar 头�
 显式切组调用已核实的 l(0L,0,true) 关闭原生下拉头，下一次UI投递再次回位；不在滚动回调中扫描/强制关闭，用户主动下拉仍由微信处理。横栏卸载时通过主线程投递删除兄弟视图，避免在 ViewGroup.dispatchDetachedFromWindow 的子数组遍历中同步删除。
 
 系统 crash buffer 的09:14堆栈包含 dispatchDetachedFromWindow 空引用；09:36还有 NewChattingTabUI.yf.queueIdle 在预加载后 c 为空的异常，后续数据库关闭异常发生在主线程故障之后。后者尚未证实与横栏的直接因果关系，未添加广泛异常吞噬。真机崩溃与空分组、稀疏分组切换仍需验收。
+
+
+### 2026-10-28 原生偏移链路纠正（替代上一节 padding 方案）
+
+用户反馈5fc5247：切组标题下移/灰点、小程序状态区出现横栏、首会话遮挡、返回顶部抖动。日志只证明挂载成功，不包含原生滚动参数，不能据此宣称稳定。录像为12.25秒1080×2340约119fps，已解压并提取逐秒联系图；当前图片工具仅OCR，未进行逐帧视觉验收。
+
+smali_classes16/ConversationListView：C()将gl.a(context)+E写入s，向TaskBarAnimController.n复制，并更新TaskBarContainer.q(statusHeight)。setSelection(0)映射getFirstHeaderVisible并使用s。onScroll在头部区域通过childTop-s计算标题translation，写I并设置C.translationY。此前增加padding而保持s不变，改变childTop-s，使原生按下拉处理。x由o()/q(II)分别置真/假。因此撤销padding/clip修改及美化几何豁免，改为原生s和控制器n统一增加横栏高度；C()重算前还原基线，后重新附加，避免累加；卸载恢复基线。
+
+RecyclerView的对应入口为y1()，字段v2/Z2/d3，控制器仍n；o/q负责原生头状态。两条路径均按实际混淆字段分别读取。标题定位扣除其父链translationY，不把下拉动画当成稳定几何位置。小程序展开/下拉位移时隐藏横栏，关闭时恢复。滚动入口仅缓存字段读取和发生变化时的显隐，无视图扫描/SQL/重载/布局重建。
+
+SDK编译、源码契约检查、生产偏移方法的基线重算/不累加/控制器一致/禁用恢复/打开头保持测试以及SQL回归通过。没有新增可用APK进行真机复测；不把定向验证等同首条不遮挡、下拉隐藏和滚动无抖动验收。

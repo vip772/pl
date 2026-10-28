@@ -163,8 +163,25 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             }
             val list = type("com.tencent.mm.ui.conversation.ConversationListView")
             hookAttach(list, "setAdapter", ListAdapter::class.java); hookAttach(list, "onAttachedToWindow")
+            fun nativeListHook(owner: Class<*>, name: String, vararg args: Class<*>, before: (Session) -> Unit = {}, after: (Session) -> Unit = {}) {
+                val method = KavaReflector.findMethodRecursive(owner, name, *args) ?: error("Missing native list method: $name")
+                hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) { sessions[param.thisObject as? View]?.let(before) }
+                    override fun afterHookedMethod(param: MethodHookParam) { sessions[param.thisObject as? View]?.let(after) }
+                })
+            }
+            nativeListHook(list, "C", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
+            nativeListHook(list, "o", after = { it.headerState(true) })
+            nativeListHook(list, "q", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.headerState(false) })
+            // Constant-time state reads only; no view search, layout mutation, SQL or reload on scroll.
+            nativeListHook(list, "onScroll", android.widget.AbsListView::class.java, Int::class.javaPrimitiveType!!,
+                Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.syncHeaderVisibility() })
             val recycler = type("com.tencent.mm.ui.conversation.recycler.ConversationRecyclerView")
             hookAttach(recycler, "setAdapter", type("androidx.recyclerview.widget.f2")); hookAttach(recycler, "onAttachedToWindow")
+            nativeListHook(recycler, "y1", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
+            nativeListHook(recycler, "o", after = { it.headerState(true) })
+            nativeListHook(recycler, "q", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.headerState(false) })
+            nativeListHook(recycler, "u1", after = { it.syncHeaderVisibility() })
             val launcher = type("com.tencent.mm.ui.LauncherUI")
             KavaReflector.findMethodRecursive(launcher, "onResume")?.let { method ->
                 hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
@@ -247,7 +264,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             reset.isAccessible = true
             sessions[view]?.let { if (it.adapter === adapter) { it.render(); return } else it.dispose() }
             val session = Session(view, parent, adapter, reset)
-            sessions[view] = session; session.render(); if (enabled) session.reload()
+            sessions[view] = session; session.render(); if (enabled) { session.closeNativeHeader(); session.reload() }
             HLog.i("[Hchat:GroupBar] 横栏已挂载: list=${view.javaClass.name} parent=${parent.javaClass.name} adapter=${adapter.javaClass.name} enabled=$enabled priority=title_first")
         }.onFailure { HLog.e("[Hchat:GroupBar] 挂载失败", it) }
     }
@@ -271,10 +288,17 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
     private inner class Session(view: View, parent: RelativeLayout, val adapter: Any, private val reset: Method) {
         private val viewRef = WeakReference(view)
         private val parentRef = WeakReference(parent)
-        private val originalPaddingTop = view.paddingTop
-        private val originalClipToPadding = (view as? ViewGroup)?.clipToPadding ?: true
-        private var appliedPadding = 0
-        private var positioning = false
+        private var nativeScrollOffset: Int? = null
+        private var appliedScrollInset = 0
+        private val isNativeList = view is ListView
+        private val scrollField = KavaReflector.findFieldRecursive(view.javaClass, if (isNativeList) "s" else "v2")!!.apply { isAccessible = true }
+        private val controllerField = KavaReflector.findFieldRecursive(view.javaClass, if (isNativeList) "m" else "Z2")!!.apply { isAccessible = true }
+        private val openField = KavaReflector.findFieldRecursive(view.javaClass, if (isNativeList) "x" else "d3")!!.apply { isAccessible = true }
+        private val translationField = if (isNativeList) KavaReflector.findFieldRecursive(view.javaClass, "I")!!.apply { isAccessible = true } else null
+        private val reserveHeight = (44 * view.resources.displayMetrics.density + .5f).toInt()
+        private var hasVisibleGroups = false
+        private var nativeOffsetUpdating = false
+        private var headerOpen = false
         // MainUI places its list below the title using a dynamic top margin.
         private var nativeTopMargin = (view.layoutParams as RelativeLayout.LayoutParams).topMargin
         private var floatingInset = 0
@@ -344,12 +368,17 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         }
         fun closeNativeHeader() {
             val list = viewRef.get() ?: return
-            if (list is ListView) runCatching {
+            if (list !is ListView) { selectNativeTop(list); return }
+            runCatching {
                 val close = KavaReflector.findMethodRecursive(list.javaClass, "l", Long::class.javaPrimitiveType!!,
                     Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!) ?: return
                 close.invoke(list, 0L, 0, true)
                 list.post { if (!disposed && enabled) runCatching { close.invoke(list, 0L, 0, true) }.onFailure { HLog.e("[Hchat:GroupBar] 切组原生头回位失败", it) } }
             }.onFailure { HLog.e("[Hchat:GroupBar] 切组关闭原生下拉头失败", it) }
+        }
+        private fun selectNativeTop(list: View) {
+            if (list is ListView) list.setSelection(0)
+            else KavaReflector.findMethodRecursive(list.javaClass, "setSelectionWithOffset", Int::class.javaPrimitiveType!!)?.invoke(list, 0)
         }
         fun reload() {
             if (!disposed && viewRef.get()?.isAttachedToWindow == true) runCatching { reset.invoke(adapter) }
@@ -357,9 +386,9 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         }
         fun render() {
             val list = viewRef.get() ?: return
-            val visible = enabled && groups.any { it.enabled }
+            hasVisibleGroups = groups.any { it.enabled }
+            val visible = enabled && hasVisibleGroups
             bar.visibility = if (visible) View.VISIBLE else View.GONE
-            if (!visible) restoreAvoidance(list)
             strip.removeAllViews()
             val floating = prefs.getInt(GroupBarStore.STYLE, 0) == 1
             val alpha = ((100 - prefs.getInt(GroupBarStore.ALPHA, 0).coerceIn(0, 100)) * 255 / 100)
@@ -396,7 +425,18 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 }
                 strip.addView(text, LinearLayout.LayoutParams(1, -1))
             }
+            applyNativeOffset(visible)
+            syncHeaderVisibility()
             resize(bar.width)
+        }
+        private fun titleTranslation(view: View): Int {
+            var current: View? = view
+            var translation = 0f
+            while (current != null && current !== parentRef.get()) {
+                translation += current.translationY
+                current = current.parent as? View
+            }
+            return translation.toInt()
         }
         private fun safePosition() {
             runCatching { positionBar() }.onFailure { HLog.e("[Hchat:GroupBar] 横栏定位失败", it) }
@@ -412,31 +452,53 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val titleBottom = if (anchor != null && anchor.isShown && anchor.height > 0) {
                 anchor.getLocationInWindow(titlePosition)
                 parent.getLocationInWindow(parentPosition)
-                (titlePosition[1] + anchor.height - parentPosition[1] - parent.paddingTop).coerceAtLeast(0)
+                (titlePosition[1] + anchor.height - titleTranslation(anchor) - parentPosition[1] - parent.paddingTop).coerceAtLeast(0)
             } else nativeTopMargin
             val top = titleBottom + floatingInset
             if (bp.topMargin != top) { bp.topMargin = top; bar.layoutParams = bp }
-            if (!positioning) {
-                positioning = true
-                try {
-                    // Keep the native taskbar/header viewport and its selection offsets intact.
-                    val reserve = dp(44) + floatingInset
-                    val expected = originalPaddingTop + reserve
-                    if (list.paddingTop != expected) list.setPadding(list.paddingLeft, expected, list.paddingRight, list.paddingBottom)
-                    appliedPadding = reserve
-                    (list as? ViewGroup)?.clipToPadding = false
-                    HomeExtensionSurface.ownGeometry(list, true)
-                } finally { positioning = false }
-            }
         }
-        private fun restoreAvoidance(list: View) {
-            HomeExtensionSurface.ownGeometry(list, false)
-            if (appliedPadding != 0) {
-                if (list.paddingTop == originalPaddingTop + appliedPadding)
-                    list.setPadding(list.paddingLeft, originalPaddingTop, list.paddingRight, list.paddingBottom)
-                (list as? ViewGroup)?.clipToPadding = originalClipToPadding
-                appliedPadding = 0
+        private fun applyNativeOffset(active: Boolean) {
+            val list = viewRef.get() ?: return
+            if (nativeOffsetUpdating) return
+            val current = scrollField.getInt(list)
+            val base = nativeScrollOffset ?: current.also { nativeScrollOffset = it }
+            val reserve = if (active) reserveHeight + floatingInset else 0
+            if (current != base + reserve) scrollField.setInt(list, base + reserve)
+            // C() copies s into TaskBarAnimController.n. Both consumers must agree.
+            val controller = controllerField.get(list)
+            if (controller != null) KavaReflector.findFieldRecursive(controller.javaClass, "n")?.apply {
+                isAccessible = true; setInt(controller, base + reserve)
             }
+            appliedScrollInset = reserve
+        }
+        fun beforeNativeOffset() {
+            val list = viewRef.get() ?: return
+            val base = nativeScrollOffset
+            if (base != null) scrollField.setInt(list, base)
+            nativeOffsetUpdating = true
+        }
+        fun afterNativeOffset() {
+            val list = viewRef.get() ?: return
+            nativeOffsetUpdating = false
+            nativeScrollOffset = scrollField.getInt(list)
+            applyNativeOffset(enabled && hasVisibleGroups)
+            if (enabled && !headerOpen) selectNativeTop(list)
+        }
+        fun headerState(open: Boolean) {
+            headerOpen = open
+            syncHeaderVisibility()
+            if (!open) safePosition()
+        }
+        fun syncHeaderVisibility() {
+            val list = viewRef.get() ?: return
+            val open = headerOpen || openField.getBoolean(list) || (translationField?.getInt(list) ?: 0) > 0
+            val visibility = if (enabled && hasVisibleGroups && !open) View.VISIBLE else View.INVISIBLE
+            if (bar.visibility != visibility) bar.visibility = visibility
+        }
+        private fun restoreAvoidance() {
+            applyNativeOffset(false)
+            nativeScrollOffset = null
+            appliedScrollInset = 0
         }
         private fun resize(width: Int) {
             if (width <= 0 || strip.childCount == 0) return
@@ -454,7 +516,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             viewRef.get()?.let { view ->
                 view.removeOnAttachStateChangeListener(detachListener)
                 view.removeOnLayoutChangeListener(positionListener)
-                restoreAvoidance(view)
+                restoreAvoidance()
             }
             titleAnchor?.removeOnLayoutChangeListener(titleLayoutListener)
             titleAnchor = null

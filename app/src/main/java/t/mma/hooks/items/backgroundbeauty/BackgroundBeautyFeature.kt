@@ -2952,7 +2952,7 @@ private class BackgroundBeautyRuntime(
         val chatList = snapshot.slot == BackgroundBeautySettings.Slot.CHAT &&
             (view.javaClass.name == "com.tencent.mm.pluginsdk.ui.tools.ChattingRecyclerView" ||
                 view.javaClass.name == "com.tencent.mm.pluginsdk.ui.tools.ScrollControlRecyclerView")
-        if (!chatList && !t.mma.hooks.items.homeextension.HomeExtensionSurface.ownsGeometry(view) && (view.paddingLeft != snapshot.originalPaddingLeft ||
+        if (!chatList && (view.paddingLeft != snapshot.originalPaddingLeft ||
             view.paddingTop != snapshot.originalPaddingTop ||
             view.paddingRight != snapshot.originalPaddingRight ||
             view.paddingBottom != snapshot.originalPaddingBottom)) {
