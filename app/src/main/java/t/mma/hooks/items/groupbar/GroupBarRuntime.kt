@@ -99,7 +99,6 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         }
     }
     private fun select(id: String) {
-        sessions.values.toList().forEach { it.beginTrace("switch:$selected->$id") }
         selected = id; updateFilter()
         sessions.values.toList().forEach { it.switchGroup() }
     }
@@ -191,52 +190,8 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             })
             nativeListHook(list, "C", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
             nativeListHook(list, "setSelection", Int::class.javaPrimitiveType!!, before = { it.beforeNativeSelection() })
-            // Diagnostic build: observe native selection without rewriting its index.
-            for ((name, args) in listOf(
-                "setSelection" to arrayOf(Int::class.javaPrimitiveType!!),
-                "setSelectionFromTop" to arrayOf(Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!),
-                "smoothScrollBy" to arrayOf(Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)
-            )) {
-                val method = KavaReflector.findMethodRecursive(list, name, *args) ?: continue
-                hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        sessions[param.thisObject as? View]?.traceCall(name, param.args)
-                    }
-                })
-            }
-            // Observation only: never alter arguments, return values or layout.
-            for ((name, signature) in listOf(
-                "h" to emptyArray<Class<*>>(),
-                "i" to arrayOf(Boolean::class.javaPrimitiveType!!),
-                "g" to arrayOf(Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!),
-                "onLayout" to arrayOf(Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)
-            )) {
-                val method = KavaReflector.findMethodRecursive(list, name, *signature) ?: continue
-                hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        runCatching { sessions[param.thisObject as? View]?.traceLayout("before:$name", param.args) }
-                    }
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        runCatching { sessions[param.thisObject as? View]?.traceLayout("after:$name", param.args) }
-                    }
-                })
-            }
             nativeListHook(list, "o", after = { it.headerState(true) })
             nativeListHook(list, "q", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.headerState(false) })
-            for ((name, signature) in listOf(
-                "dispatchDraw" to arrayOf(android.graphics.Canvas::class.java),
-                "drawChild" to arrayOf(android.graphics.Canvas::class.java, View::class.java, Long::class.javaPrimitiveType!!)
-            )) {
-                val method = KavaReflector.findMethodRecursive(list, name, *signature) ?: continue
-                hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        runCatching { sessions[param.thisObject as? View]?.traceDraw("before:$name", param.args) }
-                    }
-                    override fun afterHookedMethod(param: MethodHookParam) {
-                        runCatching { sessions[param.thisObject as? View]?.traceDraw("after:$name", param.args) }
-                    }
-                })
-            }
             // Constant-time state reads only; no view search, layout mutation, SQL or reload on scroll.
 
             nativeListHook(list, "onScroll", android.widget.AbsListView::class.java, Int::class.javaPrimitiveType!!,
@@ -433,95 +388,8 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private var positionDirty = true
         private var titleChain = emptyList<View>()
         private val preDrawListener = android.view.ViewTreeObserver.OnPreDrawListener {
-            if (!disposed) { syncHeaderVisibility(); traceState("frame") }
+            if (!disposed) syncHeaderVisibility()
             true
-        }
-        // Bounded diagnostic window: no idle logging or view-tree search.
-        private var traceUntil = 0L
-        private var traceCount = 0
-        private var traceStructuralCount = 0
-        private var traceSequence = 0
-        private var traceLast = ""
-        private var traceCalls = 0
-        private var traceDrawCount = 0
-        private var traceDispatchDrawCount = 0
-        private val traceEnd = Runnable { traceState("end"); traceUntil = 0L }
-        fun beginTrace(reason: String) {
-            val duration = if (reason == "header:false") 3000L else 1800L
-            traceUntil = android.os.SystemClock.uptimeMillis() + duration
-            traceCount = 0; traceStructuralCount = 0; traceCalls = 0; traceLayoutCount = 0; traceDrawCount = 0; traceDispatchDrawCount = 0; traceSequence++; traceLast = ""
-            HLog.i("[Hchat:GroupBarDiag] begin=$traceSequence reason=$reason")
-            main.removeCallbacks(traceEnd); main.postDelayed(traceEnd, duration - 100L)
-            traceState("begin")
-        }
-        fun traceCall(name: String, args: Array<Any?>) {
-            if (android.os.SystemClock.uptimeMillis() > traceUntil || traceCalls >= 12) return
-            traceCalls++
-            val origin = Throwable().stackTrace.take(18).joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" }
-            HLog.i("[Hchat:GroupBarDiag] seq=$traceSequence call=$name args=${args.joinToString()} origin=$origin")
-            traceState("call:$name")
-        }
-        private var traceLayoutCount = 0
-        fun traceLayout(phase: String, args: Array<Any?>) {
-            if (traceUntil == 0L || android.os.SystemClock.uptimeMillis() > traceUntil || traceLayoutCount >= 80) return
-            traceLayoutCount++
-            HLog.i("[Hchat:GroupBarDiag] seq=$traceSequence t=${android.os.SystemClock.uptimeMillis()} layout=$phase args=${args.joinToString()}")
-            traceState(phase)
-        }
-        fun traceDraw(phase: String, args: Array<Any?>) {
-            if (traceUntil == 0L || android.os.SystemClock.uptimeMillis() > traceUntil) return
-            val isDispatch = phase.endsWith("dispatchDraw")
-            if (isDispatch) {
-                if (traceDispatchDrawCount >= 8) return
-                traceDispatchDrawCount++
-            } else {
-                if (traceDrawCount >= 32) return
-                val target = args.getOrNull(1) as? View ?: return
-                val list = viewRef.get() as? ListView
-                val firstPosition = list?.headerViewsCount ?: -1
-                val firstIndex = firstPosition - (list?.firstVisiblePosition ?: 0)
-                val firstConversation = list?.let { if (firstIndex in 0 until it.childCount) it.getChildAt(firstIndex) else null }
-                val task = list?.let { KavaReflector.findFieldRecursive(it.javaClass, "i")?.apply { isAccessible = true }?.get(it) as? View }
-                if (target !== firstConversation && target !== task) return
-                traceDrawCount++
-            }
-            val target = args.getOrNull(1) as? View
-            val origin = Throwable().stackTrace.drop(1).take(8).joinToString(" <- ") { "${it.className}.${it.methodName}:${it.lineNumber}" }
-            HLog.i("[Hchat:GroupBarDiag] seq=$traceSequence t=${android.os.SystemClock.uptimeMillis()} draw=$phase target=${target?.let { diagnosticView(it) } ?: "none"} origin=$origin")
-            traceState(phase)
-        }
-        private fun diagnosticView(view: View?): String {
-            if (view == null) return "absent"
-            val rect = android.graphics.Rect()
-            val visible = view.getGlobalVisibleRect(rect)
-            return "${System.identityHashCode(view)}:${view.top}:${view.bottom}:${view.height}:${view.measuredHeight}:${view.layoutParams?.height}:${view.visibility}:${view.alpha}:${view.translationY}:shown=${view.isShown}:global=$visible,$rect:layout=${view.isLayoutRequested}"
-        }
-        private fun traceState(phase: String) {
-            if (traceUntil == 0L || android.os.SystemClock.uptimeMillis() > traceUntil) return
-            val frameSample = phase == "frame" || phase == "begin" || phase == "end"
-            if (frameSample && traceCount >= 60 || !frameSample && traceStructuralCount >= 80) return
-            val list = viewRef.get() ?: return
-            val lv = list as? ListView
-            val child = if (lv != null && lv.childCount > 0) lv.getChildAt(0) else null
-            val task = KavaReflector.findFieldRecursive(list.javaClass, if (lv != null) "i" else "Y2")?.apply { isAccessible = true }?.get(list) as? View
-            val controller = controllerField.get(list)
-            val offset = if (controller != null) KavaReflector.findFieldRecursive(controller.javaClass, "n")?.apply { isAccessible = true }?.getInt(controller) else null
-            val rows = if (lv != null) (0 until minOf(4, lv.childCount)).joinToString(";") { i ->
-                val v = lv.getChildAt(i)
-                "${lv.firstVisiblePosition+i}:${System.identityHashCode(v)}:${v.top}:${v.bottom}:${v.visibility}:${v.alpha}"
-            } else "recycler"
-            // Header count is an adapter offset, not a conversation child index.
-            val conversationPosition = lv?.headerViewsCount ?: -1
-            val conversationIndex = if (lv != null) conversationPosition - lv.firstVisiblePosition else -1
-            val conversation = if (lv != null && conversationIndex in 0 until lv.childCount) lv.getChildAt(conversationIndex) else null
-            val conversationParent = conversation?.parent as? View
-            val footer = if (lv != null) KavaReflector.findFieldRecursive(list.javaClass, "T")?.apply { isAccessible = true }?.get(list) as? View else null
-            val evidence = "conversationPos=$conversationPosition conversationIndex=$conversationIndex conversation=${diagnosticView(conversation)} conversationParent=${diagnosticView(conversationParent)} footer=${diagnosticView(footer)} listHeight=${list.height} listScrollY=${list.scrollY}"
-            val state = "$evidence rows=$rows group=$selected count=${lv?.count} headers=${lv?.headerViewsCount} first=${lv?.firstVisiblePosition} top=${child?.top} bottom=${child?.bottom} child=${child?.let { System.identityHashCode(it) }} scroll=${scrollField.getInt(list)} base=$nativeScrollOffset reserve=$appliedScrollInset controller=$offset open=${nativeHeaderOpen()} task=${task?.top}/${task?.bottom}/${task?.visibility}/${task?.translationY} bar=${bar.visibility}/${bar.top} title=${titleAnchor?.visibility}/${titleAnchor?.alpha} pending=$pendingSwitchReset deferred=$reloadDeferred touch=$userInteracting"
-            if (phase == "frame" && state == traceLast) return
-            traceLast = state
-            if (frameSample) traceCount++ else traceStructuralCount++
-            HLog.i("[Hchat:GroupBarDiag] seq=$traceSequence t=${android.os.SystemClock.uptimeMillis()} phase=$phase $state")
         }
         private val titlePosition = IntArray(2)
         private val parentPosition = IntArray(2)
@@ -606,7 +474,6 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         }
         private val switchObserver = object : DataSetObserver() {
             override fun onChanged() {
-                traceState("dataChanged")
                 if (pendingSwitchReset && !userInteracting) {
                     main.removeCallbacks(resetAfterData)
                     // DataSetObservable notifies before ListView's next layout. Commit
@@ -689,8 +556,6 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             if (disposed || !enabled || !ready) return
             if (userInteracting || nativeHeaderOpen()) { reloadDeferred = true; return }
             reloadDeferred = false
-            traceCall("groupbar.reload", emptyArray())
-            traceState("reload")
             if (!disposed && viewRef.get()?.isAttachedToWindow == true) runCatching { reset.invoke(adapter) }
                 .onFailure { HLog.e("[Hchat:GroupBar] 原生重载失败", it) }
         }
@@ -883,7 +748,6 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             // selection here: it can run during a pull gesture or TaskBar transition.
         }
         fun headerState(open: Boolean) {
-            beginTrace("header:$open")
             headerOpen = open
             if (open) {
                 pendingSwitchReset = false
@@ -929,8 +793,6 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         fun dispose() {
             if (disposed) return
             disposed = true
-            main.removeCallbacks(traceEnd)
-            traceUntil = 0L
             pendingSwitchReset = false
             main.removeCallbacks(resetAfterData)
             main.removeCallbacks(drainReload)

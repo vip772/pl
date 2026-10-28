@@ -92,13 +92,10 @@ assert feature.index('candidate.install()') < feature.index('DexInstallScheduler
 assert 'resetAfterData.run()' in runtime
 assert 'main.post(resetAfterData)' not in runtime
 assert 'param.args[0] = it' not in runtime
-assert '[Hchat:GroupBarDiag]' in runtime
+assert '[Hchat:GroupBarDiag]' not in runtime
 print('PASS direct lifecycle registration with queued failure retry; synchronous result positioning; scoped native index correction')
 
 assert 'closedHeaderIndex' not in runtime
-assert 'traceCount >= 60' in runtime and 'traceCalls >= 12' in runtime
-assert 'val duration = if (reason == "header:false") 3000L else 1800L' in runtime
-assert 'traceDrawCount >= 32' in runtime and 'traceDispatchDrawCount >= 8' in runtime
-assert 'traceCall("groupbar.reload"' in runtime
-assert 'main.removeCallbacks(traceEnd)' in runtime
-print('PASS bounded return trace, draw-call budget, native index preserved, timer cleanup')
+assert 'traceState' not in runtime and 'traceDraw' not in runtime
+assert 'traceUntil' not in runtime and 'diagnosticView' not in runtime
+print('PASS temporary diagnostic hooks, frame reflection and trace timers removed; native index rewrite remains absent')
