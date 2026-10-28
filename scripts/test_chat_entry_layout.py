@@ -55,7 +55,7 @@ class Runtime {
  }
  fun restore(v:View){restored++}
  fun removeGlobalTracking(t:FooterTracker){untracked++}
- val panelState=0
+ fun panelState(v:View)=0
  val TAG="test"
  METHOD
  fun schedule(v:View,t:FooterTracker)=scheduleFooterApply(v,t)

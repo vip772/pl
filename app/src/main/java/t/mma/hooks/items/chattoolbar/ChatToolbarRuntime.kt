@@ -404,7 +404,13 @@ class ChatToolbarRuntime(
                 row.addView(createToolButton(activity, spec.id, spec.title, action))
             }
         }
-        binding.root.visibility = if (row.childCount > 0) View.VISIBLE else View.GONE
+        // Native AppGrid actions arrive asynchronously. Reserve the configured
+        // row's real minimum height before the first chat measurement instead of
+        // growing the input stack after the conversation has already been drawn.
+        val waitingForNative = nativeTools.isEmpty() && configs.any { it.enabled }
+        val targetMinimum = if (row.childCount > 0 || waitingForNative) dp(activity, 48) else 0
+        if (binding.root.minimumHeight != targetMinimum) binding.root.minimumHeight = targetMinimum
+        binding.root.visibility = if (row.childCount > 0 || waitingForNative) View.VISIBLE else View.GONE
     }
 
     private fun createToolButton(

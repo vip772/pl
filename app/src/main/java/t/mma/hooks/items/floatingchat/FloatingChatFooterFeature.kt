@@ -70,7 +70,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         "Hchat_floating_chat_footer_method_cache"
     )
     private var structureFailureReported = false
-    private var panelState = PANEL_STATE_NONE
+    private val panelStates = WeakHashMap<View, Int>()
+    private fun panelState(footer: View): Int = panelStates[footer] ?: PANEL_STATE_NONE
     private var switchPanelMethod: Method? = null
     private var installed = false
 
@@ -369,7 +370,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     if (!isEnabled() || !footerClass.isInstance(param.thisObject)) return
                     val footer = param.thisObject as? View ?: return
                     val panel = states[footer]?.panel ?: find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
-                    if (!isPanelState(panelState) || panel.visibility != View.VISIBLE) return
+                    if (!isPanelState(panelState(footer)) || panel.visibility != View.VISIBLE) return
                     val switchMethod = switchPanelMethod ?: return
                     switchMethod.invoke(footer, PANEL_STATE_NONE, true, -1)
                     param.result = null
@@ -516,8 +517,8 @@ private class FooterRuntime(private val context: FeatureContext) {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (!isEnabled() || !footerClass.isInstance(param.thisObject)) return
                     val state = param.args.firstOrNull() as? Int ?: return
-                    panelState = state
                     val footer = param.thisObject as? View ?: return
+                    panelStates[footer] = state
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
                     if (!isPanelState(state)) panel.visibility = View.GONE
                 }
@@ -527,10 +528,11 @@ private class FooterRuntime(private val context: FeatureContext) {
                     val state = param.args.firstOrNull() as? Int ?: return
                     val footer = param.thisObject as? View ?: return
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
-                    panelState = state
+                    panelStates[footer] = state
                     panel.visibility = if (isPanelState(state)) View.VISIBLE else View.GONE
                     if (isPanelState(state)) applyCompactPanelHeight(footer, panel)
                     runCatching {
+                        if (states[footer]?.reparented == true) apply(footer)
                         requestFooterApply(footer)
                     }
                         .onFailure { HLog.e("[Hchat:$TAG] 面板状态更新失败", it) }
@@ -644,19 +646,20 @@ private class FooterRuntime(private val context: FeatureContext) {
                         return false
                     }
                     tracker.settlePasses = 0
+                    footer.visibility = tracker.visibility
                     ChatBottomTrace.event(footer, "footer-settled") { "complete=$settled ready=${tracker.ready}" }
                     return true
                 }
                 val wasReady = tracker.ready
                 val applied = apply(footer)
                 ChatBottomTrace.event(footer, if (applied) "footer-ready" else "footer-wait") {
-                    "wasReady=$wasReady attempts=${tracker.attempts} panelState=$panelState"
+                    "wasReady=$wasReady attempts=${tracker.attempts} panelState=${panelState(footer)}"
                 }
                 if (applied) {
                     tracker.attempts = 0
                     tracker.failureReported = false
                     tracker.ready = true
-                    footer.visibility = tracker.visibility
+                    if (wasReady) footer.visibility = tracker.visibility
                     if (!wasReady) {
                         removeGlobalTracking(tracker)
                     }
@@ -753,7 +756,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             t.mma.hooks.items.backgroundbeauty.ChatInputMessageUnderlay.releaseForFloatingFooter(footer)
         }
         val state = states[footer] ?: createState(footer, panel, marginParams) ?: return false
-        if (isPanelState(panelState)) applyCompactPanelHeight(footer, state.panel)
+        if (isPanelState(panelState(footer))) applyCompactPanelHeight(footer, state.panel)
         val measuredInputHeight = visibleHeightExcludingPanel(state.inputColumn, state.panel)
         val stableInputHeight = measuredInputHeight.takeIf { it > 0 }
             ?: state.baseInputHeight.takeIf { it > 0 }
@@ -761,7 +764,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             ?: return false
         // The toolbar can be inserted after the first native measurement.
         // Refresh the measured input stack instead of freezing its initial height.
-        if (!isPanelState(panelState)) state.baseInputHeight = stableInputHeight
+        state.baseInputHeight = stableInputHeight
         val inputHeight = stableInputHeight
 
         // Do not mutate hierarchy until native input height is available.
@@ -875,7 +878,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     state.panelLayoutParams.height
                 ).apply { addRule(RelativeLayout.BELOW, state.inputColumn.id) }
             )
-            panel.visibility = if (isPanelState(panelState)) View.VISIBLE else View.GONE
+            panel.visibility = if (isPanelState(panelState(state.root.parent as? View ?: return false))) View.VISIBLE else View.GONE
             state.reparented = true
 
             true
@@ -963,8 +966,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         for (index in 0 until root.childCount) {
             val child = root.getChildAt(index)
             if (child !== panel && child.visibility != View.GONE) {
-                total += child.height.takeIf { it > 0 }
-                    ?: child.measuredHeight.takeIf { it > 0 }
+                total += child.measuredHeight.takeIf { it > 0 }
+                    ?: child.height.takeIf { it > 0 }
                     ?: child.layoutParams?.height?.takeIf { it > 0 }
                     ?: 0
             }
@@ -976,7 +979,9 @@ private class FooterRuntime(private val context: FeatureContext) {
         // A late toolbar can grow descendants while footer bounds stay unchanged.
         // Reuse existing state; never reparent or roll back for padding settlement.
         val height = visibleHeightExcludingPanel(state.inputColumn, state.panel)
-        if (!isPanelState(panelState) && height > 0 && height != state.baseInputHeight) {
+        val panelHeight = if (state.panel.visibility == View.VISIBLE)
+            state.panel.layoutParams?.height?.takeIf { it > 0 } ?: state.panel.measuredHeight else 0
+        if (height > 0 && height + panelHeight + dp(BOTTOM_GAP_DP) != state.listExtra) {
             apply(footer)
         }
     }
@@ -1092,6 +1097,7 @@ private class FooterRuntime(private val context: FeatureContext) {
 
     private fun restore(footer: View?) {
         footer ?: return
+        panelStates.remove(footer)
         SendButtonSettlement.cancel(footer)
         preDrawListeners.remove(footer)?.let { listener ->
             runCatching { footer.viewTreeObserver.removeOnPreDrawListener(listener) }

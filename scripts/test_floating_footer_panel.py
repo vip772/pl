@@ -11,7 +11,7 @@ reparent=source[a:b]
 assert 'addRule(RelativeLayout.BELOW, state.inputColumn.id)' in reparent
 assert 'addRule(RelativeLayout.BELOW, panel.id)' not in reparent
 assert 'state.changedRules[state.inputColumn] = columnParams.rules.copyOf()' in reparent
-assert 'panel.visibility = if (isPanelState(panelState))' in reparent
+assert 'panel.visibility = if (isPanelState(panelState(' in reparent
 assert 'state.listExtra = occupiedHeight + gap' in source
 assert 'applyChatListPadding(footer, state.listExtra, state)' in source
 assert '.coerceAtLeast(dp(MIN_PANEL_HEIGHT_DP)) + dp(PANEL_EXTRA_HEIGHT_DP)' in source
