@@ -8,7 +8,7 @@ internal class GroupBarFilter(
         val current = group ?: return true
         if (id.startsWith("wxid_hchat_group_") || id.startsWith("hchat_conv_group:")) return false
         val room = id.endsWith("@chatroom") || id.endsWith("@im.chatroom")
-        val official = id in officials || id.startsWith("gh_") || id == "officialaccounts"
+        val official = id in officials || id.startsWith("gh_") || id == "officialaccounts" || id == "notifymessage" || id == "conversationboxservice"
         return when (current.id) {
             "all" -> true
             "friends" -> !room && !official && id in friends
@@ -31,7 +31,7 @@ internal class GroupBarFilter(
         fun ids(values: Set<String>): String = if (values.isEmpty()) "0" else
             "rconversation.username IN (" + values.sorted().joinToString(",", transform = ::quote) + ")"
         val room = "(rconversation.username LIKE '%@chatroom' OR rconversation.username LIKE '%@im.chatroom')"
-        val official = "(rconversation.username LIKE 'gh!_%' ESCAPE '!' OR rconversation.username='officialaccounts' OR ${ids(officials)})"
+        val official = "(rconversation.username LIKE 'gh!_%' ESCAPE '!' OR rconversation.username IN ('officialaccounts','notifymessage','conversationboxservice') OR ${ids(officials)})"
         return when (current.id) {
             "all" -> null
             "rooms" -> room

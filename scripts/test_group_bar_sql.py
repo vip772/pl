@@ -2,7 +2,7 @@
 from pathlib import Path
 import subprocess,tempfile,sqlite3,json,base64
 r=Path(__file__).resolve().parents[1];libs=Path('/tmp/pl-kotlin-libs');std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
-rows=[('a',2,9),('b',0,8),('g@chatroom',1,7),('gh_pub',0,6),("o'neil",1,5),('ghXfake',0,4),('officialaccounts',4,3),('g@im.chatroom',0,2)]
+rows=[('a',2,9),('b',0,8),('g@chatroom',1,7),('gh_pub',0,6),("o'neil",1,5),('ghXfake',0,4),('officialaccounts',4,3),('g@im.chatroom',0,2),('notifymessage',1,11),('conversationboxservice',0,12),('legacy_service',1,13)]
 cases=[]
 for where in ['flag > ? OR username = ?', 'flag > ? AND username != ?', "username IN (SELECT username FROM rconversation WHERE content='order by limit')"]:
  for suffix in [' ORDER BY flag DESC LIMIT 4 OFFSET 1', ' ORDER BY flag DESC;', '']:
@@ -11,8 +11,8 @@ cases += ['SELECT username FROM `rconversation` WHERE flag>0 ORDER BY flag DESC'
 main='''package t.mma.hooks.items.groupbar
 import java.util.Base64
 fun main(args:Array<String>){
- val filters=listOf("all","friends","rooms","official","unread","custom").map{ GroupBarFilter(BarGroup(it,it,members=setOf("a","o'neil")),setOf("a","b","o'neil","ghXfake"),setOf("gh_pub")) }
- val rows=listOf("a" to 2,"b" to 0,"g@chatroom" to 1,"gh_pub" to 0,"o'neil" to 1,"ghXfake" to 0,"officialaccounts" to 4,"g@im.chatroom" to 0)
+ val filters=listOf("all","friends","rooms","official","unread","custom").map{ GroupBarFilter(BarGroup(it,it,members=setOf("a","o'neil")),setOf("a","b","o'neil","ghXfake"),setOf("gh_pub","legacy_service")) }
+ val rows=listOf("a" to 2,"b" to 0,"g@chatroom" to 1,"gh_pub" to 0,"o'neil" to 1,"ghXfake" to 0,"officialaccounts" to 4,"g@im.chatroom" to 0,"notifymessage" to 1,"conversationboxservice" to 0,"legacy_service" to 1)
  for(f in filters){
   println("P|"+f.group!!.id+"|"+Base64.getEncoder().encodeToString((f.predicate()?:"1").toByteArray()))
   println("A|"+f.group.id+"|"+rows.filter{f.accepts(it.first,it.second)}.joinToString(";"){it.first})

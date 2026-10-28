@@ -3,7 +3,7 @@ from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1]
 s=(r/'app/src/main/java/t/mma/hooks/items/groupbar/GroupBarRuntime.kt').read_text()
-a=s.index('        fun userTouchStarted()');z=s.index('        private fun selectNativeTop',a)
+a=s.index('        fun userTouchStarted()');z=s.index('        fun closedHeaderIndex()',a)
 methods=s[a:z]
 a=s.index('        private val resetAfterData = Runnable');z=s.index('        private val switchObserver',a)
 reset=s[a:z]
@@ -16,18 +16,18 @@ class Runtime {var disposed=false;var enabled=true;var pendingSwitchReset=false;
  val drainReload=Runnable{}
  fun selectNativeTop(v:View){selects++};fun reload(){reloads++}
 '''+reset+methods+'''
- fun notifyData(){main.post(resetAfterData)}
+ fun notifyData(){resetAfterData.run()}
 }
 fun main(){
- val r=Runtime();r.switchGroup();check(r.selects==1&&r.reloads==1)
- r.notifyData();r.userTouchStarted();r.main.drain();check(r.selects==1&&!r.pendingSwitchReset)
- r.userTouchEnded();r.main.drain();check(r.selects==1)
- r.switchGroup();r.notifyData();r.main.drain();check(r.selects==3&&!r.pendingSwitchReset)
- r.switchGroup();r.notifyData();r.openField.open=true;r.main.drain();check(r.selects==4)
- r.userTouchStarted();check(!r.pendingSwitchReset)
- r.openField.open=false;r.userTouchEnded();r.main.drain();check(r.selects==4)
- r.switchGroup();r.notifyData();r.disposed=true;r.main.drain();check(r.selects==5)
- println("PASS touch cancels late switch reset; no gesture-end reposition; single completion reset; native open/dispose suppress pending reset")
+ val r=Runtime();r.switchGroup();check(r.selects==0&&r.reloads==1)
+ r.userTouchStarted();r.notifyData();check(r.selects==0&&!r.pendingSwitchReset)
+ r.userTouchEnded();r.main.drain();check(r.selects==0)
+ r.switchGroup();r.notifyData();check(r.selects==1&&!r.pendingSwitchReset)
+ r.notifyData();check(r.selects==1)
+ r.switchGroup();r.openField.open=true;r.notifyData();check(r.selects==1)
+ r.userTouchStarted();r.openField.open=false;r.userTouchEnded();r.main.drain();check(r.selects==1)
+ r.switchGroup();r.disposed=true;r.notifyData();check(r.selects==1)
+ println("PASS no old-result reset; synchronous single data-completion selection; gesture/open/dispose cancel")
 }
 '''
 lib=Path('/tmp/pl-kotlin-libs');std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))

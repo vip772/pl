@@ -122,3 +122,16 @@ SDK编译、源码契约检查、生产偏移方法的基线重算/不累加/控
 原C/y1先读取旧s/v2，再写入新基线、复制到TaskBar.n、调用TaskBarContainer.q，最后比较旧新偏移，变化则setSelection(1)。此前before先撤回基线，导致新旧比较受到模块干预；只在setSelection入口附加reserve还会产生假变化。现在before保留旧完整偏移，TaskBarContainer.q入口在该更新作用域内给当前列表附加reserve，确保比较的是完整偏移；不改q的原生参数和小程序容器margin。ListView.i/RecyclerView.Y2验证容器归属，重复附加有幂等保护。普通滚动不执行此逻辑。回归复现原生顺序，重复相同几何100次不定位，几何变化一次保留原生定位。
 
 删除首页长按左右移动菜单和管理页上下箭头；长按横拖排序及重命名/移除12dp间距保留。不修改首页扩展。SDK、Compose、原生偏移及手势回归通过；未完整构建安装，首条会话动画与首次显示时长仍待真机确认。
+
+
+### f421417两轮反馈：启动、短列表切组、原生布局索引
+
+两轮日志：15:37:28.206调度，30.275入队，31.841开始，32.222挂载；15:41:06.460调度，09.998入队，10.511开始，10.677挂载。提高队列优先级仍等待FeatureManager末尾BRIDGE及共享执行器。HomeExtension在feature.install直接注册生命周期。横栏现同样直接install，失败销毁后才进入BRIDGE重试，保留筛选ready/handoff保护，不修改公共调度器/首页扩展。
+
+新提供geek.apk SHA256=23b1261c3a7d607d748baba7d4997d2bb6b9c09ee30296157e3ae86ee6fefe51。META-INF/xposed/java_init.list入口com.ljx.wechatmod.hook.MainHook；对该APK定向JADX确认Application.attachBaseContext/onCreate Hook及配置AtomicBoolean初始化，与已有同名源码核对。借鉴早注册生命周期，不把静态入口当作所有环境秒显的实测证明。JADX报告2处反编译错误，不宣称全APK反编译完整。提供release mapping已提取GroupBar/HomeExtension类段核对。
+
+切组原实现先回位旧结果，数据通知后又post回位，短/空结果存在绘制TaskBar窗口。现在只在数据通知内同步回位，保留手势/open/dispose取消。原生ConversationListView.onLayout与l3.run硬编码setSelection(1)；实际getFirstHeaderVisible遍历头部，跳过TaskBar/隐藏头，返回实际可见头部索引。仅这两个原生作用域，在首页关闭且无用户触摸时改用原生可见头部索引；不对任意setSelection做全局改写。此为代码中的确定定位缺口，用户动画是否完全消除仍需真机验证，日志不包含逐帧布局信息。
+
+公众号保留getPickerOfficialAccounts的gh_及verifyFlag!=0识别（含旧名称认证账号），增补微信原生服务号聚合conversationboxservice、服务通知notifymessage；SQL与增量同语义，不主动改变原生隐藏会话归属。服务号用例纳入SQL对等回归。
+
+当前验证为SDK、SQL、手势、偏移/生命周期定向检查，未完成新APK构建安装和真机动画/秒显验收。

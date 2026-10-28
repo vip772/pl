@@ -86,3 +86,11 @@ assert 'if (list is ListView) "i" else "Y2"' in runtime
 before=runtime[runtime.index('        fun beforeNativeOffset()'):runtime.index('        fun beforeTaskBarResize(')]
 assert 'scrollField.setInt' not in before
 print('PASS startup priority retains bridge readiness; native old-final comparison retained; both taskbar owner fields verified')
+
+assert 'if (!candidate.install())' in feature
+assert feature.index('candidate.install()') < feature.index('DexInstallScheduler.schedule(')
+assert 'resetAfterData.run()' in runtime
+assert 'main.post(resetAfterData)' not in runtime
+assert 'session.closedHeaderIndex()?.let { param.args[0] = it }' in runtime
+assert 'com.tencent.mm.ui.conversation.l3' in runtime
+print('PASS direct lifecycle registration with queued failure retry; synchronous result positioning; scoped native index correction')

@@ -190,6 +190,25 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             })
             nativeListHook(list, "C", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
             nativeListHook(list, "setSelection", Int::class.javaPrimitiveType!!, before = { it.beforeNativeSelection() })
+            val layoutSelection = ThreadLocal<Boolean>()
+            for ((owner, methodName, args) in listOf(
+                Triple(list, "onLayout", arrayOf(Boolean::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)),
+                Triple(type("com.tencent.mm.ui.conversation.l3"), "run", emptyArray<Class<*>>())
+            )) {
+                val method = KavaReflector.findMethodRecursive(owner, methodName, *args) ?: error("Missing native layout selection owner")
+                hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) { layoutSelection.set(true) }
+                    override fun afterHookedMethod(param: MethodHookParam) { layoutSelection.remove() }
+                })
+            }
+            val selection = KavaReflector.findMethodRecursive(list, "setSelection", Int::class.javaPrimitiveType!!)!!
+            hooks += HookRegistry.get().hook(selection, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (layoutSelection.get() != true || param.args[0] != 1) return
+                    val session = sessions[param.thisObject as? View] ?: return
+                    session.closedHeaderIndex()?.let { param.args[0] = it }
+                }
+            })
             nativeListHook(list, "o", after = { it.headerState(true) })
             nativeListHook(list, "q", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.headerState(false) })
             // Constant-time state reads only; no view search, layout mutation, SQL or reload on scroll.
@@ -469,7 +488,9 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             override fun onChanged() {
                 if (pendingSwitchReset && !userInteracting) {
                     main.removeCallbacks(resetAfterData)
-                    main.post(resetAfterData)
+                    // DataSetObservable notifies before ListView's next layout. Commit
+                    // selection synchronously so a short result never draws its task header.
+                    resetAfterData.run()
                 }
             }
         }
@@ -528,17 +549,24 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         fun switchGroup() {
             pendingSwitchReset = true
             userInteracting = false
-            // The tab is only interactive on the closed homepage. One native selection, no
-            // force-close command and no second posted close competing with a new gesture.
-            viewRef.get()?.let { if (!nativeHeaderOpen()) selectNativeTop(it) }
+            // Commit positioning once, with the NEW data; never force-close a header.
+            // The old result must not be repositioned before the new result exists.
             reload()
         }
         private fun nativeHeaderOpen(): Boolean {
             val list = viewRef.get() ?: return headerOpen
             return headerOpen || openField.getBoolean(list)
         }
+        fun closedHeaderIndex(): Int? {
+            if (!enabled || !hasVisibleGroups || userInteracting || nativeHeaderOpen()) return null
+            val list = viewRef.get() as? ListView ?: return null
+            return KavaReflector.findMethodRecursive(list.javaClass, "getFirstHeaderVisible")?.invoke(list) as? Int
+        }
         private fun selectNativeTop(list: View) {
-            if (list is ListView) list.setSelection(0)
+            if (list is ListView) {
+                val first = KavaReflector.findMethodRecursive(list.javaClass, "getFirstHeaderVisible")?.invoke(list) as? Int ?: return
+                list.setSelectionFromTop(first, scrollField.getInt(list) - list.paddingTop)
+            }
             else KavaReflector.findMethodRecursive(list.javaClass, "setSelectionWithOffset", Int::class.javaPrimitiveType!!)?.invoke(list, 0)
         }
         fun reload() {

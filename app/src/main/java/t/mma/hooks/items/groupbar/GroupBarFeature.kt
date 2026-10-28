@@ -16,11 +16,16 @@ class GroupBarFeature : BaseFeature() {
     override fun name() = "分组横栏"
     override fun onFeatureInit(context: FeatureContext) { registerSettingsProvider(GroupBarSettingsProvider()) }
     override fun onFeatureInstall(context: FeatureContext) {
-        DexInstallScheduler.schedule(featureId(), name(), stage = DexInstallScheduler.Stage.BRIDGE, priority = -100) {
-            runtime?.destroy()
-            val candidate = GroupBarRuntime(context)
-            runtime = candidate
-            candidate.install()
+        // Exact 8.0.78 symbols: register homepage hooks now, like HomeExtension.
+        // Public API objects have already been initialized by WechatApiFeature.
+        runtime?.destroy()
+        val candidate = GroupBarRuntime(context)
+        runtime = candidate
+        if (!candidate.install()) {
+            DexInstallScheduler.schedule(featureId(), name(), stage = DexInstallScheduler.Stage.BRIDGE, priority = -100) {
+                runtime?.destroy()
+                GroupBarRuntime(context).also { runtime = it }.install()
+            }
         }
     }
     override fun onFeatureDestroy(context: FeatureContext) { runtime?.destroy(); runtime = null }
