@@ -13,6 +13,9 @@ internal class ChatListBottomInset {
     private var count = 0
     private var gap = 0
     private var shortContent = false
+    private var anchorRow: View? = null
+    private var adapterMethod: Method? = null
+    private var anchorAdapter: Any? = null
 
     fun beforePadding(list: View, target: Int) {
         ChatBottomTrace.event(list, "anchor-before") {
@@ -24,6 +27,7 @@ internal class ChatListBottomInset {
             list.canScrollVertically(1)) { traceSkip(list, "type-unchanged-or-history"); return }
         if (owner !== list) {
             owner = list
+            adapterMethod = method(list, "getAdapter")
             countMethod = method(list, "getCount")
             lastMethod = method(list, "getLastVisiblePosition")
             scrollStateMethod = method(list, "getScrollState")
@@ -36,6 +40,8 @@ internal class ChatListBottomInset {
         // Consume short-conversation bottom space before lifting covered rows.
         shortContent = oldGap > 2 || !list.canScrollVertically(-1)
         if (!shortContent && oldGap !in -2..2) { traceSkip(list, "bottom-gap"); return }
+        anchorRow = row
+        anchorAdapter = runCatching { adapterMethod?.invoke(list) }.getOrNull()
         count = size
         gap = if (shortContent) 0 else oldGap
         ChatBottomTrace.event(list, "anchor-captured") { "count=$count gap=$gap short=$shortContent target=$target" }
@@ -45,14 +51,21 @@ internal class ChatListBottomInset {
         if (count == 0) return
         val expected = count
         val wasShort = shortContent
+        val row = anchorRow
+        val adapter = anchorAdapter
         ChatBottomTrace.event(list, "anchor-after") {
             "expected=$expected gap=$gap short=$wasShort " + ChatBottomTrace.listGeometry(list)
         }
         clear() // Consume before scrollBy, which may synchronously lay out children.
         if (list !== owner || list !is ViewGroup ||
             value(scrollStateMethod, list) != 0 || value(countMethod, list) != expected ||
-            value(lastMethod, list) != expected - 1) { traceSkip(list, "layout-owner-motion-or-data-changed"); return }
-        val row = list.getChildAt(list.childCount - 1) ?: return
+            row == null || row.parent !== list ||
+            runCatching { adapterMethod?.invoke(list) }.getOrNull() !== adapter) {
+            traceSkip(list, "layout-owner-motion-data-or-anchor-changed"); return
+        }
+        // Padding can make the captured last row no longer VISIBLE while it is
+        // still attached. lastVisiblePosition is therefore not a validity test.
+        // Use that same row, never whichever child happens to be last now.
         val overflow = row.bottom - (list.height - list.paddingBottom - gap)
         // Native LinearLayoutManager may already have compensated. Never move twice,
         // select another item, follow an append, or pull history back to the bottom.
@@ -63,7 +76,7 @@ internal class ChatListBottomInset {
     private fun traceSkip(list: View, reason: String) {
         ChatBottomTrace.event(list, "anchor-skip-$reason") { reason }
     }
-    fun clear() { count = 0 }
+    fun clear() { count = 0; anchorRow = null; anchorAdapter = null }
     private fun method(view: View, name: String): Method? =
         runCatching { view.javaClass.getMethod(name) }.getOrNull()
     private fun value(method: Method?, view: View): Int? =

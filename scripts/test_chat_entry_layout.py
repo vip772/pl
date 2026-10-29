@@ -24,11 +24,11 @@ class ViewTreeObserver {
 }
 class View {
  var isAttachedToWindow=true;var visibility=0;val rootView get()=this
- val viewTreeObserver=ViewTreeObserver();var invalidations=0;var layouts=0;var isLayoutRequested=false
+ val viewTreeObserver=ViewTreeObserver();var invalidations=0;var layouts=0;var isLayoutRequested=false;var paddingBottom=0
  fun requestLayout(){layouts++;isLayoutRequested=true};fun postInvalidateOnAnimation(){invalidations++}
  companion object{const val INVISIBLE=4}
 }
-class FooterTracker(val layout:View,val visibility:Int=0,var ready:Boolean=false,var failed:Boolean=false,var settlePasses:Int=0,
+class FooterTracker(val layout:View,val visibility:Int=0,var ready:Boolean=false,var failed:Boolean=false,var revealed:Boolean=false,var settleExtensions:Int=0,var settlePasses:Int=0,
  var preDraw:ViewTreeObserver.OnPreDrawListener?=null,var attempts:Int=0,var failureReported:Boolean=false)
 object HLog {fun w(s:String){}}
 object BackgroundBeautySettings {enum class Slot{CHAT,WECHAT}}
@@ -37,10 +37,10 @@ class Name(val name:String)
 fun skip(view:Native,slot:BackgroundBeautySettings.Slot) = PREDICATE
 class Runtime {
  val INITIAL_LAYOUT_RETRY_COUNT=3;var enabled=true;var restored=0;var untracked=0
- val states=mutableMapOf<View,State>();var paddingCalls=0;var paddingStable=true
+ val states=mutableMapOf<View,State>();var paddingCalls=0;var paddingStable=true;var writeOnCall=0
  class State(val listExtra:Int=223,val chatRecycler:View?=null)
  fun refreshMeasuredInputHeight(v:View,s:State){}
- fun applyChatListPadding(v:View,e:Int,s:State):Boolean {paddingCalls++;return paddingStable}
+ fun applyChatListPadding(v:View,e:Int,s:State):Boolean {paddingCalls++;if(paddingCalls==writeOnCall){s.chatRecycler?.paddingBottom=400;return false};return paddingStable}
  val outcomes=java.util.ArrayDeque<Boolean>()
  fun isReadyChatLayout(v:View)=v.isAttachedToWindow
  fun isEnabled()=enabled
@@ -84,12 +84,26 @@ fun main(){
  // Repeated layout events cannot restart failed structural work.
  repeat(1000){fail.schedule(fv,ft);check(fv.viewTreeObserver.frame())}
  check(fail.restored==1 && ft.attempts==4)
- // Permanently pending padding never rolls back a successfully attached footer.
+ // An unrevealed initial overlay must roll back after bounded pending padding.
  val pending=Runtime();pending.paddingStable=false;pending.outcomes.add(true)
  val pv=View();val pt=FooterTracker(View());pending.states[pv]=Runtime.State()
  pending.schedule(pv,pt);check(!pv.viewTreeObserver.frame() && pt.ready)
  repeat(2){check(!pv.viewTreeObserver.frame())};check(pv.viewTreeObserver.frame())
- check(pending.restored==0 && pending.paddingCalls==3 && pv.viewTreeObserver.listeners.isEmpty())
+ check(pending.restored==1 && pt.failed && pending.paddingCalls==3 && pv.viewTreeObserver.listeners.isEmpty())
+ // A last-pass padding write must receive one real layout pass before reveal.
+ val late=Runtime();late.paddingStable=false;late.writeOnCall=3;late.outcomes.add(true)
+ val lateView=View();val lateList=View();val lateTracker=FooterTracker(View())
+ late.states[lateView]=Runtime.State(chatRecycler=lateList);late.schedule(lateView,lateTracker)
+ check(!lateView.viewTreeObserver.frame())
+ repeat(3){check(!lateView.viewTreeObserver.frame())}
+ check(late.restored==0&&!lateTracker.revealed&&lateTracker.settlePasses==1)
+ late.paddingStable=true;check(lateView.viewTreeObserver.frame())
+ check(lateTracker.revealed&&late.restored==0&&lateList.paddingBottom==400)
+ // Already revealed sessions do not roll back on a transient pending parent.
+ val existing=Runtime();existing.paddingStable=false
+ val ev=View();val et=FooterTracker(View(),ready=true,revealed=true);existing.states[ev]=Runtime.State()
+ existing.schedule(ev,et);repeat(2){check(!ev.viewTreeObserver.frame())};check(ev.viewTreeObserver.frame())
+ check(existing.restored==0&&!et.failed)
  val off=Runtime();val ov=View();val ot=FooterTracker(View());off.schedule(ov,ot);off.enabled=false
  check(ov.viewTreeObserver.frame() && off.restored==1)
  val chat=BackgroundBeautySettings.Slot.CHAT

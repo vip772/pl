@@ -117,6 +117,21 @@ private class FooterRuntime(private val context: FeatureContext) {
                 })
             }
         }
+        // Cancel an in-flight padding anchor as soon as the user touches history.
+        // Reuse native dispatch; no scroll listener or touch interception is installed.
+        KavaReflector.loadClass(CHATTING_RECYCLER_CLASS, context.hostClassLoader())?.let { listClass ->
+            KavaReflector.findMethodRecursive(listClass, "dispatchTouchEvent", android.view.MotionEvent::class.java)?.let { method ->
+                HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val list = param.thisObject as? View ?: return
+                        val footer = listOwners[list] ?: return
+                        val event = param.args.firstOrNull() as? android.view.MotionEvent ?: return
+                        if (event.actionMasked == android.view.MotionEvent.ACTION_DOWN)
+                            states[footer]?.bottomInset?.clear()
+                    }
+                })
+            }
+        }
         var count = 0
         // 8.0.78 ChatFooter.u0(int, boolean): false uses w()+settleInputModeSwitchViews,
         // avoiding the native G/p crossfade exposed by our transparent button surfaces.
@@ -472,6 +487,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                         .map(scrollLayout::getChildAt)
                         .firstOrNull { it.javaClass.name == FOOTER_CLASS }
                         ?: return
+                    if (footerTrackers[footer]?.failed == true) return
                     val panel = find(footer) { it.javaClass.name == FOOTER_BOTTOM_CLASS } ?: return
                     val imeHeight = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
                         scrollLayout.rootWindowInsets
@@ -641,9 +657,10 @@ private class FooterRuntime(private val context: FeatureContext) {
                     restore(footer)
                     return true
                 }
-                // Padding settlement must never reparent or roll back the input hierarchy.
+                // Stable sessions only settle padding; failed first reveal rolls back atomically.
                 if (tracker.settlePasses > 0) {
                     val state = states[footer]
+                    val paddingBefore = state?.chatRecycler?.paddingBottom
                     if (state != null) refreshMeasuredInputHeight(footer, state)
                     val settled = state != null && applyChatListPadding(footer, state.listExtra, state)
                     if (!settled && --tracker.settlePasses > 0) {
@@ -651,7 +668,26 @@ private class FooterRuntime(private val context: FeatureContext) {
                         footer.rootView.postInvalidateOnAnimation()
                         return false
                     }
+                    if (!settled && paddingBefore != state?.chatRecycler?.paddingBottom && tracker.settleExtensions < 3) {
+                        // A real padding write on the last pass needs its own native
+                        // layout before reveal. Never extend merely for pending ancestors.
+                        tracker.settleExtensions++
+                        tracker.settlePasses = 1
+                        scheduleFooterApply(footer, tracker)
+                        footer.rootView.postInvalidateOnAnimation()
+                        return false
+                    }
                     tracker.settlePasses = 0
+                    tracker.settleExtensions = 0
+                    if (!settled && !tracker.revealed) {
+                        // Bounded failure must not reveal a half-applied overlay.
+                        tracker.failed = true
+                        restore(footer)
+                        footer.visibility = tracker.visibility
+                        HLog.w("[Hchat:$TAG] 首次列表避让未完成，已恢复原生输入区，本实例停止重试")
+                        return true
+                    }
+                    tracker.revealed = true
                     footer.visibility = tracker.visibility
                     ChatBottomTrace.event(footer, "footer-settled") { "paddingComplete=$settled ready=${tracker.ready} " +
                             (states[footer]?.chatRecycler?.let(ChatBottomTrace::listGeometry) ?: "list=missing") }
@@ -1224,8 +1260,10 @@ private class FooterRuntime(private val context: FeatureContext) {
         var layout: ViewGroup,
         val visibility: Int,
         var ready: Boolean = false,
+        var revealed: Boolean = false,
         var failed: Boolean = false,
         var settlePasses: Int = 0,
+        var settleExtensions: Int = 0,
         var preDraw: ViewTreeObserver.OnPreDrawListener? = null,
         var layoutListener: View.OnLayoutChangeListener? = null,
         var attempts: Int = 0,

@@ -9,13 +9,15 @@ compiler = ['java', '-Xmx256m', '-cp', ':'.join(map(str, libs.glob('*.jar'))),
             'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-no-stdlib', '-no-reflect']
 fixture = '''package android.view
 open class View {
- var paddingBottom=20;var height=1000;var bottom=980;var up=true;var down=false
+ var parent:View?=null;var paddingBottom=20;var height=1000;var bottom=980;var up=true;var down=false
  var scrolls=0;var distance=0
  fun canScrollVertically(d:Int)=if(d<0)up else down
  fun scrollBy(x:Int,y:Int){scrolls++;distance+=y;bottom-=y}
 }
 open class ViewGroup:View(){
- val childCount=1;fun getChildAt(i:Int):View?=if(i==0)this else null
+ val row=View().also{it.parent=this};var adapterToken=Any()
+ fun getAdapter()=adapterToken
+ val childCount=1;fun getChildAt(i:Int):View?=if(i==0){row.bottom=bottom;row}else null
  var size=20;var last=19;var motion=0
  fun getCount()=size;fun getLastVisiblePosition()=last;fun getScrollState()=motion
 }
@@ -33,7 +35,7 @@ fun main(){
  check(shrinking.distance == -380)
  val repeated=list();inset.beforePadding(repeated,400);repeated.paddingBottom=400
  inset.beforePadding(repeated,400);inset.afterLayout(repeated);check(repeated.distance==380)
- val native=list();inset.beforePadding(native,400);native.paddingBottom=400;native.bottom=600
+ val native=list();inset.beforePadding(native,400);native.paddingBottom=400;native.bottom=600;native.row.bottom=600
  inset.afterLayout(native);check(native.scrolls==0)
  val history=list();history.down=true;inset.beforePadding(history,400);history.paddingBottom=400
  inset.afterLayout(history);check(history.scrolls==0)
@@ -51,7 +53,18 @@ fun main(){
  inset.beforePadding(partly,400);partly.paddingBottom=400;inset.afterLayout(partly);check(partly.distance==150)
  val moving=list();inset.beforePadding(moving,400);moving.paddingBottom=400;moving.motion=2
  inset.afterLayout(moving);check(moving.scrolls==0)
- println("PASS: bottom correction once; native correction, history, drag, fling, append, removal and short-list free-space consumption")
+ val hidden=list();inset.beforePadding(hidden,400);hidden.paddingBottom=400;hidden.last=18;hidden.down=true
+ inset.afterLayout(hidden);check(hidden.distance==380)
+ val replay=list();replay.height=3120;replay.paddingBottom=400;replay.bottom=2720;replay.size=18;replay.last=17
+ inset.beforePadding(replay,1431);replay.paddingBottom=1431;replay.last=15;replay.down=true
+ inset.afterLayout(replay);check(replay.distance==1031);inset.afterLayout(replay);check(replay.scrolls==1)
+ val detached=list();inset.beforePadding(detached,400);detached.paddingBottom=400;detached.row.parent=null
+ inset.afterLayout(detached);check(detached.scrolls==0)
+ val swapped=list();inset.beforePadding(swapped,400);swapped.paddingBottom=400;swapped.adapterToken=Any()
+ inset.afterLayout(swapped);check(swapped.scrolls==0)
+ val touched=list();inset.beforePadding(touched,400);touched.paddingBottom=400;inset.clear()
+ inset.afterLayout(touched);check(touched.scrolls==0)
+ println("PASS: bottom correction once; native correction, history, drag, fling, append, removal short-list space, hidden attached anchor, 1031px log replay, adapter swap/detach/touch cancellation")
 }
 '''
 with tempfile.TemporaryDirectory() as td:
