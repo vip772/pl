@@ -93,6 +93,8 @@ assert 'resetAfterData.run()' in runtime
 assert 'main.post(resetAfterData)' not in runtime
 assert 'param.args[0] = it' not in runtime
 assert 'param.args[1] = session.nativeSelectionOffset(offset)' in runtime
+assert 'ensureBarOnTop()' in runtime and 'bar.bringToFront()' in runtime
+assert 'bar.translationZ' in runtime and 'bar.elevation' in runtime
 assert '[Hchat:GroupBarDiag]' not in runtime
 print('PASS direct lifecycle registration with queued failure retry; synchronous result positioning; scoped native index correction')
 

@@ -6,7 +6,7 @@ s=(r/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/BackgroundBeautyFeatu
 a=s.index('    private fun restoreSurfaceGeometry('); b=s.index('    private fun applyWechatStatusMasks',a)
 geometry=s[a:b]
 g=(r/'app/src/main/java/t/mma/hooks/items/groupbar/GroupBarRuntime.kt').read_text()
-a=g.index('        private fun titleTranslation(');b=g.index('        private fun safePosition()',a)
+a=g.index('        private fun titleTranslation(');b=g.index('        private fun ensureBarOnTop()',a)
 translation=g[a:b]
 code='''open class View(var parent:View?=null,var translationY:Float=0f) {
  var paddingLeft=1;var paddingTop=90;var paddingRight=3;var paddingBottom=4

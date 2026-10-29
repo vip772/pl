@@ -397,7 +397,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private var positionDirty = true
         private var titleChain = emptyList<View>()
         private val preDrawListener = android.view.ViewTreeObserver.OnPreDrawListener {
-            if (!disposed) syncHeaderVisibility()
+            if (!disposed) { syncHeaderVisibility(); ensureBarOnTop() }
             true
         }
         private val titlePosition = IntArray(2)
@@ -582,7 +582,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             params.setMargins(if (floating) dp(8) else 0, nativeTopMargin + floatingInset, if (floating) dp(8) else 0, 0)
             params.addRule(RelativeLayout.ALIGN_PARENT_TOP)
             bar.layoutParams = params
-            if (visible) { positionBar(); bar.bringToFront() }
+            if (visible) { positionBar(); ensureBarOnTop() }
             val visibleGroups = groups.filter { it.enabled }
             visibleGroups.forEach { group ->
                 val text = TextView(list.context).apply {
@@ -682,6 +682,14 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             }
             return translation.toInt()
         }
+        private fun ensureBarOnTop() {
+            val parent = parentRef.get() ?: return
+            if (bar.parent === parent && parent.indexOfChild(bar) != parent.childCount - 1) bar.bringToFront()
+            if (bar.visibility == View.VISIBLE) {
+                bar.translationZ = maxOf(bar.translationZ, 1f)
+                bar.elevation = maxOf(bar.elevation, dp(1).toFloat())
+            }
+        }
         private fun safePosition() {
             runCatching { positionBar() }.onFailure { HLog.e("[Hchat:GroupBar] 横栏定位失败", it) }
         }
@@ -774,6 +782,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 main.removeCallbacks(resetAfterData)
             }
             syncHeaderVisibility()
+            ensureBarOnTop()
             if (!open) {
                 safePosition()
                 main.removeCallbacks(drainReload); main.post(drainReload)
