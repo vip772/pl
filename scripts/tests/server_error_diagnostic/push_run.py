@@ -12,7 +12,7 @@ sources['com/tencent/mm/network/t2.java']='package com.tencent.mm.network; publi
 sources['com/tencent/mm/network/j1.java']='package com.tencent.mm.network; public class j1 {public void d0(int a,int b,String c){}public static void j(j1 a,int b){}}'
 sources['com/tencent/mm/network/a3.java']='package com.tencent.mm.network; public class a3 {public static t2 adapter;public static t2 h(){return adapter;}}'
 sources['com/tencent/mm/network/s2.java']='package com.tencent.mm.network; public class s2 {public Object g=new com.tencent.mm.modelbase.m1();public int k=55;}'
-sources['com/tencent/mars/stn/StnManager.java']='''package com.tencent.mars.stn;public class StnManager {public void stopTask(int a){}public void OnJniStopTask(int a){}public void startTask(Task t){}
+sources['com/tencent/mars/stn/StnManager.java']='''package com.tencent.mars.stn;public class StnManager {public void stopTask(int a){}public void OnJniStopTask(int a){}public void startTask(Task t){}public void clearTask(){}public void OnJniClearTask(){}public void reset(){}public void OnJniReset(){}public void resetAndInitEncoderVersion(int a,String b){}public void OnJniResetAndInitEncoderVersion(int a,String b){}public void onDestroy(){}public void OnJniDestroyStnManager(){}
 public static class Task {public int taskID=55,channelSelect=2,cmdID=138;public long cgiID=138;public String cgi="secret cgi";}
 public static class CgiProfile {
 public int channelType=2,protocolType=1;public long startTaskTick=10,endTaskTick=20,startConnectTime=11,connectSuccessfulTime=12,startHandshakeTime=13,handshakeSuccessfulTime=14,startSendPacketTime=15,sendPacketFinishedTime=16,startReadPacketTime=17,readPacketFinishedTime=18;
@@ -23,8 +23,8 @@ public class PushTest {
  static void check(boolean b){if(!b)throw new AssertionError();}
  public static void main(String[] args)throws Throwable{
  ClassLoader loader=PushTest.class.getClassLoader();NetworkOriginDiagnostic.install(loader,"com.tencent.mm");check(XposedBridge.callbacks.isEmpty());
- NetworkOriginDiagnostic.install(loader,"com.tencent.mm:push");check(XposedBridge.callbacks.size()==7);
- NetworkOriginDiagnostic.install(loader,"com.tencent.mm:push");check(XposedBridge.handles.size()==7);
+ NetworkOriginDiagnostic.install(loader,"com.tencent.mm:push");check(XposedBridge.callbacks.size()==15);
+ NetworkOriginDiagnostic.install(loader,"com.tencent.mm:push");check(XposedBridge.handles.size()==15);
  com.tencent.mm.network.t2 adapter=new com.tencent.mm.network.t2();adapter.b=new Object[]{null,new com.tencent.mm.network.s2()};com.tencent.mm.network.a3.adapter=adapter;
  XC_MethodHook.MethodHookParam task=new XC_MethodHook.MethodHookParam();task.args=new Object[]{55,new Object(),4,-7,new com.tencent.mars.stn.StnManager.CgiProfile(),new byte[]{3,4}};
  XC_MethodHook.MethodHookParam submit=new XC_MethodHook.MethodHookParam();submit.args=new Object[]{new com.tencent.mars.stn.StnManager.Task()};
@@ -32,8 +32,18 @@ public class PushTest {
  XC_MethodHook.MethodHookParam stopped=new XC_MethodHook.MethodHookParam();stopped.thisObject=new com.tencent.mars.stn.StnManager();stopped.args=new Object[]{55};
  XposedBridge.callbacks.get("stopTask").before(stopped);XposedBridge.callbacks.get("OnJniStopTask").before(stopped);
  XC_MethodHook.MethodHookParam bridge=new XC_MethodHook.MethodHookParam();bridge.args=new Object[]{new com.tencent.mm.network.j1(),1};XposedBridge.callbacks.get("j").before(bridge);
+ XC_MethodHook.MethodHookParam reset=new XC_MethodHook.MethodHookParam();reset.thisObject=stopped.thisObject;reset.args=new Object[]{7,"ENCODER_SECRET"};
+ XposedBridge.callbacks.get("resetAndInitEncoderVersion").before(reset);
+ XC_MethodHook.MethodHookParam nested=new XC_MethodHook.MethodHookParam();nested.thisObject=stopped.thisObject;nested.args=reset.args.clone();
+ XposedBridge.callbacks.get("OnJniResetAndInitEncoderVersion").before(nested);
+ XposedBridge.callbacks.get("onTaskEnd").before(task);
+ String during=String.join("",XposedBridge.logs);check(during.contains("currentReset={event=")&&during.contains("source=OnJniResetAndInitEncoderVersion"));check(!during.contains("ENCODER_SECRET"));
+ XposedBridge.callbacks.get("OnJniResetAndInitEncoderVersion").after(nested);
+ XposedBridge.callbacks.get("resetAndInitEncoderVersion").after(reset);
+ check(reset.args[1].equals("ENCODER_SECRET")&&reset.result==null);
+ XposedBridge.callbacks.get("stopTask").before(stopped);XposedBridge.callbacks.get("OnJniStopTask").before(stopped);
  Object[] original=task.args.clone();XposedBridge.callbacks.get("onTaskEnd").before(task);
- String logs=String.join("",XposedBridge.logs);check(logs.contains("nativeErrType=4 nativeErrCode=-7 netId=1 requestType=139"));check(logs.contains("startConnectTime=11"));
+ String logs=String.join("",XposedBridge.logs);check(logs.contains("nativeErrType=4 nativeErrCode=-7 netId=1 requestType=139"));check(logs.contains("startConnectTime=11"));check(logs.contains("currentReset={null}"));
  check(logs.contains("stopOrigin={source=stopTask") && logs.contains("source=OnJniStopTask"));check(logs.contains("cancelBridge netId=1"));check(!logs.contains("secret cgi"));
  XposedBridge.callbacks.get("startTask").before(submit);XposedBridge.callbacks.get("onTaskEnd").before(task);
  check(XposedBridge.logs.get(XposedBridge.logs.size()-1).contains("stopOrigin={not_captured}"));
@@ -41,9 +51,11 @@ public class PushTest {
  XC_MethodHook.MethodHookParam clear=new XC_MethodHook.MethodHookParam();clear.thisObject=adapter;clear.args=new Object[]{1,-7,"clear secret"};Object[] saved=adapter.b.clone();XposedBridge.callbacks.get("e").before(clear);
  logs=String.join("",XposedBridge.logs);check(logs.contains("autoAuthFail inErrType=1 inErrCode=-7"));check(logs.contains("clearTaskAndCallback errType=1 errCode=-7"));check(logs.contains("queue netId=1 taskId=55 requestType=139"));check(!logs.contains("auth secret")&&!logs.contains("clear secret"));check(java.util.Arrays.equals(saved,adapter.b));check(java.util.Arrays.equals(original,task.args));check(task.result==null);
  int before=XposedBridge.logs.size();for(int i=0;i<30;i++)XposedBridge.callbacks.get("d0").before(auth);check(XposedBridge.logs.size()-before==5);
+ for(int i=0;i<40;i++){XC_MethodHook.MethodHookParam clean=new XC_MethodHook.MethodHookParam();clean.thisObject=stopped.thisObject;clean.args=new Object[0];XposedBridge.callbacks.get("clearTask").before(clean);XposedBridge.callbacks.get("clearTask").after(clean);check(clean.result==null);}
+ before=XposedBridge.logs.size();XC_MethodHook.MethodHookParam capped=new XC_MethodHook.MethodHookParam();capped.args=new Object[0];XposedBridge.callbacks.get("reset").before(capped);XposedBridge.callbacks.get("reset").after(capped);check(before==XposedBridge.logs.size());
  android.os.SystemClock.now+=600001;before=XposedBridge.logs.size();XposedBridge.callbacks.get("onTaskEnd").before(task);check(XposedBridge.logs.size()==before);
  java.lang.reflect.Method stop=NetworkOriginDiagnostic.class.getDeclaredMethod("stop");stop.setAccessible(true);stop.invoke(null);check(XposedBridge.handles.stream().allMatch(u->u.removed));
- System.out.println("PASS push-only/idempotent installation, native task-to-netId mapping, profile stages, auth/clear paths, read-only state, secret exclusion, log limits, expiry and cleanup");
+ System.out.println("PASS push-only/idempotent installation, native task-to-netId mapping, profile stages, auth/clear paths, read-only state, secret exclusion, log limits, expiry and cleanup; nested reset begin/end correlation and encoder secret exclusion");
  }
 }'''
 with tempfile.TemporaryDirectory(prefix='pl-push-origin-') as d:

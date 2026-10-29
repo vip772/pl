@@ -29,3 +29,15 @@
 - 未运行 Gradle、未编译完整 ModuleEntry 集成、未构建 APK、未提交推送，尚无新包现场证据。
 
 下一轮需包含诊断的新包，强停并重开微信，复现后保存同一时段 LSPosed 模块日志和运行日志。没有 armed/hook installed、已超过180秒或缺 push 重启记录时，不能用缺失事件排除任何路径。先依据 sceneCancel/queueReset 的调用栈和 nativeTaskEnd.stopOrigin 确认取消发起者，再修改业务逻辑；本轮不宣称网络故障已经修复。
+
+## 16:17 复现证据与 push-reset-v4
+
+本次主/push 入口均安装成功。16:17:35.616 提交 taskId=6、CGI138；16:17:36.470 原生回调 taskId=6/netId=5 为9/-7；36.491 主进程同一个 sceneIdentity=145397607/netId=5 收到1/-7；36.720 新任务17同步成功，36.743主进程成功。另taskId=3/type0在同一毫秒收到9/-7，存在多个任务同时终止的线索，但尚未确认批量重置。
+
+没有捕获 sceneCancel、queueCancel、queueReset、cancelBridge、taskStop、autoAuthFail、clearTaskAndCallback。阶段字段全零不能证明从未联网。公共网络Hook在37.906安装，Protobuf在46.182安装，均晚于失败；本次不归因于这两个Hook。mapping确认pm.n是诊断回调，不能把提交栈中的诊断框架当作主动发包者。
+
+新增精准边界：StnManager.clearTask/OnJniClearTask、reset/OnJniReset、resetAndInitEncoderVersion/OnJniResetAndInitEncoderVersion、onDestroy/OnJniDestroyStnManager，八个签名均由本机8.0.78 smali核对。每入口独立安装、明确installed/unavailable。
+
+push-reset-v4记录重置事件ID、管理器身份、线程、单调时间及调用栈；before/after以线程局部上下文保留嵌套来源，原生失败回调增加currentReset、lastReset及其自身栈。currentReset只表示同步嵌套调用；lastReset只提供最近事件上下文，不将时间邻近当因果证据。跨线程回调需要结合事件ID/manager/时间及堆栈判断。最多32次重置事件，主/push仍180秒自动卸载，无轮询、无原生行为修改、不读取编码器字符串。
+
+验证：生产诊断Android36 SDK定向编译、8入口smali签名核对通过；push JVM回归覆盖嵌套重置开始/结束、上下文清理、参数结果保持、编码器字符串排除、32事件上限与卸载；主进程回归通过。尚无v4真机记录，不宣称故障已修复。需新包强停重开，在启动3分钟内复现，并导出LSPosed模块日志及Hchat运行日志。

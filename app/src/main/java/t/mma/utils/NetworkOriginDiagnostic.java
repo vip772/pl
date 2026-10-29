@@ -23,6 +23,9 @@ public final class NetworkOriginDiagnostic {
     private static final AtomicInteger lifecycle = new AtomicInteger();
     private static final AtomicInteger submissions = new AtomicInteger();
     private static final java.util.Map<Integer, String> stopOrigins = new java.util.LinkedHashMap<>();
+    private static final AtomicInteger resetEvents = new AtomicInteger();
+    private static final ThreadLocal<String> currentReset = new ThreadLocal<>();
+    private static volatile String lastReset = "not_captured";
     private static boolean installed;
     private static volatile boolean stopped;
     private static long started;
@@ -34,7 +37,7 @@ public final class NetworkOriginDiagnostic {
         installed = true;
         process = name;
         started = SystemClock.elapsedRealtime();
-        log("armed revision=push-cancel-v3 windowMs=" + WINDOW_MS);
+        log("armed revision=push-reset-v4 windowMs=" + WINDOW_MS);
         // Install each verified entry independently: one incompatible signature must not hide the others.
         try {
             Class<?> adapter = Class.forName("com.tencent.mm.network.t2", false, loader);
@@ -130,6 +133,9 @@ public final class NetworkOriginDiagnostic {
                                 "startSendPacketTime", "sendPacketFinishedTime", "startReadPacketTime", "readPacketFinishedTime"}) {
                             out.append(' ').append(field).append('=').append(value == null ? "null" : read(value, field));
                         }
+                        out.append(" currentReset={").append(currentReset.get()).append("} lastReset={")
+                                .append(lastReset).append('}');
+                        if (failed) appendStack(out);
                         log(out.toString());
                     } catch (Throwable error) { failure("taskCapture", error); }
                 }
@@ -137,6 +143,7 @@ public final class NetworkOriginDiagnostic {
             log("taskHook=installed signature=" + method.toGenericString());
         } catch (Throwable error) { failure("taskHook", error); }
         installTaskLifecycle(loader);
+        installManagerResetTrace(loader);
         try {
             if (!new Handler(Looper.getMainLooper()).postDelayed(NetworkOriginDiagnostic::stop, WINDOW_MS)) stop();
         } catch (Throwable error) {
@@ -213,6 +220,51 @@ public final class NetworkOriginDiagnostic {
             log("submitHook=installed signature=" + method.toGenericString());
         } catch (Throwable error) { failure("submitHook", error); }
     }
+    /** Exact 8.0.78 Java and JNI boundaries. A recent reset is context, not proof of causation. */
+    private static void installManagerResetTrace(ClassLoader loader) {
+        try {
+            Class<?> manager = Class.forName("com.tencent.mars.stn.StnManager", false, loader);
+            for (String name : new String[]{"clearTask", "OnJniClearTask", "reset", "OnJniReset",
+                    "resetAndInitEncoderVersion", "OnJniResetAndInitEncoderVersion",
+                    "onDestroy", "OnJniDestroyStnManager"}) {
+                try {
+                    Class<?>[] types = name.endsWith("EncoderVersion")
+                            ? new Class<?>[]{int.class, String.class} : new Class<?>[0];
+                    Method method = manager.getDeclaredMethod(name, types);
+                    hooks.add(XposedBridge.hookMethod(method, new XC_MethodHook() {
+                        @Override protected void beforeHookedMethod(MethodHookParam param) {
+                            if (!active() || resetEvents.get() >= 32) return;
+                            int eventId = resetEvents.incrementAndGet();
+                            if (eventId > 32) return;
+                            String previous = currentReset.get();
+                            String event = "event=" + eventId + " source=" + name
+                                    + " managerIdentity=" + System.identityHashCode(param.thisObject)
+                                    + " uptimeMs=" + SystemClock.elapsedRealtime()
+                                    + " thread=" + Thread.currentThread().getName();
+                            // No encoder string or account/crypto information is inspected.
+                            param.setObjectExtra("hchat.reset.previous", previous);
+                            param.setObjectExtra("hchat.reset.event", event);
+                            currentReset.set(event);
+                            lastReset = event;
+                            try {
+                                StringBuilder out = new StringBuilder("managerResetBegin ").append(event);
+                                appendStack(out);
+                                log(out.toString());
+                            } catch (Throwable error) { failure("resetCapture", error); }
+                        }
+                        @Override protected void afterHookedMethod(MethodHookParam param) {
+                            Object event = param.getObjectExtra("hchat.reset.event");
+                            if (event == null) return;
+                            Object previous = param.getObjectExtra("hchat.reset.previous");
+                            if (previous == null) currentReset.remove(); else currentReset.set((String) previous);
+                            if (active()) log("managerResetEnd " + event);
+                        }
+                    }));
+                    log("managerResetHook=installed signature=" + method.toGenericString());
+                } catch (Throwable error) { failure("managerResetHook:" + name, error); }
+            }
+        } catch (Throwable error) { failure("managerResetClass", error); }
+    }
     private static boolean active() { return !stopped && SystemClock.elapsedRealtime() - started < WINDOW_MS; }
     private static Object read(Object target, String name) throws Exception {
         Field field = target.getClass().getDeclaredField(name);
@@ -244,6 +296,7 @@ public final class NetworkOriginDiagnostic {
         for (XC_MethodHook.Unhook hook : hooks) try { hook.unhook(); } catch (Throwable ignored) { }
         hooks.clear();
         synchronized (stopOrigins) { stopOrigins.clear(); }
-        log("finished taskEvents=" + tasks.get() + " authEvents=" + auth.get() + " clearEvents=" + clears.get());
+        lastReset = "not_captured";
+        log("finished resetEvents=" + resetEvents.get() + " taskEvents=" + tasks.get() + " authEvents=" + auth.get() + " clearEvents=" + clears.get());
     }
 }
