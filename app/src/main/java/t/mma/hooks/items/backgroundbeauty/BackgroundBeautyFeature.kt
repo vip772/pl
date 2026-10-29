@@ -1375,11 +1375,14 @@ private class BackgroundBeautyRuntime(
         snapshot.originalMinimumHeight = view.minimumHeight
     }
     private fun isConversationFeedbackRow(row: View): Boolean {
-        val height = row.height
-        val density = row.resources.displayMetrics.density
-        return height >= 40f * density && height <= 120f * density &&
-            !isWechatTaskSurface(row) &&
-            !t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(row)
+        if (row.height <= 0 || isWechatTaskSurface(row) ||
+            t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(row)) return false
+        // 8.0.78 runtime tree: kbq is the conversation title in jo5.s.
+        // A spacer/list/outer container is never an actionable conversation row.
+        val titleId = resourceId("kbq")
+        if (titleId == 0) return false
+        val title = row.findViewById<View>(titleId) ?: return false
+        return title.visibility == View.VISIBLE
     }
     private fun updateListRipple(list: ViewGroup, event: android.view.MotionEvent) {
         // A cancelled drag has no ripple to update; skip subsequent owner queries.
@@ -1391,6 +1394,7 @@ private class BackgroundBeautyRuntime(
         if (states[activity]?.loadedBitmaps?.get(slot)?.bitmap?.isRecycled != false) return
         when (event.actionMasked) {
             android.view.MotionEvent.ACTION_DOWN -> {
+                clearListRipple(list)
                 for (index in list.childCount - 1 downTo 0) {
                     val row = list.getChildAt(index)
                     val x = event.x + list.scrollX - row.left - row.translationX
@@ -1500,7 +1504,12 @@ private class BackgroundBeautyRuntime(
         if (view is AbsListView) {
             if (!listSelectors.containsKey(view)) {
                 listSelectors[view] = view.selector
-                view.selector = BackgroundBeautyFeedbackDrawable(manualOnly = homeLists[view] == BackgroundBeautySettings.Slot.CONTACTS || homeLists[view] == BackgroundBeautySettings.Slot.ME)
+                // Homepage feedback belongs only to the row actually hit below.
+                // AbsListView may keep a selector after the last visible item;
+                // it must never animate blank space or a previous selection.
+                view.selector = if (homeLists[view] == BackgroundBeautySettings.Slot.WECHAT)
+                    BackgroundBeautyTransparentDrawable()
+                else BackgroundBeautyFeedbackDrawable(manualOnly = homeLists[view] == BackgroundBeautySettings.Slot.CONTACTS || homeLists[view] == BackgroundBeautySettings.Slot.ME)
             }
             val adapter = view.adapter ?: return
             if (listAdapters[view] === adapter) return
@@ -2781,10 +2790,10 @@ private class BackgroundBeautyRuntime(
         val footerHost = slot == BackgroundBeautySettings.Slot.CHAT && view is ViewGroup &&
             appGridItems[view] != true &&
             findAncestor(view, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") != null
-        val conversationSpacer = slot == BackgroundBeautySettings.Slot.WECHAT &&
-            (view.parent as? ViewGroup)?.let { homeLists.containsKey(it) } == true && view.height > 0 &&
-            !isConversationFeedbackRow(view)
-        val feedback = preserveFeedback && !conversationSpacer && !footerHost && (slot != BackgroundBeautySettings.Slot.CHAT ||
+        val conversationFeedback = slot != BackgroundBeautySettings.Slot.WECHAT ||
+            (homeLists[view.parent as? View] == BackgroundBeautySettings.Slot.WECHAT &&
+                isConversationFeedbackRow(view))
+        val feedback = preserveFeedback && conversationFeedback && !footerHost && (slot != BackgroundBeautySettings.Slot.CHAT ||
             !inAppPanel || appGridItems[view] == true)
         if (slot == BackgroundBeautySettings.Slot.CHAT && state.surfaces[view]?.let {
                 it.slot == slot && it.appliedBitmap != null && view.background === it.appliedBackground
@@ -2804,7 +2813,7 @@ private class BackgroundBeautyRuntime(
             // Keep native background changes and feedback-mode changes on the full path.
             if (!backgroundMatches) {
                 val marker: Drawable = if (feedback) {
-                    BackgroundBeautyFeedbackDrawable(manualOnly = slot == BackgroundBeautySettings.Slot.CONTACTS || slot == BackgroundBeautySettings.Slot.ME)
+                    BackgroundBeautyFeedbackDrawable(manualOnly = slot == BackgroundBeautySettings.Slot.WECHAT || slot == BackgroundBeautySettings.Slot.CONTACTS || slot == BackgroundBeautySettings.Slot.ME)
                 } else BackgroundBeautyTransparentDrawable()
                 view.backgroundTintList = null
                 view.backgroundTintMode = null
@@ -2953,9 +2962,10 @@ private class BackgroundBeautyRuntime(
         // Chat list padding belongs to native insets / floating header and footer.
         // A background snapshot predates those owners; replaying it erases their
         // live avoidance on every background repair (20 -> 400 -> 20 in traces).
-        val chatList = snapshot.slot == BackgroundBeautySettings.Slot.CHAT &&
-            (view.javaClass.name == "com.tencent.mm.pluginsdk.ui.tools.ChattingRecyclerView" ||
-                view.javaClass.name == "com.tencent.mm.pluginsdk.ui.tools.ScrollControlRecyclerView")
+        // Geometry ownership follows the chat list, not the mutable page slot.
+        // A LauncherUI home snapshot must not erase live chat insets either.
+        val chatList = view.javaClass.name == "com.tencent.mm.pluginsdk.ui.tools.ChattingRecyclerView" ||
+            view.javaClass.name == "com.tencent.mm.pluginsdk.ui.tools.ScrollControlRecyclerView"
         if (!chatList && (view.paddingLeft != snapshot.originalPaddingLeft ||
             view.paddingTop != snapshot.originalPaddingTop ||
             view.paddingRight != snapshot.originalPaddingRight ||

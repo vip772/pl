@@ -166,3 +166,15 @@ SDK编译、源码契约检查、生产偏移方法的基线重算/不累加/控
 空白区水波纹的代码依据是背景 updateListRipple 对首页任意命中行启动反馈，缺少空白占位高度限制。现仅让 40–120dp 首页行产生反馈，并排除 TaskBar 和模块扩展；高大占位既不启动手动反馈，也不持有原生状态传播的反馈表面。只变更背景反馈，不扩大横栏点击范围、不修改原生触摸返回值。check_home_conversation_feedback_sdk.py 对真实生产条件做 SDK 编译和边界测试。具体截图空白视图类型日志未记录，需真机确认该反馈路径是否完整覆盖现象。
 
 仅在已有 8.0.78 证据范围修正，未新增其它版本兼容声明。未执行 Gradle、APK 构建或真机帧率测量，未提交推送。
+
+### 2026-10-29 空白区域反馈重新定位（替代行高过滤）
+
+用户明确要求：空白点击无任何可见反馈，实际条目点击才出现条目内水波纹并由微信进入会话。前轮 5 次空白点击已录屏，约 9.76 秒，空白区有五组对应变化；前台始终 LauncherUI。不能把没有跳转解释为反馈正常。
+
+重新核查发现遗漏来源：installRecyclerBinding 为整个 AbsListView 安装 BackgroundBeautyFeedbackDrawable，WECHAT 未设 manualOnly；applyHomeRow 还遍历内部 ViewGroup 安装可由宿主 pressed 状态触发的反馈。旧版仅以直接子行 40–120dp 高度过滤，未覆盖 selector、内部容器及状态传播，故现场仍有水波纹。
+
+本轮 WECHAT 的 ListView selector 改为透明并保留原 selector 供清理恢复；首页所有模块反馈 Drawable 改为 manualOnly，只接受命中行后的 setTouchPressed。只有父节点登记为首页列表、包含可见原生 kbq 标题的直接行可以持有反馈，外层/内部容器及空白占位透明。kbq 来源为现场 activity-top 视图树及 8.0.78 jo5.s/jo5.i0 原生绑定。移除任意固定行高上限，保留长字号行；每次 DOWN 清理旧手动状态，MOVE 超过 slop 和 UP/CANCEL 维持原有取消流程。没有拦截点击、改写事件返回值或增加滚动/逐帧扫描；资源 ID 使用已有缓存，标题查找仅在接管/点击时发生。
+
+验证：实际生产标题资格/反馈所有权片段与完整 Drawable 对真实 Android 36 SDK 定向编译；生产按压状态提取测试覆盖 2000 次宿主 pressed 不触发、真实行手动按下/松开、其它页面原有反馈、空占位/隐藏标题/TaskBar/模块扩展排除。分组手势、原生偏移、首次布局与背景作用域回归通过；git diff --check 通过。未运行 Gradle、未打包安装，当前设备运行的仍是旧包，不能声称新修复已通过真机五次点击验收。
+
+字体深浅继续保持证据边界：jo5.i0.a 确实按原生会话状态选择 ColorStateList，HomeTextColorFeature 对命中的标题统一应用配置；本轮没有运行时 ColorStateList/alpha 对照，不能断言截图浅色来自哪条分支，未强制覆盖颜色。

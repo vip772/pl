@@ -160,3 +160,16 @@ footer预绘制使用既有已缓存GradientDrawable进行常量级背景一致�
 验证：生产 FloatingChatFooterFeature、卡片/表面、ChatListBottomInset、SendButtonSettlement 对真实 Android 36 SDK 与 DexKit 定向编译通过，项目服务为签名桩（scripts/check_floating_footer_sdk.py）。生产事务提取测试覆盖 measuredHeight 有效但旧 height=0、首次避让回滚后重新初始化、重试上限；padding 测试覆盖共同祖先 pending 时等待、外层 decor pending 时可完成、稳定重复调用无写入及不主动滚动。面板切换、晚插工具栏、表面恢复、时间缓存及背景作用域回归通过。
 
 没有新增滚动扫描、逐帧数据库查询、定时轮询或无限重试。SDK 定向编译和方法测试不等同真机效果/帧率保证；上述相关路径已有源码修正，仍需后续新包验证。未运行 Gradle、未构建 APK、未提交推送。
+
+
+## 2026-10-29 底部上滑后消息下移：证据与快照所有权修正
+
+采集目录 /sdcard/Download/Operit/wechat-chat-swipe-20261029，14:20:21/24/28/32/35 五次上滑，18.69秒录屏。录屏本身不能确定 padding 写入调用者；图像区域匹配在内容重排后失配，不作为精确消息位移量。系统 logcat 无模块 INFO 的原因由 HLog/RuntimeLogStore 源码确认：日志写入微信私有 Hchat/logs/runtime.log，非 logcat；ChatBottomTrace 对每个视图/阶段仅采前120秒及限80条，因此未覆盖14:20。本次只读复制既有私有日志，未重启微信/清空日志。
+
+私有日志保留14:04–14:15，14:06:04.235底部400，14:06:05.281底部20而目标400，同一ScrollControlRecyclerView；14:06:05.286锚点补偿380，随后底部恢复400；14:06:09.445等再次出现20到400，另有141/235等中间值。记录直接证明留位反复变动及补偿，尚不能直接证明所有外部写入调用者。
+
+BackgroundBeautyFeature.restoreSurfaceGeometry 已有保护却要求 snapshot.slot==CHAT。LauncherUI共享页面/快照作用域中，聊天列表带旧WECHAT等标签仍能被恢复到旧padding；旧test_chat_background_padding_owner甚至明确预期WECHAT标签把400恢复20，故此前测试漏掉所有权要求。现按已核查的ChattingRecyclerView/ScrollControlRecyclerView实际类型保护几何，不依赖可变slot；不改动其它控件背景恢复及minimum尺寸恢复。移除这条确定存在的padding覆盖路径。
+
+定向验证：生产restoreSurfaceGeometry对真实Android36 SDK编译、两类列表在全部五种slot各1000次恢复均不覆盖实时padding；其它控件仍恢复。Footer整套生产源码SDK定向编译；底部锚点、底部padding、顶部留位和背景作用域回归通过。mapping包对应70603e3，FooterRuntime映射gj.u0、HeaderRuntime为gj.h1、ChatListBottomInset为gj.g；本次无异常堆栈，未将mapping误作运行栈证据。
+
+未增加持续强制滚底、滚动扫描、监听器或定时轮询；本修改仅减少已有背景恢复的布局写入。仍需新包验证是否覆盖全部上滑位移；没有当前时段写入调用栈，不能声明唯一根因或全部修复。未执行Gradle/APK构建，未提交推送，保留此前空白反馈未提交修复。
