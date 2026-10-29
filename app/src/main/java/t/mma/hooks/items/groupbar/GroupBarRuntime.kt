@@ -139,7 +139,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     val item = param.args.firstOrNull() ?: return
                     runCatching {
                         val native = conversation.get(item) ?: return
-                        param.result = filter.acceptsNativeParent(param.result == true, parent.get(native) as? String) &&
+                        param.result = filter.acceptsNativeParent(param.result == true, parent.get(native) as? String, user.get(native) as? String ?: "") &&
                             filter.accepts(user.get(native) as? String ?: "", unread.getInt(native))
                     }.onFailure { HLog.e("[Hchat:GroupBar] 增量筛选失败，保留原生结果", it) }
                 }
@@ -149,7 +149,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             querySubscription = database.subscribeQuery { sql ->
                 val snapshot = queryScope.get()
                 if (destroyed || snapshot == null) sql else synchronized(sqlCache) {
-                    sqlCache.getOrPut(snapshot to sql) { GroupBarSql.rewrite(sql, snapshot.predicate()) }
+                    sqlCache.getOrPut(snapshot to sql) { GroupBarSql.rewrite(sql, snapshot.predicate(), snapshot.explicitOfficialPredicate()) }
                 }
             }
             fun hookAttach(owner: Class<*>, name: String, vararg args: Class<*>) {

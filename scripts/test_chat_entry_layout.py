@@ -23,13 +23,13 @@ class ViewTreeObserver {
  fun frame():Boolean {var draw=true;listeners.toList().forEach{if(!it.onPreDraw())draw=false};return draw}
 }
 class View {
- var isAttachedToWindow=true;var visibility=0;val rootView get()=this
+ var height=100;var width=100;var isAttachedToWindow=true;var visibility=0;val rootView get()=this
  val viewTreeObserver=ViewTreeObserver();var invalidations=0;var layouts=0;var isLayoutRequested=false;var paddingBottom=0
  fun requestLayout(){layouts++;isLayoutRequested=true};fun postInvalidateOnAnimation(){invalidations++}
- companion object{const val INVISIBLE=4}
+ companion object{const val INVISIBLE=4;const val VISIBLE=0;const val GONE=8}
 }
-class FooterTracker(val layout:View,val visibility:Int=0,var ready:Boolean=false,var failed:Boolean=false,var revealed:Boolean=false,var settleExtensions:Int=0,var settlePasses:Int=0,
- var preDraw:ViewTreeObserver.OnPreDrawListener?=null,var attempts:Int=0,var failureReported:Boolean=false)
+class FooterTracker(val layout:View,var visibility:Int=0,var ready:Boolean=false,var failed:Boolean=false,var revealed:Boolean=false,var settleExtensions:Int=0,var settlePasses:Int=0,
+ var preDraw:ViewTreeObserver.OnPreDrawListener?=null,var attempts:Int=0,var failureReported:Boolean=false,var failedGeometry:String?=null,var recoveries:Int=0)
 object HLog {fun w(s:String){}}
 object BackgroundBeautySettings {enum class Slot{CHAT,WECHAT}}
 class Native(val javaClass:Name)
@@ -65,7 +65,7 @@ fun main(){
  val r=Runtime();r.outcomes.addAll(listOf(false,false,true));val v=View();val t=FooterTracker(View())
  r.schedule(v,t);check(!v.viewTreeObserver.frame() && !t.ready)
  check(!v.viewTreeObserver.frame() && !t.ready)
- check(!v.viewTreeObserver.frame() && t.ready && r.untracked==1)
+ check(!v.viewTreeObserver.frame() && t.ready && r.untracked==0)
  r.states[v]=Runtime.State()
  check(v.viewTreeObserver.frame());check(v.viewTreeObserver.listeners.isEmpty())
  // Native layout clears the flag before pre-draw; retries must not set it again.
@@ -104,6 +104,19 @@ fun main(){
  val ev=View();val et=FooterTracker(View(),ready=true,revealed=true);existing.states[ev]=Runtime.State()
  existing.schedule(ev,et);repeat(2){check(!ev.viewTreeObserver.frame())};check(ev.viewTreeObserver.frame())
  check(existing.restored==0&&!et.failed)
+ // Hidden/unmeasured native initialization is deferred without consuming attempts.
+ val hidden=Runtime();val hv=View();hv.visibility=8;hv.height=0;val ht=FooterTracker(View(),8)
+ repeat(1000){hidden.schedule(hv,ht)};check(ht.attempts==0&&!ht.failed&&hidden.restored==0)
+ hv.visibility=0;hv.height=100;hidden.outcomes.add(true);hidden.states[hv]=Runtime.State()
+ hidden.schedule(hv,ht);check(!hv.viewTreeObserver.frame());check(hv.viewTreeObserver.frame())
+ check(ht.revealed&&hv.visibility==0&&ht.visibility==0)
+ // Recovery is event-driven, geometry gated and capped; unchanged failures stay inert.
+ val recovery=Runtime();val rv=View();val rt=FooterTracker(View(),failed=true,failedGeometry="0:100:100:100:100")
+ repeat(1000){recovery.schedule(rv,rt)};check(rt.recoveries==0&&rt.preDraw==null)
+ rv.height=120;recovery.outcomes.add(true);recovery.states[rv]=Runtime.State()
+ recovery.schedule(rv,rt);check(rt.recoveries==1&&!rt.failed)
+ check(!rv.viewTreeObserver.frame());check(rv.viewTreeObserver.frame()&&rt.revealed)
+ val capped=FooterTracker(View(),failed=true,recoveries=2);recovery.schedule(View(),capped);check(capped.preDraw==null)
  val off=Runtime();val ov=View();val ot=FooterTracker(View());off.schedule(ov,ot);off.enabled=false
  check(ov.viewTreeObserver.frame() && off.restored==1)
  val chat=BackgroundBeautySettings.Slot.CHAT

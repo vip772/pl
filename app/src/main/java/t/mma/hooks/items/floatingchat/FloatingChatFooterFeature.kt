@@ -597,7 +597,10 @@ private class FooterRuntime(private val context: FeatureContext) {
         val layout = findAncestorChatLayout(footer) ?: return
         val tracker = trackerForFooter(footer, layout)
         if (!isReadyChatLayout(layout)) return
-        if (!tracker.ready && !tracker.failed) footer.visibility = View.INVISIBLE
+        if (!tracker.ready && !tracker.failed && footer.visibility == View.VISIBLE && footer.height > 0) {
+            tracker.visibility = View.VISIBLE
+            footer.visibility = View.INVISIBLE
+        }
         scheduleFooterApply(footer, tracker)
     }
 
@@ -621,7 +624,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                 footer.addOnLayoutChangeListener(listener)
                 val observer = footer.viewTreeObserver
                 val global = ViewTreeObserver.OnGlobalLayoutListener {
-                    if (!created.ready && footer.isAttachedToWindow && isEnabled() && isReadyChatLayout(created.layout)) {
+                    if (!created.revealed && footer.isAttachedToWindow && isEnabled() && isReadyChatLayout(created.layout)) {
                         scheduleFooterApply(footer, created, requestLayout = false)
                     }
                 }
@@ -635,7 +638,18 @@ private class FooterRuntime(private val context: FeatureContext) {
     }
 
     private fun scheduleFooterApply(footer: View, tracker: FooterTracker, requestLayout: Boolean = false) {
-        if (tracker.failed) return
+        // A native hidden/unmeasured footer is not a failed floating transaction.
+        // Keep lifecycle observation until the native input becomes available.
+        if (states[footer] == null && (footer.visibility == View.GONE || footer.height <= 0)) return
+        if (tracker.failed) {
+            val geometry = "${footer.visibility}:${footer.width}:${footer.height}:${tracker.layout.width}:${tracker.layout.height}"
+            if (geometry == tracker.failedGeometry || tracker.recoveries >= 2) return
+            tracker.recoveries++
+            tracker.failed = false
+            tracker.ready = false
+            tracker.attempts = 0
+        }
+        if (!tracker.ready && footer.visibility == View.VISIBLE) tracker.visibility = View.VISIBLE
         if (tracker.ready && tracker.settlePasses == 0) {
             val state = states[footer] ?: return
             refreshMeasuredInputHeight(footer, state)
@@ -657,6 +671,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     restore(footer)
                     return true
                 }
+                if (states[footer] == null && (footer.visibility == View.GONE || footer.height <= 0)) return true
                 // Stable sessions only settle padding; failed first reveal rolls back atomically.
                 if (tracker.settlePasses > 0) {
                     val state = states[footer]
@@ -682,12 +697,14 @@ private class FooterRuntime(private val context: FeatureContext) {
                     if (!settled && !tracker.revealed) {
                         // Bounded failure must not reveal a half-applied overlay.
                         tracker.failed = true
+                        tracker.failedGeometry = "${footer.visibility}:${footer.width}:${footer.height}:${tracker.layout.width}:${tracker.layout.height}"
                         restore(footer)
                         footer.visibility = tracker.visibility
                         HLog.w("[Hchat:$TAG] 首次列表避让未完成，已恢复原生输入区，本实例停止重试")
                         return true
                     }
                     tracker.revealed = true
+                    removeGlobalTracking(tracker)
                     footer.visibility = tracker.visibility
                     ChatBottomTrace.event(footer, "footer-settled") { "paddingComplete=$settled ready=${tracker.ready} " +
                             (states[footer]?.chatRecycler?.let(ChatBottomTrace::listGeometry) ?: "list=missing") }
@@ -703,9 +720,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                     tracker.failureReported = false
                     tracker.ready = true
                     if (wasReady) footer.visibility = tracker.visibility
-                    if (!wasReady) {
-                        removeGlobalTracking(tracker)
-                    }
+                    // Remove the bounded startup observer only after a real reveal.
                 } else if (tracker.attempts++ < INITIAL_LAYOUT_RETRY_COUNT) {
                     // Keep the incomplete entry transaction off screen. A bounded
                     // retry finishes native layout and list padding before first draw.
@@ -717,6 +732,7 @@ private class FooterRuntime(private val context: FeatureContext) {
                 } else {
                     // Stop ALL layout/global callbacks from restarting a failed transaction.
                     tracker.failed = true
+                    tracker.failedGeometry = "${footer.visibility}:${footer.width}:${footer.height}:${tracker.layout.width}:${tracker.layout.height}"
                     removeGlobalTracking(tracker)
                     // A failed apply may already have moved the native panel. Roll it back.
                     ChatBottomTrace.event(footer, "footer-rollback") { "attempts=${tracker.attempts}" }
@@ -786,7 +802,7 @@ private class FooterRuntime(private val context: FeatureContext) {
             restore(footer)
             return false
         }
-        if (!footer.isAttachedToWindow) return false
+        if (!footer.isAttachedToWindow || footer.visibility == View.GONE || footer.height <= 0) return false
         val layout = findAncestorChatLayout(footer) ?: return false
         if (!isReadyChatLayout(layout)) return false
         val marginParams = footer.layoutParams as? ViewGroup.MarginLayoutParams ?: return false
@@ -1258,7 +1274,7 @@ private class FooterRuntime(private val context: FeatureContext) {
 
     private class FooterTracker(
         var layout: ViewGroup,
-        val visibility: Int,
+        var visibility: Int,
         var ready: Boolean = false,
         var revealed: Boolean = false,
         var failed: Boolean = false,
@@ -1268,6 +1284,8 @@ private class FooterRuntime(private val context: FeatureContext) {
         var layoutListener: View.OnLayoutChangeListener? = null,
         var attempts: Int = 0,
         var failureReported: Boolean = false,
+        var failedGeometry: String? = null,
+        var recoveries: Int = 0,
         var globalObserver: ViewTreeObserver? = null,
         var globalListener: ViewTreeObserver.OnGlobalLayoutListener? = null,
     )

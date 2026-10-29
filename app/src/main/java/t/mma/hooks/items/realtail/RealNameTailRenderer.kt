@@ -30,6 +30,7 @@ class RealNameTailRenderer(
     private val boundViews = Collections.synchronizedMap(WeakHashMap<TextView, String>())
     private val holderTextFieldCache = ConcurrentHashMap<Class<*>, Field?>()
     private val likelyMsgCache = ConcurrentHashMap<Class<*>, Boolean>()
+    private val colorRebinds = WeakHashMap<TextView, Runnable>()
     private val inSetText = ThreadLocal<Boolean>()
     private val methodCachePrefs = DexMethodCache.prefs(context.hostContext(), "Hchat_real_tail_method_cache")
     @Volatile private var installed = false
@@ -104,6 +105,7 @@ class RealNameTailRenderer(
             clearBoundDecorations(tv)
             return
         }
+        colorRebinds.remove(tv)?.let(tv::removeCallbacks)
         boundViews[tv] = sender
         if (tailEnabled) {
             val rawTail = store.cachedTail(sender)
@@ -119,7 +121,7 @@ class RealNameTailRenderer(
             hideTail(tv)
         }
         if (nicknameColorEnabled) {
-            applyNicknameColor(tv)
+            applyNicknameColorAfterBind(tv, sender)
         } else {
             hideNicknameColor(tv)
         }
@@ -138,8 +140,24 @@ class RealNameTailRenderer(
         }
     }
 
+    private fun applyNicknameColorAfterBind(tv: TextView, sender: String) {
+        colorRebinds.remove(tv)?.let(tv::removeCallbacks)
+        val applied = applyNicknameColor(tv)
+        val styledText = tv.text
+        // One post-bind pass, not polling. Do nothing when native code retained
+        // the styled object; same-string replacement still needs its spans restored.
+        val task = Runnable {
+            colorRebinds.remove(tv)
+            if (tv.isAttachedToWindow && boundViews[tv] == sender && nicknameColorStore.isEnabled() &&
+                (!applied || tv.text !== styledText)) applyNicknameColor(tv)
+        }
+        colorRebinds[tv] = task
+        tv.post(task)
+    }
     private fun applyNicknameColor(tv: TextView): Boolean {
-        if (tv.visibility != View.VISIBLE) return false
+        // Styling hidden native names must not force visibility, but preserving
+        // the span allows a later native visibility change to display the style.
+        if (tv.text.isNullOrEmpty()) return false
         val row = ChatNameDecorationLayout.ensure(tv)
         ChatNameDecorationLayout.showBaseNameStyle(
             row,
@@ -291,6 +309,7 @@ class RealNameTailRenderer(
     }
 
     private fun clearBoundDecorations(tv: TextView) {
+        colorRebinds.remove(tv)?.let(tv::removeCallbacks)
         boundViews.remove(tv)
         hideTail(tv)
         hideNicknameColor(tv)

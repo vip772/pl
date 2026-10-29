@@ -18,12 +18,24 @@ internal class GroupBarFilter(
             else -> id in current.members
         }
     }
+    // Immutable selection state: no SQL construction during incremental membership.
+    private val explicitMembers = group?.takeIf {
+        it.id !in setOf("all", "friends", "rooms", "official", "unread")
+    }?.members.orEmpty()
+    private val explicitPredicate: String? by lazy(LazyThreadSafetyMode.PUBLICATION) {
+        explicitMembers.takeIf { it.isNotEmpty() }?.sorted()?.joinToString(",", "rconversation.username IN (", ")") {
+            "'" + it.replace("'", "''") + "'"
+        }
+    }
+    fun explicitOfficialPredicate(): String? = explicitPredicate
     private val cachedPredicate: String? by lazy(LazyThreadSafetyMode.PUBLICATION) { buildPredicate() }
     fun predicate(): String? = if (group == null) null else {
         val real = "rconversation.username NOT LIKE 'wxid!_hchat!_group!_%' ESCAPE '!' AND rconversation.username NOT LIKE 'hchat!_conv!_group:%' ESCAPE '!'"
         cachedPredicate?.let { "($real) AND ($it)" } ?: real
     }
-    fun acceptsNativeParent(native: Boolean, parent: String?): Boolean = native ||
+    fun acceptsNativeParent(native: Boolean, parent: String?, id: String = ""): Boolean = native ||
+        (id in explicitMembers &&
+            parent in setOf("officialaccounts", "service_officialaccounts", "photoaccounts")) ||
         (group != null && parent != null && (parent.startsWith("wxid_hchat_group_") || parent.startsWith("hchat_conv_group:")))
     private fun buildPredicate(): String? {
         val current = group ?: return null
@@ -45,7 +57,7 @@ internal class GroupBarFilter(
 
 /** Only used inside jo5.e.g's scoped native query; never rewrites arbitrary module queries. */
 internal object GroupBarSql {
-    fun rewrite(sql: String, predicate: String?): String {
+    fun rewrite(sql: String, predicate: String?, explicitOfficial: String? = null): String {
         if (predicate == null || "hchat_group_bar" in sql) return sql
         // Tokens exclude strings, quoted identifiers and comments; track nesting for ORDER/LIMIT.
         val tokens = ArrayList<Pair<String, Int>>()
@@ -96,7 +108,8 @@ internal object GroupBarSql {
                 val text = sql.substring(start, end)
                 if (Regex("parentRef\\s+is\\s+null", RegexOption.IGNORE_CASE).matches(text) && sql.getOrNull(start - 1) != '.') {
                     condition = condition.replaceRange(start - conditionStart, end - conditionStart,
-                        "($text OR parentRef LIKE 'wxid!_hchat!_group!_%' ESCAPE '!' OR parentRef LIKE 'hchat!_conv!_group:%' ESCAPE '!')")
+                        "($text OR parentRef LIKE 'wxid!_hchat!_group!_%' ESCAPE '!' OR parentRef LIKE 'hchat!_conv!_group:%' ESCAPE '!'" +
+                            (explicitOfficial?.let { " OR (parentRef IN ('officialaccounts','service_officialaccounts','photoaccounts') AND $it)" } ?: "") + ")")
                 }
             }
         }
