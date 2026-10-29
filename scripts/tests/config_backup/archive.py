@@ -230,6 +230,29 @@ fun main(args:Array<String>){
  HchatConfigBackup.importFromUri(bar,Uri(barZip))
  check(!(barPrefs.getBoolean("enable",false)&&grouped.getBoolean("enabled",false)))
  println("PASS bidirectional grouping exclusion for direct/quick preference writes; both group configurations preserved")
+ // Removed input settings cannot round-trip; independent header settings remain.
+ val retired=Context(File(base,"retired"),"com.retired")
+ Store.preferences(retired,"Hchat_global_config").edit().putBoolean("floating_chat_header_enabled",true).putInt("floating_chat_header_transparency",23).putBoolean("floating_chat_footer_enabled",true).putInt("floating_chat_footer_transparency",80).commit()
+ Store.preferences(retired,"Hchat_feature_floating_chat_footer").edit().putBoolean("enabled",true).commit()
+ val retiredZip=File(base,"retired.zip");HchatConfigBackup.exportToUri(retired,Uri(retiredZip))
+ java.util.zip.ZipFile(retiredZip).use { archive ->
+  val manifest=JSONObject(archive.getInputStream(archive.getEntry("config.json")).bufferedReader().readText())
+  val exported=manifest.getJSONObject("prefs")
+  check(!exported.has("Hchat_feature_floating_chat_footer"))
+  val global=exported.getJSONObject("Hchat_global_config")
+  check(!global.has("floating_chat_footer_enabled")&&!global.has("floating_chat_footer_transparency"))
+  check(global.has("floating_chat_header_enabled")&&global.has("floating_chat_header_transparency"))
+ }
+ val oldGlobal=JSONObject().put("floating_chat_footer_enabled",JSONObject().put("type","boolean").put("value",true)).put("floating_chat_footer_transparency",JSONObject().put("type","int").put("value",80)).put("floating_chat_header_enabled",JSONObject().put("type","boolean").put("value",true))
+ val oldPrefs=JSONObject().put("Hchat_global_config",oldGlobal).put("Hchat_feature_floating_chat_footer",JSONObject().put("enabled",JSONObject().put("type","boolean").put("value",true)))
+ val oldFile=File(base,"retired-old.json");oldFile.writeText(JSONObject().put("format","HchatConfigBackup").put("version",1).put("prefs",oldPrefs).toString())
+ val retiredOut=Context(File(base,"retired-out"),"com.retired.out")
+ HchatConfigBackup.importFromUri(retiredOut,Uri(oldFile))
+ val importedGlobal=Store.preferences(retiredOut,"Hchat_global_config")
+ check(importedGlobal.getBoolean("floating_chat_header_enabled",false))
+ check(!importedGlobal.contains("floating_chat_footer_enabled")&&!importedGlobal.contains("floating_chat_footer_transparency"))
+ check(Store.preferences(retiredOut,"Hchat_feature_floating_chat_footer").all.isEmpty())
+ println("PASS removed input settings excluded from export/legacy import; header settings preserved")
  // Commit failure after resource replacement must restore both preferences and resource.
  val target=File(Store.resourceDirectory(b,"future"),"image.png");target.writeText("before")
  out.edit().putInt("i",99).commit();FastKV.failName="Hchat_brand_new_feature";FastKV.failOnce=true

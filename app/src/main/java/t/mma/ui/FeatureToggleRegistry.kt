@@ -114,7 +114,7 @@ object FeatureToggleRegistry {
                 val sp = HchatStorage.preferences(context, t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings.PREFS_NAME)
                 t.mma.hooks.items.backgroundbeauty.MeEntryVisibility.Entry.values().any { sp.getBoolean(it.key, false) }
             }
-            "floating_chat_header", "floating_chat_footer" -> global(context, featureId)
+            "floating_chat_header" -> global(context, featureId)
             "floating_bottom_bar" -> boolean(context, "Hchat_custom_bottom_bar_config", "custom_bottom_bar_enable") &&
                 string(context, "Hchat_custom_bottom_bar_config", "custom_bottom_bar_style") == "floating"
             "mention_extension" -> boolean(context, "Hchat_hidden_at_config", "enable") ||

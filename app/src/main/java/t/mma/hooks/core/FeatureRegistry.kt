@@ -31,7 +31,6 @@ import t.mma.hooks.items.fakescancamera.FakeScanCameraFeature
 import t.mma.hooks.items.fakevoiceduration.FakeVoiceDurationFeature
 import t.mma.hooks.items.floatingshortcut.FloatingShortcutFeature
 import t.mma.hooks.items.floatingchat.FloatingChatHeaderFeature
-import t.mma.hooks.items.floatingchat.FloatingChatFooterFeature
 
 import t.mma.hooks.items.forwardlimit.RemoveForwardLimitFeature
 import t.mma.hooks.items.gameemoji.GameEmojiFeature
@@ -132,7 +131,6 @@ object FeatureRegistry {
             .register(t.mma.hooks.items.emojiat.EmojiAtFeature())
             .register(FloatingShortcutFeature())
             .register(FloatingChatHeaderFeature())
-            .register(FloatingChatFooterFeature())
             .register(CustomBottomBarFeature())
             .register(DynamicBadgeFeature())
 

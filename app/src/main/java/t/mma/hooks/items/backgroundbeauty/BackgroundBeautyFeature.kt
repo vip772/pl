@@ -2300,7 +2300,7 @@ private class BackgroundBeautyRuntime(
                         prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) &&
                         hasBackgroundImage(BackgroundBeautySettings.Slot.CHAT) &&
                         chatChromeVersionName() == "8.0.78"
-                    if (enabled && !floatingFooterEnabled()) state.inputUnderlay.apply(scroll) else state.inputUnderlay.restore(scroll)
+                    if (enabled) state.inputUnderlay.apply(scroll) else state.inputUnderlay.restore(scroll)
                 } catch (e: Throwable) {
                     state.inputUnderlay.restore(scroll)
                     HLog.e("$TAG 输入栏消息穿透布局失败", e)
@@ -2325,9 +2325,7 @@ private class BackgroundBeautyRuntime(
                 if (view != null && hasClassName(view, className)) {
                     val activity = findActivity(view)
                     val state = activity?.let { states[it] ?: ensureState(it) }
-                    t.mma.hooks.items.floatingchat.ChatBottomTrace.event(view, "background-lifecycle") {
-                        "activity=${activity?.javaClass?.simpleName} event=${param.method.name} slot=${state?.lastLoggedSlot} configured=${activity?.let(::hasConfiguredBackground)} floating=${floatingFooterEnabled()}"
-                    }
+
                     if (activity != null && (state == null || state.lastLoggedSlot != BackgroundBeautySettings.Slot.CHAT)) scheduleRefresh(activity)
                     if (activity != null && state != null && !destroyed &&
                         resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT && hasConfiguredBackground(activity)) {
@@ -2375,8 +2373,6 @@ private class BackgroundBeautyRuntime(
             chatChromeVersionName = it
         }
     }
-    private fun floatingFooterEnabled(): Boolean =
-        context.configStore().getGlobalBoolean("floating_chat_footer_enabled", false)
     private fun applyChatChromeRoot(state: HostState, root: View) {
         val layout = when {
             root.javaClass.name == "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout" -> root
@@ -2400,7 +2396,7 @@ private class BackgroundBeautyRuntime(
         if (chatChromeVersionName() == "8.0.78") {
             val scroll = findVisibleDescendant(layout ?: root, ChatInputMessageUnderlay.SCROLL) as? ViewGroup
             if (scroll != null) runCatching {
-                if (floatingFooterEnabled()) state.inputUnderlay.restore(scroll) else state.inputUnderlay.apply(scroll)
+                state.inputUnderlay.apply(scroll)
             }
                 .onFailure { state.inputUnderlay.restore(scroll); HLog.e("$TAG 输入栏消息穿透布局失败", it) }
         }
@@ -2413,9 +2409,7 @@ private class BackgroundBeautyRuntime(
         if (footer == null) {
             return
         }
-        t.mma.hooks.items.floatingchat.ChatBottomTrace.event(footer, "background-before") {
-            "activity=${state.activity.javaClass.simpleName} floating=${floatingFooterEnabled()}"
-        }
+
         // The complete ChatFooter contains both the input surface and the sibling plus-menu
         // panel. Both are intended to reveal the chat background, so process the whole footer.
         applySpeechSurfaces(state, footer)
@@ -2428,7 +2422,7 @@ private class BackgroundBeautyRuntime(
             // Keep the bkc/AppPanel branch in this traversal: its surface is intentionally transparent.
 
             if (view is android.widget.EditText) {
-                // Native and floating editors share the transparent, borderless surface.
+                // Native editors retain the transparent, borderless surface.
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true)
             } else if (view is ViewGroup) {
                 setTransparentSurface(state, view, BackgroundBeautySettings.Slot.CHAT, clearForeground = true, preserveFeedback = appGridItems[view] == true)
@@ -2443,9 +2437,6 @@ private class BackgroundBeautyRuntime(
             }
         }
 
-        t.mma.hooks.items.floatingchat.ChatBottomTrace.event(footer, "background-after") {
-            "activity=${state.activity.javaClass.simpleName} managed=${state.surfaces.containsKey(footer)}"
-        }
     }
     private fun applyWhitelistedSurfaces(
         state: HostState,
@@ -2663,11 +2654,6 @@ private class BackgroundBeautyRuntime(
 
     private val initializedChrome = WeakHashMap<View, Boolean>()
     private fun applyNativeChrome(view: View, slot: BackgroundBeautySettings.Slot) {
-        if (view.javaClass.name == "com.tencent.mm.ui.FrostedContentView") {
-            t.mma.hooks.items.floatingchat.ChatBottomTrace.event(view, "native-frosted") {
-                "slot=$slot initialized=${initializedChrome[view]} restoring=$restoringBounce owned=${bounceColors.containsKey(view)}"
-            }
-        }
         if (restoringBounce || initializedChrome[view] == true) return
         // ActionBarContainer draws primary/stacked/split layers independently of View.background.
         if (slot == BackgroundBeautySettings.Slot.CHAT && view.javaClass.name != "androidx.appcompat.widget.ActionBarContainer") return
@@ -2959,7 +2945,7 @@ private class BackgroundBeautyRuntime(
     }
 
     private fun restoreSurfaceGeometry(view: View, snapshot: SurfaceSnapshot) {
-        // Chat list padding belongs to native insets / floating header and footer.
+        // Chat list padding belongs to native insets and the floating header.
         // A background snapshot predates those owners; replaying it erases their
         // live avoidance on every background repair (20 -> 400 -> 20 in traces).
         // Geometry ownership follows the chat list, not the mutable page slot.

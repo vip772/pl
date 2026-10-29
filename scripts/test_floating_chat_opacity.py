@@ -18,9 +18,9 @@ with tempfile.TemporaryDirectory() as td:
  subprocess.run(cmd+['-classpath',str(std)+':/usr/lib/android-sdk/platforms/android-36/android.jar','-d',str(p/'sdk.jar'),str(b/'FloatingChatOpacity.kt'),str(b/'FloatingChatCardVisuals.kt')],check=True,timeout=45)
  subprocess.run(cmd+['-classpath',str(std),'-d',str(p/'test.jar'),str(b/'FloatingChatOpacity.kt'),str(p/'Test.kt')],check=True,timeout=45)
  subprocess.run(['java','-cp',f'{p/"test.jar"}:{std}','t.mma.hooks.items.floatingchat.TestKt'],check=True)
-for kind in ['Header','Footer']:
+for kind in ['Header']:
  s=(b/f'FloatingChat{kind}Feature.kt').read_text()
  for line in s.splitlines():
   if 'FloatingChatCardVisuals.apply(' in line:assert 'transparency = backgroundTransparency' in line
  assert f'floating_chat_{kind.lower()}_transparency' in s
-print('PASS production card SDK compile; header/footer background wiring')
+print('PASS production card SDK compile; header background wiring')

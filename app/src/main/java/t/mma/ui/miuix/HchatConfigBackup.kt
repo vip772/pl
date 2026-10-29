@@ -30,6 +30,12 @@ internal object HchatConfigBackup {
     private val resourceRoots = setOf("resources", "background_beauty", "side_panel",
         "home_profile", "custom_friend_avatars", "custom_bottom_bar_icons",
         "message_bubbles", "FloatingShortcut/icons")
+    // Legacy backups must not restore the removed input feature.
+    private fun retiredStore(name: String): Boolean =
+        name.startsWith("Hchat_floating_chat_footer") ||
+            name.startsWith("Hchat_feature_floating_chat_footer")
+    private fun retiredKey(name: String, key: String): Boolean =
+        name == "Hchat_global_config" && key.startsWith("floating_chat_footer_")
     private val transactionLock = Any()
     data class Result(val stores: Int, val items: Int, val resources: Int) {
         fun description() = "$stores 个配置库、$items 项配置、$resources 个资源"
@@ -40,8 +46,10 @@ internal object HchatConfigBackup {
         val prefs = JSONObject()
         var itemCount = 0
         for (name in HchatStorage.backupPreferenceNames(context)) {
+            if (retiredStore(name)) continue
             val entries = JSONObject()
             HchatStorage.preferences(context, name).all.forEach { (key, value) ->
+                if (retiredKey(name, key)) return@forEach
                 val encoded = encodePreferenceValue(value)
                     ?: error("不支持的配置类型: $name/$key")
                 entries.put(key, encoded)
@@ -146,10 +154,12 @@ internal object HchatConfigBackup {
             val oldRoot = manifest.optString("storageRoot")
             val newRoot = HchatStorage.storageDir(context).absolutePath
             for (name in prefs.keys().asSequence()) {
+                if (retiredStore(name)) continue
                 check(HchatStorage.isBackupPreference(context, name)) { "禁止恢复非用户配置: $name" }
                 val entries = prefs.getJSONObject(name)
                 val values = linkedMapOf<String, Any>()
                 for (key in entries.keys().asSequence()) {
+                    if (retiredKey(name, key)) continue
                     val obj = entries.getJSONObject(key)
                     val value = decodeStrict(obj)
                     values[key] = when (value) {

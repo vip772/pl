@@ -56,7 +56,6 @@ import t.mma.hooks.items.floatingshortcut.FloatingShortcutItem
 import t.mma.hooks.items.floatingshortcut.FloatingShortcutRuntime
 import t.mma.hooks.items.floatingshortcut.FloatingShortcutSettings
 import t.mma.hooks.items.floatingchat.FloatingChatHeaderFeature
-import t.mma.hooks.items.floatingchat.FloatingChatFooterFeature
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -1122,7 +1121,6 @@ internal fun FeatureSettingsPage(
         SpecialMessageFeature.ID -> SpecialMessageMiuixPage(context, onBack)
         FloatingShortcutFeature.ID -> FloatingShortcutMiuixPage(context, provider, onBack)
         FloatingChatHeaderFeature.ID -> FloatingChatToggleMiuixPage(context, provider, onBack)
-        FloatingChatFooterFeature.ID -> FloatingChatToggleMiuixPage(context, provider, onBack)
         MessageDetailsSettingsProvider.FEATURE_ID -> MessageDetailsConfigPage(
             context = context,
             sp = HchatStorage.preferences(context, HchatExtraSettings.PREFS_NAME),

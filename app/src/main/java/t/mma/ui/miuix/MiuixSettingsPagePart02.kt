@@ -56,7 +56,6 @@ import t.mma.hooks.items.floatingshortcut.FloatingShortcutItem
 import t.mma.hooks.items.floatingshortcut.FloatingShortcutRuntime
 import t.mma.hooks.items.floatingshortcut.FloatingShortcutSettings
 import t.mma.hooks.items.floatingchat.FloatingChatHeaderFeature
-import t.mma.hooks.items.floatingchat.FloatingChatFooterFeature
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -1280,8 +1279,7 @@ internal fun practicalFeatureGroups(
                 t.mma.hooks.items.homeextension.HomeExtensionFeature.ID,
                 DynamicBadgeSettings.ID,
                 FloatingBottomBarSettings.FEATURE_ID,
-                FloatingChatHeaderFeature.ID,
-                FloatingChatFooterFeature.ID
+                FloatingChatHeaderFeature.ID
             )
         ),
         FeatureGroupEntry(

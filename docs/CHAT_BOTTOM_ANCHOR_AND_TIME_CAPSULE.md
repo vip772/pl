@@ -1,7 +1,7 @@
 # 聊天底部位置修正与消息时间胶囊背景
 
 ## 范围
-基线 7fad3c1。输入区穿透路径本来就仅在微信 8.0.78、聊天背景开启且悬浮输入栏关闭时使用，本次不扩展版本范围。逆向依据为本地 8.0.78 ChattingContent.onMeasure(II)、ChattingScrollLayout.onLayout(ZIIII) 和 dispatchTouchEvent(MotionEvent) 的具体实现。未对其他微信版本新增 Hook 行为保证。
+基线 7fad3c1。输入区穿透路径本来就仅在微信 8.0.78、聊天背景开启时使用，本次不扩展版本范围。逆向依据为本地 8.0.78 ChattingContent.onMeasure(II)、ChattingScrollLayout.onLayout(ZIIII) 和 dispatchTouchEvent(MotionEvent) 的具体实现。未对其他微信版本新增 Hook 行为保证。
 
 ## 原因与修改
 - beforeLayout 原先用宽高相等推断模块测量；同宽的新原生高度等于旧扩展高度时会误恢复旧高度。现通过 ChattingContent.onMeasure 失效测量所有权；模块自己的同步 measure 使用保护标记排除，不再仅凭尺寸判断。

@@ -16,7 +16,6 @@ fun findWechatVerifiedMethod(c:Class<*>?,n:String,vararg types:Class<*>)=c?.getD
 fun hookOnce(m:java.lang.reflect.Method,before:((Param)->Unit)?=null,after:((Param)->Unit)?=null){}
 fun findActivity(v:View):Activity?=null
 fun chatChromeVersionName()="8.0.78"
-fun floatingFooterEnabled()=false
 fun hasBackgroundImage(s:BackgroundBeautySettings.Slot)=true
 fun install(){
 '''+s[a:b]+'''}}

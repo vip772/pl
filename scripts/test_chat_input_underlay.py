@@ -168,12 +168,6 @@ fun main(){
  controller.apply(scroll)
  check(content.width==1440)
  controller.restoreAll()
- // Floating acquisition must restore native padding BEFORE it snapshots it.
- val baseline=list.paddingBottom;val nativeHeight=content.height
- controller.apply(scroll);check(list.paddingBottom>baseline)
- ChatInputMessageUnderlay.releaseForFloatingFooter(footer)
- check(list.paddingBottom==baseline&&content.height==nativeHeight)
- controller.restoreAll();check(list.paddingBottom==baseline)
  // Model the real bottom-pinned list: native layout shrinks it first.
  scroll.height=0
  val rowItem=View();rowItem.height=120;list.add(rowItem)

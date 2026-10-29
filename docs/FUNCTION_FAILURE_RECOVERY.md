@@ -29,18 +29,4 @@
 - 新绑定、成功、清理和脱离窗口仍保持取消/有效性检查。
 - 布局监听仍会响应实际 global-layout 事件；具体 kn5.d9 / mq 行的显示、位置与复用需要实机验证。
 
-## 4. 群通话铃声与悬浮输入框
-
-- 本地微信 8.0.78 APK 内没有旧 MultiTalkAudioManager 路由字符串，但有 CoreV2 的 startRing 请求入口；smali 确认参数 J/[B/I/Z、roomRole 取反为 outgoing，以及末尾 a4(J) 确认回调。
-- 保留已有 CoreV2 定位/确认逻辑，更新失败扫描缓存版本以重新评估旧失败结果；同时保留旧 MT 路径扫描，避免影响旧微信两路共存。
-- 仅当 CoreV2 未就绪时将旧群入口缺失报告为失败；有替代入口时输出各路径数量。定位异常、候选过多和确认回调失败仍记录。此次没有新增模糊通话 Hook，也没有把未测的真实铃声屏蔽写为已验证。
-- 悬浮输入框禁用时不隐藏原输入框/排队重试；确认输入高度可用后才迁移面板。
-- 失败耗尽时恢复原输入框及已经变动的面板/样式；失败提示限次，后续实际布局变化仍可再试。成功重置重试状态。
-
 ## 验证
-
-- `python3 scripts/tests/function_recovery/run.py`：生产父级规划策略、生产 PendingLayout observer 的 JVM 桩回归通过。覆盖未知归属保护、可信归属恢复、缺失会话保护、有界重入轮询、后续布局恢复、成功/退出清理、脱离窗口抑制。
-- `node scripts/run_message_details_layout_tests.cjs /tmp/pl-kotlin-libs`：7 项布局观察及卡片层级回归通过。
-- `node scripts/run_message_details_predraw_tests.cjs /tmp/pl-kotlin-libs`：预绘制回归通过。
-- `git diff --check` 通过。
-- 这些测试不等于完整 Android feature 编译；未完整编译 ConversationGroupRuntime / QuickMarkReadRuntime / HchatExtraFeature / FooterRuntime / CallRingtoneBlockHooker，亦未实机验证数据库恢复、分身快捷已读、消息详情显示、铃声屏蔽和悬浮输入框。

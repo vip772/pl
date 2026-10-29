@@ -10,8 +10,6 @@ PageScaffold 原先把 Miuix Scaffold 的 bottomBar 设为空，将真实操作�
 
 所有使用该共用组件的页面移除原来的固定 84dp/78dp 高度补偿，统一保留测量后额外 12dp 的内容末尾间距，防撤回页移除自身重复测量补偿。影响面覆盖共用设置页面，因此不止新功能分组；这是避免共用修正引入双重高度的配套调整。
 
-逐一检查实际 isNewFeature 注册：动态角标、艾特扩展、群聊分析、输入框提示、资料页显示、进入时间/邀请人、悬浮标题栏和悬浮输入框，都使用 PageScaffold 并消费其底部 padding。额外检查首页扩展、首页侧栏、首页文字颜色、自定义底栏、聊天工具栏、缓存、步数等独立页面。动态角标和消息菜单扩展无需在页面中再添加固定高度，直接获得共用测量结果。
-
 ## 依据与验证
 核对项目依赖 Miuix 0.8.8 源码 ScaffoldLayout：先测量 bottomBarPlaceable，再将其 height.toDp() 写入 contentPadding.bottom（空底栏时用系统 inset），最后在页面底部放置。源码来源：https://repo.maven.apache.org/maven2/top/yukonga/miuix/kmp/miuix-android/0.8.8/miuix-android-0.8.8-sources.jar ，commonMain/top/yukonga/miuix/kmp/basic/Scaffold.kt。
 
