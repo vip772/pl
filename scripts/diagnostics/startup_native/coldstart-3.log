@@ -1,0 +1,23 @@
+armed pid=22634 base=0x7003034000 seconds=25
+event ms=21218339 tid=22889 site=longFinal pc=0x29dc00 lr=0x29dbbc type=0 code=0 task=5 cmd=434 retry=0 running=0 readable=1 fp=0x2a58c4,0x2a6430,
+event ms=21218562 tid=22634 site=redo pc=0x3277f4 lr=0x32f430 type=0 code=0 task=0 cmd=0 retry=0 running=0 readable=0 fp=
+event ms=21218829 tid=22634 site=rebuildLonglink pc=0x1666ec lr=0x11df1c type=0 code=0 task=0 cmd=0 retry=0 running=0 readable=0 fp=0x280294,
+event ms=21218845 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=1 cmd=0 retry=1 running=1 readable=1 fp=0x2c7fac,
+event ms=21218847 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=2 cmd=121 retry=1 running=1 readable=1 fp=0x2c7fac,
+event ms=21218850 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=3 cmd=0 retry=1 running=1 readable=1 fp=0x2c7fac,
+event ms=21218864 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=6 cmd=0 retry=1 running=1 readable=1 fp=0x2c7fac,
+event ms=21218870 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=7 cmd=0 retry=1 running=1 readable=1 fp=0x2c7fac,
+event ms=21218885 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=8 cmd=0 retry=1 running=1 readable=1 fp=0x2c7fac,
+event ms=21218890 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=9 cmd=0 retry=1 running=1 readable=1 fp=0x2c7fac,
+event ms=21218958 tid=22889 site=longResponse pc=0x29c1c0 lr=0x2a3a98 type=9 code=-7 task=4 cmd=312 retry=1 running=1 readable=1 fp=0x2a3468,0x167158,
+event ms=21219244 tid=22889 site=longFinal pc=0x29dc00 lr=0x29dbbc type=0 code=0 task=4 cmd=312 retry=0 running=0 readable=1 fp=0x2a58c4,0x2a6430,
+event ms=21219479 tid=22634 site=redo pc=0x3277f4 lr=0x32f430 type=0 code=0 task=0 cmd=0 retry=0 running=0 readable=0 fp=
+event ms=21219492 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=14 cmd=0 retry=1 running=1 readable=1 fp=0x2c7fac,
+event ms=21219496 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=15 cmd=0 retry=0 running=1 readable=1 fp=0x2c7fac,
+event ms=21219506 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=16 cmd=0 retry=1 running=1 readable=1 fp=0x2c7fac,
+event ms=21219508 tid=22889 site=shortResponse pc=0x2f46d0 lr=0x304038 type=9 code=-7 task=17 cmd=0 retry=1 running=1 readable=1 fp=0x2c7fac,
+event ms=21220624 tid=22889 site=longFinal pc=0x29dc00 lr=0x29dbbc type=0 code=0 task=32 cmd=121 retry=1 running=0 readable=1 fp=0x2a58c4,0x2a6430,
+event ms=21220741 tid=22889 site=longFinal pc=0x29dc00 lr=0x29dbbc type=0 code=0 task=1 cmd=357 retry=0 running=0 readable=1 fp=0x2a58c4,0x2a6430,
+event ms=21220982 tid=22889 site=longFinal pc=0x29dc00 lr=0x29dbbc type=0 code=0 task=41 cmd=121 retry=1 running=0 readable=1 fp=0x2a58c4,0x2a6430,
+cleanup detached=132 remaining=0
+finished events=20 enrolled=142

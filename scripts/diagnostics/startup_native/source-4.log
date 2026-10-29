@@ -1,0 +1,10 @@
+armed pid=22536 base=0x6ff6e00000 seconds=25
+event ms=23848237 tid=22536 site=jniSaveAuthLong pc=0x27a818 lr=0xffffff907bf09250 type=0 code=0 task=0 cmd=0 retry=0 running=0 readable=0 fp=
+event ms=23848238 tid=22536 site=jniSaveAuthShort pc=0x27acac lr=0xffffff907bf09250 type=0 code=0 task=0 cmd=0 retry=0 running=0 readable=0 fp=
+event ms=23848240 tid=22536 site=jniRedoTask pc=0x32f380 lr=0xffffff907bf06904 type=0 code=0 task=0 cmd=0 retry=0 running=0 readable=0 fp=
+event ms=23848240 tid=22536 site=redo pc=0x3277f4 lr=0x32f430 type=0 code=0 task=0 cmd=0 retry=0 running=0 readable=0 fp=
+event ms=23848341 tid=22536 site=jniSetMMTlsHost pc=0x27fd1c lr=0xffffff907bf09250 type=0 code=0 task=0 cmd=0 retry=0 running=0 readable=0 fp=
+event ms=23848738 tid=22536 site=jniRedoTask pc=0x32f380 lr=0xffffff907bf06904 type=0 code=0 task=0 cmd=0 retry=0 running=0 readable=0 fp=
+event ms=23848740 tid=22536 site=redo pc=0x3277f4 lr=0x32f430 type=0 code=0 task=0 cmd=0 retry=0 running=0 readable=0 fp=
+cleanup detached=136 remaining=0
+finished events=7 enrolled=159
