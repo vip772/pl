@@ -76,6 +76,8 @@ public class ModuleEntry implements IXposedHookLoadPackage {
         // 平板模式需要在微信所有进程保持一致，避免升级/降级后登录态校验看到不同设备形态。
         installTabletEarlyHook(lpparam);
 
+        installStartupNetworkDiagnosticHook(lpparam);
+
         // 2. 子进程只安装明确需要的最小 Hook。
         if (!isMainProcess(lpparam)) {
             if (isAppBrandProcess(lpparam)) {
@@ -122,6 +124,29 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                     }
                 }
         ));
+    }
+
+    /** Temporary, read-only 8.0.78 startup trace; never initialise full features in push. */
+    private void installStartupNetworkDiagnosticHook(XC_LoadPackage.LoadPackageParam lpparam) {
+        if (!isMainProcess(lpparam) && !(lpparam.packageName + ":push").equals(lpparam.processName)) return;
+        HookRegistry.get().add(XposedHelpers.findAndHookMethod(Application.class, "onCreate", new XC_MethodHook() {
+            @Override protected void beforeHookedMethod(MethodHookParam param) {
+                try {
+                    Application app = (Application) param.thisObject;
+                    if (!TermsGate.INSTANCE.isAccepted(app)) return;
+                    String version = app.getPackageManager().getPackageInfo(app.getPackageName(), 0).versionName;
+                    if (!"8.0.78".equals(version) && (version == null || !version.startsWith("8.0.78."))) return;
+                    ClassLoader loader = resolveHostClassLoader(app, lpparam);
+                    if (isMainProcess(lpparam)) {
+                        t.mma.utils.StartupNetworkDiagnostic.install(loader, lpparam.packageName);
+                    } else {
+                        t.mma.utils.NetworkOriginDiagnostic.install(loader, lpparam.processName);
+                    }
+                } catch (Throwable error) {
+                    HLog.e(TAG + " 启动网络诊断安装失败", error);
+                }
+            }
+        }));
     }
 
     // ============ 包名与进程判断 ============
