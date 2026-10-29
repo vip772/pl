@@ -35,7 +35,7 @@ internal class GroupBarFilter(
     }
     fun acceptsNativeParent(native: Boolean, parent: String?, id: String = ""): Boolean = native ||
         (id in explicitMembers &&
-            parent in setOf("officialaccounts", "service_officialaccounts", "photoaccounts")) ||
+            parent in setOf("officialaccounts", "service_officialaccounts", "photoaccounts", "conversationboxservice")) ||
         (group != null && parent != null && (parent.startsWith("wxid_hchat_group_") || parent.startsWith("hchat_conv_group:")))
     private fun buildPredicate(): String? {
         val current = group ?: return null
@@ -103,13 +103,18 @@ internal object GroupBarSql {
         allTokens.windowed(3).asReversed().forEach { atom ->
             if (atom.map { it.first } == listOf("parentref", "is", "null") &&
                 atom[0].second >= conditionStart && atom[2].second < suffix) {
-                val start = atom[0].second
+                val columnStart = atom[0].second
+                val qualified = sql.getOrNull(columnStart - 1) == '.'
+                val qualifier = "rconversation."
+                val start = if (qualified) columnStart - qualifier.length else columnStart
+                if (start < conditionStart || (qualified && !sql.regionMatches(start, qualifier, 0, qualifier.length, true))) return@forEach
                 val end = atom[2].second + 4
                 val text = sql.substring(start, end)
-                if (Regex("parentRef\\s+is\\s+null", RegexOption.IGNORE_CASE).matches(text) && sql.getOrNull(start - 1) != '.') {
+                val column = if (qualified) "rconversation.parentRef" else "parentRef"
+                if (Regex("parentRef\\s+is\\s+null", RegexOption.IGNORE_CASE).matches(sql.substring(columnStart, end))) {
                     condition = condition.replaceRange(start - conditionStart, end - conditionStart,
-                        "($text OR parentRef LIKE 'wxid!_hchat!_group!_%' ESCAPE '!' OR parentRef LIKE 'hchat!_conv!_group:%' ESCAPE '!'" +
-                            (explicitOfficial?.let { " OR (parentRef IN ('officialaccounts','service_officialaccounts','photoaccounts') AND $it)" } ?: "") + ")")
+                        "($text OR $column LIKE 'wxid!_hchat!_group!_%' ESCAPE '!' OR $column LIKE 'hchat!_conv!_group:%' ESCAPE '!'" +
+                            (explicitOfficial?.let { " OR ($column IN ('officialaccounts','service_officialaccounts','photoaccounts','conversationboxservice') AND $it)" } ?: "") + ")")
                 }
             }
         }

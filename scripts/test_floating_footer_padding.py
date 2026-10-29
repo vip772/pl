@@ -43,6 +43,11 @@ fun main() {
  val parent=View();list.parent=parent;parent.isLayoutRequested=true
  val before=list.writes;check(!runtime.applyChatListPadding(footer,217,state,true));check(list.writes==before)
  parent.isLayoutRequested=false;list.parent=null
+ // Unrelated decor/title layout cannot starve a stable common scroll container.
+ val scroll=View();val decor=View();list.parent=scroll;footer.parent=scroll;scroll.parent=decor;decor.isLayoutRequested=true
+ check(runtime.applyChatListPadding(footer,217,state))
+ scroll.isLayoutRequested=true;check(!runtime.applyChatListPadding(footer,217,state))
+ scroll.isLayoutRequested=false;list.parent=null;footer.parent=null
  // Native layout already reserves 140px: only remaining 77px overlap belongs in padding.
  list.height=660;runtime.applyChatListPadding(footer,217,state);check(list.paddingBottom==88)
  // No overlap must restore base even if a full input height was supplied.

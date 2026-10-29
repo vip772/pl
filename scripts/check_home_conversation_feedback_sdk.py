@@ -1,0 +1,54 @@
+"""Compile actual feedback predicates with Android SDK; exercise placeholder boundaries."""
+from pathlib import Path
+import subprocess, tempfile
+r = Path(__file__).resolve().parents[1]
+s = (r/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt').read_text()
+a = s.index('    private fun isConversationFeedbackRow(')
+b = s.index('    private fun updateListRipple(', a)
+method = s[a:b]
+a = s.index('        val conversationSpacer =')
+b = s.index('\n        if (slot == BackgroundBeautySettings.Slot.CHAT', a)
+predicate = s[a:b]
+libs = Path('/tmp/pl-kotlin-libs')
+std = next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
+compiler = ['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect']
+with tempfile.TemporaryDirectory() as td:
+ p = Path(td)
+ code = '''import android.view.View
+import android.view.ViewGroup
+object BackgroundBeautySettings {enum class Slot {WECHAT,CHAT,ME}}
+class Check {
+ val homeLists=java.util.WeakHashMap<ViewGroup,Any>()
+ val appGridItems=java.util.WeakHashMap<View,Boolean>()
+ fun isWechatTaskSurface(v:View)=false
+ METHOD
+ fun feedback(view:View,slot:BackgroundBeautySettings.Slot,preserveFeedback:Boolean,footerHost:Boolean,inAppPanel:Boolean):Boolean {
+ PREDICATE
+ return feedback
+ }
+}
+'''.replace('METHOD',method).replace('PREDICATE',predicate)
+ (p/'Check.kt').write_text(code)
+ (p/'Surface.kt').write_text('package t.mma.hooks.items.homeextension\nobject HomeExtensionSurface {fun contains(v:android.view.View)=false}')
+ sdk=Path('/usr/lib/android-sdk/platforms/android-36/android.jar')
+ x=subprocess.run(compiler+['-classpath',f'{std}:{sdk}','-d',str(p/'sdk.jar'),str(p/'Check.kt'),str(p/'Surface.kt')],capture_output=True,text=True,timeout=45)
+ assert x.returncode==0,x.stdout+x.stderr
+ # Execute the production height/owner predicate without Android framework stubs.
+ (p/'Main.kt').write_text('''class Metrics {val density=3f}
+class Resources {val displayMetrics=Metrics()}
+class View(var height:Int,val task:Boolean=false,val extension:Boolean=false){val resources=Resources()}
+fun isWechatTaskSurface(v:View)=v.task
+'''+method+'''
+fun main(){
+ for(h in listOf(120,180,216,300,360)) check(isConversationFeedbackRow(View(h)))
+ for(h in listOf(0,1,119,361,900,2400)) check(!isConversationFeedbackRow(View(h)))
+ check(!isConversationFeedbackRow(View(216,task=true)))
+ check(!isConversationFeedbackRow(View(216,extension=true)))
+ println("PASS actual homepage feedback predicate: normal rows, tall empty placeholders, taskbar and extension exclusions")
+}
+''')
+ (p/'SurfaceJvm.kt').write_text('object t {object mma {object hooks {object items {object homeextension {object HomeExtensionSurface {fun contains(v:View)=v.extension}}}}}}')
+ x=subprocess.run(compiler+['-classpath',str(std),'-d',str(p/'test.jar'),str(p/'Main.kt'),str(p/'SurfaceJvm.kt')],capture_output=True,text=True,timeout=45)
+ assert x.returncode==0,x.stdout+x.stderr
+ subprocess.run(['java','-cp',f'{p/"test.jar"}:{std}','MainKt'],check=True,timeout=10)
+print('PASS changed production feedback code compiles against real Android 36 SDK')

@@ -1374,6 +1374,13 @@ private class BackgroundBeautyRuntime(
         snapshot.originalMinimumWidth = view.minimumWidth
         snapshot.originalMinimumHeight = view.minimumHeight
     }
+    private fun isConversationFeedbackRow(row: View): Boolean {
+        val height = row.height
+        val density = row.resources.displayMetrics.density
+        return height >= 40f * density && height <= 120f * density &&
+            !isWechatTaskSurface(row) &&
+            !t.mma.hooks.items.homeextension.HomeExtensionSurface.contains(row)
+    }
     private fun updateListRipple(list: ViewGroup, event: android.view.MotionEvent) {
         // A cancelled drag has no ripple to update; skip subsequent owner queries.
         if (event.actionMasked != android.view.MotionEvent.ACTION_DOWN &&
@@ -1391,6 +1398,14 @@ private class BackgroundBeautyRuntime(
                     if (row.visibility == View.VISIBLE && x >= 0 && y >= 0 && x < row.width && y < row.height) {
                         if (dirtyBoundRows.remove(row) == true || surfaceOwners[row] == null) applyBoundRow(list, row)
                         (row.background as? BackgroundBeautyFeedbackDrawable)?.let { ripple ->
+                            // Empty native placeholders may fill the remaining page.
+                            // Never animate them as one enormous conversation row.
+                            if (slot == BackgroundBeautySettings.Slot.WECHAT &&
+                                !isConversationFeedbackRow(row)) {
+                                ripple.setTouchPressed(false)
+                                ripple.setTouchRegion(Rect())
+                                return
+                            }
                             val region = when (slot) {
                                 BackgroundBeautySettings.Slot.CONTACTS -> contactTouchRegion(row, x, y)
                                 BackgroundBeautySettings.Slot.ME -> meTouchRegion(row, x, y)
@@ -2766,7 +2781,10 @@ private class BackgroundBeautyRuntime(
         val footerHost = slot == BackgroundBeautySettings.Slot.CHAT && view is ViewGroup &&
             appGridItems[view] != true &&
             findAncestor(view, "com.tencent.mm.pluginsdk.ui.chat.ChatFooter") != null
-        val feedback = preserveFeedback && !footerHost && (slot != BackgroundBeautySettings.Slot.CHAT ||
+        val conversationSpacer = slot == BackgroundBeautySettings.Slot.WECHAT &&
+            (view.parent as? ViewGroup)?.let { homeLists.containsKey(it) } == true && view.height > 0 &&
+            !isConversationFeedbackRow(view)
+        val feedback = preserveFeedback && !conversationSpacer && !footerHost && (slot != BackgroundBeautySettings.Slot.CHAT ||
             !inAppPanel || appGridItems[view] == true)
         if (slot == BackgroundBeautySettings.Slot.CHAT && state.surfaces[view]?.let {
                 it.slot == slot && it.appliedBitmap != null && view.background === it.appliedBackground

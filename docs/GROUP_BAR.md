@@ -156,3 +156,13 @@ SDK编译、源码契约检查、生产偏移方法的基线重算/不累加/控
 ### 验收后本地精简
 
 9c0d467 已移除横栏临时诊断；本轮继续合并同内容的布局监听器，移除启动取证状态日志、仅供日志使用的发现计数和测试诊断占位。保留错误日志、生命周期保护、切组页脚协调、原生偏移及首次挂载补偿。文档上方诊断版章节仅为历史记录。
+
+### 2026-10-29 自定义服务号筛选与空白反馈
+
+本次对照 Hchat-runtime-20261029-123517.log、截图和 8.0.78 原生 smali：jo5.e.g 使用 im.j2.W（parentRef）调用 uf5.d.m；uf5.d.z 生成表名.列名，uf5.c0.d 生成 `rconversation.parentRef is null OR rconversation.parentRef = ''`。旧 GroupBarSql 明确跳过点号前缀，导致之前仅针对无前缀 parentRef 的放行修改在真实首页查询中不生效。现同时处理无前缀和明确 rconversation 前缀，保留 native WHERE、flag、分页、占位符和其它父容器限制。com.tencent.mm.storage.l4 的原生服务会话查询确认 conversationboxservice，显式选择成员的父级白名单同步补充此项；增量判断采用相同规则，不写数据库归属。
+
+更新 test_group_bar_explicit_official.py，使用实际带表名前缀的 SQL 和截图两项 ID（gh_8a8cce549a85、gh_c2381078be34）验证，未选择公众号及其它隐藏父级仍排除；78 条 SQL 语义测试和旧父级测试通过。横栏手势、原生偏移及首次布局回归通过，生产横栏 Android 36 SDK 定向编译通过。
+
+空白区水波纹的代码依据是背景 updateListRipple 对首页任意命中行启动反馈，缺少空白占位高度限制。现仅让 40–120dp 首页行产生反馈，并排除 TaskBar 和模块扩展；高大占位既不启动手动反馈，也不持有原生状态传播的反馈表面。只变更背景反馈，不扩大横栏点击范围、不修改原生触摸返回值。check_home_conversation_feedback_sdk.py 对真实生产条件做 SDK 编译和边界测试。具体截图空白视图类型日志未记录，需真机确认该反馈路径是否完整覆盖现象。
+
+仅在已有 8.0.78 证据范围修正，未新增其它版本兼容声明。未执行 Gradle、APK 构建或真机帧率测量，未提交推送。

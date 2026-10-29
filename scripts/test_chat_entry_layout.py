@@ -23,7 +23,7 @@ class ViewTreeObserver {
  fun frame():Boolean {var draw=true;listeners.toList().forEach{if(!it.onPreDraw())draw=false};return draw}
 }
 class View {
- var height=100;var width=100;var isAttachedToWindow=true;var visibility=0;val rootView get()=this
+ var height=100;var measuredHeight=100;var width=100;var isAttachedToWindow=true;var visibility=0;val rootView get()=this
  val viewTreeObserver=ViewTreeObserver();var invalidations=0;var layouts=0;var isLayoutRequested=false;var paddingBottom=0
  fun requestLayout(){layouts++;isLayoutRequested=true};fun postInvalidateOnAnimation(){invalidations++}
  companion object{const val INVISIBLE=4;const val VISIBLE=0;const val GONE=8}
@@ -53,7 +53,7 @@ class Runtime {
   if(passes==2){v.requestLayout();return false}
   return true
  }
- fun restore(v:View){restored++}
+ fun restore(v:View){restored++;states.remove(v)}
  fun removeGlobalTracking(t:FooterTracker){untracked++}
  fun panelState(v:View)=0
  val TAG="test"
@@ -89,7 +89,13 @@ fun main(){
  val pv=View();val pt=FooterTracker(View());pending.states[pv]=Runtime.State()
  pending.schedule(pv,pt);check(!pv.viewTreeObserver.frame() && pt.ready)
  repeat(2){check(!pv.viewTreeObserver.frame())};check(pv.viewTreeObserver.frame())
- check(pending.restored==1 && pt.failed && pending.paddingCalls==3 && pv.viewTreeObserver.listeners.isEmpty())
+ check(pending.restored==1 && pt.failed && !pt.ready && pt.settlePasses==0 && pending.paddingCalls==3 && pv.viewTreeObserver.listeners.isEmpty())
+  pv.height=120;pending.paddingStable=true;pending.outcomes.add(true)
+  pending.schedule(pv,pt);check(!pv.viewTreeObserver.frame() && pt.ready && !pt.failed)
+  pending.states[pv]=Runtime.State();check(pv.viewTreeObserver.frame() && pt.revealed)
+  val measured=Runtime();val mv=View();mv.height=0;val mt=FooterTracker(View())
+  measured.outcomes.add(true);measured.schedule(mv,mt);check(!mv.viewTreeObserver.frame() && mt.ready)
+  measured.states[mv]=Runtime.State();check(mv.viewTreeObserver.frame() && mt.revealed)
  // A last-pass padding write must receive one real layout pass before reveal.
  val late=Runtime();late.paddingStable=false;late.writeOnCall=3;late.outcomes.add(true)
  val lateView=View();val lateList=View();val lateTracker=FooterTracker(View())

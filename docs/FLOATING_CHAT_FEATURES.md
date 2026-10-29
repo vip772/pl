@@ -147,3 +147,16 @@ footer预绘制使用既有已缓存GradientDrawable进行常量级背景一致�
 截图与8.0.78本地ChatFooter反编译对应：u0(int,boolean)进入o0(int)时，G与p同时可见，执行200ms淡出和延迟100ms的200ms淡入；透明按钮底色可能暴露交叉叠字。悬浮开启、当前footer面板已重排且mode为1/2时，仅将u0第二参数改为false，走原生w取消旧动画及settleInputModeSwitchViews互斥可见性/属性复位。继续执行原生其余模式逻辑、发送事件和点击处理，不设置固定宽度、不按文本长度推断发送状态。
 
 仅精确versionName=8.0.78并验证u0(int,boolean):void签名；其他版本不安装该修正，未完成横向适配。现有本地材料可核对，未新增猜测字段或DexKit候选。此路径为与截图吻合的修正，偶发故障实机复现及修复效果仍需新包验收。验收快速输入/清空、发送后清空、语音/文字、表情/＋号切换，以及关闭悬浮后的原生动画。未发送测试消息。
+
+
+## 2026-10-29 输入框初始化与首次避让回滚
+
+附件 12:22:56.114 确认悬浮输入框安装成功；12:25:08 等记录显示 ChatFooter 0x0、部分 visibility=GONE、reparented=null；12:33:36.419/.462 和 12:34:00.921 明确出现首次列表避让回滚。不能将安装成功解释为悬浮卡片完成。
+
+源码确认两个缺口：初始化仅接受旧 layout height，未接受已完成的 measuredHeight；首次避让回滚删除 FooterState 后没有清除 tracker.ready，几何变化触发恢复时会进入依赖已删除 state 的分支并直接退出。现接受非 GONE 的有效测量高度，以本地 ChatFooter 反编译确认的具体 onMeasure(int,int) 注册首次测量后的初始化，已接管实例不进入该分支；两条失败分支均清除 ready/settlePasses，首次避让失败同时解除全局观察。恢复仍按几何变化触发且最多两次。不会强制显示宿主 GONE 输入区。
+
+避让布局检查止于列表与输入框的共同 ChattingScrollLayout，保留共同容器及内部待布局检查，避免不相关窗口/标题祖先的布局请求阻塞首次避让；不修改列表锚点、滚动事件或实际高度计算。聊天工具栏会使输入列晚增高，继续使用已测量高度更新与相同 padding 所有权；悬浮标题栏只维护顶部空间。会话时间样式只处理原生时间 TextView，消息显示时间处理消息行绑定，未发现直接隐藏 ChatFooter 的写入，不能依据截图认定这两项为输入框消失原因。
+
+验证：生产 FloatingChatFooterFeature、卡片/表面、ChatListBottomInset、SendButtonSettlement 对真实 Android 36 SDK 与 DexKit 定向编译通过，项目服务为签名桩（scripts/check_floating_footer_sdk.py）。生产事务提取测试覆盖 measuredHeight 有效但旧 height=0、首次避让回滚后重新初始化、重试上限；padding 测试覆盖共同祖先 pending 时等待、外层 decor pending 时可完成、稳定重复调用无写入及不主动滚动。面板切换、晚插工具栏、表面恢复、时间缓存及背景作用域回归通过。
+
+没有新增滚动扫描、逐帧数据库查询、定时轮询或无限重试。SDK 定向编译和方法测试不等同真机效果/帧率保证；上述相关路径已有源码修正，仍需后续新包验证。未运行 Gradle、未构建 APK、未提交推送。

@@ -16,12 +16,13 @@ fun main() {
  check(!all.accepts("wxid_hchat_group_old", 3))
  check(!all.accepts("hchat_conv_group:old", 3))
  check(room.accepts("48651937268@chatroom", 1))
- val custom=GroupBarFilter(BarGroup("custom_a","custom",members=setOf("gh_c2381078be34","picked_hidden")))
+ val custom=GroupBarFilter(BarGroup("custom_a","custom",members=setOf("gh_c2381078be34","gh_8a8cce549a85","picked_hidden")))
+ check(custom.acceptsNativeParent(false,"conversationboxservice","gh_8a8cce549a85"))
  check(custom.acceptsNativeParent(false,"officialaccounts","gh_c2381078be34"))
  check(custom.acceptsNativeParent(false,"service_officialaccounts","gh_c2381078be34"))
  check(!custom.acceptsNativeParent(false,"officialaccounts","not_selected"))
  check(!custom.acceptsNativeParent(false,"other_native_parent","picked_hidden"))
- val sql = "SELECT username FROM rconversation WHERE flag > ? AND (parentRef is null OR parentRef='' OR parentRef='message_fold') ORDER BY flag DESC LIMIT 20 OFFSET 0"
+ val sql = "SELECT username FROM rconversation WHERE flag > ? AND (rconversation.parentRef IS NULL OR rconversation.parentRef='' OR rconversation.parentRef='message_fold') ORDER BY flag DESC LIMIT 20 OFFSET 0"
  println(GroupBarSql.rewrite(sql, all.predicate()))
  println(GroupBarSql.rewrite(sql, room.predicate()))
  println(GroupBarSql.rewrite(sql,custom.predicate(),custom.explicitOfficialPredicate()))
@@ -40,10 +41,10 @@ with tempfile.TemporaryDirectory() as td:
  db = sqlite3.connect(':memory:')
  db.execute('CREATE TABLE rconversation(username TEXT,parentRef TEXT,flag INT,content TEXT)')
  rows = [('normal',None,9,''),('48651937268@chatroom','wxid_hchat_group_old',8,''),('old@chatroom','hchat_conv_group:old',7,''),('nativehidden@chatroom','other_native_parent',6,''),('wxid_hchat_group_old','',5,''),('hchat_conv_group:old','',4,''),('blocked@chatroom','wxid_hchat_group_old',0,'')]
- rows += [('gh_c2381078be34','officialaccounts',10,''),('not_selected','officialaccounts',11,''),('picked_hidden','other_native_parent',12,'')]
+ rows += [('gh_8a8cce549a85','conversationboxservice',13,''),('gh_c2381078be34','officialaccounts',10,''),('not_selected','officialaccounts',11,''),('picked_hidden','other_native_parent',12,'')]
  db.executemany('INSERT INTO rconversation VALUES(?,?,?,?)',rows)
  assert [x[0] for x in db.execute(queries[0],(1,))] == ['normal','48651937268@chatroom','old@chatroom']
  assert [x[0] for x in db.execute(queries[1],(1,))] == ['48651937268@chatroom','old@chatroom']
- assert [x[0] for x in db.execute(queries[2],(1,))] == ['gh_c2381078be34']
+ assert [x[0] for x in db.execute(queries[2],(1,))] == ['gh_8a8cce549a85','gh_c2381078be34']
  assert list(db.execute('SELECT * FROM rconversation')) == rows
 print('PASS legacy parents visible, virtual rows excluded, native hidden/flag filters retained, incremental parity, disabled passthrough, no DB mutations')
