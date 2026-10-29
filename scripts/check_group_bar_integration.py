@@ -45,13 +45,13 @@ print('PASS production integration and actual smali: both native loaders, S2 res
 
 assert 'RelativeLayout.BELOW, bar.id' not in runtime
 assert 'lp.topMargin = 0' not in runtime
-assert '.setPadding(' not in runtime and 'restoreAvoidance' in runtime
+assert 'val paddingReserve = if (isNativeList) reserve else 0' in runtime and 'restoreAvoidance' in runtime
 assert 'scrollField.setInt(list, base + reserve)' in runtime
 assert 'main.post { if (!v.isAttachedToWindow)' in runtime
 assert 'close.invoke(' not in runtime and 'userTouchStarted' in runtime
 beauty=read(base+'hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt')
 assert 'HomeExtensionSurface.ownsGeometry(view)' not in beauty
-print('PASS native viewport/rules/padding retained; native list/taskbar offsets coordinated; deferred detach')
+print('PASS native viewport/rules retained; physical list reserve and taskbar offsets coordinated; deferred detach')
 
 listSource=(d/'smali_classes16/com/tencent/mm/ui/conversation/ConversationListView.smali').read_text()
 for contract in ['.method public final C()V','.method public o()V','.method public q(II)V','->s:I','->n:I','computeActionBarTranslation %d']:
@@ -92,6 +92,7 @@ assert feature.index('candidate.install()') < feature.index('DexInstallScheduler
 assert 'resetAfterData.run()' in runtime
 assert 'main.post(resetAfterData)' not in runtime
 assert 'param.args[0] = it' not in runtime
+assert 'param.args[1] = session.nativeSelectionOffset(offset)' in runtime
 assert '[Hchat:GroupBarDiag]' not in runtime
 print('PASS direct lifecycle registration with queued failure retry; synchronous result positioning; scoped native index correction')
 

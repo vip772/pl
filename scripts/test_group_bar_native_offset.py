@@ -3,25 +3,25 @@ from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1]
 s=(r/'app/src/main/java/t/mma/hooks/items/groupbar/GroupBarRuntime.kt').read_text()
-a=s.index('        private fun applyNativeOffset(');z=s.index('        fun headerState(',a)
+a=s.index('        fun nativeSelectionOffset(');z=s.index('        fun headerState(',a)
 methods=s[a:z]
 code='''import java.lang.ref.WeakReference
-open class View
+open class View {var paddingTop=0;val paddingLeft=0;val paddingRight=0;val paddingBottom=0;fun setPadding(l:Int,t:Int,r:Int,b:Int){paddingTop=t}}
 class ListView:View() {var offset=120;val controller=Controller();val taskBar=Any();var selections=0}
 class Controller {var n=120}
 class Field(val name:String) {var isAccessible=false;fun getInt(o:Any)=if(o is ListView)o.offset else (o as Controller).n;fun setInt(o:Any,v:Int){if(o is ListView)o.offset=v else (o as Controller).n=v};fun get(o:Any):Any=if(name=="i"||name=="Y2")(o as ListView).taskBar else (o as ListView).controller}
 object KavaReflector {fun findFieldRecursive(c:Class<*>,n:String):Field?=Field(n)}
 class Session(val list:ListView) {
  val viewRef=WeakReference<View>(list);val scrollField=Field("offset");val controllerField=Field("controller")
- var nativeScrollOffset:Int?=null;var appliedScrollInset=0;var nativeOffsetUpdating=false;var offsetAppliedDuringUpdate=false
- val reserveHeight=44;var floatingInset=2;var enabled=true;var hasVisibleGroups=true;var headerOpen=false
+ var appliedPaddingInset=0;var nativeScrollOffset:Int?=null;var appliedScrollInset=0;var nativeOffsetUpdating=false;var offsetAppliedDuringUpdate=false
+ val isNativeList=true;val reserveHeight=44;var floatingInset=2;var enabled=true;var hasVisibleGroups=true;var headerOpen=false
  fun selectNativeTop(v:View){list.selections++}
  fun apply(a:Boolean)=applyNativeOffset(a)
 '''+methods+'''}
 fun main() {
  val l=ListView();val s=Session(l)
- s.apply(true);check(l.offset==166&&l.controller.n==166)
- repeat(100){s.apply(true)};check(l.offset==166) // no accumulation
+ s.apply(true);check(l.offset==166&&l.controller.n==166&&l.paddingTop==46)
+ repeat(100){s.apply(true)};check(l.offset==166);check(s.nativeSelectionOffset(166)+l.paddingTop==166);check(s.nativeSelectionOffset(120)==120) // no accumulation
  s.beforeNativeOffset();check(l.offset==166)
  l.offset=140 // native C/y1 recomputes orientation/statusbar baseline
  s.afterNativeOffset();check(l.offset==186&&l.controller.n==186&&l.selections==0)
@@ -50,7 +50,7 @@ fun main() {
  s.afterNativeOffset();check(l.selections==1&&s.nativeScrollOffset==150)
  s.beforeNativeOffset();l.offset=140;s.beforeTaskBarResize(l.taskBar);s.afterNativeOffset()
  l.selections=0
- s.apply(false);check(l.offset==140&&l.controller.n==140)
+ s.apply(false);check(l.offset==140&&l.controller.n==140&&l.paddingTop==0)
  s.apply(true);check(l.offset==186)
  s.headerOpen=true;s.beforeNativeOffset();l.offset=150;s.afterNativeOffset();check(l.offset==196&&l.controller.n==196&&l.selections==0)
  // Native onScroll: translated = max(0, childTop - s). At rest childTop == s.

@@ -188,6 +188,17 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     sessions.values.forEach { it.beforeTaskBarResize(param.thisObject) }
                 }
             })
+            // Native first-layout code invokes AbsListView directly, bypassing the subclass.
+            KavaReflector.findMethodRecursive(android.widget.AbsListView::class.java,
+                "setSelectionFromTop", Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!)?.let { selection ->
+                hooks += HookRegistry.get().hook(selection, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        val session = sessions[param.thisObject as? View] ?: return
+                        val offset = param.args[1] as? Int ?: return
+                        param.args[1] = session.nativeSelectionOffset(offset)
+                    }
+                })
+            }
             nativeListHook(list, "C", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
             nativeListHook(list, "setSelection", Int::class.javaPrimitiveType!!, before = { it.beforeNativeSelection() })
             nativeListHook(list, "o", after = { it.headerState(true) })
@@ -366,6 +377,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private val parentRef = WeakReference(parent)
         private var nativeScrollOffset: Int? = null
         private var appliedScrollInset = 0
+        private var appliedPaddingInset = 0
         private val isNativeList = view is ListView
         private val scrollField = KavaReflector.findFieldRecursive(view.javaClass, if (isNativeList) "s" else "v2")!!.apply { isAccessible = true }
         private val controllerField = KavaReflector.findFieldRecursive(view.javaClass, if (isNativeList) "m" else "Z2")!!.apply { isAccessible = true }
@@ -664,7 +676,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private fun titleTranslation(view: View): Int {
             var current: View? = view
             var translation = 0f
-            while (current != null && current !== parentRef.get()) {
+            while (current != null) {
                 translation += current.translationY
                 current = current.parent as? View
             }
@@ -686,7 +698,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val titleBottom = if (anchor != null && anchor.isShown && anchor.height > 0 && !nativeHeaderOpen()) {
                 anchor.getLocationInWindow(titlePosition)
                 parent.getLocationInWindow(parentPosition)
-                val measured = (titlePosition[1] + anchor.height - titleTranslation(anchor) - parentPosition[1] - parent.paddingTop).coerceAtLeast(0)
+                val measured = (titlePosition[1] + anchor.height - titleTranslation(anchor) - parentPosition[1] + titleTranslation(parent) - parent.paddingTop).coerceAtLeast(0)
                 if (measured > 0) stableTitleTop = measured
                 stableTitleTop ?: return
             } else stableTitleTop ?: return
@@ -694,12 +706,27 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             if (bp.topMargin != top) { bp.topMargin = top; bar.layoutParams = bp }
             positionDirty = false
         }
+        fun nativeSelectionOffset(offset: Int): Int {
+            val list = viewRef.get() ?: return offset
+            // Module selections already subtract padding. Only native s-based calls
+            // need compensation for AbsListView adding the physical reserve back.
+            return if (appliedPaddingInset > 0 && offset == scrollField.getInt(list))
+                offset - appliedPaddingInset else offset
+        }
         private fun applyNativeOffset(active: Boolean) {
             val list = viewRef.get() ?: return
             if (nativeOffsetUpdating) return
             val current = scrollField.getInt(list)
             val base = nativeScrollOffset ?: current.also { nativeScrollOffset = it }
             val reserve = if (active) reserveHeight + floatingInset else 0
+            // s/controller.n govern native selection and TaskBar animations, not the
+            // ListView scroll boundary. Reserve physical space there as well.
+            val paddingReserve = if (isNativeList) reserve else 0
+            val paddingBase = list.paddingTop - appliedPaddingInset
+            if (appliedPaddingInset != paddingReserve) {
+                list.setPadding(list.paddingLeft, paddingBase + paddingReserve, list.paddingRight, list.paddingBottom)
+                appliedPaddingInset = paddingReserve
+            }
             if (current != base + reserve) scrollField.setInt(list, base + reserve)
             // C() copies s into TaskBarAnimController.n. Both consumers must agree.
             val controller = controllerField.get(list)

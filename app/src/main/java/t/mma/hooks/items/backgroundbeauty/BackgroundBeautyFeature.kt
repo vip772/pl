@@ -674,6 +674,46 @@ private class BackgroundBeautyRuntime(
         return installed
     }
 
+    /** 8.0.78 onDraw reads o after super.onDraw, then paints the taskbar backup footer. */
+    private fun installConversationPullDownShadeHook(clazz: Class<*>?): Boolean {
+        if (chatChromeVersionName() != "8.0.78" || clazz == null) return false
+        val draw = KavaReflector.findDeclaredMethod(clazz, "onDraw", Canvas::class.java)
+            ?.takeIf { it.returnType == Void.TYPE } ?: return false
+        val strength = KavaReflector.findDeclaredField(clazz, "o")
+            ?.takeIf { it.type == Int::class.javaPrimitiveType } ?: return false
+        if (!hookedMembers.add(draw)) return true
+        return runCatching {
+            ownedHooks += HookRegistry.get().hook(draw, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed || !backgroundRenderingEnabled) return
+                    val list = param.thisObject as? View ?: return
+                    if (homeLists[list] != BackgroundBeautySettings.Slot.WECHAT) return
+                    val activity = findActivity(list) ?: return
+                    if (!wechatHomepageBackdropEnabled(activity) ||
+                        resolveTarget(activity) != BackgroundBeautySettings.Slot.WECHAT) return
+                    val state = states[activity] ?: return
+                    if (state.loadedBitmaps[BackgroundBeautySettings.Slot.WECHAT]?.bitmap?.isRecycled != false) return
+                    val original = KavaReflector.readField(strength, list) as? Int ?: return
+                    if (original < 30) return
+                    // p.alpha is rewritten inside onDraw; changing Paint on entry is ineffective.
+                    // Only skip that rectangle's branch; execute the original method and superclass.
+                    if (KavaReflector.writeField(strength, list, 0)) {
+                        param.setObjectExtra("Hchat:conversationPullDownStrength", original)
+                    }
+                }
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val original = param.getObjectExtra("Hchat:conversationPullDownStrength") as? Int ?: return
+                    // Always restore, including host exceptions or a render gate changing mid-call.
+                    KavaReflector.writeField(strength, param.thisObject, original)
+                }
+            })
+            true
+        }.getOrElse {
+            hookedMembers.remove(draw)
+            HLog.e("$TAG 下拉遮层 Hook 安装失败: $draw", it)
+            false
+        }
+    }
     private fun readNativeField(owner: Any?, name: String): Any? = nativeFieldCache.read(owner, name)
 
     private fun hasBackgroundImage(slot: BackgroundBeautySettings.Slot): Boolean = slot in configuredBackgroundSlots
@@ -870,6 +910,7 @@ private class BackgroundBeautyRuntime(
             installed = true
         }
         val conversationClass = KavaReflector.loadClass("com.tencent.mm.ui.conversation.ConversationListView", context.hostClassLoader())
+        installed = installConversationPullDownShadeHook(conversationClass) || installed
         findWechatVerifiedMethod(conversationClass, "y")?.let { method ->
             installed = hookOnce(method, after = { param ->
                 val list = param.thisObject as? View ?: return@hookOnce
@@ -2987,7 +3028,10 @@ private class BackgroundBeautyRuntime(
         // A LauncherUI home snapshot must not erase live chat insets either.
         val chatList = view.javaClass.name == "com.tencent.mm.pluginsdk.ui.tools.ChattingRecyclerView" ||
             view.javaClass.name == "com.tencent.mm.pluginsdk.ui.tools.ScrollControlRecyclerView"
-        if (!chatList && (view.paddingLeft != snapshot.originalPaddingLeft ||
+        val conversationList = view.javaClass.name == "com.tencent.mm.ui.conversation.ConversationListView" ||
+            view.javaClass.name == "com.tencent.mm.ui.conversation.recycler.ConversationRecyclerView"
+        // Group-bar avoidance and native insets own live homepage list padding.
+        if (!chatList && !conversationList && (view.paddingLeft != snapshot.originalPaddingLeft ||
             view.paddingTop != snapshot.originalPaddingTop ||
             view.paddingRight != snapshot.originalPaddingRight ||
             view.paddingBottom != snapshot.originalPaddingBottom)) {
