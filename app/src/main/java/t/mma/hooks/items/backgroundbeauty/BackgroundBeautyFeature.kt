@@ -1459,7 +1459,42 @@ private class BackgroundBeautyRuntime(
         }
         touchFeedbackOrigins.remove(list)
     }
+    /** Fixed footer rows bypass adapter.getView when a full list becomes short/empty. */
+    private fun repairConversationEmptyFooter(list: View, createdFooter: View? = null) {
+        if (destroyed || !backgroundRenderingEnabled ||
+            homeLists[list] != BackgroundBeautySettings.Slot.WECHAT) return
+        if (!prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE)) return
+        val activity = findActivity(list) ?: return
+        val state = states[activity] ?: return
+        if (state.loadedBitmaps[BackgroundBeautySettings.Slot.WECHAT]?.bitmap?.isRecycled != false) return
+        // 8.0.78 getEmptyFooter: T is the spacer; its direct LinearLayout parent is bp9.
+        // Never clear the conversation list/taskbar via an unchecked parent fallback.
+        val spacer = readNativeField(list, "T") as? View ?: return
+        val footer = createdFooter ?: spacer.parent as? View ?: return
+        val footerId = resourceId("bp9")
+        if (footerId == 0 || footer.id != footerId || spacer.parent !== footer) return
+        setTransparentSurface(state, footer, BackgroundBeautySettings.Slot.WECHAT)
+        setTransparentSurface(state, spacer, BackgroundBeautySettings.Slot.WECHAT)
+    }
+
+    private fun installConversationEmptyFooterHooks(view: View) {
+        if (view.javaClass.name != "com.tencent.mm.ui.conversation.ConversationListView") return
+        // Creation and native checkEmptyFooter resize cover late insertion and data changes.
+        // No draw/scroll hook or decor scan: only two fixed native objects are managed.
+        listOf("getEmptyFooter", "h").forEach { name ->
+            val method = KavaReflector.findDeclaredMethod(view.javaClass, name) ?: return@forEach
+            if ((name == "getEmptyFooter" && !View::class.java.isAssignableFrom(method.returnType)) ||
+                (name == "h" && method.returnType != Void.TYPE)) return@forEach
+            hookOnce(method, after = { param ->
+                val list = param.thisObject as? View ?: return@hookOnce
+                repairConversationEmptyFooter(list, if (name == "getEmptyFooter") param.result as? View else null)
+            })
+        }
+        repairConversationEmptyFooter(view)
+    }
+
     private fun installRecyclerBinding(view: View) {
+        installConversationEmptyFooterHooks(view)
         KavaReflector.findMethodRecursive(view.javaClass, "dispatchTouchEvent", android.view.MotionEvent::class.java)?.let { method ->
             hookOnce(method, before = { param ->
                 val list = param.thisObject as? ViewGroup ?: return@hookOnce
