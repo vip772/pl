@@ -647,7 +647,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             applyNativeOffset(visible)
             val insetDelta = appliedScrollInset - previousInset
             if (insetDelta != 0 && !userInteracting && !nativeHeaderOpen()) {
-                if (list is ListView && list.childCount > 0) {
+                if (list is ListView && list.childCount > 0 && !list.isLayoutRequested) {
                     val first = list.firstVisiblePosition
                     val firstTop = list.getChildAt(0).top
                     // ListView's native method uses this top verbatim (no second s addition).
@@ -760,12 +760,16 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             val visible = enabled && hasVisibleGroups && !open && titleReady
             if (visible && initialAlignmentPending && !userInteracting) {
                 viewRef.get()?.let { list ->
-                    initialAlignmentPending = false
-                    selectNativeTop(list)
+                    // The title can become visible before cold-start adapter rows exist.
+                    if (list is ViewGroup && list.childCount > 0 && !list.isLayoutRequested) {
+                        selectNativeTop(list)
+                        initialAlignmentPending = false
+                    }
                 }
             }
             if (visible && (positionDirty || bar.visibility != View.VISIBLE)) safePosition()
-            val visibility = if (visible && stableTitleTop != null) View.VISIBLE else View.INVISIBLE
+            val listReady = viewRef.get()?.let { !it.isLayoutRequested } == true
+            val visibility = if (visible && stableTitleTop != null && !initialAlignmentPending && listReady) View.VISIBLE else View.INVISIBLE
             if (bar.visibility != visibility) {
                 bar.visibility = visibility
             }

@@ -12,12 +12,13 @@ internal class ChatListBottomInset {
     private var scrollStateMethod: Method? = null
     private var count = 0
     private var gap = 0
+    private var shortContent = false
 
     fun beforePadding(list: View, target: Int) {
         if (count != 0 && owner === list) return
         clear()
         if (list !is ViewGroup || target == list.paddingBottom ||
-            !list.canScrollVertically(-1) || list.canScrollVertically(1)) return
+            list.canScrollVertically(1)) return
         if (owner !== list) {
             owner = list
             countMethod = method(list, "getCount")
@@ -29,14 +30,17 @@ internal class ChatListBottomInset {
         if (size <= 0 || value(lastMethod, list) != size - 1) return
         val row = list.getChildAt(list.childCount - 1) ?: return
         val oldGap = list.height - list.paddingBottom - row.bottom
-        if (oldGap !in -2..2) return
+        // Consume short-conversation bottom space before lifting covered rows.
+        shortContent = oldGap > 2 || !list.canScrollVertically(-1)
+        if (!shortContent && oldGap !in -2..2) return
         count = size
-        gap = oldGap
+        gap = if (shortContent) 0 else oldGap
     }
 
     fun afterLayout(list: View) {
         if (count == 0) return
         val expected = count
+        val wasShort = shortContent
         clear() // Consume before scrollBy, which may synchronously lay out children.
         if (list !== owner || list !is ViewGroup ||
             value(scrollStateMethod, list) != 0 || value(countMethod, list) != expected ||
@@ -45,7 +49,7 @@ internal class ChatListBottomInset {
         val overflow = row.bottom - (list.height - list.paddingBottom - gap)
         // Native LinearLayoutManager may already have compensated. Never move twice,
         // select another item, follow an append, or pull history back to the bottom.
-        if (overflow != 0) list.scrollBy(0, overflow)
+        if (overflow != 0 && (!wasShort || overflow > 0)) list.scrollBy(0, overflow)
     }
 
     fun clear() { count = 0 }

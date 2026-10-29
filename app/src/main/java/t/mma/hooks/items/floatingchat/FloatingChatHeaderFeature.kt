@@ -177,6 +177,16 @@ private class HeaderRuntime(private val context: FeatureContext) {
                 ensureTipsAttachListener(group)
             }
         }
+        KavaReflector.findDeclaredMethod(clazz, "setVisibility", Int::class.javaPrimitiveType!!)?.let { method ->
+            count += hook(method) { param ->
+                val group = param.thisObject as? View ?: return@hook
+                if (!isEnabled()) return@hook
+                ensureTipsAttachListener(group)
+                val layout = findAncestorLayout(group) ?: return@hook
+                tipsGroups[layout] = group
+                scheduleApply(layout)
+            }
+        }
         return count
     }
 
@@ -196,7 +206,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         tipsAttachListeners[group] = listener
         group.addOnAttachStateChangeListener(listener)
         val layoutListener = View.OnLayoutChangeListener { view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
-            if (left == oldLeft && top == oldTop && right == oldRight && bottom == oldBottom) return@OnLayoutChangeListener
+            // Native positioning may be restored even when all four bounds stay equal.
             val sourceLayout = findAncestorLayout(view) ?: visibleChatLayoutFromRoot(view) ?: return@OnLayoutChangeListener
             val layout = visibleChatLayout(sourceLayout) ?: return@OnLayoutChangeListener
             tipsGroups[layout] = view
@@ -452,6 +462,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val side = (SIDE_MARGIN_DP * density).roundToInt()
         val gap = (CARD_GAP_DP * density).roundToInt()
         val state = headerZoneStates.getOrPut(layout) { HeaderZoneState() }
+        val headerLocation = IntArray(2).also(header::getLocationOnScreen)
+        val layoutLocation = IntArray(2).also(layout::getLocationOnScreen)
         var first = true
         for (index in 0 until hostIndex) {
             val child = layout.getChildAt(index)
@@ -460,7 +472,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             if (!state.originalMargins.containsKey(child)) {
                 state.originalMargins[child] = intArrayOf(lp.leftMargin, lp.topMargin, lp.rightMargin, lp.bottomMargin)
             }
-            val top = if (first) header.height + dp(TOP_GAP_DP) + gap else gap
+            val top = if (first) (headerLocation[1] + header.height + gap - layoutLocation[1] - layout.paddingTop).coerceAtLeast(0) else gap
             first = false
             if (lp.leftMargin != side || lp.rightMargin != side || lp.topMargin != top) {
                 lp.leftMargin = side

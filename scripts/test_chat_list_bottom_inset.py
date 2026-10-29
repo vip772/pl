@@ -43,10 +43,14 @@ fun main(){
  val removed=list();inset.beforePadding(removed,400);removed.paddingBottom=400;removed.size--
  inset.afterLayout(removed);check(removed.scrolls==0)
  val short=list();short.up=false;inset.beforePadding(short,400);short.paddingBottom=400
- inset.afterLayout(short);check(short.scrolls==0)
+ inset.afterLayout(short);check(short.distance==380)
+ val spaced=list();spaced.up=false;spaced.bottom=450
+ inset.beforePadding(spaced,400);spaced.paddingBottom=400;inset.afterLayout(spaced);check(spaced.scrolls==0)
+ val partly=list();partly.up=false;partly.bottom=750
+ inset.beforePadding(partly,400);partly.paddingBottom=400;inset.afterLayout(partly);check(partly.distance==150)
  val moving=list();inset.beforePadding(moving,400);moving.paddingBottom=400;moving.motion=2
  inset.afterLayout(moving);check(moving.scrolls==0)
- println("PASS: bottom correction once; native correction, history, drag, fling, append, removal and short list preserved")
+ println("PASS: bottom correction once; native correction, history, drag, fling, append, removal and short-list free-space consumption")
 }
 '''
 with tempfile.TemporaryDirectory() as td:
