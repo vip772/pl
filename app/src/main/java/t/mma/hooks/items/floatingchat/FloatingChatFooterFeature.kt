@@ -477,8 +477,14 @@ private class FooterRuntime(private val context: FeatureContext) {
                         scrollLayout.rootWindowInsets
                             ?.getInsets(android.view.WindowInsets.Type.ime())?.bottom ?: 0
                     } else 0
+                    val nativeTarget = param.args[0]
                     if (panel.visibility == View.VISIBLE) {
                         param.args[0] = imeHeight
+                    }
+                    ChatBottomTrace.event(footer, "native-scroll-target") {
+                        "native=$nativeTarget effective=${param.args[0]} ime=$imeHeight panel=${panel.visibility} " +
+                            "panelState=${panelState(footer)} panelH=${panel.height} footerTy=${footer.translationY} " +
+                            "reparented=${states[footer]?.reparented} args=${param.args.joinToString()}"
                     }
                 }
             })
@@ -647,7 +653,8 @@ private class FooterRuntime(private val context: FeatureContext) {
                     }
                     tracker.settlePasses = 0
                     footer.visibility = tracker.visibility
-                    ChatBottomTrace.event(footer, "footer-settled") { "complete=$settled ready=${tracker.ready}" }
+                    ChatBottomTrace.event(footer, "footer-settled") { "paddingComplete=$settled ready=${tracker.ready} " +
+                            (states[footer]?.chatRecycler?.let(ChatBottomTrace::listGeometry) ?: "list=missing") }
                     return true
                 }
                 val wasReady = tracker.ready
@@ -1007,7 +1014,7 @@ private class FooterRuntime(private val context: FeatureContext) {
         val overlap = (listLocation[1] + recycler.height - footerLocation[1]).coerceIn(0, extra)
         val target = base + overlap
         ChatBottomTrace.event(footer, "list-padding") {
-            "extra=$extra listY=${listLocation[1]} listH=${recycler.height} footerY=${footerLocation[1]} base=$base current=${recycler.paddingBottom} target=$target overlap=$overlap"
+            "extra=$extra listY=${listLocation[1]} listH=${recycler.height} footerY=${footerLocation[1]} base=$base current=${recycler.paddingBottom} target=$target overlap=$overlap " + ChatBottomTrace.listGeometry(recycler)
         }
         if (recycler.paddingBottom == target) {
             liftNewMessageBubble(footer)

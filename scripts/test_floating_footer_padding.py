@@ -8,7 +8,7 @@ start = source.index('    private fun applyChatListPadding(')
 end = source.index('    private fun ensurePreDrawTracking(', start)
 method = source[start:end].replace('private fun ', 'fun ')
 fixture = '''
-object ChatBottomTrace {fun event(v:View,p:String,d:()->String){}}
+object ChatBottomTrace {fun event(v:View,p:String,d:()->String){};fun listGeometry(v:View)=""}
 class View {
  var parent:View?=null;var isAttachedToWindow=true;var isLayoutRequested=false;var height=800;var y=0
  fun getLocationOnScreen(a:IntArray){a[1]=y}

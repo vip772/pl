@@ -14,7 +14,7 @@ a=bg.index('        if (slot == BackgroundBeautySettings.Slot.CHAT &&',bg.index(
 b=bg.index(' return',a)
 predicate=bg[a:b].strip()[4:-1]
 code='''
-object ChatBottomTrace {fun event(v:View,p:String,d:()->String){}}
+object ChatBottomTrace {fun event(v:View,p:String,d:()->String){};fun listGeometry(v:View)=""}
 class ViewTreeObserver {
  interface OnPreDrawListener {fun onPreDraw():Boolean}
  var isAlive=true;val listeners=mutableListOf<OnPreDrawListener>()
@@ -38,7 +38,7 @@ fun skip(view:Native,slot:BackgroundBeautySettings.Slot) = PREDICATE
 class Runtime {
  val INITIAL_LAYOUT_RETRY_COUNT=3;var enabled=true;var restored=0;var untracked=0
  val states=mutableMapOf<View,State>();var paddingCalls=0;var paddingStable=true
- class State(val listExtra:Int=223)
+ class State(val listExtra:Int=223,val chatRecycler:View?=null)
  fun refreshMeasuredInputHeight(v:View,s:State){}
  fun applyChatListPadding(v:View,e:Int,s:State):Boolean {paddingCalls++;return paddingStable}
  val outcomes=java.util.ArrayDeque<Boolean>()

@@ -22,6 +22,7 @@ open class ViewGroup:View(){
 '''
 main = '''package t.mma.hooks.items.floatingchat
 import android.view.ViewGroup
+object ChatBottomTrace {fun event(v:android.view.View,p:String,d:()->String){};fun listGeometry(v:android.view.View)=""}
 fun main(){
  fun list()=ViewGroup()
  val inset=ChatListBottomInset();val v=list()
@@ -55,7 +56,8 @@ fun main(){
 '''
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)
- subprocess.run(compiler+['-classpath',f'{std}:/usr/lib/android-sdk/platforms/android-36/android.jar','-d',str(p/'sdk.jar'),str(source)],check=True,timeout=50)
+ (p/'Trace.kt').write_text('package t.mma.hooks.items.floatingchat; object ChatBottomTrace {fun event(v:android.view.View,p:String,d:()->String){};fun listGeometry(v:android.view.View)=""}')
+ subprocess.run(compiler+['-classpath',f'{std}:/usr/lib/android-sdk/platforms/android-36/android.jar','-d',str(p/'sdk.jar'),str(source),str(p/'Trace.kt')],check=True,timeout=50)
  (p/'Views.kt').write_text(fixture);(p/'Test.kt').write_text(main)
  subprocess.run(compiler+['-classpath',str(std),'-d',str(p/'test.jar'),str(source),str(p/'Views.kt'),str(p/'Test.kt')],check=True,timeout=50)
  subprocess.run(['java','-cp',f'{p/"test.jar"}:{std}','t.mma.hooks.items.floatingchat.TestKt'],check=True)
