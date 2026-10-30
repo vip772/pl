@@ -16,11 +16,25 @@ object FeatureToggleRegistry{fun isEnabled(c:Any,id:String)=true}
 class UIRegistry {var count=0;fun registerProvider(p:FeatureSettingsProvider,c:()->Boolean){count++};fun unregisterProvider(id:String){count--}}''',
 'Settings.kt': 'package t.mma.hooks.items.settings\nobject SettingsFeature {const val ID="settings"}',
 'Terms.kt': 'package t.mma.preferences\nobject TermsGate {fun isAccepted(c:Any)=true}',
-'Core.kt': 'package t.mma.hooks.core\nobject DexInstallScheduler {fun markDexBridgeReady(){}}\nclass HookRegistry {fun unhookAll(){};companion object {fun get()=HookRegistry()}}',
-'Events.kt': 'package t.mma.event\nobject Events {class FeatureInstalled(s:String)}',
+'Core.kt': 'package t.mma.hooks.core\nobject DexInstallScheduler {enum class Stage{WARMUP};fun markDexBridgeReady(){};fun schedule(k:String,l:String,stage:Stage,installer:()->Boolean){}}\nclass HookRegistry {fun unhookAll(){};companion object {fun get()=HookRegistry()}}',
+'Events.kt': 'package t.mma.event\nobject Events {class FeatureInstalled(s:String);class DexReady}',
 'Context.kt': '''package t.mma.hooks.core
 class Config {fun getGlobalBoolean(k:String,d:Boolean)=d;fun getBoolean(f:String,k:String,d:Boolean)=d;fun getInt(f:String,k:String,d:Int)=d;fun getString(f:String,k:String,d:String)=d}
 class FeatureContext{val bus=t.mma.event.EventBus();val ui=t.mma.ui.UIRegistry();fun hostContext()=this;fun eventBus()=bus;fun uiRegistry()=ui;fun configStore()=Config()}''',
+'SendButton.kt': 'package t.mma.hooks.items.script\nobject ScriptSendButtonHook{fun install(c:Any)=true}',
+'Music.kt': '''package t.mma.hooks.items.musicorder
+object State {var fail=false;var closed=0;var sub:Any?=null;var track:((Any)->Unit)?=null}
+class QQMusicOrderSettingsProvider:t.mma.ui.FeatureSettingsProvider{override fun featureId()="qq_music_order"}
+class QQMusicOrderRuntime(c:Any,log:(String,Throwable?)->Unit){
+ fun install(track:(Any)->Unit){State.track=track;val sub=t.mma.hooks.core.Sub();State.sub=sub;track(sub);if(State.fail)error("music start")}
+ fun destroy(){State.closed++}
+}''',
+'Scheduled.kt': '''package t.mma.hooks.items.scheduledtask
+object State {var fail=false;var closed=0;var attached:ScheduledTaskRuntime?=null}
+class ScheduledTaskSettingsProvider:t.mma.ui.FeatureSettingsProvider{override fun featureId()="scheduled_task"}
+object ScheduledTaskRuntimeCoordinator{fun attach(r:ScheduledTaskRuntime){State.attached=r};fun detach(r:ScheduledTaskRuntime){if(State.attached===r)State.attached=null}}
+class ScheduledTaskRuntime(c:Any,log:(String,Throwable?)->Unit){fun start(){if(State.fail)error("scheduled start")};fun shutdown(){State.closed++}}
+''',
 'Test.kt': '''package t.mma.hooks.core
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
@@ -66,11 +80,33 @@ fun main(){
  check(enabled.installs==1 && disabledFeature.inits==1 && c.ui.count==1)
  m.destroyAll(c);check(enabled.destroys==1&&disabledFeature.ends==1&&c.ui.count==0&&c.bus.count==0)
  m.installAll(c);check(enabled.installs==2);m.destroyAll(c)
+ t.mma.hooks.items.musicorder.State.fail=true
+ val music=t.mma.hooks.items.musicorder.QQMusicOrderFeature()
+ try{music.install(c);error("expected music failure")}catch(_:IllegalStateException){}
+ check(t.mma.hooks.items.musicorder.State.closed==1 && (t.mma.hooks.items.musicorder.State.sub as Sub).removed==1)
+ val musicOldTrack=t.mma.hooks.items.musicorder.State.track!!
+ t.mma.hooks.items.musicorder.State.fail=false;music.install(c)
+ val lateSub=Sub();musicOldTrack(lateSub);check(lateSub.removed==1)
+ music.onDestroy(c);music.onDestroy(c);check(t.mma.hooks.items.musicorder.State.closed==2)
+ t.mma.hooks.items.scheduledtask.State.fail=true
+ val scheduled=t.mma.hooks.items.scheduledtask.ScheduledTaskFeature()
+ try{scheduled.install(c);error("expected scheduler failure")}catch(_:IllegalStateException){}
+ check(t.mma.hooks.items.scheduledtask.State.attached==null && t.mma.hooks.items.scheduledtask.State.closed==1)
+ t.mma.hooks.items.scheduledtask.State.fail=false;scheduled.install(c)
+ check(t.mma.hooks.items.scheduledtask.State.attached!=null)
+ scheduled.onDestroy(c);scheduled.onDestroy(c)
+ check(t.mma.hooks.items.scheduledtask.State.attached==null && t.mma.hooks.items.scheduledtask.State.closed==2 && c.ui.count==0)
  println("PASS lifecycle: reverse cleanup, failure isolation, late/racing registration, duplicate install/destroy, restart, partial failure, initialized-only release")
 }
 '''}
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)
+ music=(r/'app/src/main/java/t/mma/hooks/items/musicorder/QQMusicOrderFeature.kt').read_text()
+ scheduled=(r/'app/src/main/java/t/mma/hooks/items/scheduledtask/ScheduledTaskFeature.kt').read_text().split('object ScheduledTaskRuntimeCoordinator')[0]
+ scheduled='\n'.join(line for line in scheduled.splitlines() if not line.startswith('import '))
+ scheduled=scheduled.replace('package t.mma.hooks.items.scheduledtask','package t.mma.hooks.items.scheduledtask\nimport t.mma.hooks.core.BaseFeature\nimport t.mma.hooks.core.FeatureContext')
+ (p/'MusicFeature.kt').write_text(music)
+ (p/'ScheduledFeature.kt').write_text(scheduled)
  for name,body in fixtures.items():(p/name).write_text(body)
  sources=[r/'app/src/main/java/t/mma/hooks/core'/name for name in ['FeatureResourceScope.kt','BaseFeature.kt','Feature.kt','FeatureManager.kt']]
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(p/'test.jar'),*map(str,sources),*map(str,p.glob('*.kt'))],check=True,timeout=45)

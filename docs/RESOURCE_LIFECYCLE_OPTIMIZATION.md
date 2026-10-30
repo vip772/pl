@@ -65,3 +65,7 @@ c17dd61 的 Actions 41042601510 已核实 completed/success，包含完整 APK/R
 ScriptDexKitBridge 的类/成员便捷查询及 DexBridgeHolder 的字符串查询现在通过与安装器、Agent 相同的可重入串行门；结果转换为 Class、Member 或字符串信息后才离开区间。Java 调用入口为 queryDexKitTask(Callable)。原始 bridge()/holder() 和脚本原始对象注入保持兼容；外部直接操作原始对象仍不受此门自动约束，本次不启用 native close。
 BaseFeature 新增捕获创建时资源作用域的 subscriptionRegistrar。QQ 点歌实际使用该登记器，独占运行时构造后、安装前即登记 destroy，订阅清理先于运行时关闭；安装中途抛错也能释放该运行时。定时任务同样在 coordinator attach/start 前登记独占运行时，启动失败会 detach 并排空已接收任务。旧登记器在关闭并重新初始化后继续回调时立即释放旧资源，不登记到新一代。本次不代表所有异步安装器已迁移，也没有开启全局热卸载。
 验证：test_dex_query_consumers.py 使用真实 DexKit JAR 编译生产 Java Holder、Kotlin 脚本查询与调度器；验证空/不可用实例路径、120 次 Java/Kotlin 混合串行、嵌套及异常恢复。test_feature_resource_scope.py 新增跨两代登记验证；test_resource_schedulers.py 通过。native 查询、关闭重建、真实发送及手机验证仍未完成。
+
+### 生产入口失败注入与回归补充
+生命周期 fixture 现编译实际 QQMusicOrderFeature，以及 ScheduledTaskFeature 的生产功能入口（运行时由 fixture 替换）。注入运行时启动异常，验证订阅释放、独占运行时关闭、定时任务 coordinator 解绑；再次安装、重复销毁及旧订阅登记回调也通过。此验证覆盖入口归属，不替代真实 QQ 音乐网络或微信发送。
+已有 13 项资源定向回归与新增两项（feature_resource_scope、dex_query_consumers）均通过；背景综合测试曾被组合命令总限时取消，单独重跑通过。没有执行本地 Gradle，没有安装手机。
