@@ -5,7 +5,9 @@ import android.os.Handler
 import android.os.Looper
 import java.util.concurrent.Callable
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -29,11 +31,12 @@ object DexInstallScheduler {
     private val states = ConcurrentHashMap<String, State>()
     private val readyLevel = AtomicInteger(0)
     private val dexKitExecutionLock = Any()
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Hchat-DexInstall").apply {
-            isDaemon = true
+    private val executor = ThreadPoolExecutor(
+        1, 1, 30L, TimeUnit.SECONDS, LinkedBlockingQueue(),
+        java.util.concurrent.ThreadFactory { runnable ->
+            Thread(runnable, "Hchat-DexInstall").apply { isDaemon = true }
         }
-    }
+    ).apply { allowCoreThreadTimeOut(true) }
 
     fun schedule(
         key: String,
@@ -45,10 +48,13 @@ object DexInstallScheduler {
         if (key.isBlank()) return
         HLog.d("$TAG 调度功能: $label key=$key stage=$stage priority=$priority")
         val state = states.computeIfAbsent(key) { State(label) }
-        state.label = label
-        state.stage = stage
-        state.priority = priority
-        state.installer = installer
+        synchronized(state) {
+            if (state.installed.get()) return
+            state.label = label
+            state.stage = stage
+            state.priority = priority
+            state.installer = installer
+        }
         if (!isReady(stage)) return
         if (!state.installed.get() && !state.running.get() && !state.retryScheduled.get() &&
             state.retryIndex.get() >= MAX_RETRY_ATTEMPTS
@@ -97,28 +103,39 @@ object DexInstallScheduler {
     }
 
     fun markInstalled(key: String) {
-        states.computeIfAbsent(key) { State(key) }.installed.set(true)
+        val state = states.computeIfAbsent(key) { State(key) }
+        synchronized(state) {
+            state.installed.set(true)
+            state.installer = null
+        }
     }
 
     private fun runNow(key: String, state: State) {
         if (!isReady(state.stage)) return
-        if (state.installed.get()) return
-        val installer = state.installer ?: return
-        if (!state.running.compareAndSet(false, true)) return
+        synchronized(state) {
+            if (state.installed.get() || state.installer == null) return
+            if (!state.running.compareAndSet(false, true)) return
+        }
         HLog.d("$TAG 安装入队: ${state.label} key=$key attempt=${state.retryIndex.get() + 1}")
         executor.execute {
             var ok = false
             try {
                 ok = synchronized(dexKitExecutionLock) {
                     HLog.i("$TAG 开始执行: ${state.label} key=$key attempt=${state.retryIndex.get() + 1} thread=${Thread.currentThread().name}")
-                    installer()
+                    val installer = synchronized(state) {
+                        if (state.installed.get()) null else state.installer
+                    }
+                    if (installer == null) state.installed.get() else installer()
 
                 }
             } catch (e: Throwable) {
                 HLog.e("$TAG ${state.label} 安装异常: ${e.message}", e)
             } finally {
                 if (ok) {
-                    state.installed.set(true)
+                    synchronized(state) {
+                        state.installed.set(true)
+                        state.installer = null
+                    }
                     HLog.i("$TAG 功能生效: ${state.label} key=$key")
                 } else {
                     HLog.w("$TAG 安装未完成: ${state.label} key=$key attempt=${state.retryIndex.get()}")

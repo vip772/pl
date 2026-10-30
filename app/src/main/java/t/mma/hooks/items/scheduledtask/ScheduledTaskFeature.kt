@@ -15,6 +15,9 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.min
 
@@ -78,6 +81,16 @@ class ScheduledTaskRuntime(
 ) {
     private val settings = ScheduledTaskSettings(context.hostContext())
     private val scheduled = ConcurrentHashMap<String, Boolean>()
+    private val acceptedSends = ConcurrentHashMap.newKeySet<String>()
+    // Completion persistence may fail after delivery. Do not replay automatically in this process.
+    private val uncertainSends = ConcurrentHashMap<String, Long>()
+    // Sending may wait for another channel for minutes. Never occupy script workers.
+    private val executionWorker = ThreadPoolExecutor(
+        2, 2, 30L, TimeUnit.SECONDS, LinkedBlockingQueue(),
+        java.util.concurrent.ThreadFactory { runnable ->
+            Thread(runnable, "Hchat-ScheduledSend").apply { isDaemon = true }
+        }
+    ).apply { allowCoreThreadTimeOut(true) }
     @Volatile private var started = false
 
     fun start() {
@@ -86,9 +99,12 @@ class ScheduledTaskRuntime(
         reload()
     }
 
+    @Synchronized
     fun shutdown() {
         started = false
         cancelAll()
+        // Already accepted sends finish normally: interrupting them can cause duplicate delivery.
+        executionWorker.shutdown()
     }
 
     @Synchronized
@@ -99,9 +115,19 @@ class ScheduledTaskRuntime(
         val now = System.currentTimeMillis()
         val nextTasks = ArrayList<ScheduledTaskItem>()
         var changed = false
-        settings.tasks().forEach { stored ->
+        val storedTasks = settings.tasks()
+        val storedIds = storedTasks.mapTo(HashSet()) { it.id }
+        uncertainSends.keys.removeAll { it !in storedIds }
+        storedTasks.forEach { stored ->
             var task = withPlanTimes(stored, ScheduledTaskSettings.normalizedPlanTimes(stored))
             if (task != stored) changed = true
+            val uncertainTime = uncertainSends[task.id]
+            if (uncertainTime != null && uncertainTime != task.planTime) uncertainSends.remove(task.id)
+            if (uncertainTime == task.planTime || task.id in acceptedSends) {
+                // This occurrence is queued/running in this process, not stale after a crash.
+                nextTasks += task
+                return@forEach
+            }
             if (task.status == ScheduledTaskSettings.STATUS_RUNNING) {
                 task = task.copy(status = ScheduledTaskSettings.STATUS_PENDING)
                 changed = true
@@ -164,9 +190,10 @@ class ScheduledTaskRuntime(
 
     @Synchronized
     fun executeNow(taskId: String): Boolean {
-        if (!settings.isEnabled()) return false
+        if (!started || !settings.isEnabled()) return false
         val task = settings.findTask(taskId) ?: return false
-        if (task.status == ScheduledTaskSettings.STATUS_RUNNING) return false
+        if (uncertainSends[taskId] == task.planTime) return false
+        if (task.status == ScheduledTaskSettings.STATUS_RUNNING || taskId in acceptedSends) return false
         cancel(taskId)
         val running = ScheduledTaskSettings.normalizeForSave(task)
             .copy(status = ScheduledTaskSettings.STATUS_RUNNING)
@@ -178,11 +205,7 @@ class ScheduledTaskRuntime(
             }
             finishImmediateTask(running, result.first, result.second)
         }
-        taskApi()?.runAsync(job) ?: Thread(job, "Hchat-ScheduledTask-Now-$taskId").apply {
-            isDaemon = true
-            start()
-        }
-        return true
+        return submitSend(running, job)
     }
 
     private fun schedule(task: ScheduledTaskItem, delayMs: Long) {
@@ -204,10 +227,12 @@ class ScheduledTaskRuntime(
         }
     }
 
+    @Synchronized
     private fun execute(taskId: String, expectedPlanTime: Long) {
-        if (!settings.isEnabled()) return
+        if (!started || !settings.isEnabled()) return
         val task = settings.findTask(taskId) ?: return
-        if (task.planTime != expectedPlanTime || task.status == ScheduledTaskSettings.STATUS_RUNNING) return
+        if (uncertainSends[taskId] == task.planTime) return
+        if (task.planTime != expectedPlanTime || task.status == ScheduledTaskSettings.STATUS_RUNNING || taskId in acceptedSends) return
         val now = System.currentTimeMillis()
         if (now < task.planTime) {
             schedule(task, task.planTime - now)
@@ -220,8 +245,8 @@ class ScheduledTaskRuntime(
         }
         val running = task.copy(status = ScheduledTaskSettings.STATUS_RUNNING)
         settings.saveTask(running)
-        val wakeLock = acquireExecutionWakeLock()
         val job = Runnable {
+            val wakeLock = acquireExecutionWakeLock()
             try {
                 val result = runCatching { sendTask(running) }.getOrElse {
                     logger("定时任务执行异常", it)
@@ -232,9 +257,41 @@ class ScheduledTaskRuntime(
                 releaseExecutionWakeLock(wakeLock)
             }
         }
-        taskApi()?.runAsync(job) ?: Thread(job, "Hchat-ScheduledTask-$taskId").apply {
-            isDaemon = true
-            start()
+        submitSend(running, job)
+    }
+
+    @Synchronized
+    private fun submitSend(task: ScheduledTaskItem, job: Runnable): Boolean {
+        if (!acceptedSends.add(task.id)) return false
+        try {
+            executionWorker.execute {
+                var finished = false
+                try {
+                    job.run()
+                    finished = true
+                } catch (error: Throwable) {
+                    uncertainSends[task.id] = task.planTime
+                    logger("定时任务执行链异常，停止本次自动重入", error)
+                } finally {
+                    synchronized(this) {
+                        acceptedSends.remove(task.id)
+                        // A send may have succeeded before persistence failed. Do not immediately
+                        // replay an occurrence whose completion state is unknown.
+                        if (finished) reload()
+                    }
+                }
+            }
+            return true
+        } catch (error: RejectedExecutionException) {
+            acceptedSends.remove(task.id)
+            // Nothing was sent. Preserve the pending occurrence instead of recording a false success.
+            val latest = settings.findTask(task.id)
+            if (latest != null && latest.status == ScheduledTaskSettings.STATUS_RUNNING &&
+                latest.planTime == task.planTime) {
+                settings.saveTask(latest.copy(status = ScheduledTaskSettings.STATUS_PENDING))
+            }
+            logger("定时任务未入队，已保留待执行状态", error)
+            return false
         }
     }
 

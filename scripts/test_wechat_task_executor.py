@@ -6,6 +6,9 @@ root = Path(__file__).resolve().parents[1]
 source = (root / 'app/src/main/java/t/mma/hooks/api/runtime/WeChatTaskApi.kt').read_text()
 assert 'ThreadPoolExecutor(' in source
 assert 'LinkedBlockingQueue()' in source
+a = source.index('    private val executor = ThreadPoolExecutor(')
+b = source.index('    private val delayedTasks', a)
+executor_source = source[a:b].replace('private val executor', 'val executor')
 assert 'Executors.newCachedThreadPool()' not in source
 assert 'executor.shutdownNow()' in source
 
@@ -13,19 +16,24 @@ code = r'''
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
 fun main() {
-    val executor = ThreadPoolExecutor(1, 2, 30L, TimeUnit.SECONDS, LinkedBlockingQueue())
+    EXECUTOR_SOURCE
     val threads = ConcurrentHashMap.newKeySet<Long>()
     val completed = AtomicInteger()
     val gate = CountDownLatch(1)
     val done = CountDownLatch(96)
+    val started = CountDownLatch(2)
+
     repeat(96) {
         executor.execute {
             threads += Thread.currentThread().id
+            started.countDown()
             gate.await(5, TimeUnit.SECONDS)
             completed.incrementAndGet(); done.countDown()
         }
     }
-    check(threads.size <= 2)
+    // Both blocked workers must start before we release either of them.
+    check(started.await(3, TimeUnit.SECONDS))
+    check(threads.size == 2) { "Second worker did not start: ${threads.size}" }
     gate.countDown()
     check(done.await(5, TimeUnit.SECONDS))
     check(completed.get() == 96)
@@ -34,6 +42,7 @@ fun main() {
     println("PASS bounded task executor: 96 tasks delivered, max 2 workers, shutdown")
 }
 '''
+code = code.replace('    EXECUTOR_SOURCE', executor_source.replace('    init { executor.allowCoreThreadTimeOut(true) }', '    executor.allowCoreThreadTimeOut(true)'))
 libs = Path('/tmp/pl-kotlin-libs')
 std = next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
 with tempfile.TemporaryDirectory() as td:

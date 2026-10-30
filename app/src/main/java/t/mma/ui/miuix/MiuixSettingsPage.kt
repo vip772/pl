@@ -1,6 +1,7 @@
 package t.mma.ui.miuix
 import t.mma.utils.HLog
 
+import androidx.compose.ui.graphics.asAndroidBitmap
 import android.app.Activity
 import android.app.DatePickerDialog
 import android.app.TimePickerDialog
@@ -1370,26 +1371,33 @@ object MiuixSettingsPage {
 
 internal object AvatarMemoryCache {
     private const val MAX_ENTRIES = 64
-    private val bitmaps = object : LinkedHashMap<String, ImageBitmap?>(MAX_ENTRIES, 0.75f, true) {
-        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap?>?): Boolean =
-            size > MAX_ENTRIES
-    }
+    private const val MAX_BYTES = 8L * 1024L * 1024L
+    private data class Entry(val bitmap: ImageBitmap?, val bytes: Long)
+    private val bitmaps = LinkedHashMap<String, Entry>(MAX_ENTRIES, 0.75f, true)
+    private var totalBytes = 0L
 
     @Synchronized
     fun cached(value: String): Pair<Boolean, ImageBitmap?> {
-        return if (bitmaps.containsKey(value)) {
-            true to bitmaps[value]
-        } else {
-            false to null
-        }
+        val entry = bitmaps[value] ?: return false to null
+        return true to entry.bitmap
     }
-
     @Synchronized
     fun put(value: String, bitmap: ImageBitmap?) {
-        bitmaps[value] = bitmap
+        val bytes = bitmap?.let { runCatching {
+            it.asAndroidBitmap().allocationByteCount.toLong()
+        }.getOrElse { _ -> it.width.toLong() * it.height.toLong() * 4L } } ?: 0L
+        bitmaps.remove(value)?.let { totalBytes -= it.bytes }
+        bitmaps[value] = Entry(bitmap, bytes)
+        totalBytes += bytes
+        val iterator = bitmaps.entries.iterator()
+        while ((bitmaps.size > MAX_ENTRIES || totalBytes > MAX_BYTES) && iterator.hasNext()) {
+            totalBytes -= iterator.next().value.bytes
+            iterator.remove()
+        }
     }
+    @Synchronized
+    fun trimMemory() { bitmaps.clear(); totalBytes = 0L }
 }
-
 internal object WeChatAvatarPathCache {
     @Volatile
     private var avatarRoot: String? = null

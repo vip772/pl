@@ -9,4 +9,5 @@
     <item name="hchat_fake_wallet_balance_target" type="id" />
     <item name="hchat_sns_anti_recall_label" type="id" />
     <item name="hchat_settings_page_host" type="id" />
+    <item name="hchat_background_host_state" type="id" />
 </resources>

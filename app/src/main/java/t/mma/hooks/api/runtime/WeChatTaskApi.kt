@@ -32,11 +32,11 @@ class WeChatTaskApi(
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    // Keep async API semantics while preventing a burst of callers from creating
-    // an unbounded number of WeChat-process threads. The queue preserves task
-    // delivery; shutdown() retains the existing lifecycle contract.
+    // Both workers must be core workers: with an unbounded queue, maximumPoolSize
+    // alone does not start a second worker. Idle workers still time out.
+    // Queue capacity and cancellation require caller-specific delivery contracts.
     private val executor = ThreadPoolExecutor(
-        1,
+        2,
         2,
         30L,
         TimeUnit.SECONDS,

@@ -415,6 +415,11 @@ public class ModuleEntry implements IXposedHookLoadPackage {
 
     private void initModule(Context hostContext, XC_LoadPackage.LoadPackageParam lpparam) {
         HLog.initialize(hostContext);
+        try {
+            t.mma.hooks.core.ResourceMemoryCallbacks.install(hostContext);
+        } catch (Throwable error) {
+            HLog.e(TAG + " 内存回调注册失败", error);
+        }
         // Runtime logging remains available through HLog and RuntimeLogStore.
         try {
             // 1. 加载 Native 库（DexKit）

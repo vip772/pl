@@ -48,7 +48,10 @@ import java.util.IdentityHashMap
 import java.util.LinkedHashMap
 import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
+import java.util.concurrent.FutureTask
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import kotlin.math.max
 
 class BackgroundBeautyFeature : BaseFeature() {
@@ -267,10 +270,12 @@ private class BackgroundBeautyRuntime(
             View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
     }
 
-    private data class LoadRequest(
+    private class LoadRequest(
         val slot: BackgroundBeautySettings.Slot,
         val revision: Int
-    )
+    ) {
+        var task: FutureTask<Unit>? = null
+    }
 
     private data class LoadedBitmap(
         val revision: Int,
@@ -308,6 +313,16 @@ private class BackgroundBeautyRuntime(
         var slot: BackgroundBeautySettings.Slot? = null
     }
 
+    // Values are weak too: page state contains Views whose Context owns the Activity.
+    private class WeakValueMap<K : Any, V : Any> {
+        private val values = WeakHashMap<K, WeakReference<V>>()
+        operator fun get(key: K): V? = values[key]?.get()
+        operator fun set(key: K, value: V) { values[key] = WeakReference(value) }
+        fun remove(key: K): V? = values.remove(key)?.get()
+        fun clear() = values.clear()
+        val keys: Set<K> get() = values.keys
+        fun liveValues(): List<V> = values.values.mapNotNull { it.get() }
+    }
     private class HostState(val activity: Activity) {
         val inputUnderlay = ChatInputMessageUnderlay()
         val surfaces = IdentityHashMap<View, SurfaceSnapshot>()
@@ -332,11 +347,14 @@ private class BackgroundBeautyRuntime(
     )
     private val methodPrefs = DexMethodCache.prefs(context.hostContext(), METHOD_CACHE_PREFS)
     private val main = Handler(Looper.getMainLooper())
-    private val loader = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Hchat-BackgroundBeauty").apply { isDaemon = true }
-    }
+    private val loader = ThreadPoolExecutor(
+        1, 1, 30L, TimeUnit.SECONDS, LinkedBlockingQueue(),
+        java.util.concurrent.ThreadFactory { runnable ->
+            Thread(runnable, "Hchat-BackgroundBeauty").apply { isDaemon = true }
+        }
+    ).apply { allowCoreThreadTimeOut(true) }
     private val observedActivities = Collections.synchronizedMap(WeakHashMap<Activity, Boolean>())
-    private val states = Collections.synchronizedMap(WeakHashMap<Activity, HostState>())
+    private val states = WeakValueMap<Activity, HostState>()
     private val pendingLoads = Collections.synchronizedMap(WeakHashMap<Activity, LoadRequest>())
     private val pendingRefreshes = Collections.synchronizedMap(WeakHashMap<Activity, Runnable>())
     private val fragmentRoots = Collections.synchronizedMap(
@@ -352,7 +370,7 @@ private class BackgroundBeautyRuntime(
     private val hookedMembers = ConcurrentHashMap.newKeySet<Member>()
     private val ownedHooks = java.util.concurrent.CopyOnWriteArrayList<XC_MethodHook.Unhook>()
     private var surfaceMutationDepth = 0
-    private val surfaceOwners = WeakHashMap<View, HostState>()
+    private val surfaceOwners = WeakValueMap<View, HostState>()
     private val listAdapters = WeakHashMap<View, Any>()
     private val bounceColors = WeakHashMap<View, MutableMap<java.lang.reflect.Method, Any?>>()
     private var restoringBounce = false
@@ -449,15 +467,24 @@ private class BackgroundBeautyRuntime(
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         main.removeCallbacksAndMessages(null)
         loader.shutdownNow()
-        val activeStates = synchronized(states) { states.values.toList().also { states.clear() } }
-        activeStates.forEach(::restoreState)
+        val activeStates = synchronized(states) { states.liveValues().also { states.clear() } }
+        activeStates.forEach { state ->
+            state.activity.window.decorView.setTag(t.mma.R.id.hchat_background_host_state, null)
+            restoreState(state)
+        }
         synchronized(layoutListeners) {
             layoutListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
             layoutListeners.clear()
         }
         observedActivities.clear()
-        pendingLoads.clear()
-        pendingRefreshes.clear()
+        synchronized(pendingLoads) {
+            pendingLoads.values.forEach(::cancelLoad)
+            pendingLoads.clear()
+        }
+        synchronized(pendingRefreshes) {
+            pendingRefreshes.forEach { (activity, task) -> activity.window.decorView.removeCallbacks(task) }
+            pendingRefreshes.clear()
+        }
         fragmentRoots.clear()
         nativeChatImages.clear()
         launcherTabIndices.clear()
@@ -792,7 +819,7 @@ private class BackgroundBeautyRuntime(
 
     private fun completeWechatReturn(activity: Activity, reason: String) {
         if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY || resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return
-        preparedRoots.entries.removeAll { it.value.first.activity === activity }
+        preparedRoots.entries.removeAll { it.value.first.get()?.activity === activity }
         applyForActivity(activity)
         invalidateWechatBackdrops(activity)
 
@@ -1007,7 +1034,7 @@ private class BackgroundBeautyRuntime(
                 if (chatView.visibility != View.GONE) return@hookOnce
                 val activity = findActivity(chatView) ?: return@hookOnce
                 if (activity.javaClass.name != LAUNCHER_ACTIVITY || resolveTarget(activity) == BackgroundBeautySettings.Slot.CHAT || !hasConfiguredBackground(activity)) return@hookOnce
-                preparedRoots.entries.removeAll { it.value.first.activity === activity }
+                preparedRoots.entries.removeAll { it.value.first.get()?.activity === activity }
                 applyForActivity(activity)
 
             }) || installed
@@ -1118,7 +1145,7 @@ private class BackgroundBeautyRuntime(
     }
     private fun restoreBounceColors(activity: Activity?) {
         pendingPageRoots.keys.removeAll { activity == null || findActivity(it) === activity }
-        preparedRoots.entries.removeAll { activity == null || it.value.first.activity === activity }
+        preparedRoots.entries.removeAll { activity == null || it.value.first.get()?.activity === activity }
         listSelectors.entries.filter { activity == null || findActivity(it.key) === activity }.toList().forEach { (list, selector) ->
             if (list.selector is BackgroundBeautyFeedbackDrawable) list.selector = selector
             listSelectors.remove(list)
@@ -1821,10 +1848,17 @@ private class BackgroundBeautyRuntime(
     private fun scheduleRefresh(activity: Activity, retries: Int = 0) {
         if (destroyed || activity.isFinishing || activity.isDestroyed) return
         synchronized(observedActivities) { observedActivities[activity] = true }
+        val activityRef = WeakReference(activity)
+        lateinit var refreshTask: Runnable
         val task = synchronized(pendingRefreshes) {
             if (pendingRefreshes.containsKey(activity)) return@synchronized null
             Runnable {
-                synchronized(pendingRefreshes) { pendingRefreshes.remove(activity) }
+                val activity = activityRef.get() ?: return@Runnable
+                val current = synchronized(pendingRefreshes) {
+                    if (pendingRefreshes[activity] !== refreshTask) false
+                    else { pendingRefreshes.remove(activity); true }
+                }
+                if (!current || destroyed || activity.isFinishing || activity.isDestroyed) return@Runnable
                 // Resume/focus refreshes revisit prepared header rows once, including
                 // preference descendants replaced without an adapter bind.
                 homeLists.entries.toList().forEach { (list, slot) ->
@@ -1835,9 +1869,9 @@ private class BackgroundBeautyRuntime(
                 applyForActivity(activity)
 
                 if (retries > 0 && !destroyed) {
-                    main.postDelayed({ scheduleRefresh(activity, retries - 1) }, 120L)
+                    main.postDelayed({ activityRef.get()?.let { scheduleRefresh(it, retries - 1) } }, 120L)
                 }
-            }.also { pendingRefreshes[activity] = it }
+            }.also { refreshTask = it; pendingRefreshes[activity] = it }
         } ?: return
         activity.window.decorView.postOnAnimation(task)
     }
@@ -1878,7 +1912,7 @@ private class BackgroundBeautyRuntime(
                 invalidateWechatBackdrops(activity)
 
                 if (!entered) {
-                    preparedRoots.entries.removeAll { it.value.first.activity === activity }
+                    preparedRoots.entries.removeAll { it.value.first.get()?.activity === activity }
                     scheduleRefresh(activity, 1)
                 }
             }
@@ -1924,33 +1958,58 @@ private class BackgroundBeautyRuntime(
                 return
             }
         }
+        val existing = synchronized(pendingLoads) { pendingLoads[activity] }
+        if (existing?.slot == slot && existing.revision == revision) return
         val request = LoadRequest(slot, revision)
-        if (synchronized(pendingLoads) { pendingLoads[activity] } == request) return
-        synchronized(pendingLoads) { pendingLoads[activity] = request }
-        loader.execute {
-            val bitmap = BackgroundBeautyStore.loadBitmap(context.hostContext(), slot)
+        val activityRef = WeakReference(activity)
+        val task = FutureTask<Unit> {
+            val active = activityRef.get()?.let { host ->
+                synchronized(pendingLoads) { pendingLoads[host] === request }
+            } == true
+            if (!active || destroyed) return@FutureTask Unit
+            val bitmap = runCatching { BackgroundBeautyStore.loadBitmap(context.hostContext(), slot) }
+                .onFailure { HLog.e("$TAG 背景加载失败: $slot", it) }.getOrNull()
             main.post {
-                if (synchronized(pendingLoads) { pendingLoads[activity] } != request) return@post
-                synchronized(pendingLoads) { pendingLoads.remove(activity) }
-                if (bitmap == null || destroyed || activity.isFinishing || activity.isDestroyed) return@post
+                val host = activityRef.get() ?: return@post
+                val current = synchronized(pendingLoads) {
+                    if (pendingLoads[host] !== request) false
+                    else { pendingLoads.remove(host); true }
+                }
+                if (!current || bitmap == null || destroyed || host.isFinishing || host.isDestroyed) return@post
+                if (revision != prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)) {
+                    scheduleRefresh(host)
+                    return@post
+                }
                 if (!prefs.getBoolean(
                         BackgroundBeautySettings.KEY_ENABLE,
                         BackgroundBeautySettings.DEFAULT_ENABLE
-                    ) ||
-                    resolveTarget(activity) != slot ||
-                    !hasBackgroundImage(slot)
+                    ) || resolveTarget(host) != slot || !hasBackgroundImage(slot)
                 ) return@post
-                val currentState = ensureState(activity)
+                val currentState = ensureState(host)
                 currentState.loadedBitmaps[slot] = LoadedBitmap(revision, bitmap)
                 trimLauncherBitmaps(currentState, slot)
                 applyBitmap(currentState, slot, bitmap)
             }
+            Unit
         }
+        request.task = task
+        synchronized(pendingLoads) { pendingLoads.put(activity, request)?.let(::cancelLoad) }
+        loader.execute(task)
+    }
 
+    private fun cancelLoad(request: LoadRequest) {
+        request.task?.let { task ->
+            task.cancel(false)
+            loader.remove(task)
+        }
     }
 
     private fun ensureState(activity: Activity): HostState = synchronized(states) {
-        states[activity] ?: HostState(activity).also { states[activity] = it }
+        states[activity] ?: HostState(activity).also {
+            // The page owns its state. The runtime only keeps weak indices.
+            activity.window.decorView.setTag(t.mma.R.id.hchat_background_host_state, it)
+            states[activity] = it
+        }
     }
 
     private fun trimLauncherBitmaps(
@@ -2053,16 +2112,16 @@ private class BackgroundBeautyRuntime(
         }
         return false
     }
-    private val preparedRoots = WeakHashMap<View, Pair<HostState, Int>>()
+    private val preparedRoots = WeakHashMap<View, Pair<WeakReference<HostState>, Int>>()
     private fun preparePage(state: HostState, root: View, slot: BackgroundBeautySettings.Slot) {
         val revision = prefs.getInt(BackgroundBeautySettings.KEY_REVISION, 0)
         val prepared = preparedRoots[root]
-        if (prepared?.first === state && prepared.second == revision) return
+        if (prepared?.first?.get() === state && prepared.second == revision) return
         applyWhitelistedSurfaces(state, root, slot)
         val pendingList = homeLists.entries.any { (list, listSlot) ->
             listSlot == slot && list is ViewGroup && list.childCount == 0 && isDescendantOf(list, root)
         }
-        if (!pendingList) preparedRoots[root] = state to revision
+        if (!pendingList) preparedRoots[root] = WeakReference(state) to revision
         else pendingPageRoots[root] = slot
 
     }
@@ -2958,7 +3017,7 @@ private class BackgroundBeautyRuntime(
 
     private fun restoreSlot(state: HostState, slot: BackgroundBeautySettings.Slot) {
         if (slot == BackgroundBeautySettings.Slot.CHAT) state.inputUnderlay.restoreAll()
-        preparedRoots.entries.removeAll { it.value.first === state }
+        preparedRoots.entries.removeAll { it.value.first.get() === state }
         state.loadedBitmaps.remove(slot)
         state.surfaces.entries.toList().forEach { (view, snapshot) ->
             if (snapshot.slot == slot) {
@@ -3110,12 +3169,14 @@ private class BackgroundBeautyRuntime(
 
     private fun clearActivity(activity: Activity) {
         restoreBounceColors(activity)
-        synchronized(pendingLoads) { pendingLoads.remove(activity) }
+        synchronized(pendingLoads) { pendingLoads.remove(activity)?.let(::cancelLoad) }
         synchronized(pendingRefreshes) { pendingRefreshes.remove(activity) }
+            ?.let { activity.window.decorView.removeCallbacks(it) }
         removeLayoutListeners(activity)
         homeLists.keys.removeAll { findActivity(it) === activity }
         listAdapters.keys.removeAll { findActivity(it) === activity }
         val state = synchronized(states) { states.remove(activity) } ?: return
+        activity.window.decorView.setTag(t.mma.R.id.hchat_background_host_state, null)
         restoreState(state)
     }
 
@@ -3138,7 +3199,7 @@ private class BackgroundBeautyRuntime(
 
     private fun restoreState(state: HostState) {
         state.inputUnderlay.restoreAll()
-        preparedRoots.entries.removeAll { it.value.first === state }
+        preparedRoots.entries.removeAll { it.value.first.get() === state }
         state.surfaces.entries.toList().forEach { (view, snapshot) ->
             restoreSurface(view, snapshot)
         }

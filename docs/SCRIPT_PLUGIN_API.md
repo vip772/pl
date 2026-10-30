@@ -2004,6 +2004,10 @@ Object handle = hookAfter(method, new java.util.function.Consumer() {
 unhook(handle);
 ```
 
+## 异步任务资源生命周期
+
+插件卸载会取消尚未开始的 HTTP/下载等异步闭包，已开始的操作不中断。该行为不保证撤销已发生的网络请求或消息发送。每个插件的不同超时 HTTP 客户端共用连接池和 dispatcher，最多缓存 8 个超时配置；超时取值仍为 1–300 秒，缓存淘汰后按需重建。原始 DexKit 对象接口维持有效，尚未启用闲置关闭。
+
 ## DexKit
 
 接口：
@@ -2118,3 +2122,5 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
 - 模块会分别记录超过 `50ms` 的单击/长按发送按钮回调和因解释器忙碌而跳过的插件名；同类日志会限频。
 - 网络请求请使用 `get/post/download` 的回调处理结果。
 - 文件路径建议使用 `pluginDir` 或 `cacheDir`。
+
+资源调度补充：每插件最多保留 256 个未完成异步任务，达到上限时记录“异步任务失败”日志并拒绝新任务。公共任务服务尚未就绪时使用进程共享备用双线程池（队列 256 项），过载同样记录错误；卸载取消未开始任务，已开始操作继续完成。

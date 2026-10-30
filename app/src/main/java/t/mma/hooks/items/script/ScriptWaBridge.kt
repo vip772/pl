@@ -50,7 +50,20 @@ class ScriptWaBridge @JvmOverloads internal constructor(
     private var currentPluginDir: File? = null
     private val atPattern: Pattern = Pattern.compile("\\[AtWx=([^\\]]+)]")
     private val callbackSeq = AtomicLong(1L)
-    private val httpClients = Collections.synchronizedMap(LinkedHashMap<Long, OkHttpClient>())
+    private val baseHttpClient by lazy { OkHttpClient.Builder().build() }
+    private val httpClients = Collections.synchronizedMap(
+        object : LinkedHashMap<Long, OkHttpClient>(8, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Long, OkHttpClient>?): Boolean = size > 8
+        }
+    )
+    private val asyncScope = ScriptAsyncScope(
+        enqueue = { task ->
+            val tasks = WeChatApis.runtime().tasks()
+            if (tasks != null) tasks.runAsync(task)
+            else ScriptAsyncScope.enqueueFallback(task)
+        },
+        onError = { error -> bridge.log("异步任务失败: ${error.message}") }
+    )
     private val durationCodec: SilkCodec by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { SilkCodec() }
 
     private val delays = ScriptDelayScope(delayOnMainThread) { currentPluginName.orEmpty() }
@@ -949,7 +962,11 @@ class ScriptWaBridge @JvmOverloads internal constructor(
 
     fun delay(millis: Long, action: Runnable?) = delays.delay(millis, action)
 
-    internal fun dispose() = delays.dispose()
+    internal fun dispose() {
+        delays.dispose()
+        asyncScope.dispose()
+        httpClients.clear()
+    }
 
     fun notify(title: String?, text: String?) {
         WeChatApis.interaction().notifier()?.sendNotice(
@@ -1712,18 +1729,7 @@ class ScriptWaBridge @JvmOverloads internal constructor(
         return result
     }
 
-    private fun async(block: () -> Unit) {
-        val key = "script_http_${callbackSeq.getAndIncrement()}"
-        val tasks = WeChatApis.runtime().tasks()
-        if (tasks != null) {
-            tasks.runAsync { runCatching(block).onFailure { bridge.log("异步任务失败: ${it.message}") } }
-        } else {
-            Thread({
-                runCatching(block).onFailure { bridge.log("异步任务失败: ${it.message}") }
-            }, key).start()
-        }
-    }
-
+    private fun async(block: () -> Unit) = asyncScope.execute(block)
     private fun parseAtContent(talker: String, content: String): ParsedAtContent? {
         val contacts = WeChatApis.contact().contacts() ?: return null
         if (!contacts.isGroup(talker)) return null
@@ -1885,7 +1891,7 @@ class ScriptWaBridge @JvmOverloads internal constructor(
     private fun httpClient(timeoutSeconds: Long): OkHttpClient {
         val timeout = timeoutSeconds.coerceAtLeast(1L).coerceAtMost(300L)
         return httpClients.getOrPut(timeout) {
-            OkHttpClient.Builder()
+            baseHttpClient.newBuilder()
                 .connectTimeout(timeout, TimeUnit.SECONDS)
                 .readTimeout(timeout, TimeUnit.SECONDS)
                 .writeTimeout(timeout, TimeUnit.SECONDS)

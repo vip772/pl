@@ -21,6 +21,7 @@ object BackgroundBeautyStore {
     private const val MAX_DECODE_DIMENSION = 4096
     private const val MAX_DECODE_PIXELS = 6L * 1024L * 1024L
     private const val MAX_CACHE_ENTRIES = 2
+    private const val MAX_CACHE_BYTES = 24L * 1024L * 1024L
 
     private data class CacheEntry(
         val modified: Long,
@@ -32,6 +33,19 @@ object BackgroundBeautyStore {
         override fun removeEldestEntry(
             eldest: MutableMap.MutableEntry<BackgroundBeautySettings.Slot, CacheEntry>?
         ): Boolean = size > MAX_CACHE_ENTRIES
+    }
+
+    // Drop cache ownership only. A visible Drawable may still own the same bitmap.
+    @Synchronized
+    fun trimMemory() { cache.clear() }
+
+    private fun trimCache(maxBytes: Long) {
+        var bytes = cache.values.sumOf { it.bitmap.allocationByteCount.toLong() }
+        val iterator = cache.entries.iterator()
+        while (bytes > maxBytes && iterator.hasNext()) {
+            bytes -= iterator.next().value.bitmap.allocationByteCount.toLong()
+            iterator.remove()
+        }
     }
 
     fun hasImage(context: Context, slot: BackgroundBeautySettings.Slot): Boolean {
@@ -53,6 +67,7 @@ object BackgroundBeautyStore {
         }?.let { return it.bitmap }
         val bitmap = decode(file) ?: return null
         cache[slot] = CacheEntry(file.lastModified(), file.length(), bitmap)
+        trimCache(MAX_CACHE_BYTES)
         return bitmap
     }
 
