@@ -13,6 +13,9 @@ import android.os.Looper
 import android.text.TextUtils
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -29,7 +32,19 @@ class WeChatTaskApi(
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val executor = Executors.newCachedThreadPool()
+    // Keep async API semantics while preventing a burst of callers from creating
+    // an unbounded number of WeChat-process threads. The queue preserves task
+    // delivery; shutdown() retains the existing lifecycle contract.
+    private val executor = ThreadPoolExecutor(
+        1,
+        2,
+        30L,
+        TimeUnit.SECONDS,
+        LinkedBlockingQueue(),
+        Executors.defaultThreadFactory()
+    )
+    init { executor.allowCoreThreadTimeOut(true) }
+
     private val delayedTasks = ConcurrentHashMap<String, Runnable>()
     private val exactTasks = ConcurrentHashMap<String, ExactTask>()
     private val lastRunTimes = ConcurrentHashMap<String, Long>()

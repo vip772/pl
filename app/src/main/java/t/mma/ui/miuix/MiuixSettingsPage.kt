@@ -1369,7 +1369,11 @@ object MiuixSettingsPage {
 }
 
 internal object AvatarMemoryCache {
-    private val bitmaps = LinkedHashMap<String, ImageBitmap?>()
+    private const val MAX_ENTRIES = 64
+    private val bitmaps = object : LinkedHashMap<String, ImageBitmap?>(MAX_ENTRIES, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ImageBitmap?>?): Boolean =
+            size > MAX_ENTRIES
+    }
 
     @Synchronized
     fun cached(value: String): Pair<Boolean, ImageBitmap?> {
