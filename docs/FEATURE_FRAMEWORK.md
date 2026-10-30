@@ -2157,3 +2157,5 @@ DexFinder 的公开 resolve 方法及 findNativeNetSceneClass、SettingsDexFinde
 消息单选/多选菜单、收藏菜单公开定位入口及收藏语音内部定位统一通过共享 Dex 门，结果转换和 invokes 消费在门内；实际下载和发送保留原调度路径。
 
 朋友圈转发原生媒体、本地媒体路径和上下文菜单定位入口（含折叠卡片绑定完成）现自行通过共享 Dex 门，native 查询及 Method 转换均在返回前完成。缓存和定位条件不变；完整生产定位器已加入 test_dex_finder_gates.py 并通过 SDK/DexKit 编译。手机转发与菜单交互尚未验证。
+
+语音播报独占运行时和音量键 Hook 纳入功能作用域；shutdown 幂等并移除旧 Handler 回调，主线程立即释放，后台调用投递清理。TTS 初始化代际校验沿用原实现。

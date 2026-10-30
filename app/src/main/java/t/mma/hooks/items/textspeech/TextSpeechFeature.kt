@@ -23,7 +23,9 @@ class TextSpeechFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = TextSpeechRuntime(context.hostContext())
+        val installed = TextSpeechRuntime(context.hostContext())
+        runtime = installed
+        trackResource { installed.shutdown(); if (runtime === installed) runtime = null }
         installVolumeKeyHook()
         subscribe(Events.DexReady::class.java) {
             val observe = WeChatApis.message().observe()
@@ -35,10 +37,6 @@ class TextSpeechFeature : BaseFeature() {
         }
     }
 
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.shutdown()
-        runtime = null
-    }
 
     private fun installVolumeKeyHook() {
         val method = KavaReflector.findDeclaredMethod(
@@ -51,12 +49,13 @@ class TextSpeechFeature : BaseFeature() {
             return
         }
         runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            val unhook = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val event = param.args.getOrNull(0) as? KeyEvent ?: return
                     if (runtime?.handleVolumeKey(event) == true) param.result = true
                 }
             })
+            trackResource { HookRegistry.get().unhook(unhook) }
         }.onFailure {
             HLog.e("$TAG 音量键 Hook 安装失败: ${it.message}", it)
         }

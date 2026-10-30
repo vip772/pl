@@ -186,6 +186,7 @@ class TextSpeechRuntime(context: Context) {
     }
 
     fun handleVolumeKey(event: KeyEvent): Boolean {
+        if (destroyed) return false
         if (event.keyCode != KeyEvent.KEYCODE_VOLUME_DOWN && event.keyCode != KeyEvent.KEYCODE_VOLUME_UP) {
             return false
         }
@@ -222,13 +223,17 @@ class TextSpeechRuntime(context: Context) {
         }
     }
 
+    @Synchronized
     fun shutdown() {
+        if (destroyed) return
         destroyed = true
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        mainHandler.post {
+        mainHandler.removeCallbacksAndMessages(null)
+        val cleanup = {
             stopAndClear()
             safeShutdownTts()
         }
+        if (Looper.myLooper() == Looper.getMainLooper()) cleanup() else mainHandler.post { cleanup() }
     }
 
     private fun settings(): TextSpeechSettings = TextSpeechSettings(appContext)

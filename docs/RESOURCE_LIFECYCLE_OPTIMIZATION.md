@@ -106,3 +106,6 @@ SingleMessageMenuLocator、MultiSelectMessageMenuLocator 的所有公开定位�
 test_dex_finder_gates.py 扩展编译上述完整生产定位器、收藏语音解析器及实际缓存，依赖真实 SDK/DexKit/KavaRef/协程；FeatureContext 和任务 API 为外围 fixture。通过，仍不代表真实菜单交互或语音下载已手机验证。5764c96 的完整 Actions 41052126713 已成功。
 
 朋友圈转发原生媒体、本地媒体路径和上下文菜单定位入口（含折叠卡片绑定完成）现自行通过共享 Dex 门，native 查询及 Method 转换均在返回前完成。缓存和定位条件不变；完整生产定位器已加入 test_dex_finder_gates.py 并通过 SDK/DexKit 编译。手机转发与菜单交互尚未验证。
+
+## 接续：语音播报独占清理
+TextSpeechFeature 在后续安装前即登记独占 TextSpeechRuntime，音量键 Hook 也登记解除。运行时 shutdown 幂等，移除 Handler 旧回调，主线程立即停止播放并关闭 TTS，后台调用只投递一次清理；销毁后音量键回调直接退出。TTS 原有 generation 和 destroyed 校验保留。test_text_speech_shutdown.py 通过主/后台清理、旧回调移除、重复关闭及生产资源登记约束。实际 TTS 引擎、音频会话和手机播报尚未验证；本项不等于语音播报已接入完整主开关重建。
