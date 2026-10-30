@@ -16,7 +16,7 @@ object FeatureToggleRegistry{fun isEnabled(c:Any,id:String)=true}
 class UIRegistry {var count=0;fun registerProvider(p:FeatureSettingsProvider,c:()->Boolean){count++};fun unregisterProvider(id:String){count--}}''',
 'Settings.kt': 'package t.mma.hooks.items.settings\nobject SettingsFeature {const val ID="settings"}',
 'Terms.kt': 'package t.mma.preferences\nobject TermsGate {fun isAccepted(c:Any)=true}',
-'Core.kt': 'package t.mma.hooks.core\nobject DexInstallScheduler {enum class Stage{WARMUP};fun markDexBridgeReady(){};fun schedule(k:String,l:String,stage:Stage,installer:()->Boolean){}}\nclass HookRegistry {fun unhookAll(){};companion object {fun get()=HookRegistry()}}',
+'Core.kt': 'package t.mma.hooks.core\nobject DexInstallScheduler {enum class Stage{WARMUP};class Installation {var closed=false;fun schedule(task:()->Boolean){if(!closed)task()};fun close(){closed=true}};fun installation(k:String,l:String)=Installation();fun markDexBridgeReady(){};fun schedule(k:String,l:String,stage:Stage,installer:()->Boolean){}}\nclass HookRegistry {fun unhookAll(){};companion object {fun get()=HookRegistry()}}',
 'Events.kt': 'package t.mma.event\nobject Events {class FeatureInstalled(s:String);class DexReady}',
 'Context.kt': '''package t.mma.hooks.core
 class Config {fun getGlobalBoolean(k:String,d:Boolean)=d;fun getBoolean(f:String,k:String,d:Boolean)=d;fun getInt(f:String,k:String,d:Int)=d;fun getString(f:String,k:String,d:String)=d}
@@ -34,6 +34,20 @@ object State {var fail=false;var closed=0;var attached:ScheduledTaskRuntime?=nul
 class ScheduledTaskSettingsProvider:t.mma.ui.FeatureSettingsProvider{override fun featureId()="scheduled_task"}
 object ScheduledTaskRuntimeCoordinator{fun attach(r:ScheduledTaskRuntime){State.attached=r};fun detach(r:ScheduledTaskRuntime){if(State.attached===r)State.attached=null}}
 class ScheduledTaskRuntime(c:Any,log:(String,Throwable?)->Unit){fun start(){if(State.fail)error("scheduled start")};fun shutdown(){State.closed++}}
+''',
+'Preferences.kt': '''package android.content
+interface SharedPreferences{fun getBoolean(k:String,d:Boolean):Boolean;fun registerOnSharedPreferenceChangeListener(l:OnSharedPreferenceChangeListener);fun unregisterOnSharedPreferenceChangeListener(l:OnSharedPreferenceChangeListener);fun interface OnSharedPreferenceChangeListener{fun onSharedPreferenceChanged(p:SharedPreferences,k:String?)}}
+''',
+'Toolbar.kt': '''package t.mma.hooks.items.chattoolbar
+class Prefs:android.content.SharedPreferences{var enabled=false;val listeners=mutableListOf<android.content.SharedPreferences.OnSharedPreferenceChangeListener>();override fun getBoolean(k:String,d:Boolean)=enabled;override fun registerOnSharedPreferenceChangeListener(l:android.content.SharedPreferences.OnSharedPreferenceChangeListener){listeners+=l};override fun unregisterOnSharedPreferenceChangeListener(l:android.content.SharedPreferences.OnSharedPreferenceChangeListener){listeners-=l};fun toggle(v:Boolean){enabled=v;listeners.toList().forEach{it.onSharedPreferenceChanged(this,"enable")}}}
+object ChatToolbarSettings{const val KEY_ENABLE="enable";const val DEFAULT_ENABLE=false;val prefs=Prefs();fun preferences(c:Any)=prefs}
+class ChatToolbarSettingsProvider:t.mma.ui.FeatureSettingsProvider{override fun featureId()="chat_toolbar"}
+object ToolbarState{var created=0;var destroyed=0;var fail=false;var last:ChatToolbarRuntime?=null}
+class ChatToolbarRuntime(c:Any,logger:(String,Throwable?)->Unit){var active=true;init{ToolbarState.created++;ToolbarState.last=this};fun destroy(){check(active);active=false;ToolbarState.destroyed++};fun installBaseHooks(){if(ToolbarState.fail)error("toolbar install")};fun installDexHooks():Boolean{check(active);return true};fun onActivityDestroyed(a:Any){check(active)}}
+''',
+'Apis.kt': '''package t.mma.hooks.api.core
+class Lifecycle{class Event{val isDestroy=true;val activity=Any()};var subscriptions=0;inner class Subscription{fun unsubscribe(){subscriptions--}};fun subscribe(callback:(Event)->Unit):Subscription{subscriptions++;return Subscription()}}
+object WeChatApis{val events=Lifecycle();fun lifecycle()=events}
 ''',
 'Test.kt': '''package t.mma.hooks.core
 import java.util.concurrent.*
@@ -96,6 +110,18 @@ fun main(){
  check(t.mma.hooks.items.scheduledtask.State.attached!=null)
  scheduled.onDestroy(c);scheduled.onDestroy(c)
  check(t.mma.hooks.items.scheduledtask.State.attached==null && t.mma.hooks.items.scheduledtask.State.closed==2 && c.ui.count==0)
+ val toolbar=t.mma.hooks.items.chattoolbar.ChatToolbarFeature()
+ val prefs=t.mma.hooks.items.chattoolbar.ChatToolbarSettings.prefs
+ toolbar.install(c);check(t.mma.hooks.items.chattoolbar.ToolbarState.created==0&&prefs.listeners.size==1)
+ repeat(20){prefs.toggle(true);prefs.toggle(true);check(t.mma.hooks.api.core.WeChatApis.events.subscriptions==1);prefs.toggle(false);prefs.toggle(false);check(t.mma.hooks.api.core.WeChatApis.events.subscriptions==0)}
+ check(t.mma.hooks.items.chattoolbar.ToolbarState.created==20&&t.mma.hooks.items.chattoolbar.ToolbarState.destroyed==20)
+ t.mma.hooks.items.chattoolbar.ToolbarState.fail=true;prefs.toggle(true)
+ check(t.mma.hooks.items.chattoolbar.ToolbarState.destroyed==21)
+ t.mma.hooks.items.chattoolbar.ToolbarState.fail=false;prefs.toggle(false);prefs.toggle(true)
+ val oldListener=prefs.listeners.single();toolbar.onDestroy(c)
+ check(prefs.listeners.isEmpty()&&t.mma.hooks.items.chattoolbar.ToolbarState.destroyed==22&&t.mma.hooks.api.core.WeChatApis.events.subscriptions==0)
+ toolbar.install(c);val before=t.mma.hooks.items.chattoolbar.ToolbarState.created;oldListener.onSharedPreferenceChanged(prefs,"enable");check(t.mma.hooks.items.chattoolbar.ToolbarState.created==before)
+ toolbar.onDestroy(c);check(prefs.listeners.isEmpty()&&c.ui.count==0&&c.bus.count==0)
  println("PASS lifecycle: reverse cleanup, failure isolation, late/racing registration, duplicate install/destroy, restart, partial failure, initialized-only release")
 }
 '''}
@@ -105,6 +131,7 @@ with tempfile.TemporaryDirectory() as td:
  scheduled=(r/'app/src/main/java/t/mma/hooks/items/scheduledtask/ScheduledTaskFeature.kt').read_text().split('object ScheduledTaskRuntimeCoordinator')[0]
  scheduled='\n'.join(line for line in scheduled.splitlines() if not line.startswith('import '))
  scheduled=scheduled.replace('package t.mma.hooks.items.scheduledtask','package t.mma.hooks.items.scheduledtask\nimport t.mma.hooks.core.BaseFeature\nimport t.mma.hooks.core.FeatureContext')
+ (p/'ToolbarFeature.kt').write_text((r/'app/src/main/java/t/mma/hooks/items/chattoolbar/ChatToolbarFeature.kt').read_text())
  (p/'MusicFeature.kt').write_text(music)
  (p/'ScheduledFeature.kt').write_text(scheduled)
  for name,body in fixtures.items():(p/name).write_text(body)

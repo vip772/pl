@@ -2134,3 +2134,6 @@ DexInstallScheduler.queryDexKitTask(Callable) 是 Java 查询入口，与 queryD
 ### 功能独占 Dex 安装凭证
 DexInstallScheduler.installation(key, label, stage, priority) 返回可关闭 Installation。仅对功能独占 key 使用并在功能作用域登记 close；功能重建时创建新凭证。close 撤销等待/重试和旧 installed 标记，不中断已开始安装；运行时仍须登记并释放安装中获得的 Hook、监听等资源。聊天工具栏已实接入，安装闭包绑定该轮运行时。共享 API 的安装不能随任一消费者关闭。
 单频道 Actions 使用仓库级 android-single-release 并发组，cancel-in-progress=false，保证版本选择及发布不与另一次单频道运行重叠。此调整源于 41047526655 已构建成功但发布 v10.2.0 碰撞的实际日志。
+
+### 聊天工具栏实际开关生命周期
+聊天工具栏主开关监听由功能本身持有，设置 Provider 和该监听在关闭状态继续存在；只有开关开启才创建运行时、独占 Hook、生命周期订阅及 Dex 安装凭证。关闭释放这些资源，再开启创建新一轮。安装完成会在当前 Activity 一次查找既有 ChatFooter 并挂载，覆盖输入区早于开启创建的情形；不在滚动或绘制回调扫描。共享微信 API 保持运行。

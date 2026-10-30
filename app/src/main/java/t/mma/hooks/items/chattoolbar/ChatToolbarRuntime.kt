@@ -118,6 +118,11 @@ class ChatToolbarRuntime(
         hookResources.register { preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
         if (!active) return false
         baseHooksInstalled = true
+        runOnMain {
+            if (active) WeChatApis.currentActivity()?.currentActivity()?.window?.decorView?.let { decor ->
+                (findViewByClassName(decor, CHAT_FOOTER_CLASS) as? ViewGroup)?.let(::attachFooter)
+            }
+        }
         return true
     }
 

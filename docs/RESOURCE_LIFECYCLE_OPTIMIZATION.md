@@ -75,3 +75,7 @@ BaseFeature 新增捕获创建时资源作用域的 subscriptionRegistrar。QQ �
 DexInstallScheduler 新增功能独占 Installation 凭证：关闭后拒绝再次登记、清除 installer 和 installed 状态、撤销延迟重试；排队旧状态不再执行，执行中的安装不打断，完成后也不会复活旧状态。新一轮使用新凭证重新安装。共享 API key 继续沿用原语义，不能用功能清理撤销共享安装。凭证要求 key 为该功能独占。
 聊天工具栏实际接入此凭证，安装闭包绑定具体运行时，事件迟到时不会操作新运行时；构造 Hook、工具面板 Hook 和偏好监听由运行时作用域释放。关闭不等待 Dex 查询锁，关闭后迟到获得的 Hook/监听立即解除，清理已有工具栏 View。未开启全部功能统一热启停。
 test_resource_schedulers.py 新增：失败待重试关闭、关闭后禁止登记、同 key 下一轮安装、正在执行时关闭并重建、排队安装取消；与 Dex 查询及生命周期测试均通过。完整聊天工具栏编译与 R8 由本提交 Actions 验证，手机验证尚缺。
+
+## 接续：聊天工具栏真实开关
+聊天工具栏已由实际 SharedPreferences 主开关驱动运行时创建/清理，设置 Provider 保留；功能级偏好监听和 DexReady 订阅保留到功能销毁。关闭清理运行时、独占安装凭证和生命周期订阅，再次开启重新创建；旧监听跨销毁到达时因原代 active=false 不再动作。安装后在当前 Activity 一次扫描已创建的 ChatFooter，恢复当前页面挂载；不增加滚动/绘制期扫描。
+生产 ChatToolbarFeature 已加入生命周期 fixture，20 轮开启/重复开启/关闭/重复关闭、安装异常、失败后恢复、销毁后重装和旧监听回调均通过。运行时 Hook 与 UI 的真实 Android 行为仍以完整构建和手机验证为准，不能由此宣称全功能热启停完成。
