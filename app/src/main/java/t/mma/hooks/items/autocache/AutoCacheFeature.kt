@@ -166,14 +166,19 @@ internal class AutoCacheRuntime(
         if (stopped.get()) { pending.remove(key); lastSubmitted.remove(key); return }
         try {
             worker.schedule({
-                val enabled = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
-                    .getBoolean(AutoCacheSettings.KEY_ENABLE, false)
-                if (stopped.get() || !enabled || WeChatApis.account()?.selfWxId() != account) {
-                    pending.remove(key)
-                    lastSubmitted.remove(key)
-                    return@schedule
-                }
                 try {
+                    if (stopped.get()) {
+                        pending.remove(key)
+                        lastSubmitted.remove(key)
+                        return@schedule
+                    }
+                    val enabled = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
+                        .getBoolean(AutoCacheSettings.KEY_ENABLE, false)
+                    if (!enabled || WeChatApis.account()?.selfWxId() != account) {
+                        pending.remove(key)
+                        lastSubmitted.remove(key)
+                        return@schedule
+                    }
                     val store = WeChatApis.message().store()
                     val message = initial.msgId.takeIf { it > 0 }?.let { store?.getMessageById(it) }
                         ?: initial.msgSvrId.takeIf { it > 0 }?.let { store?.getMessageBySvrId(initial.talker, it) }

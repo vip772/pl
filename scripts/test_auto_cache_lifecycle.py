@@ -25,9 +25,10 @@ open class SimpleFeatureSettingsProvider(a:String,b:String,c:String,d:String,e:B
  'Storage.kt':'''package t.mma.preferences
 object HchatStorage {
  var enabled=false
+ var failReads=false
  val listeners=mutableSetOf<android.content.SharedPreferences.OnSharedPreferenceChangeListener>()
  val prefs=java.lang.reflect.Proxy.newProxyInstance(javaClass.classLoader,arrayOf(android.content.SharedPreferences::class.java)){_,m,a->when(m.name){
- "getBoolean"->enabled
+ "getBoolean"->if(failReads) error("injected preferences failure") else enabled
  "registerOnSharedPreferenceChangeListener"->{listeners.add(a!![0] as android.content.SharedPreferences.OnSharedPreferenceChangeListener);null}
  "unregisterOnSharedPreferenceChangeListener"->{listeners.remove(a!![0]);null}
  else->error(m.name)
@@ -84,6 +85,26 @@ fun main(){
   val f=ticket.javaClass.getDeclaredField("closed").apply{isAccessible=true}
   check(f.getBoolean(ticket))
  }
+ // Force rejection while runtime is active; both admission maps must be released.
+ val rejected=AutoCacheRuntime(c){}
+ val rw=field(rejected,"worker").get(rejected) as ScheduledExecutorService;rw.shutdown()
+ val rp=field(rejected,"pending").get(rejected) as MutableSet<String>
+ val rs=field(rejected,"lastSubmitted").get(rejected) as MutableMap<String,Long>
+ val enqueue=rejected.javaClass.getDeclaredMethod("enqueue",FeatureContext::class.java,t.mma.hooks.api.model.WeChatMessage::class.java,String::class.java,String::class.java,Integer.TYPE).apply{isAccessible=true}
+ rp.add("rejected");rs["rejected"]=1L
+ enqueue.invoke(rejected,c,t.mma.hooks.api.model.WeChatMessage(),"fixture","rejected",0)
+ check(rp.isEmpty() && rs.isEmpty());rejected.shutdown()
+ rp.add("late");rs["late"]=1L
+ enqueue.invoke(rejected,c,t.mma.hooks.api.model.WeChatMessage(),"fixture","late",0)
+ check(rp.isEmpty() && rs.isEmpty())
+ val failedRead=AutoCacheRuntime(c){}
+ val fp=field(failedRead,"pending").get(failedRead) as MutableSet<String>
+ val fs=field(failedRead,"lastSubmitted").get(failedRead) as MutableMap<String,Long>
+ fp.add("read");fs["read"]=1L;storage.failReads=true
+ enqueue.invoke(failedRead,c,t.mma.hooks.api.model.WeChatMessage(),"fixture","read",720)
+ val fw=field(failedRead,"worker").get(failedRead) as ScheduledExecutorService
+ fw.schedule({},5100,TimeUnit.MILLISECONDS).get(8,TimeUnit.SECONDS)
+ check(fp.isEmpty() && fs.isEmpty());storage.failReads=false;failedRead.shutdown()
  val old=AutoCacheRuntime(c){};old.shutdown();val fresh=AutoCacheRuntime(c){}
  check(!(field(fresh,"worker").get(fresh) as ScheduledExecutorService).isShutdown)
  fresh.shutdown()
