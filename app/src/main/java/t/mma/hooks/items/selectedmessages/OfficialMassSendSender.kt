@@ -10,6 +10,7 @@ import t.mma.hooks.api.media.WeChatEmojiApi
 import t.mma.hooks.api.media.WeChatVoiceApi
 import t.mma.hooks.api.message.WeChatRetransmitPayload
 import t.mma.hooks.api.model.WeChatMessage
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.items.scheduledtask.ScheduledTaskContentItem
@@ -507,7 +508,8 @@ class OfficialMassSendSender(
         return configured?.takeIf { it > 0 } ?: DEFAULT_CONTACT_LIMIT
     }
 
-    private fun locateRuntime(): MassSendRuntime? {
+    private fun locateRuntime(): MassSendRuntime? = DexInstallScheduler.queryDexKit { locateRuntimeLocked() }
+    private fun locateRuntimeLocked(): MassSendRuntime? {
         val cacheKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         val cached = DexMethodCache.load(methodPrefs, cacheKey, context.hostClassLoader(), CACHE_ANCHOR)
         val baseRuntime = cached?.let(::runtimeFromAnchor) ?: run {

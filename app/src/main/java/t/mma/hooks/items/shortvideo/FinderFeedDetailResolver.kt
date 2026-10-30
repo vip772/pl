@@ -5,6 +5,7 @@ import android.os.Looper
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.utils.KavaReflector
@@ -103,7 +104,9 @@ internal class FinderFeedDetailResolver private constructor(
         private val pending = ConcurrentHashMap<Any, PendingRequest>()
         private val hookedCallbacks = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
 
-        fun locate(context: FeatureContext): FinderFeedDetailResolver? {
+        fun locate(context: FeatureContext): FinderFeedDetailResolver? =
+            DexInstallScheduler.queryDexKit { locateLocked(context) }
+        private fun locateLocked(context: FeatureContext): FinderFeedDetailResolver? {
             val hostContext = context.hostContext()
             val classLoader = context.hostClassLoader()
             val runtimeKey = DexMethodCache.runtimeKey(hostContext, classLoader)

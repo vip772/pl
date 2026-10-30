@@ -58,3 +58,17 @@ for method, collector in [('findClassList','collectClassMatches'),('findMemberLi
 s=holder.read_text()
 for name in ['findClassesByStrings','findMethodsByStrings']:
  assert f'queryDexKitTask(() -> {name}Locked(anchorStrings))' in s
+
+# Runtime locator entry contracts; whole-file Android linkage is checked by Actions.
+base=r/'app/src/main/java/t/mma/hooks/items'
+contracts={
+ 'shortvideo/FinderFeedDetailResolver.kt':'DexInstallScheduler.queryDexKit { locateLocked(context) }',
+ 'messageforward/ChatLivePhotoResolver.kt':'DexInstallScheduler.queryDexKit { locateFreshLocked(context, logger) }',
+ 'selectedmessages/OfficialMassSendSender.kt':'DexInstallScheduler.queryDexKit { locateRuntimeLocked() }',
+ 'realtail/BeforeTransferNameQuery.kt':'DexInstallScheduler.queryDexKit { ensureReadyLocked() }',
+}
+for file,contract in contracts.items():
+ source=(base/file).read_text();assert contract in source,file
+mass=(base/'selectedmessages/OfficialMassSendSender.kt').read_text()
+a=mass.index('    private fun locateRuntimeLocked()');b=mass.index('    private fun locateNativeSubmitRuntime',a)
+assert 'locateEmojiRuntime(cacheKey)' in mass[a:b] and 'locateNativeSubmitRuntime(' in mass[a:b]

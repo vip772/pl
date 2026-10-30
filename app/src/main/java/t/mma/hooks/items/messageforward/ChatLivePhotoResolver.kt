@@ -3,6 +3,7 @@ package t.mma.hooks.items.messageforward
 import android.media.MediaMetadataRetriever
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.items.selectedmessages.SelectedMessageSnapshot
 import t.mma.utils.KavaReflector
@@ -253,6 +254,10 @@ private object ChatLivePhotoLocator {
     }
 
     private fun locateFresh(
+        context: FeatureContext,
+        logger: (String, Throwable?) -> Unit
+    ): ChatLivePhotoMethods? = DexInstallScheduler.queryDexKit { locateFreshLocked(context, logger) }
+    private fun locateFreshLocked(
         context: FeatureContext,
         logger: (String, Throwable?) -> Unit
     ): ChatLivePhotoMethods? {

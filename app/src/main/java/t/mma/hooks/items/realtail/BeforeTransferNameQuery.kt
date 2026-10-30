@@ -2,6 +2,7 @@ package t.mma.hooks.items.realtail
 
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.utils.KavaReflector
@@ -26,7 +27,9 @@ class BeforeTransferNameQuery(
     private val featurePrefs = context.configStore().getFeaturePrefs("real_name_tail_runtime")
     @Volatile private var initialized = false
 
-    fun ensureReady(): Boolean {
+    fun ensureReady(): Boolean = DexInstallScheduler.queryDexKit { ensureReadyLocked() }
+    @Synchronized
+    private fun ensureReadyLocked(): Boolean {
         if (initialized && sceneCtor != null && callbackMethod != null) return true
         return runCatching {
             locateScene()

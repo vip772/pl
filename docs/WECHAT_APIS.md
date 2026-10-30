@@ -1032,3 +1032,5 @@ SingleMessageMenuLocator、MultiSelectMessageMenuLocator、FavoriteMenuLocator �
 朋友圈转发原生媒体、本地媒体路径和上下文菜单定位入口（含折叠卡片绑定完成）现自行通过共享 Dex 门，native 查询及 Method 转换均在返回前完成。缓存和定位条件不变；完整生产定位器已加入 test_dex_finder_gates.py 并通过 SDK/DexKit 编译。手机转发与菜单交互尚未验证。
 
 共享 WeChatSnsPostObserver 和 WeContactHeaderApi 的 install 入口现先取共享 Dex 门，再取原安装 monitor；定位查询及关联 Hook 安装处于同一区间。共享 Hook 所有权不变，不随单个功能消费者关闭。test_dex_finder_gates.py 编译完整生产入口（Xposed/Hook 注册外围 fixture）通过，实际手机 Hook 尚未验证。
+
+视频号详情定位、聊天实况图片 fresh 定位、官方群发运行时定位及转账实名 ensureReady 现自行通过共享 Dex 门，含延迟 invokes 消费、缓存整理及关联 Hook。网络发送和响应等待不放在查询区间内。test_dex_query_consumers.py 新增这些生产入口及官方群发子定位的源码约束；完整四文件编译仍依赖 Actions，不能把该约束当作真实发送/网络查询通过。原 matcher 和缓存 key 未改。
