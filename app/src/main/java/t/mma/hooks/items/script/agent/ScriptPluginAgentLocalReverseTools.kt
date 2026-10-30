@@ -431,14 +431,14 @@ object ScriptPluginAgentLocalReverseTools {
                 error(it.message ?: it.javaClass.simpleName)
             }
         }
-        val current = binding.get()
-            ?: return error("内置逆向工具尚未绑定到微信运行时")
         if (normalizedName !in toolNames) return error("未知的内置逆向工具: $name")
         return runCatching {
             cancellation?.throwIfCancelled()
             // Lock order matches ModuleEntry initialization: shared Dex gate, then target lock.
             DexInstallScheduler.queryDexKit {
                 synchronized(targetLock) {
+                    val current = binding.get()
+                        ?: return@queryDexKit error("内置逆向工具尚未绑定到微信运行时")
                     try {
                         onProgress?.invoke(progressLabel(normalizedName))
                         val result = when (normalizedName) {

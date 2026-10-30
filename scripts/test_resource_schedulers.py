@@ -7,6 +7,7 @@ execute=agent.index("val normalizedName = normalize(name)")
 start=agent.index('            DexInstallScheduler.queryDexKit {',execute)
 end=agent.index('        }.getOrElse {',start)
 section=agent[start:end]
+assert section.index("synchronized(targetLock)") < section.index("val current = binding.get()") < section.index("findClasses(target,")
 assert section.index('queryDexKit') < section.index('synchronized(targetLock)') < section.index('findClasses(target,')
 assert section.index('attachTarget(targetResult, target)') < section.rindex('result')
 install=agent[agent.index('    fun install(holder:'):agent.index('    fun toolCatalog()')]
