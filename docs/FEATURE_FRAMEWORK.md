@@ -2148,3 +2148,6 @@ HomeSidePanelRuntime 的运行时失效门覆盖页面挂载及头像回填；de
 功能本身持有主开关监听和设置 Provider；启用时创建运行时及页面订阅，关闭释放并在再次启用时重建。共享清除未读服务不作为侧边栏独占资源释放。开关迟到回调按原代 active 门丢弃。
 
 Agent 逆向工具的公开 install 重绑入口与查询入口均自行遵守共享 Dex 门→目标锁，外部实例关闭也在该区间；ModuleEntry 的嵌套调用可重入。
+
+### Finder 公开入口串行
+DexFinder 的公开 resolve 方法及 findNativeNetSceneClass、SettingsDexFinder.resolveAll 自行进入统一 Dex 门，结果读取在原定位体返回前完成。原 Finder monitor 放在共享门之后，保持与安装调度器一致的锁顺序。缓存 key 和定位算法不变；原始 DexKitBridge 的外部调用仍须遵守调用约束。

@@ -93,3 +93,7 @@ test_home_side_panel_lifecycle.py 提取生产销毁方法、执行器和回调�
 
 ## 接续：Agent 重绑入口锁顺序
 Agent install 公开入口现自行取得共享 Dex 门后再取 targetLock，外部目标关闭和宿主重绑都在门内。原 ModuleEntry 外层门保持可重入；不能只依赖当前唯一调用位置的外层锁。调度测试增加生产重绑入口的锁顺序约束，原并发、嵌套和异常恢复测试继续覆盖同一共享门。此项不启用宿主 Dex 闲置关闭。
+
+## 接续：Finder 公开定位入口
+DexFinder 的 37 个公开 resolve 入口及 findNativeNetSceneClass、SettingsDexFinder.resolveAll(boolean) 现自行进入共享 Dex 门，调用方无需承担其内部查询串行责任；整个原定位体（含 native 延迟结果消费）位于区间内，缓存定位算法未改。原 synchronized resolveAll/resolveChatPageApi 移到门内私有实现，锁顺序为共享门→Finder monitor，避免脚本直接调用与安装器顺序相反。
+新增 test_dex_finder_gates.py：编译完整生产 DexFinder、SettingsDexFinder、CacheSnapshotEditor、KavaReflector、版本模型/API 和调度器，使用真实 SDK/DexKit/KavaRef，日志/存储/Xposed 外围 fixture；公开入口门约束检查通过。仍未验证实际 native 查询与全部微信版本，原始 bridge 持有链和自动关闭重建尚未完成。

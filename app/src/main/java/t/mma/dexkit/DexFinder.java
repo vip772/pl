@@ -1,5 +1,6 @@
 package t.mma.dexkit;
 import t.mma.utils.HLog;
+import t.mma.hooks.core.DexInstallScheduler;
 
 import android.os.Bundle;
 import android.content.Context;
@@ -260,7 +261,10 @@ public class DexFinder {
 
     private final boolean restoredCacheUsable;
 
-    public synchronized void resolveAll() {
+    public void resolveAll() {
+        DexInstallScheduler.runDexKitTask(() -> resolveAllLocked());
+    }
+    private synchronized void resolveAllLocked() {
         if (resolvedAll) {
             logDetail("resolveAll 已完成，跳过重复解析");
             return;
@@ -792,6 +796,9 @@ public class DexFinder {
 
     // ============ 文本消息发送 ============
     public void resolveServiceManagerApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveServiceManagerApiLocked());
+    }
+    private void resolveServiceManagerApiLocked() {
         try {
             if (isServiceGetterMethod(serviceGetterMethod)) return;
             List<MethodData> methods = dexKit.findMethod(
@@ -812,6 +819,9 @@ public class DexFinder {
     }
 
     public void resolveSendTextMsg() {
+        DexInstallScheduler.runDexKitTask(() -> resolveSendTextMsgLocked());
+    }
+    private void resolveSendTextMsgLocked() {
         try {
             if (sendTextMsgClass != null
                     && (sendTextMsgCtorLong != null || sendTextMsgCtorObject != null)) {
@@ -867,6 +877,9 @@ public class DexFinder {
     }
 
     public void resolveGetContactServiceApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveGetContactServiceApiLocked());
+    }
+    private void resolveGetContactServiceApiLocked() {
         try {
             if (getContactAddMethods.isEmpty()) {
                 collectGetContactAddMethods("dkverify add Contact");
@@ -931,6 +944,9 @@ public class DexFinder {
 
     // ============ 图片消息发送 ============
     public void resolveSendImageApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveSendImageApiLocked());
+    }
+    private void resolveSendImageApiLocked() {
         try {
             if (isSendImageAppInfoMethod(sendImageMethod)) {
                 resolveSendImageAsyncAppInfoApi();
@@ -970,6 +986,9 @@ public class DexFinder {
     }
 
     public void resolveImageCdnDownloadApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveImageCdnDownloadApiLocked());
+    }
+    private void resolveImageCdnDownloadApiLocked() {
         try {
             resolveMarsCdnDownloadApi();
             if (isImageCdnTaskClass(imageCdnTaskClass)
@@ -1353,6 +1372,9 @@ public class DexFinder {
     }
 
     public void resolveSendFileApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveSendFileApiLocked());
+    }
+    private void resolveSendFileApiLocked() {
         try {
             if (isSendFileAppMsgMethod(sendFileMethod)) {
                 if (sendFileAttachDirMethod == null || sendFileAttachPathMethod == null) {
@@ -1388,6 +1410,9 @@ public class DexFinder {
     }
 
     public void resolveSendXmlApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveSendXmlApiLocked());
+    }
+    private void resolveSendXmlApiLocked() {
         try {
             if (isSendXmlAppMsgMethod(sendXmlAppMsgMethod)) {
                 resolveAppMsgParseMethod(sendXmlAppMsgMethod.getParameterTypes()[0]);
@@ -1432,6 +1457,9 @@ public class DexFinder {
     }
 
     public void resolveMsgDescTextApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveMsgDescTextApiLocked());
+    }
+    private void resolveMsgDescTextApiLocked() {
         try {
             if (!msgDescTextMethods.isEmpty()) return;
             // 跨版本通用：微信消息描述文本方法名稳定为 "l"（各版本 xN0.q/r.l），用 "string" 字符串缩小范围后按签名过滤
@@ -1510,6 +1538,9 @@ public class DexFinder {
     }
 
     public void resolveSendVideoApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveSendVideoApiLocked());
+    }
+    private void resolveSendVideoApiLocked() {
         try {
             if (sendVideoMethod != null) return;
 
@@ -1532,6 +1563,9 @@ public class DexFinder {
     }
 
     public void resolveSendVideoTaskApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveSendVideoTaskApiLocked());
+    }
+    private void resolveSendVideoTaskApiLocked() {
         try {
             if (sendVideoTaskClass != null) return;
             sendVideoTaskClass = findFirstClassByStrings(
@@ -1545,6 +1579,9 @@ public class DexFinder {
     }
 
     public void resolveVideoPathApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveVideoPathApiLocked());
+    }
+    private void resolveVideoPathApiLocked() {
         try {
             if (!isVideoPathMethod(videoPathMethod)) {
                 videoPathMethod = null;
@@ -1619,6 +1656,9 @@ public class DexFinder {
     }
 
     public void resolveVideoInfoApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveVideoInfoApiLocked());
+    }
+    private void resolveVideoInfoApiLocked() {
         try {
             if (isVideoInfoByFileNameMethod(videoInfoByFileNameMethod, videoInfoClass)) return;
             videoInfoByFileNameMethod = null;
@@ -1672,6 +1712,9 @@ public class DexFinder {
     }
 
     public void resolveSendVoiceApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveSendVoiceApiLocked());
+    }
+    private void resolveSendVoiceApiLocked() {
         try {
             if (voiceStartRecordMethod == null) {
                 List<MethodData> methods = dexKit.findMethod(
@@ -1885,6 +1928,9 @@ public class DexFinder {
     }
 
     public void resolveSendEmojiApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveSendEmojiApiLocked());
+    }
+    private void resolveSendEmojiApiLocked() {
         try {
             if (emojiSendMethod == null) {
                 List<MethodData> methods = dexKit.findMethod(
@@ -2028,6 +2074,9 @@ public class DexFinder {
     }
 
     public void resolveFavoriteApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveFavoriteApiLocked());
+    }
+    private void resolveFavoriteApiLocked() {
         try {
             resolveFavoriteItemApi();
             resolveFavoriteListApi();
@@ -2351,6 +2400,9 @@ public class DexFinder {
     }
 
     public void resolveTransferOperationApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveTransferOperationApiLocked());
+    }
+    private void resolveTransferOperationApiLocked() {
         try {
             if (isTransferOperationClass(transferOperationClass)) return;
 
@@ -2397,6 +2449,9 @@ public class DexFinder {
     }
 
     public void resolveTransferQueryApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveTransferQueryApiLocked());
+    }
+    private void resolveTransferQueryApiLocked() {
         try {
             if (isTransferQueryClass(transferQueryClass)
                     && isTransferQueryResponseMethod(transferQueryResponseMethod, transferQueryClass)) return;
@@ -2423,6 +2478,9 @@ public class DexFinder {
     }
 
     public void resolveVerifyUserApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveVerifyUserApiLocked());
+    }
+    private void resolveVerifyUserApiLocked() {
         try {
             if (isVerifyUserClass(verifyUserClass)) return;
 
@@ -2459,6 +2517,9 @@ public class DexFinder {
     }
 
     public void resolveContactCardApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveContactCardApiLocked());
+    }
+    private void resolveContactCardApiLocked() {
         try {
             if (isContactCardXmlMethod(contactCardXmlMethod)) return;
 
@@ -2492,6 +2553,9 @@ public class DexFinder {
     }
 
     public void resolvePatMessageApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolvePatMessageApiLocked());
+    }
+    private void resolvePatMessageApiLocked() {
         try {
             if (!isPatDisplayTemplateMethod(patDisplayTemplateMethod)) {
                 List<MethodData> methods = dexKit.findMethod(
@@ -2663,6 +2727,9 @@ public class DexFinder {
 
     // ============ 数据库/联系人公共 API ============
     public void resolveDatabaseApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveDatabaseApiLocked());
+    }
+    private void resolveDatabaseApiLocked() {
         try {
             if (coreStorageGetter != null && sqliteDbWrapperClass != null && configStorageClass != null) return;
 
@@ -2710,6 +2777,9 @@ public class DexFinder {
     }
 
     public void resolveConversationDeleteApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveConversationDeleteApiLocked());
+    }
+    private void resolveConversationDeleteApiLocked() {
         try {
             if (isConversationDeleteMethod(conversationDeleteMethod)) return;
             conversationDeleteMethod = null;
@@ -2752,6 +2822,9 @@ public class DexFinder {
     }
 
     public void resolveMessageClearApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveMessageClearApiLocked());
+    }
+    private void resolveMessageClearApiLocked() {
         try {
             if (isMessageClearByTalkerMethod(messageClearByTalkerMethod, messageClearBatchMethod)) {
                 return;
@@ -2828,6 +2901,9 @@ public class DexFinder {
     }
 
     public void resolveConversationMuteApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveConversationMuteApiLocked());
+    }
+    private void resolveConversationMuteApiLocked() {
         try {
             if (!isServiceGetterMethod(serviceGetterMethod)) {
                 resolveServiceManagerApi();
@@ -3062,6 +3138,9 @@ public class DexFinder {
     }
 
     public void resolveLocalMessageApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveLocalMessageApiLocked());
+    }
+    private void resolveLocalMessageApiLocked() {
         try {
             if (hasLocalMessageApi() && localMessageCreateTimeMethod != null) return;
             int candidateCount = resolveLocalMessageApiBySignature();
@@ -3162,6 +3241,9 @@ public class DexFinder {
     }
 
     public void resolveGroupMemberDisplayName() {
+        DexInstallScheduler.runDexKitTask(() -> resolveGroupMemberDisplayNameLocked());
+    }
+    private void resolveGroupMemberDisplayNameLocked() {
         try {
             if (groupMemberDisplayNameMethod != null) return;
             List<MethodData> methods = dexKit.findMethod(
@@ -3190,6 +3272,9 @@ public class DexFinder {
     }
 
     public void resolveInviteChatroomMemberApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveInviteChatroomMemberApiLocked());
+    }
+    private void resolveInviteChatroomMemberApiLocked() {
         try {
             if (inviteChatroomMemberCtor == null) {
                 inviteChatroomMemberCtor = findInviteChatroomMemberCtor(inviteChatroomMemberClass);
@@ -3222,6 +3307,9 @@ public class DexFinder {
     }
 
     public void resolveAddChatroomMemberApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveAddChatroomMemberApiLocked());
+    }
+    private void resolveAddChatroomMemberApiLocked() {
         try {
             if (addChatroomMemberCtor == null) {
                 addChatroomMemberCtor = findAddChatroomMemberCtor(addChatroomMemberClass);
@@ -3254,6 +3342,9 @@ public class DexFinder {
     }
 
     public void resolveDelChatroomMemberApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveDelChatroomMemberApiLocked());
+    }
+    private void resolveDelChatroomMemberApiLocked() {
         try {
             if (delChatroomMemberCtor == null) {
                 delChatroomMemberCtor = findDelChatroomMemberCtor(delChatroomMemberClass);
@@ -3284,6 +3375,9 @@ public class DexFinder {
     }
 
     public void resolveRevokeMsgApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveRevokeMsgApiLocked());
+    }
+    private void resolveRevokeMsgApiLocked() {
         try {
             if (revokeMsgCtor == null) {
                 revokeMsgCtor = findRevokeMsgCtor(revokeMsgClass);
@@ -3315,6 +3409,9 @@ public class DexFinder {
     }
 
     public void resolveUploadDeviceStepApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveUploadDeviceStepApiLocked());
+    }
+    private void resolveUploadDeviceStepApiLocked() {
         try {
             if (uploadDeviceStepCtor == null) {
                 uploadDeviceStepCtor = findUploadDeviceStepCtor(uploadDeviceStepClass);
@@ -3346,6 +3443,9 @@ public class DexFinder {
     }
 
     public void resolveContactLabelNetworkApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveContactLabelNetworkApiLocked());
+    }
+    private void resolveContactLabelNetworkApiLocked() {
         try {
             if (addContactLabelCtorString == null) {
                 addContactLabelCtorString = findCtorByExactTypes(addContactLabelClass, String.class);
@@ -3410,6 +3510,9 @@ public class DexFinder {
     }
 
     public void resolveSnsUploadApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveSnsUploadApiLocked());
+    }
+    private void resolveSnsUploadApiLocked() {
         try {
             if (hasSnsUploadApi() && snsAddVideoMethod != null && snsShareAppMsgMethod != null) {
                 return;
@@ -3509,7 +3612,10 @@ public class DexFinder {
         }
     }
 
-    public synchronized void resolveChatPageApi() {
+    public void resolveChatPageApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveChatPageApiLocked());
+    }
+    private synchronized void resolveChatPageApiLocked() {
         SharedPreferences chatCache = null;
         try {
             if (chatPageStartMethod != null
@@ -3598,6 +3704,9 @@ public class DexFinder {
     }
 
     public void resolveScriptSendHookApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveScriptSendHookApiLocked());
+    }
+    private void resolveScriptSendHookApiLocked() {
         try {
             if (chatFooterSendClickMethod != null) return;
             List<MethodData> methods = dexKit.findMethod(
@@ -5373,6 +5482,9 @@ public class DexFinder {
     }
 
     public void resolveGroupSolitaireApi() {
+        DexInstallScheduler.runDexKitTask(() -> resolveGroupSolitaireApiLocked());
+    }
+    private void resolveGroupSolitaireApiLocked() {
         try {
             if (groupSolitaireSendMethod != null && groupSolitairePluginClass != null) return;
             List<Class<?>> candidates = new ArrayList<>();
@@ -5795,6 +5907,9 @@ public class DexFinder {
     }
 
     public Class<?> findNativeNetSceneClass(String uri, int cgiId) {
+        return DexInstallScheduler.queryDexKitTask(() -> findNativeNetSceneClassLocked(uri, cgiId));
+    }
+    private Class<?> findNativeNetSceneClassLocked(String uri, int cgiId) {
         if (uri == null || uri.length() == 0 || cgiId <= 0) return null;
         try {
             FindClass fc = new FindClass();

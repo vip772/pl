@@ -1,5 +1,6 @@
 package t.mma.dexkit;
 import t.mma.utils.HLog;
+import t.mma.hooks.core.DexInstallScheduler;
 
 import android.content.Context;
 import android.content.SharedPreferences;
@@ -99,6 +100,9 @@ public class SettingsDexFinder {
     }
 
     public void resolveAll(boolean includePlusMenu) {
+        DexInstallScheduler.runDexKitTask(() -> resolveAllLocked(includePlusMenu));
+    }
+    private void resolveAllLocked(boolean includePlusMenu) {
         if (loadCache()) {
             resolveMissingTargets(includePlusMenu);
             saveCache();

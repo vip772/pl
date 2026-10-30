@@ -2127,3 +2127,5 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
 
 ### DexKit 便捷查询的资源约束
 ScriptDexKitBridge.findClassList / findMemberList（含各参数重载）现在与模块内部安装、Agent 查询共用串行门，返回前已完成结果转换。原有 bridge()、holder()、dexKitBridge 注入及返回类型保持兼容；脚本直接调用原始对象不会自动进入串行门。当前仍不自动关闭共享原始实例，不能据此假定 native 结果可在关闭后继续使用。
+
+脚本注入的 dexFinder 调用其公开定位方法时进入模块共享 Dex 门；与安装器嵌套调用可重入，返回类型不变。直接操作 dexKitBridge 原始对象仍不会自动受门约束；暂未启用自动关闭。
