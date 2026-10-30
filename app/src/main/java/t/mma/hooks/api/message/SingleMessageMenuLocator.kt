@@ -3,6 +3,7 @@ package t.mma.hooks.api.message
 import android.view.MenuItem
 import android.view.View
 import t.mma.dexkit.DexMethodCache
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.enums.StringMatchType
@@ -20,7 +21,9 @@ object SingleMessageMenuLocator {
     private const val CACHE_MENU_CLICK = "menu_click_v1"
 
     @JvmStatic
-    fun menuCreateMethods(context: FeatureContext, logger: (String, Throwable?) -> Unit): List<Method> {
+    fun menuCreateMethods(context: FeatureContext, logger: (String, Throwable?) -> Unit): List<Method> =
+        DexInstallScheduler.queryDexKit { menuCreateMethodsLocked(context, logger) }
+    private fun menuCreateMethodsLocked(context: FeatureContext, logger: (String, Throwable?) -> Unit): List<Method> {
         val prefs = DexMethodCache.prefs(context.hostContext(), PREFS_NAME)
         val cacheKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         val cached = DexMethodCache.loadList(prefs, cacheKey, context.hostClassLoader(), CACHE_MENU_CREATE)
@@ -53,7 +56,9 @@ object SingleMessageMenuLocator {
     }
 
     @JvmStatic
-    fun menuClickMethods(context: FeatureContext, logger: (String, Throwable?) -> Unit): List<Method> {
+    fun menuClickMethods(context: FeatureContext, logger: (String, Throwable?) -> Unit): List<Method> =
+        DexInstallScheduler.queryDexKit { menuClickMethodsLocked(context, logger) }
+    private fun menuClickMethodsLocked(context: FeatureContext, logger: (String, Throwable?) -> Unit): List<Method> {
         val prefs = DexMethodCache.prefs(context.hostContext(), PREFS_NAME)
         val cacheKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         val cached = DexMethodCache.loadList(prefs, cacheKey, context.hostClassLoader(), CACHE_MENU_CLICK)

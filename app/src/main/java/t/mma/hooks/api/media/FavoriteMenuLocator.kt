@@ -4,6 +4,7 @@ import android.view.ContextMenu
 import android.view.MenuItem
 import android.view.View
 import t.mma.dexkit.DexMethodCache
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
@@ -18,6 +19,13 @@ object FavoriteMenuLocator {
 
     @JvmStatic
     fun menuCreateMethods(
+        context: FeatureContext,
+        includeDetails: Boolean,
+        logger: (String, Throwable?) -> Unit
+    ): List<Method> = DexInstallScheduler.queryDexKit {
+        menuCreateMethodsLocked(context, includeDetails, logger)
+    }
+    private fun menuCreateMethodsLocked(
         context: FeatureContext,
         includeDetails: Boolean,
         logger: (String, Throwable?) -> Unit
@@ -66,6 +74,13 @@ object FavoriteMenuLocator {
 
     @JvmStatic
     fun menuClickMethods(
+        context: FeatureContext,
+        includeDetails: Boolean,
+        logger: (String, Throwable?) -> Unit
+    ): List<Method> = DexInstallScheduler.queryDexKit {
+        menuClickMethodsLocked(context, includeDetails, logger)
+    }
+    private fun menuClickMethodsLocked(
         context: FeatureContext,
         includeDetails: Boolean,
         logger: (String, Throwable?) -> Unit

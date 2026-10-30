@@ -100,3 +100,7 @@ DexFinder 的 37 个公开 resolve 入口及 findNativeNetSceneClass、SettingsD
 
 ## 接续：朋友圈定位结果消费
 SnsInteractionLocator 的点赞、评论、评论保护方法和刷新构造定位入口现先进入共享门再取定位器 monitor。SnsLivePhotoUploadLocator 的完整定位（含 methodData.usingFields 和反射成员整理）也处于门内，返回仅含反射成员的运行时数据。原字符串匹配、成员校验及缓存 key 未改。test_dex_finder_gates.py 扩展编译这两个完整生产定位器及实际 DexMethodCache，使用真实 SDK/DexKit/KavaRef，通过；仍不替代朋友圈实际发送和多版本 native 查询验证。
+
+## 接续：消息菜单与收藏运行时查询
+SingleMessageMenuLocator、MultiSelectMessageMenuLocator 的所有公开定位入口和 FavoriteMenuLocator 两个菜单入口现通过共享 Dex 门；返回前完成反射 Method 转换。FavoriteVoiceResolver 的下载方法、媒体路径定位入口也在门内，包含延迟 invokes 读取；实际下载/发送不在定位区间执行。定位 matcher、缓存 key、返回类型保持原语义。
+test_dex_finder_gates.py 扩展编译上述完整生产定位器、收藏语音解析器及实际缓存，依赖真实 SDK/DexKit/KavaRef/协程；FeatureContext 和任务 API 为外围 fixture。通过，仍不代表真实菜单交互或语音下载已手机验证。5764c96 的完整 Actions 41052126713 已成功。

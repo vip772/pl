@@ -1026,3 +1026,5 @@ DexBridgeHolder.findClassesByStrings / findMethodsByStrings 在共享 DexInstall
 DexFinder/SettingsDexFinder 公开定位入口现自行通过 DexInstallScheduler 共享串行门，返回原有反射成员或类；缓存语义和公开参数/返回类型不变。该约束不等于已释放其持有的原始 DexKitBridge。
 
 朋友圈原生点赞/评论/评论保护/刷新和实况上传定位由公共 API 内部串行，结果消费留在共享 Dex 区间内。此资源约束不改变对外发送参数或返回语义。
+
+SingleMessageMenuLocator、MultiSelectMessageMenuLocator、FavoriteMenuLocator 以及收藏语音定位自行串行查询并返回反射成员；参数、缓存与实际发送/下载调度语义不变。

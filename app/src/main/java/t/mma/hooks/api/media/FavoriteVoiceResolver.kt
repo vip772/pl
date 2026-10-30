@@ -1,5 +1,6 @@
 package t.mma.hooks.api.media
 
+import t.mma.hooks.core.DexInstallScheduler
 import android.content.Context
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.core.WeChatApis
@@ -137,6 +138,13 @@ internal object FavoriteVoiceResolver {
         dexKitBridge: DexKitBridge?,
         favoriteClass: Class<*>,
         logger: ((String, Throwable?) -> Unit)?
+    ): Method? = DexInstallScheduler.queryDexKit { favoriteDownloadMethodLocked(hostContext, classLoader, dexKitBridge, favoriteClass, logger) }
+    private fun favoriteDownloadMethodLocked(
+        hostContext: Context,
+        classLoader: ClassLoader,
+        dexKitBridge: DexKitBridge?,
+        favoriteClass: Class<*>,
+        logger: ((String, Throwable?) -> Unit)?
     ): Method? {
         favoriteDownloadMethodCache[favoriteClass]?.let { method ->
             if (isFavoriteDownloadMethod(method, favoriteClass)) return method
@@ -255,6 +263,12 @@ internal object FavoriteVoiceResolver {
         classLoader: ClassLoader,
         dataClass: Class<*>,
         logger: ((String, Throwable?) -> Unit)? = null
+    ): List<Method> = DexInstallScheduler.queryDexKit { locateFavoriteDataPathMethodsLocked(dexKitBridge, classLoader, dataClass, logger) }
+    private fun locateFavoriteDataPathMethodsLocked(
+        dexKitBridge: DexKitBridge?,
+        classLoader: ClassLoader,
+        dataClass: Class<*>,
+        logger: ((String, Throwable?) -> Unit)?
     ): List<Method> {
         if (dexKitBridge == null) return emptyList()
         return runCatching {

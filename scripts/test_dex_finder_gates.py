@@ -10,10 +10,12 @@ with tempfile.TemporaryDirectory() as td:
  (p/'HchatStorage.java').write_text('package t.mma.preferences; public class HchatStorage{public static android.content.SharedPreferences preferences(android.content.Context c,String n){return null;}public static android.content.SharedPreferences runtimePreferences(android.content.Context c,String n){return null;}}')
  (p/'XposedBridge.java').write_text('package de.robv.android.xposed; public class XposedBridge{public static void log(String s){}}')
  subprocess.run(['javac','-cp',str(sdk),'-d',str(classes),*map(str,p.glob('*.java'))],check=True,timeout=20)
- cp=':'.join(map(str,[classes,std,dex,sdk,kava]))
+ cp=':'.join(map(str,[classes,std,dex,sdk,kava,libs/"kotlinx-coroutines-core-jvm-1.8.0.jar"]))
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-jvm-target','17','-nowarn','-no-stdlib','-no-reflect','-classpath',cp,'-d',str(classes),str(base/'utils/KavaReflector.kt'),str(base/'hooks/core/DexInstallScheduler.kt'),str(base/'hooks/api/model/WeChatVersionInfo.kt')],check=True,timeout=45)
  subprocess.run(['javac','-cp',cp,'-d',str(classes),str(base/'hooks/api/runtime/WeChatVersionApi.java'),str(base/'dexkit/DexFinder.java'),str(base/'dexkit/CacheSnapshotEditor.java'),str(base/'dexkit/SettingsDexFinder.java')],check=True,timeout=30)
- subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-jvm-target','17','-nowarn','-no-stdlib','-no-reflect','-classpath',cp,'-d',str(p/'sns.jar'),str(base/'dexkit/DexMethodCache.kt'),str(base/'hooks/api/sns/SnsInteractionLocator.kt'),str(base/'hooks/api/sns/SnsLivePhotoUploadLocator.kt')],check=True,timeout=45)
+ (p/'Apis.kt').write_text('package t.mma.hooks.api.core\nclass Tasks{fun runOnMain(r:Runnable){}}\nobject WeChatApis{fun tasks():Tasks?=null}')
+ (p/'Context.kt').write_text('package t.mma.hooks.core\nclass FeatureContext{fun hostContext():android.content.Context=error("fixture");fun hostClassLoader():ClassLoader=error("fixture");fun dexKitBridge():org.luckypray.dexkit.DexKitBridge=error("fixture")}')
+ subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-jvm-target','17','-nowarn','-no-stdlib','-no-reflect','-classpath',cp,'-d',str(p/'sns.jar'),str(base/'dexkit/DexMethodCache.kt'),str(base/'hooks/api/sns/SnsInteractionLocator.kt'),str(base/'hooks/api/sns/SnsLivePhotoUploadLocator.kt'),str(p/'Context.kt'),str(base/'hooks/api/message/SingleMessageMenuLocator.kt'),str(base/'hooks/api/message/MultiSelectMessageMenuLocator.kt'),str(base/'hooks/api/media/FavoriteMenuLocator.kt'),str(p/'Apis.kt'),str(base/'hooks/api/media/FavoriteVoiceResolver.kt')],check=True,timeout=45)
 for name in ['DexFinder.java','SettingsDexFinder.java']:
  s=(base/'dexkit'/name).read_text()
  for m in re.finditer(r'public (?:synchronized )?void (resolve\w+)\(([^)]*)\) \{([^}]+)\}',s):
@@ -27,3 +29,13 @@ for name in ['nativeLikeMethod','nativeCommentMethod','nativeCommentGuardMethods
 live=(base/'hooks/api/sns/SnsLivePhotoUploadLocator.kt').read_text()
 assert live.index('DexInstallScheduler.queryDexKit {') < live.index('private fun locateLocked') < live.index('methodData.usingFields')
 print('PASS production SNS locators and real DexMethodCache compile; query/usingFields consumption scoped before detached result return')
+
+for file in ['SingleMessageMenuLocator.kt','MultiSelectMessageMenuLocator.kt']:
+ source=(base/'hooks/api/message'/file).read_text()
+ assert 'DexInstallScheduler.queryDexKit' in source
+print('PASS production single/multi-select message menu locator SDK/DexKit compile')
+
+voice=(base/'hooks/api/media/FavoriteVoiceResolver.kt').read_text()
+assert 'DexInstallScheduler.queryDexKit { favoriteDownloadMethodLocked(' in voice
+assert 'DexInstallScheduler.queryDexKit { locateFavoriteDataPathMethodsLocked(' in voice
+print('PASS complete favorite menu/voice resolver compile; lazy invokes consumed within query gate')

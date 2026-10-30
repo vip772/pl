@@ -2,6 +2,7 @@ package t.mma.hooks.api.message
 
 import android.view.MenuItem
 import t.mma.dexkit.DexMethodCache
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.enums.StringMatchType
@@ -18,7 +19,9 @@ object MultiSelectMessageMenuLocator {
     private const val CACHE_MULTI_SELECT_EXIT = "multi_select_exit_v1"
 
     @JvmStatic
-    fun menuCreateMethod(context: FeatureContext, logger: (String, Throwable?) -> Unit): Method? {
+    fun menuCreateMethod(context: FeatureContext, logger: (String, Throwable?) -> Unit): Method? =
+        DexInstallScheduler.queryDexKit { menuCreateMethodLocked(context, logger) }
+    private fun menuCreateMethodLocked(context: FeatureContext, logger: (String, Throwable?) -> Unit): Method? {
         val prefs = DexMethodCache.prefs(context.hostContext(), PREFS_NAME)
         val cacheKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         DexMethodCache.load(prefs, cacheKey, context.hostClassLoader(), CACHE_MENU_CREATE)
@@ -43,7 +46,9 @@ object MultiSelectMessageMenuLocator {
     }
 
     @JvmStatic
-    fun menuClickMethod(context: FeatureContext, logger: (String, Throwable?) -> Unit): Method? {
+    fun menuClickMethod(context: FeatureContext, logger: (String, Throwable?) -> Unit): Method? =
+        DexInstallScheduler.queryDexKit { menuClickMethodLocked(context, logger) }
+    private fun menuClickMethodLocked(context: FeatureContext, logger: (String, Throwable?) -> Unit): Method? {
         val prefs = DexMethodCache.prefs(context.hostContext(), PREFS_NAME)
         val cacheKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         DexMethodCache.load(prefs, cacheKey, context.hostClassLoader(), CACHE_MENU_CLICK)
@@ -68,6 +73,13 @@ object MultiSelectMessageMenuLocator {
 
     @JvmStatic
     fun multiSelectExitMethod(
+        context: FeatureContext,
+        menuClickMethod: Method,
+        logger: (String, Throwable?) -> Unit
+    ): Method? = DexInstallScheduler.queryDexKit {
+        multiSelectExitMethodLocked(context, menuClickMethod, logger)
+    }
+    private fun multiSelectExitMethodLocked(
         context: FeatureContext,
         menuClickMethod: Method,
         logger: (String, Throwable?) -> Unit
