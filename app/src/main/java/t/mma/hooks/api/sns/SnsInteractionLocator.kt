@@ -1,5 +1,6 @@
 package t.mma.hooks.api.sns
 
+import t.mma.hooks.core.DexInstallScheduler
 import android.content.Context
 import t.mma.dexkit.DexMethodCache
 import t.mma.utils.KavaReflector
@@ -30,8 +31,9 @@ internal class SnsInteractionLocator(
     @Volatile
     private var refreshConstructor: Constructor<*>? = null
 
+    fun nativeLikeMethod(): Method? = DexInstallScheduler.queryDexKit { nativeLikeMethodLocked() }
     @Synchronized
-    fun nativeLikeMethod(): Method? {
+    private fun nativeLikeMethodLocked(): Method? {
         likeMethod?.takeIf(::isNativeLikeMethod)?.let { return it }
         val runtimeKey = DexMethodCache.runtimeKey(context, classLoader)
         DexMethodCache.load(prefs, runtimeKey, classLoader, CACHE_LIKE)
@@ -63,8 +65,9 @@ internal class SnsInteractionLocator(
         }.getOrNull()
     }
 
+    fun nativeCommentMethod(): Method? = DexInstallScheduler.queryDexKit { nativeCommentMethodLocked() }
     @Synchronized
-    fun nativeCommentMethod(): Method? {
+    private fun nativeCommentMethodLocked(): Method? {
         commentMethod?.takeIf(::isNativeCommentMethod)?.let { return it }
         val runtimeKey = DexMethodCache.runtimeKey(context, classLoader)
         DexMethodCache.load(prefs, runtimeKey, classLoader, CACHE_COMMENT)
@@ -102,8 +105,9 @@ internal class SnsInteractionLocator(
         }
     }
 
+    fun nativeCommentGuardMethods(): List<Method> = DexInstallScheduler.queryDexKit { nativeCommentGuardMethodsLocked() }
     @Synchronized
-    fun nativeCommentGuardMethods(): List<Method> {
+    private fun nativeCommentGuardMethodsLocked(): List<Method> {
         commentGuardMethods.takeIf { methods ->
             hasCompleteCommentGuardSet(methods)
         }?.let { return it }
@@ -131,8 +135,9 @@ internal class SnsInteractionLocator(
         return methods
     }
 
+    fun timelineRefreshConstructor(): Constructor<*>? = DexInstallScheduler.queryDexKit { timelineRefreshConstructorLocked() }
     @Synchronized
-    fun timelineRefreshConstructor(): Constructor<*>? {
+    private fun timelineRefreshConstructorLocked(): Constructor<*>? {
         refreshConstructor?.takeIf(::isTimelineRefreshConstructor)?.let { return it }
         val runtimeKey = DexMethodCache.runtimeKey(context, classLoader)
         DexMethodCache.loadConstructor(prefs, runtimeKey, classLoader, CACHE_REFRESH)

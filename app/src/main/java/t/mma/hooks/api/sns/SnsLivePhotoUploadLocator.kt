@@ -1,5 +1,6 @@
 package t.mma.hooks.api.sns
 
+import t.mma.hooks.core.DexInstallScheduler
 import android.content.Context
 import t.mma.dexkit.DexMethodCache
 import t.mma.utils.KavaReflector
@@ -26,6 +27,15 @@ internal object SnsLivePhotoUploadLocator {
     private const val CACHE_ELEMENT_CLASS = "element_class_v1"
 
     fun locate(
+        context: Context,
+        classLoader: ClassLoader,
+        dexKitBridge: DexKitBridge,
+        helperClass: Class<*>?,
+        logger: (String) -> Unit
+    ): SnsLivePhotoUploadRuntime? = DexInstallScheduler.queryDexKit {
+        locateLocked(context, classLoader, dexKitBridge, helperClass, logger)
+    }
+    private fun locateLocked(
         context: Context,
         classLoader: ClassLoader,
         dexKitBridge: DexKitBridge,

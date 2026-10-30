@@ -1024,3 +1024,5 @@ scripts/test_message_single_cursor.py提取生产读取及旧实现做1215组类
 DexBridgeHolder.findClassesByStrings / findMethodsByStrings 在共享 DexInstallScheduler 门内查询并整理结果，返回字符串或 MethodInfo。Java 内部需要受控查询时使用 queryDexKitTask(Callable)，所有延迟 native 结果读取应在 Callable 返回前完成；此入口不能拦截持有原始 DexKitBridge 的外部代码，也不表示已启用闲置释放。
 
 DexFinder/SettingsDexFinder 公开定位入口现自行通过 DexInstallScheduler 共享串行门，返回原有反射成员或类；缓存语义和公开参数/返回类型不变。该约束不等于已释放其持有的原始 DexKitBridge。
+
+朋友圈原生点赞/评论/评论保护/刷新和实况上传定位由公共 API 内部串行，结果消费留在共享 Dex 区间内。此资源约束不改变对外发送参数或返回语义。

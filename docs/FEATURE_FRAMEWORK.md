@@ -2151,3 +2151,5 @@ Agent 逆向工具的公开 install 重绑入口与查询入口均自行遵守�
 
 ### Finder 公开入口串行
 DexFinder 的公开 resolve 方法及 findNativeNetSceneClass、SettingsDexFinder.resolveAll 自行进入统一 Dex 门，结果读取在原定位体返回前完成。原 Finder monitor 放在共享门之后，保持与安装调度器一致的锁顺序。缓存 key 和定位算法不变；原始 DexKitBridge 的外部调用仍须遵守调用约束。
+
+朋友圈交互及实况上传定位器自行取得共享 Dex 门，先门后定位器 monitor，延迟 usingFields 读取完成后才返回反射成员；定位条件和缓存语义不变。
