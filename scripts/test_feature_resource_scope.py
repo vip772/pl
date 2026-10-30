@@ -17,6 +17,8 @@ object FeatureToggleRegistry{fun isEnabled(c:Any,id:String)=true}
 class UIRegistry {var count=0;fun registerProvider(p:FeatureSettingsProvider,c:()->Boolean){count++};fun unregisterProvider(id:String){count--}}''',
 'Settings.kt': 'package t.mma.hooks.items.settings\nobject SettingsFeature {const val ID="settings"}',
 'Terms.kt': 'package t.mma.preferences\nobject TermsGate {fun isAccepted(c:Any)=true}',
+'HchatStorage.kt': 'package t.mma.preferences\nobject HchatStorage {fun preferences(c:Any,n:String)=t.mma.hooks.items.musicorder.QQMusicOrderSettings.prefs}',
+'MusicSettings.kt': 'package t.mma.hooks.items.musicorder\nimport android.content.SharedPreferences\nobject QQMusicOrderSettings {const val PREFS_NAME=\"fixture\";const val KEY_ENABLE=\"qq_music_order_enable\";const val DEFAULT_ENABLE=false;val prefs=t.mma.hooks.items.chattoolbar.Prefs()}',
 'Core.kt': 'package t.mma.hooks.core\nobject DexInstallScheduler {enum class Stage{WARMUP};class Installation {var closed=false;fun schedule(task:()->Boolean){if(!closed)task()};fun close(){closed=true}};fun installation(k:String,l:String)=Installation();fun markDexBridgeReady(){};fun schedule(k:String,l:String,stage:Stage,installer:()->Boolean){}}\nclass HookRegistry {fun unhookAll(){};companion object {fun get()=HookRegistry()}}',
 'Events.kt': 'package t.mma.event\nobject Events {class FeatureInstalled(s:String);class DexReady}',
 'Context.kt': '''package t.mma.hooks.core
@@ -24,11 +26,13 @@ class Config {fun getGlobalBoolean(k:String,d:Boolean)=d;fun getBoolean(f:String
 class FeatureContext{val bus=t.mma.event.EventBus();val ui=t.mma.ui.UIRegistry();fun hostContext()=this;fun eventBus()=bus;fun uiRegistry()=ui;fun configStore()=Config()}''',
 'SendButton.kt': 'package t.mma.hooks.items.script\nobject ScriptSendButtonHook{fun install(c:Any)=true}',
 'Music.kt': '''package t.mma.hooks.items.musicorder
-object State {var fail=false;var closed=0;var sub:Any?=null;var track:((Any)->Unit)?=null}
+object State {var fail=false;var closed=0;var sub:Any?=null;var lastSub:Any?=null;var track:((Any)->Unit)?=null}
 class QQMusicOrderSettingsProvider:t.mma.ui.FeatureSettingsProvider{override fun featureId()="qq_music_order"}
 class QQMusicOrderRuntime(c:Any,log:(String,Throwable?)->Unit){
- fun install(track:(Any)->Unit){State.track=track;val sub=t.mma.hooks.core.Sub();State.sub=sub;track(sub);if(State.fail)error("music start")}
- fun destroy(){State.closed++}
+ private var active=true
+ fun install(track:(Any)->Unit){active=true;State.track=track;val sub=t.mma.hooks.core.Sub();State.sub=sub;State.lastSub=sub;track(sub);if(State.fail)error(\"music start\")}
+ fun destroy(){if(active){active=false;State.closed++;State.sub=null}}
+ fun isActive()=active
 }''',
 'Scheduled.kt': '''package t.mma.hooks.items.scheduledtask
 object State {var fail=false;var closed=0;var attached:ScheduledTaskRuntime?=null}
@@ -60,7 +64,7 @@ class HomeSidePanelRuntime(c:Any){init{HomeState.created++};fun install(){if(Hom
 'Test.kt': '''package t.mma.hooks.core
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
-class Sub {var removed=0;fun unsubscribe(){removed++}}
+class Sub {var removed=0;var active=true;fun unsubscribe(){removed++;active=false};fun isActive()=active}
 class F:BaseFeature(){var installs=0;var destroys=0;var fail=false;val sub=Sub()
  override fun featureId()="fixture"
  override fun onFeatureInit(c:FeatureContext){registerSettingsProvider(object:t.mma.ui.FeatureSettingsProvider{override fun featureId()="fixture"})}
@@ -112,14 +116,20 @@ fun main(){
  check(enabled.installs==1 && disabledFeature.inits==1 && c.ui.count==1)
  m.destroyAll(c);check(enabled.destroys==1&&disabledFeature.ends==1&&c.ui.count==0&&c.bus.count==0)
  m.installAll(c);check(enabled.installs==2);m.destroyAll(c)
+ t.mma.hooks.items.musicorder.QQMusicOrderSettings.prefs.enabled=true
  t.mma.hooks.items.musicorder.State.fail=true
  val music=t.mma.hooks.items.musicorder.QQMusicOrderFeature()
+ music.onInit(c)
  try{music.install(c);error("expected music failure")}catch(_:IllegalStateException){}
- check(t.mma.hooks.items.musicorder.State.closed==1 && (t.mma.hooks.items.musicorder.State.sub as Sub).removed==1)
+ check(t.mma.hooks.items.musicorder.State.closed==1 && (t.mma.hooks.items.musicorder.State.lastSub as Sub).removed==1)
  val musicOldTrack=t.mma.hooks.items.musicorder.State.track!!
- t.mma.hooks.items.musicorder.State.fail=false;music.install(c)
+ t.mma.hooks.items.musicorder.State.fail=false;music.onDestroy(c);music.onInit(c);t.mma.hooks.items.musicorder.QQMusicOrderSettings.prefs.enabled=true;music.install(c)
  val lateSub=Sub();musicOldTrack(lateSub);check(lateSub.removed==1)
- music.onDestroy(c);music.onDestroy(c);check(t.mma.hooks.items.musicorder.State.closed==2)
+ val musicOldInstallListener=t.mma.hooks.items.musicorder.QQMusicOrderSettings.prefs.listeners.last()
+ music.onDestroy(c);music.onDestroy(c);check(t.mma.hooks.items.musicorder.State.closed==2 && t.mma.hooks.items.musicorder.State.sub == null)
+ musicOldInstallListener.onSharedPreferenceChanged(t.mma.hooks.items.musicorder.QQMusicOrderSettings.prefs,"qq_music_order_enable")
+ check(t.mma.hooks.items.musicorder.State.closed==2 && t.mma.hooks.items.musicorder.State.sub == null)
+ val musicEnabled=t.mma.hooks.items.musicorder.QQMusicOrderSettings.prefs;musicEnabled.enabled=false;musicEnabled.listeners.toList().forEach{it.onSharedPreferenceChanged(musicEnabled,"qq_music_order_enable")};check(t.mma.hooks.items.musicorder.State.closed==2);musicEnabled.enabled=true
  t.mma.hooks.items.scheduledtask.State.fail=true
  val scheduled=t.mma.hooks.items.scheduledtask.ScheduledTaskFeature()
  try{scheduled.install(c);error("expected scheduler failure")}catch(_:IllegalStateException){}

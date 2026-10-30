@@ -148,3 +148,7 @@ Agent 工具执行的宿主 Binding 读取已移入共享门和 targetLock 内�
 
 ## 接续：语音播报主开关与独占运行时重建
 文字转语音播报现由主开关创建/释放独占 TextSpeechRuntime、音量键 Hook 和消息订阅。关闭按运行时作用域逆序解除 Hook、订阅并调用幂等 TTS shutdown；再次开启创建新实例。DexReady 安装闭包固定该代实例，重复 ready 不重复订阅，订阅异常可重试，销毁后的旧偏好监听快照被 active 拦截。运行时自身偏好监听也先检查 destroyed。test_text_speech_feature.py 现编译完整生产 Feature 和资源作用域，20 轮主开关、旧代回调、订阅失败恢复、重复 ready、关闭/重开和销毁后迟到监听通过；test_text_speech_shutdown.py 原主/后台关闭测试通过。真实 TTS 引擎、音量键设备行为和手机仍待验证；不保证撤销已经交给语音服务的播放。
+
+## 接续：QQ 点歌运行时主开关
+QQMusicOrderFeature 监听既有 `qq_music_order_enable`，开关关闭时逆序释放消息变更订阅并销毁独占 QQMusicOrderRuntime，重新开启创建新运行时。偏好 listener 与 DexReady 回调在功能销毁后由原资源代拦截；运行时创建后先登记销毁，安装失败继续抛回 BaseFeature 的原清理路径。共享 `shared:send_button` Hook 仍按共享所有权安装，不随点歌功能关闭卸载；点歌 handler 订阅跟随运行时释放。
+`test_qq_music_lifecycle.py` 编译完整生产 Feature，覆盖多轮开关、重复开启去重、关闭/重开、旧偏好监听、旧运行时登记器和共享 Hook 隔离；`test_feature_resource_scope.py` 保留生产入口安装失败/迟到订阅清理检查并增加 QQ 点歌关闭后迟到监听隔离，均通过。实际 QQ 音乐网络和微信卡片/语音发送、手机验证仍未执行；开关关闭不会撤销已经进入发送流程的请求。
