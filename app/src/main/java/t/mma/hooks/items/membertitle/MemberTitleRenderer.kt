@@ -7,6 +7,8 @@ import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.contact.WeChatChatroomApi
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.core.DexInstallScheduler
+import t.mma.hooks.core.FeatureResourceScope
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.items.chatname.ChatNameDecorationLayout
@@ -23,6 +25,22 @@ class MemberTitleRenderer(
     private val store: MemberTitleStore,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    private val active = java.util.concurrent.atomic.AtomicBoolean(true)
+    private val resources = FeatureResourceScope { logger("群员头衔资源释放失败", it) }
+    private val pendingApplyKeys = ConcurrentHashMap.newKeySet<String>()
+    fun destroy() {
+        if (!active.compareAndSet(true, false)) return
+        resources.close()
+        pendingApplyKeys.toList().forEach { WeChatApis.tasks()?.cancel(it) }
+        pendingApplyKeys.clear()
+        val views = synchronized(boundViews) { boundViews.keys.toList().also { boundViews.clear() } }
+        msgSenderCache.clear()
+        holderTextFieldCache.clear()
+        likelyMsgCache.clear()
+        val cleanup = { views.forEach { view -> runCatching { removeTitleOnly(view) }.onFailure { logger("群员头衔界面恢复失败", it) } } }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) cleanup()
+        else android.os.Handler(android.os.Looper.getMainLooper()).post { cleanup() }
+    }
     private val msgSenderCache = Collections.synchronizedMap(WeakHashMap<Any, String>())
     private val boundViews = Collections.synchronizedMap(WeakHashMap<TextView, Target>())
     private val holderTextFieldCache = ConcurrentHashMap<Class<*>, Field?>()
@@ -31,13 +49,17 @@ class MemberTitleRenderer(
     private val methodCachePrefs = DexMethodCache.prefs(context.hostContext(), "Hchat_member_title_method_cache")
     @Volatile private var usernameBindInstalled = false
 
-    fun install(): Boolean {
+    fun install(): Boolean = DexInstallScheduler.queryDexKit { installLocked() }
+    @Synchronized
+    private fun installLocked(): Boolean {
+        if (!active.get()) return false
         return installUsernameBindHook()
     }
 
     fun refreshRoom(roomId: String) {
-        if (!isRoom(roomId)) return
+        if (!active.get() || !isRoom(roomId)) return
         WeChatApis.tasks()?.runOnMain {
+            if (!active.get()) return@runOnMain
             val targets = synchronized(boundViews) { boundViews.values.toSet() }
                 .asSequence()
                 .filter { it.roomId == roomId }
@@ -48,6 +70,7 @@ class MemberTitleRenderer(
 
     private fun refreshTarget(target: Target) {
         WeChatApis.tasks()?.runOnMain {
+            if (!active.get()) return@runOnMain
             val snapshot = synchronized(boundViews) { boundViews.entries.toList() }
             snapshot.forEach { (view, value) ->
                 if (value == target) {
@@ -61,11 +84,13 @@ class MemberTitleRenderer(
         if (usernameBindInstalled) return true
         val method = locateUsernameBindMethod() ?: return false
         return try {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            val unhook = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     handleUsernameBind(param)
                 }
             })
+            resources.register { HookRegistry.get().unhook(unhook) }
+            if (!active.get()) return false
             usernameBindInstalled = true
             true
         } catch (e: Throwable) {
@@ -75,7 +100,7 @@ class MemberTitleRenderer(
     }
 
     private fun handleUsernameBind(param: XC_MethodHook.MethodHookParam) {
-        if (!store.isEnabled()) return
+        if (!active.get() || !store.isEnabled()) return
         val roomId = currentRoomId()
         if (!isRoom(roomId)) return
         val args = param.args ?: return
@@ -105,7 +130,7 @@ class MemberTitleRenderer(
     }
 
     private fun applyTitle(tv: TextView, roomId: String, sender: String): Boolean {
-        if (!MemberTitleStore.isValidMemberId(sender) || !isRoom(roomId)) return false
+        if (!active.get() || !MemberTitleStore.isValidMemberId(sender) || !isRoom(roomId)) return false
         val target = Target(roomId, sender)
         boundViews[tv] = target
         val chatrooms = WeChatApis.contact().chatrooms()
@@ -176,6 +201,7 @@ class MemberTitleRenderer(
     }
 
     private fun showEditDialog(anchor: TextView, target: Target) {
+        if (!active.get()) return
         val role = WeChatApis.contact().chatrooms()?.getMemberRoleName(target.roomId, target.sender).orEmpty()
         MemberTitleMiuixDialog.show(
             anchor = anchor,
@@ -246,11 +272,14 @@ class MemberTitleRenderer(
     private fun scheduleDelayedApply(tv: TextView, roomId: String, sender: String) {
         val target = Target(roomId, sender)
         boundViews[tv] = target
-        WeChatApis.tasks()?.runOnMainDelayed("member_title_apply_${System.identityHashCode(tv)}", 120L) {
-            if (boundViews[tv] == target) {
-                applyTitle(tv, roomId, sender)
-            }
+        if (!active.get()) return
+        val key = "member_title_apply_${System.identityHashCode(this)}_${System.identityHashCode(tv)}"
+        pendingApplyKeys.add(key)
+        WeChatApis.tasks()?.runOnMainDelayed(key, 120L) {
+            pendingApplyKeys.remove(key)
+            if (active.get() && boundViews[tv] == target) applyTitle(tv, roomId, sender)
         }
+        if (!active.get()) { pendingApplyKeys.remove(key); WeChatApis.tasks()?.cancel(key) }
     }
 
     private fun locateUsernameBindMethod(): Method? {

@@ -119,3 +119,5 @@ TextSpeechFeature 在后续安装前即登记独占 TextSpeechRuntime，音量�
 BaseFeature 事件订阅包装现绑定订阅时的资源作用域，作用域已关闭时拒绝快照中的迟到回调。已开始回调不中断，其线程内 trackResource/trackSubscription/subscribe 继续归属原代，跨关闭重开后的迟到登记立即释放，不污染新代；ThreadLocal 在 finally 恢复/移除，不传递到另外启动的线程。跨线程异步任务仍需显式捕获登记器，不能据此认为所有异步安装器已安全。生命周期 fixture 验证旧快照回调不执行、回调运行中关闭重开、旧回调随后登记资源立即释放，通过。
 
 输入框提示运行时构造后立即登记到功能资源作用域，DexReady 安装闭包固定该轮 runtime，统计订阅使用捕获原作用域的登记器。销毁幂等、清除 Handler 等待回调，销毁后拒绝 Hook/统计重新安装。test_input_hint_lifecycle.py（含新增重复销毁/关闭后拒绝）及 test_input_hint_sdk.py 通过，保留 3000 次稳定布局不重复渲染和原生提示恢复验证；未开启该功能全局热重启。
+
+群员头衔渲染器现实际登记为功能独占资源，安装闭包和群成员刷新固定本轮实例，独占 Installation 关闭撤销旧 installed/重试。渲染器 destroy 幂等，解除自己的 Hook，撤销含运行时身份的延迟任务，清理缓存及绑定；只 hideTitle，不释放共享昵称装饰布局或其它尾缀。旧刷新/延迟回调检查 active；迟到获得 Hook 在已关闭作用域内立即卸载。test_member_title_lifecycle.py 提取生产 destroy/延迟方法及真实作用域验证取消、旧回填拒绝、晚登记 Hook 清理、页面异常隔离和重复关闭，通过；整渲染器编译及真实昵称布局仍待 Actions/手机验证。未接通群员头衔完整主开关重建。

@@ -19,28 +19,25 @@ class MemberTitleFeature : BaseFeature() {
 
     override fun onFeatureInstall(context: FeatureContext) {
         val store = MemberTitleStore(context.hostContext())
-        renderer = MemberTitleRenderer(context, store, ::logFeatureError)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) {
-            scheduleInstall()
-        }
+        val installed = MemberTitleRenderer(context, store, ::logFeatureError)
+        renderer = installed
+        trackResource { installed.destroy(); if (renderer === installed) renderer = null }
+        val installation = DexInstallScheduler.installation(ID, name())
+        trackResource { installation.close() }
+        val install = { installation.schedule { installed.install() } }
+        install()
+        subscribe(Events.DexReady::class.java) { install() }
         val chatroomChanges = WeChatApis.contact().chatroomChanges() ?: return
         trackSubscription(chatroomChanges.subscribe { change ->
             if (!store.isEnabled()) return@subscribe
             val roomId = change.chatroomId()
             if (roomId.isBlank()) return@subscribe
-            renderer?.refreshRoom(roomId)
+            installed.refreshRoom(roomId)
         })
     }
 
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            renderer?.install() == true
-        }
     }
 
     companion object {
