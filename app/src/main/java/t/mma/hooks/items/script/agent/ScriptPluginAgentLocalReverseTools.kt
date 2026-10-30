@@ -7,6 +7,7 @@ import com.reandroid.apk.ApkModule
 import com.reandroid.arsc.chunk.TableBlock
 import com.reandroid.arsc.model.ResourceEntry
 import t.mma.dexkit.DexBridgeHolder
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.preferences.HchatStorage
 import org.json.JSONArray
 import org.json.JSONObject
@@ -398,40 +399,43 @@ object ScriptPluginAgentLocalReverseTools {
         if (normalizedName !in toolNames) return error("未知的内置逆向工具: $name")
         return runCatching {
             cancellation?.throwIfCancelled()
-            synchronized(targetLock) {
-                onProgress?.invoke(progressLabel(normalizedName))
-                val result = when (normalizedName) {
-                    "open_target_session" -> openTarget(current, arguments, allowedExternalApkRoots)
-                    "list_target_sessions" -> listTargets(current)
-                    "get_target_session" -> getTarget(current, arguments)
-                    "close_target_session" -> closeTarget(current, arguments)
-                    "compare_methods_using_strings" -> compareMethodsUsingStrings(current, arguments, cancellation)
-                    else -> {
-                        val target = resolveTarget(current, arguments.optString("session_id", ""))
-                        val targetResult = when (normalizedName) {
-                            "find_classes_using_strings" -> findClasses(target, arguments, cancellation)
-                            "find_methods_using_strings" -> findMethodsUsingStrings(target, arguments, cancellation)
-                            "find_methods_using_resource" -> findMethodsUsingResource(target, arguments, cancellation)
-                            "find_methods" -> findMethods(target, arguments, cancellation)
-                            "inspect_method" -> inspectMethod(target, arguments, cancellation)
-                            "inspect_class" -> inspectClass(target, arguments, cancellation)
-                            "export_method_java" -> exportMethodJava(target, arguments, cancellation)
-                            "export_class_java" -> exportClassJava(target, arguments, cancellation)
-                            "export_method_smali" -> exportMethodSmali(target, arguments, cancellation)
-                            "export_class_smali" -> exportClassSmali(target, arguments, cancellation)
-                            "find_resource_values" -> findResourceValues(target, arguments)
-                            "get_resource_value" -> getResourceValue(target, arguments)
-                            "list_res" -> listResources(target, arguments)
-                            "decode_xml" -> decodeXml(target, arguments)
-                            "manifest" -> manifest(target, arguments)
-                            else -> error("未知的内置逆向工具: $name")
+            // Lock order matches ModuleEntry initialization: shared Dex gate, then target lock.
+            DexInstallScheduler.queryDexKit {
+                synchronized(targetLock) {
+                    onProgress?.invoke(progressLabel(normalizedName))
+                    val result = when (normalizedName) {
+                        "open_target_session" -> openTarget(current, arguments, allowedExternalApkRoots)
+                        "list_target_sessions" -> listTargets(current)
+                        "get_target_session" -> getTarget(current, arguments)
+                        "close_target_session" -> closeTarget(current, arguments)
+                        "compare_methods_using_strings" -> compareMethodsUsingStrings(current, arguments, cancellation)
+                        else -> {
+                            val target = resolveTarget(current, arguments.optString("session_id", ""))
+                            val targetResult = when (normalizedName) {
+                                "find_classes_using_strings" -> findClasses(target, arguments, cancellation)
+                                "find_methods_using_strings" -> findMethodsUsingStrings(target, arguments, cancellation)
+                                "find_methods_using_resource" -> findMethodsUsingResource(target, arguments, cancellation)
+                                "find_methods" -> findMethods(target, arguments, cancellation)
+                                "inspect_method" -> inspectMethod(target, arguments, cancellation)
+                                "inspect_class" -> inspectClass(target, arguments, cancellation)
+                                "export_method_java" -> exportMethodJava(target, arguments, cancellation)
+                                "export_class_java" -> exportClassJava(target, arguments, cancellation)
+                                "export_method_smali" -> exportMethodSmali(target, arguments, cancellation)
+                                "export_class_smali" -> exportClassSmali(target, arguments, cancellation)
+                                "find_resource_values" -> findResourceValues(target, arguments)
+                                "get_resource_value" -> getResourceValue(target, arguments)
+                                "list_res" -> listResources(target, arguments)
+                                "decode_xml" -> decodeXml(target, arguments)
+                                "manifest" -> manifest(target, arguments)
+                                else -> error("未知的内置逆向工具: $name")
+                            }
+                            attachTarget(targetResult, target)
                         }
-                        attachTarget(targetResult, target)
                     }
+                    cancellation?.throwIfCancelled()
+                    onProgress?.invoke("整理逆向结果")
+                    result
                 }
-                cancellation?.throwIfCancelled()
-                onProgress?.invoke("整理逆向结果")
-                result
             }
         }.getOrElse {
             if (cancellation?.isCancellation(it) == true) throw it

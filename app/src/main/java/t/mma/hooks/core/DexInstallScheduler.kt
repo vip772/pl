@@ -93,6 +93,9 @@ object DexInstallScheduler {
         }
     }
 
+    /** Consume native-backed results before returning; only detached values may escape. */
+    fun <T> queryDexKit(task: () -> T): T = synchronized(dexKitExecutionLock) { task() }
+
     private fun advanceReady(stage: Stage) {
         while (true) {
             val current = readyLevel.get()

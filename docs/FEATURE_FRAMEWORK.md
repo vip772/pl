@@ -2124,3 +2124,5 @@ DexFinder 在构造阶段、发布给 FeatureContext 和各 API 安装器之前�
 BaseFeature 的事件订阅、外部 unsubscribe 凭证、设置 Provider 现统一登记到 FeatureResourceScope；关闭逆序释放，单项异常记错后继续，重复关闭不重复清理，关闭后迟到登记立即释放。不要把共享任务池或共享 API 放入功能作用域。
 背景、聊天工具栏、首页侧边栏、自动转发的独占运行时已在构造后、安装前登记，安装中途失败仍清理。BaseFeature 防重复初始化/安装；初始化或安装异常清理已登记资源。FeatureManager 保存初始化集合，未安装功能的 Provider 也会在销毁时释放。
 验证脚本 scripts/test_feature_resource_scope.py 编译真实作用域、BaseFeature、FeatureManager，验证并发/迟到登记、逆序及异常隔离、重复启停、失败安装、仅初始化清理。宿主由 fixture 替代，不能证明所有功能运行时都能热重启。现有 notifyConfigChanged 没有调用方；此次未据此开启全局热卸载，其他功能的 Hook/监听/系统资源仍需逐项接入。
+
+Agent 内置逆向工具现与 Hook 安装共用 DexInstallScheduler 的串行门，结果读取和 JSON 整理也在门内。锁顺序固定共享 Dex 门→Agent targetLock；不得在持有 targetLock 时反向获取共享门。queryDexKit 本身不代表 idle close 已实现，返回值不得保留 native-backed 查询结果。

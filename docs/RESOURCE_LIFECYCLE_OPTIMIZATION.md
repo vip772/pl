@@ -54,3 +54,8 @@ DexKit 安全释放、全功能统一启停仍未完成；本次未启用 native
 新增 FeatureResourceScope 并实际替换 BaseFeature 原三个资源列表；已接入所有通过 subscribe/trackSubscription/registerSettingsProvider 登记的功能资源，以及背景、聊天工具栏、首页侧边栏、自动转发的独占运行时。重复初始化/安装/销毁及失败路径现在有明确清理；FeatureManager 也销毁已初始化但未安装功能。
 test_feature_resource_scope.py、test_background_resource_lifecycle.py、test_conversation_pull_down_shade.py、test_conversation_empty_footer.py 通过；后两项含定向 Android SDK 编译。未执行本地 Gradle、未安装手机。
 此为 C 的首批实接入，不是全部功能热启停完成；未改动所有功能的配置监听、共享资源边界和 Dex 安装状态。DexKit A 仍未实施安全关闭，不应将本阶段描述为三项全部完成。
+
+## 接续：Agent 共享 Dex 查询串行
+7c8d20f 的 Actions 41041713476 已成功完成。原有 13 项定向资源回归及新增生命周期回归通过（不代表整项目无回归）。
+Agent 工具原来仅持有 targetLock，未通过共享 Dex 串行门；现在查询、延迟结果读取及 JSON 整理整体位于 DexInstallScheduler.queryDexKit 区间，锁顺序为共享 Dex 门→targetLock，与初始化一致。调度测试新增 40 次并发查询不重叠、嵌套可重入、异常后恢复，以及实际 Agent 区间源码约束。完整 Agent 编译以 Actions 为准。
+这只是 A 的串行约束接入，不启用闲置关闭或重建。ModuleEntry 静态 bridge 集合、原始对象接口、内部持有链及脚本兼容保活契约仍未完成迁移。
