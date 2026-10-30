@@ -29,15 +29,12 @@ class AutoMessageForwardFeature : BaseFeature() {
                 HLog.e("$TAG $message", error)
             }
             runtime = installed
+            trackResource { installed.shutdown(); if (runtime === installed) runtime = null }
             trackSubscription(observe.subscribe(installed::handleMessage))
             subscribe(Events.MessageRecalled::class.java) { event -> installed.handleRecall(event) }
         }
     }
 
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.shutdown()
-        runtime = null
-    }
 
     companion object {
         const val ID = "auto_message_forward"

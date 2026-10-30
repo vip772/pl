@@ -20,6 +20,7 @@ class ChatToolbarFeature : BaseFeature() {
     override fun onFeatureInstall(context: FeatureContext) {
         val installed = ChatToolbarRuntime(context, ::logRuntimeError)
         runtime = installed
+        trackResource { installed.destroy(); if (runtime === installed) runtime = null }
         installed.installBaseHooks()
         trackSubscription(
             WeChatApis.lifecycle()?.subscribe { event ->
@@ -30,10 +31,6 @@ class ChatToolbarFeature : BaseFeature() {
         subscribe(Events.DexReady::class.java) { scheduleDexInstall() }
     }
 
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
-    }
 
     private fun scheduleDexInstall() {
         DexInstallScheduler.schedule(ID, name(), stage = DexInstallScheduler.Stage.BRIDGE) {

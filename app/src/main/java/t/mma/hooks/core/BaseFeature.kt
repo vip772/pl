@@ -11,55 +11,51 @@ import t.mma.utils.KavaReflector
  * 功能模块基类。
  */
 abstract class BaseFeature : Feature {
-    private val subscriptions = ArrayList<EventBus.Subscription>()
-    private val trackedSubscriptions = ArrayList<Any>()
-    private val registeredProviderIds = ArrayList<String>()
+    private var resources = newResourceScope()
+    private var initialized = false
+    private var installed = false
+    private fun newResourceScope() = FeatureResourceScope { logError("资源释放异常", it) }
     private var context: FeatureContext? = null
 
     @Throws(Throwable::class)
+    @Synchronized
     final override fun onInit(context: FeatureContext) {
+        if (initialized) return
+        resources = newResourceScope()
         this.context = context
-        onFeatureInit(context)
+        initialized = true
+        try { onFeatureInit(context) } catch (error: Throwable) {
+            onDestroy(context)
+            throw error
+        }
     }
 
     @Throws(Throwable::class)
+    @Synchronized
     final override fun install(context: FeatureContext) {
-        this.context = context
-        onFeatureInstall(context)
+        if (installed) return
+        if (!initialized) onInit(context)
+        installed = true
+        try { onFeatureInstall(context) } catch (error: Throwable) {
+            onDestroy(context)
+            throw error
+        }
     }
 
+    @Synchronized
     final override fun onDestroy(context: FeatureContext) {
-        try {
-            onFeatureDestroy(context)
-        } catch (e: Throwable) {
-            logError("onDestroy异常", e)
+        if (!initialized) return
+        initialized = false
+        installed = false
+        try { onFeatureDestroy(context) } catch (error: Throwable) {
+            logError("onDestroy异常", error)
+        } finally {
+            resources.close()
+            this.context = null
         }
-        for (subscription in subscriptions) {
-            try {
-                context.eventBus().unsubscribe(subscription)
-            } catch (_: Throwable) {
-            }
-        }
-        subscriptions.clear()
-        for (subscription in trackedSubscriptions) {
-            try {
-                KavaReflector.invoke(
-                    KavaReflector.findMethod(subscription.javaClass, "unsubscribe"),
-                    subscription
-                )
-            } catch (_: Throwable) {
-            }
-        }
-        trackedSubscriptions.clear()
-        for (featureId in registeredProviderIds) {
-            try {
-                context.uiRegistry().unregisterProvider(featureId)
-            } catch (_: Throwable) {
-            }
-        }
-        registeredProviderIds.clear()
     }
-
+    /** Register only resources owned by this feature, never shared API executors. */
+    protected fun trackResource(release: () -> Unit) { resources.register(release) }
     @Throws(Throwable::class)
     protected open fun onFeatureInit(context: FeatureContext) {
     }
@@ -82,7 +78,7 @@ abstract class BaseFeature : Feature {
             FeatureToggleRegistry.isEnabled(currentContext.hostContext(), provider.featureId())
         }
         currentContext.uiRegistry().registerProvider(provider, registryCheck)
-        registeredProviderIds.add(provider.featureId())
+        trackResource { currentContext.uiRegistry().unregisterProvider(provider.featureId()) }
     }
     protected fun <E> subscribe(
         eventType: Class<E>,
@@ -98,13 +94,17 @@ abstract class BaseFeature : Feature {
     ): EventBus.Subscription {
         val currentContext = context ?: return EventBus.Subscription.empty()
         val subscription = currentContext.eventBus().subscribe(eventType, handler, priority)
-        subscriptions.add(subscription)
+        trackResource { currentContext.eventBus().unsubscribe(subscription) }
         return subscription
     }
 
     protected fun <T : Any> trackSubscription(subscription: T?): T? {
         if (subscription != null) {
-            trackedSubscriptions.add(subscription)
+            trackResource {
+                KavaReflector.invoke(
+                    KavaReflector.findMethod(subscription.javaClass, "unsubscribe"), subscription
+                )
+            }
         }
         return subscription
     }

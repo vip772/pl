@@ -11,6 +11,7 @@ import java.util.Collections
  */
 class FeatureManager {
     private val features = ArrayList<Feature>()
+    private val initializedFeatures = ArrayList<Feature>()
     private val installedFeatures = ArrayList<Feature>()
 
     fun register(feature: Feature?): FeatureManager {
@@ -27,7 +28,7 @@ class FeatureManager {
     fun installAll(context: FeatureContext) {
         HLog.i("[Hchat:FeatureManager] 开始加载功能，总数=${features.size}")
         val termsAccepted = TermsGate.isAccepted(context.configStore())
-        val initializedFeatures = ArrayList<Feature>()
+        if (initializedFeatures.isNotEmpty()) return
         for (feature in features) {
             val displayName = safeName(feature)
             HLog.d("[Hchat:FeatureManager] 功能初始化开始: $displayName (${feature.featureId()})")
@@ -42,10 +43,13 @@ class FeatureManager {
                 HLog.i("[Hchat:FeatureManager] 功能初始化完成: $displayName")
             } catch (e: Throwable) {
                 HLog.e("$TAG onInit 失败: $displayName, error=$e", e)
+                try { feature.onDestroy(context) } catch (cleanup: Throwable) {
+                    HLog.e("$TAG 初始化失败清理异常: $displayName", cleanup)
+                }
             }
         }
 
-        for (feature in initializedFeatures) {
+        for (feature in initializedFeatures.toList()) {
             val displayName = safeName(feature)
             try {
                 if (!feature.isEnabled(context)) {
@@ -66,6 +70,10 @@ class FeatureManager {
                 }
             } catch (e: Throwable) {
                 HLog.e("$TAG 功能安装失败: $displayName, error=$e", e)
+                try { feature.onDestroy(context) } catch (cleanup: Throwable) {
+                    HLog.e("$TAG 安装失败清理异常: $displayName", cleanup)
+                }
+                initializedFeatures.remove(feature)
             }
         }
         DexInstallScheduler.markDexBridgeReady()
@@ -84,8 +92,8 @@ class FeatureManager {
     }
 
     fun destroyAll(context: FeatureContext) {
-        for (i in installedFeatures.size - 1 downTo 0) {
-            val feature = installedFeatures[i]
+        for (i in initializedFeatures.size - 1 downTo 0) {
+            val feature = initializedFeatures[i]
             try {
                 HLog.i("[Hchat:FeatureManager] 卸载功能: ${safeName(feature)} (${feature.featureId()})")
                 feature.onDestroy(context)
@@ -95,6 +103,7 @@ class FeatureManager {
             }
         }
         installedFeatures.clear()
+        initializedFeatures.clear()
         HookRegistry.get().unhookAll()
     }
 

@@ -48,3 +48,9 @@
 通用关闭改为排空，避免中断已开始的网络或发送操作。定时发送的 deferred 状态写入原有任务 JSON，跨进程恢复时保留该次未接收计划；有限定时重试及完成唤醒，手动立即执行拒绝返回 false。
 定向验证：test_wechat_task_executor.py（满载拒绝、取消清队列、排空）、test_resource_schedulers.py（32 项发送队列满载及状态恢复）、test_scheduled_send_state.py（deferred 超过原窗口仍保留、重启恢复、有限重试）、test_script_resource_scope.py（关闭/过载错误）通过。以上仍不替代 Android 整项目编译与真实发送。
 DexKit 安全释放、全功能统一启停仍未完成；本次未启用 native close。
+
+## 接续：统一资源作用域首批接入
+003e75f 已推送，Actions 41040645860 最终成功（包含 APK/R8 构建）。
+新增 FeatureResourceScope 并实际替换 BaseFeature 原三个资源列表；已接入所有通过 subscribe/trackSubscription/registerSettingsProvider 登记的功能资源，以及背景、聊天工具栏、首页侧边栏、自动转发的独占运行时。重复初始化/安装/销毁及失败路径现在有明确清理；FeatureManager 也销毁已初始化但未安装功能。
+test_feature_resource_scope.py、test_background_resource_lifecycle.py、test_conversation_pull_down_shade.py、test_conversation_empty_footer.py 通过；后两项含定向 Android SDK 编译。未执行本地 Gradle、未安装手机。
+此为 C 的首批实接入，不是全部功能热启停完成；未改动所有功能的配置监听、共享资源边界和 Dex 安装状态。DexKit A 仍未实施安全关闭，不应将本阶段描述为三项全部完成。

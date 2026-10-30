@@ -20,8 +20,10 @@ class HomeSidePanelFeature : BaseFeature() {
 
     override fun onFeatureInstall(context: FeatureContext) {
         t.mma.hooks.items.quickread.QuickMarkReadRuntime.install(context)
-        val installed = HomeSidePanelRuntime(context).also { it.install() }
+        val installed = HomeSidePanelRuntime(context)
         runtime = installed
+        trackResource { installed.destroy(); if (runtime === installed) runtime = null }
+        installed.install()
         t.mma.hooks.api.core.WeChatApis.lifecycle()?.let { lifecycle ->
             trackSubscription(lifecycle.subscribe { event -> installed.onActivityEvent(event) })
         }
@@ -32,10 +34,6 @@ class HomeSidePanelFeature : BaseFeature() {
             ?.let(installed::attach)
     }
 
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
-    }
 
     companion object {
         const val ID = "home_side_panel"

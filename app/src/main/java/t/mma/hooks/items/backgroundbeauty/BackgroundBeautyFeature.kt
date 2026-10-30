@@ -66,8 +66,10 @@ class BackgroundBeautyFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = BackgroundBeautyRuntime(context)
-        runtime?.install()
+        val installed = BackgroundBeautyRuntime(context)
+        runtime = installed
+        trackResource { installed.destroy(); if (runtime === installed) runtime = null }
+        installed.install()
         WeChatApis.chatPage()?.let { api ->
             trackSubscription(api.subscribe { event -> runtime?.onChatPageChanged(event.isEnter()) })
         }
@@ -78,10 +80,6 @@ class BackgroundBeautyFeature : BaseFeature() {
         }
     }
 
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
-    }
 
     companion object {
         const val ID = "background_beauty"
