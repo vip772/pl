@@ -16,6 +16,11 @@
 - 修复后，执行器按 Feature 安装代际创建，Feature ResourceScope 先登记 `stop()` 再订阅；销毁时关闭门、清空主线程待执行通知/Toast/铃声回调、头像缓存及头像路径状态并 `shutdownNow()` 私有工作线程。消息事件处理仍异步执行，关闭后排队任务检查门退出。同步消息屏蔽判定继续使用原 API，不受通知 Feature 生命周期关闭影响。通知/Toast/手动铃声的主线程投递也在执行时检查当前门。
 - 新增 `scripts/test_keyword_notification_lifecycle.py`：验证生产源码包含逐 Feature 执行器、门控和主线程投递约束；编译/运行 JVM lifecycle model 检验安装前不工作、关闭清理待办和缓存、迟到投递拒绝及重复启停幂等。该 fixture 不编译 Android 通知实现，也不能替代真实通知与手机验证。
 
+## 后续核查：朋友圈发布通知
+- `MomentsPostNotificationFeature` 的独占 Runtime 原只在正常 `onFeatureDestroy` 中释放；`start()` 中途失败时，线程池、已注册的设置监听或订阅可能遗留。原 `destroy()` 未撤销主线程 Toast 回调，也未清理头像 Bitmap 缓存、头像目录状态与进程内去重集合。
+- 现于启动前登记 Runtime 资源，失败由 Feature 作用域执行清理；启动/销毁串行化，关闭门阻止旧观察回调、排队任务、Toast 和头像缓存回填，清空待执行回调和缓存，异常取消订阅不跳过后续释放。已进入系统通知服务的 `notify()` 无法撤回；这项仅覆盖 Feature 销毁，不宣称朋友圈通知设置主开关已实现完整热启停。
+- `scripts/test_moments_post_notification_lifecycle.py` 覆盖生产源码入口约束和独立关闭模型；仍需 Actions 完整编译、实机朋友圈发布通知/Toast 与资源测量。共享 `WeChatSnsPostObserver` 不随单个消费者退出销毁。
+
 ## 按资源类型核查的状态与后续优先级
 
 | 资源类别 | 源码现状 / 所有权边界 | 状态 |

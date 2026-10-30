@@ -28,6 +28,7 @@ import java.security.MessageDigest
 import java.util.LinkedHashMap
 import java.util.LinkedHashSet
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MomentsPostNotificationFeature : BaseFeature() {
     private var runtime: MomentsPostNotificationRuntime? = null
@@ -41,12 +42,13 @@ class MomentsPostNotificationFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = MomentsPostNotificationRuntime(context, ::logError).also { it.start() }
-    }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
+        val current = MomentsPostNotificationRuntime(context, ::logError)
+        runtime = current
+        trackResource {
+            current.destroy()
+            if (runtime === current) runtime = null
+        }
+        current.start()
     }
 
     companion object {
@@ -66,10 +68,11 @@ private class MomentsPostNotificationRuntime(
     }
     private val observed = LinkedHashSet<String>()
     private val avatarCache = LinkedHashMap<String, Bitmap>()
+    private val active = AtomicBoolean(false)
     @Volatile private var avatarRoot: String? = null
     private var enabledState = prefs.getBoolean(MomentsPostNotificationSettings.KEY_ENABLE, false)
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == MomentsPostNotificationSettings.KEY_ENABLE) {
+        if (active.get() && key == MomentsPostNotificationSettings.KEY_ENABLE) {
             val enabled = prefs.getBoolean(MomentsPostNotificationSettings.KEY_ENABLE, false)
             if (enabled && !enabledState) {
                 synchronized(observed) { observed.clear() }
@@ -89,7 +92,9 @@ private class MomentsPostNotificationRuntime(
     }
     private var subscription: WeChatSnsPostObserver.Subscription? = null
 
+    @Synchronized
     fun start() {
+        if (!active.compareAndSet(false, true)) return
         val enabledAtSeconds = prefs.getLong(MomentsPostNotificationSettings.KEY_ENABLED_AT_SECONDS, 0L)
         val observedInitialized = prefs.contains(MomentsPostNotificationSettings.KEY_NOTIFIED_IDS)
         if (enabledState && (enabledAtSeconds <= 0L || !observedInitialized)) {
@@ -105,14 +110,27 @@ private class MomentsPostNotificationRuntime(
         subscription = WeChatApis.snsApi()?.observePosts(::onPostStored)
     }
 
+    @Synchronized
     fun destroy() {
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        subscription?.unsubscribe()
+        if (!active.getAndSet(false)) {
+            worker.shutdownNow()
+            return
+        }
+        runCatching { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
+            .onFailure { logger("取消朋友圈通知设置监听失败", it) }
+        val previousSubscription = subscription
         subscription = null
+        runCatching { previousSubscription?.unsubscribe() }
+            .onFailure { logger("取消朋友圈通知订阅失败", it) }
+        main.removeCallbacksAndMessages(null)
         worker.shutdownNow()
+        synchronized(avatarCache) { avatarCache.clear() }
+        synchronized(observed) { observed.clear() }
+        avatarRoot = null
     }
 
     private fun onPostStored(nativeInfo: Any) {
+        if (!active.get()) return
         if (!prefs.getBoolean(MomentsPostNotificationSettings.KEY_ENABLE, false)) return
         if (!prefs.getBoolean(
                 MomentsPostNotificationSettings.KEY_SYSTEM_NOTIFICATION,
@@ -126,11 +144,12 @@ private class MomentsPostNotificationRuntime(
     }
 
     private fun process(nativeInfo: Any) {
+        if (!active.get()) return
         val post = MomentsPostRecord.from(nativeInfo, WeChatApis.snsApi() ?: return) ?: return
         val enabledAtSeconds = prefs.getLong(MomentsPostNotificationSettings.KEY_ENABLED_AT_SECONDS, 0L)
         if (post.createTimeSeconds <= 0L || enabledAtSeconds <= 0L || post.createTimeSeconds < enabledAtSeconds) return
         if (post.userName !in parseMomentsIds(prefs.getString(MomentsPostNotificationSettings.KEY_TARGETS, ""))) return
-        if (!rememberObserved(post.key)) return
+        if (!active.get() || !rememberObserved(post.key)) return
         val sender = displayName(post.userName)
         val title = formatTemplate(
             prefs.getString(
@@ -148,7 +167,7 @@ private class MomentsPostNotificationRuntime(
             post,
             sender
         ).ifBlank { defaultBody(sender, post) }
-        if (prefs.getBoolean(
+        if (active.get() && prefs.getBoolean(
                 MomentsPostNotificationSettings.KEY_SYSTEM_NOTIFICATION,
                 MomentsPostNotificationSettings.DEFAULT_SYSTEM_NOTIFICATION
             )
@@ -156,7 +175,7 @@ private class MomentsPostNotificationRuntime(
             runCatching { sendNotification(post, title, body) }
                 .onFailure { logger("发送朋友圈发布通知失败", it) }
         }
-        if (prefs.getBoolean(MomentsPostNotificationSettings.KEY_TOAST, MomentsPostNotificationSettings.DEFAULT_TOAST)) {
+        if (active.get() && prefs.getBoolean(MomentsPostNotificationSettings.KEY_TOAST, MomentsPostNotificationSettings.DEFAULT_TOAST)) {
             val toast = formatTemplate(
                 prefs.getString(
                     MomentsPostNotificationSettings.KEY_TOAST_TEMPLATE,
@@ -165,11 +184,12 @@ private class MomentsPostNotificationRuntime(
                 post,
                 sender
             ).ifBlank { "📣 $sender 发布了${post.type.label}朋友圈" }
-            main.post { Toast.makeText(context, toast, Toast.LENGTH_SHORT).show() }
+            main.post { if (active.get()) Toast.makeText(context, toast, Toast.LENGTH_SHORT).show() }
         }
     }
 
     private fun sendNotification(post: MomentsPostRecord, title: String, body: String) {
+        if (!active.get()) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         if (Build.VERSION.SDK_INT >= 26 && manager.getNotificationChannel(CHANNEL_ID) == null) {
             val channel = NotificationChannel(
@@ -206,7 +226,7 @@ private class MomentsPostNotificationRuntime(
             .setVisibility(Notification.VISIBILITY_PRIVATE)
             .setContentIntent(openMomentsIntent(post.key.hashCode()))
         loadAvatarBitmap(post.userName)?.let { builder.setLargeIcon(it) }
-        manager.notify(("hchat_sns_" + post.key).hashCode(), builder.build())
+        if (active.get()) manager.notify(("hchat_sns_" + post.key).hashCode(), builder.build())
     }
 
     private fun openMomentsIntent(requestCode: Int): PendingIntent? {
@@ -253,6 +273,7 @@ private class MomentsPostNotificationRuntime(
         }
         val bitmap = sources.firstNotNullOfOrNull(::loadBitmap) ?: return null
         synchronized(avatarCache) {
+            if (!active.get()) return bitmap
             avatarCache[wxId] = bitmap
             while (avatarCache.size > MAX_AVATAR_CACHE) {
                 avatarCache.remove(avatarCache.entries.first().key)
