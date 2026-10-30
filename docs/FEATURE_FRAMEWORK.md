@@ -2137,3 +2137,6 @@ DexInstallScheduler.installation(key, label, stage, priority) 返回可关闭 In
 
 ### 聊天工具栏实际开关生命周期
 聊天工具栏主开关监听由功能本身持有，设置 Provider 和该监听在关闭状态继续存在；只有开关开启才创建运行时、独占 Hook、生命周期订阅及 Dex 安装凭证。关闭释放这些资源，再开启创建新一轮。安装完成会在当前 Activity 一次查找既有 ChatFooter 并挂载，覆盖输入区早于开启创建的情形；不在滚动或绘制回调扫描。共享微信 API 保持运行。
+
+### 首页侧边栏异步清理
+HomeSidePanelRuntime 的运行时失效门覆盖页面挂载及头像回填；destroy 移除 Handler 回调，清空排队头像任务并 shutdown 执行器，已开始任务结束后不回填。头像线程空闲 30 秒退出。Session 解绑清除头像引用；页面清理异常隔离，不回收显示中的 Bitmap。

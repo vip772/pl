@@ -79,3 +79,7 @@ test_resource_schedulers.py 新增：失败待重试关闭、关闭后禁止登�
 ## 接续：聊天工具栏真实开关
 聊天工具栏已由实际 SharedPreferences 主开关驱动运行时创建/清理，设置 Provider 保留；功能级偏好监听和 DexReady 订阅保留到功能销毁。关闭清理运行时、独占安装凭证和生命周期订阅，再次开启重新创建；旧监听跨销毁到达时因原代 active=false 不再动作。安装后在当前 Activity 一次扫描已创建的 ChatFooter，恢复当前页面挂载；不增加滚动/绘制期扫描。
 生产 ChatToolbarFeature 已加入生命周期 fixture，20 轮开启/重复开启/关闭/重复关闭、安装异常、失败后恢复、销毁后重装和旧监听回调均通过。运行时 Hook 与 UI 的真实 Android 行为仍以完整构建和手机验证为准，不能由此宣称全功能热启停完成。
+
+## 接续：首页侧边栏销毁链
+核查发现 HomeSidePanelRuntime.destroy 未关闭头像执行器，旧安装和页面回调也缺运行时失效门。现新增 active 门、合并回填检查；销毁时移除 Handler 回调，清空等待头像任务并 shutdown，已开始任务不中断，结果不再更新已销毁页面。头像执行器空闲 30 秒退出。页面逐项清理隔离异常，解绑后清除 Session 持有的 avatar/retainedAvatar 引用；不 recycle 已显示 Bitmap。Hook 和偏好监听继续由该运行时独占释放，重复销毁不重复清理。
+test_home_side_panel_lifecycle.py 提取生产销毁方法、执行器和回调门，验证排队丢弃、已开始任务不中断、迟到回填、异常隔离、Hook/监听只清一次及关闭后拒绝。此测试不替代完整页面、网络加载和 Android 产物验证。本轮未将首页侧边栏改成全局热启停，DexKit 自动关闭仍未启用。
