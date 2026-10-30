@@ -22,7 +22,6 @@ import java.lang.ref.WeakReference
 
 class InputHintFeature : BaseFeature() {
     private var runtime: InputHintRuntime? = null
-    private var statisticsInstalled = false
 
     override fun featureId(): String = ID
 
@@ -33,30 +32,26 @@ class InputHintFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = InputHintRuntime(context.hostContext(), context.hostClassLoader()) { message, throwable ->
+        val installed = InputHintRuntime(context.hostContext(), context.hostClassLoader()) { message, throwable ->
             if (throwable == null) logIneffective(message) else logError(message, throwable)
         }
-        runtime?.installInputHook()
-        installStatistics()
-        subscribe(Events.DexReady::class.java) {
-            runtime?.installInputHook()
-            installStatistics()
+        runtime = installed
+        trackResource {
+            installed.destroy()
+            if (runtime === installed) runtime = null
         }
+        var statisticsReady = false
+        val track = subscriptionRegistrar()
+        val install = {
+            installed.installInputHook()
+            if (!statisticsReady) installed.installStatistics()?.let {
+                track(it)
+                statisticsReady = true
+            }
+        }
+        install()
+        subscribe(Events.DexReady::class.java) { install() }
     }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
-        statisticsInstalled = false
-    }
-
-    private fun installStatistics() {
-        if (statisticsInstalled) return
-        val subscription = runtime?.installStatistics() ?: return
-        trackSubscription(subscription)
-        statisticsInstalled = true
-    }
-
     companion object {
         const val ID = "input_hint"
     }
@@ -104,6 +99,7 @@ private class InputHintRuntime(
 
     @Synchronized
     fun installInputHook(): Boolean {
+        if (!active) return false
         if (inputHookInstalled) return true
         val footerClass = KavaReflector.loadClass(CHAT_FOOTER_CLASS, classLoader) ?: run {
             logger("未找到微信聊天输入区类", null)
@@ -146,6 +142,7 @@ private class InputHintRuntime(
     }
 
     fun installStatistics(): OutgoingMessageStatsRepository.Subscription? {
+        if (!active) return null
         if (!OutgoingMessageStatsRepository.install(logger)) {
             // 启动早期数据库监听可能尚未完成，DexReady 后会再次尝试安装。
             logger("消息变更 API 尚未就绪，等待后续初始化", null)
@@ -154,8 +151,11 @@ private class InputHintRuntime(
         return OutgoingMessageStatsRepository.subscribe(::refreshAttachedInputs)
     }
 
+    @Synchronized
     fun destroy() {
+        if (!active) return
         active = false
+        mainHandler.removeCallbacksAndMessages(null)
         ownedHooks.forEach { runCatching { HookRegistry.get().unhook(it) } }; ownedHooks.clear()
         footerListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
         footerListeners.clear(); queuedFooters.clear()

@@ -65,7 +65,7 @@ fun main(){
  footer.layoutEvent();android.os.Handler.drain();check(proxy.getHint().toString()=="custom")
  footer.setHint("proxy native");android.os.Handler.drain();check(proxy.getHint().toString()=="custom")
  InputHintSettings.notifyChange();val beforeDestroy=InputHintSettings.renders
- r.destroy();android.os.Handler.drain();check(InputHintSettings.renders==beforeDestroy);check(t.mma.hooks.core.HookRegistry.count()==0 && footer.listeners.isEmpty())
+ r.destroy();r.destroy();check(!r.installInputHook()&&r.installStatistics()==null);android.os.Handler.drain();check(InputHintSettings.renders==beforeDestroy);check(t.mma.hooks.core.HookRegistry.count()==0 && footer.listeners.isEmpty())
  check(proxy.getHint().toString()=="proxy native")
  footer.layoutEvent();android.os.Handler.drain()
  println("PASS: late readiness, replacement, host blank/native overwrite, copied Spanned, 3000 stable layouts no render/write, style-only and template changes, stripped styles, burst coalescing, statistics and expiry, disable/restore, recursion guard, destroy cleanup")
@@ -82,7 +82,7 @@ fun interface OnSharedPreferenceChangeListener {fun onSharedPreferenceChanged(p:
 ''',
 'Handler.kt':'''package android.os
 class Looper {companion object{fun getMainLooper()=Looper()}}
-class Handler(l:Looper) {fun post(f:()->Unit){queue.add(f)};companion object{val queue=java.util.ArrayDeque<()->Unit>();fun drain(){var n=0;while(queue.isNotEmpty()){check(n++<10000);queue.removeFirst()()}}}}
+class Handler(l:Looper) {fun removeCallbacksAndMessages(v:Any?){queue.clear()};fun post(f:()->Unit){queue.add(f)};companion object{val queue=java.util.ArrayDeque<()->Unit>();fun drain(){var n=0;while(queue.isNotEmpty()){check(n++<10000);queue.removeFirst()()}}}}
 ''',
 'View.kt':'''package android.view
 open class View {
