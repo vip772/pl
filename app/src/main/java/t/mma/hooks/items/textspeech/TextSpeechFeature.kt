@@ -2,6 +2,7 @@ package t.mma.hooks.items.textspeech
 import t.mma.utils.HLog
 
 import android.app.Activity
+import java.util.concurrent.atomic.AtomicBoolean
 import android.view.KeyEvent
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.event.Events
@@ -26,19 +27,27 @@ class TextSpeechFeature : BaseFeature() {
         val installed = TextSpeechRuntime(context.hostContext())
         runtime = installed
         trackResource { installed.shutdown(); if (runtime === installed) runtime = null }
-        installVolumeKeyHook()
+        installVolumeKeyHook(installed)
+        val registerSubscription = subscriptionRegistrar()
+        val observing = AtomicBoolean(false)
         subscribe(Events.DexReady::class.java) {
             val observe = WeChatApis.message().observe()
             if (observe == null) {
                 HLog.e("$TAG 消息观察 API 未就绪")
                 return@subscribe
             }
-            trackSubscription(observe.subscribe { message -> runtime?.handleMessage(message) })
+            if (!observing.compareAndSet(false, true)) return@subscribe
+            try {
+                registerSubscription(observe.subscribe { message -> installed.handleMessage(message) })
+            } catch (error: Throwable) {
+                observing.set(false)
+                throw error
+            }
         }
     }
 
 
-    private fun installVolumeKeyHook() {
+    private fun installVolumeKeyHook(installed: TextSpeechRuntime) {
         val method = KavaReflector.findDeclaredMethod(
             Activity::class.java,
             "dispatchKeyEvent",
@@ -52,7 +61,7 @@ class TextSpeechFeature : BaseFeature() {
             val unhook = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val event = param.args.getOrNull(0) as? KeyEvent ?: return
-                    if (runtime?.handleVolumeKey(event) == true) param.result = true
+                    if (installed.handleVolumeKey(event)) param.result = true
                 }
             })
             trackResource { HookRegistry.get().unhook(unhook) }
