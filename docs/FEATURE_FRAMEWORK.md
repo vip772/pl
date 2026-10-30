@@ -2130,3 +2130,7 @@ Agent 内置逆向工具现与 Hook 安装共用 DexInstallScheduler 的串行�
 ### 资源作用域登记补充
 BaseFeature.subscriptionRegistrar() 返回绑定创建时作用域的订阅登记函数，适用于交给运行时保存的登记回调；跨关闭/重新初始化的迟到资源由原作用域立即释放。QQ 点歌已接入，运行时在 install 前登记清理；定时任务运行时在 coordinator attach/start 前登记 detach/shutdown，覆盖启动失败。trackResource/trackSubscription 仍登记当前作用域，不能把它们的动态包装回调当作跨代安全保证。
 DexInstallScheduler.queryDexKitTask(Callable) 是 Java 查询入口，与 queryDexKit、runDexKitTask 和安装执行共用串行门。Holder 字符串查询和脚本便捷查询实际接入；结果应在区间内消费，返回脱离 native 的值。未启用 DexKit 闲置关闭。
+
+### 功能独占 Dex 安装凭证
+DexInstallScheduler.installation(key, label, stage, priority) 返回可关闭 Installation。仅对功能独占 key 使用并在功能作用域登记 close；功能重建时创建新凭证。close 撤销等待/重试和旧 installed 标记，不中断已开始安装；运行时仍须登记并释放安装中获得的 Hook、监听等资源。聊天工具栏已实接入，安装闭包绑定该轮运行时。共享 API 的安装不能随任一消费者关闭。
+单频道 Actions 使用仓库级 android-single-release 并发组，cancel-in-progress=false，保证版本选择及发布不与另一次单频道运行重叠。此调整源于 41047526655 已构建成功但发布 v10.2.0 碰撞的实际日志。

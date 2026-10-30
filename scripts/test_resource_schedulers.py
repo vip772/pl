@@ -53,6 +53,30 @@ fun main(){
  release.countDown();flush();check(installer("block")==null)
  val attempts=AtomicInteger();D.schedule("retry"){attempts.incrementAndGet()>1};flush();check(attempts.get()==1 && installer("retry")!=null)
  Handler.drain();flush();check(attempts.get()==2 && installer("retry")==null)
+ val cancelledAttempts=AtomicInteger()
+ val cancelled=D.installation("owned-retry")
+ cancelled.schedule{cancelledAttempts.incrementAndGet();false};flush()
+ check(cancelledAttempts.get()==1)
+ cancelled.close();cancelled.close();Handler.drain();flush()
+ check(cancelledAttempts.get()==1)
+ cancelled.schedule{error("closed installation accepted")};flush()
+ val replacement=D.installation("owned-retry")
+ replacement.schedule{cancelledAttempts.incrementAndGet();true};flush()
+ check(cancelledAttempts.get()==2 && installer("owned-retry")==null)
+ replacement.close()
+ val gateInstall=CountDownLatch(1);val installEntered=CountDownLatch(1)
+ val runningOwned=D.installation("owned-running")
+ runningOwned.schedule{installEntered.countDown();gateInstall.await(3,TimeUnit.SECONDS);false}
+ check(installEntered.await(3,TimeUnit.SECONDS));runningOwned.close()
+ val nextOwned=D.installation("owned-running");val nextAttempts=AtomicInteger()
+ nextOwned.schedule{nextAttempts.incrementAndGet();true}
+ gateInstall.countDown();flush();Handler.drain();flush()
+ check(nextAttempts.get()==1 && installer("owned-running")==null);nextOwned.close()
+ val gateQueue=CountDownLatch(1);val queueEntered=CountDownLatch(1)
+ D.schedule("block-queue"){queueEntered.countDown();gateQueue.await(3,TimeUnit.SECONDS);true}
+ check(queueEntered.await(3,TimeUnit.SECONDS))
+ val queuedOwned=D.installation("owned-queued");queuedOwned.schedule{error("cancelled queued installer ran")}
+ queuedOwned.close();gateQueue.countDown();flush();Handler.drain();flush()
  val sender=Sender();val gate=CountDownLatch(1);val started=CountDownLatch(2);val finished=CountDownLatch(3)
  repeat(2){check(sender.send("s$it",Runnable{started.countDown();gate.await(3,TimeUnit.SECONDS);finished.countDown()}))}
  check(started.await(3,TimeUnit.SECONDS));check(!sender.send("s0",Runnable{error("duplicate send")}));val other=Executors.newSingleThreadExecutor()
@@ -82,7 +106,7 @@ with tempfile.TemporaryDirectory() as td:
  (p/'Log.kt').write_text('package t.mma.utils\nobject HLog {fun d(s:String){};fun i(s:String){};fun w(s:String){};fun e(s:String,t:Throwable?=null){}}')
  (p/'Handler.kt').write_text('''package android.os
 class Looper {companion object {fun getMainLooper()=Looper()}}
-class Handler(l:Looper) {fun postDelayed(r:Runnable,d:Long):Boolean {synchronized(tasks){tasks+=r};return true}
+class Handler(l:Looper) {fun removeCallbacks(r:Runnable){synchronized(tasks){tasks.remove(r)}};fun postDelayed(r:Runnable,d:Long):Boolean {synchronized(tasks){tasks+=r};return true}
  companion object {val tasks=mutableListOf<Runnable>();fun drain(){val a=synchronized(tasks){tasks.toList().also{tasks.clear()}};a.forEach{it.run()}}}}
 ''')
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(p/'test.jar'),*map(str,p.glob('*.kt'))],check=True,timeout=45)

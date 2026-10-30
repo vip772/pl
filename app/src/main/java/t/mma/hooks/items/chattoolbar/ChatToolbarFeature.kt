@@ -27,15 +27,11 @@ class ChatToolbarFeature : BaseFeature() {
                 if (event.isDestroy) installed.onActivityDestroyed(event.activity)
             }
         )
-        scheduleDexInstall()
-        subscribe(Events.DexReady::class.java) { scheduleDexInstall() }
-    }
-
-
-    private fun scheduleDexInstall() {
-        DexInstallScheduler.schedule(ID, name(), stage = DexInstallScheduler.Stage.BRIDGE) {
-            runtime?.installDexHooks() == true
-        }
+        val installation = DexInstallScheduler.installation(ID, name())
+        trackResource { installation.close() }
+        val install = { installation.schedule { installed.installDexHooks() } }
+        install()
+        subscribe(Events.DexReady::class.java) { install() }
     }
 
     private fun logRuntimeError(message: String, throwable: Throwable?) {

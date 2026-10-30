@@ -43,6 +43,7 @@ class ChatToolbarRuntime(
     private val featureContext: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    private val hookResources = t.mma.hooks.core.FeatureResourceScope { logger("聊天工具栏 Hook 清理失败", it) }
     private val mainHandler = Handler(Looper.getMainLooper())
     private val preferences = ChatToolbarSettings.preferences(featureContext.hostContext())
     private val methodCache = DexMethodCache.prefs(
@@ -80,6 +81,7 @@ class ChatToolbarRuntime(
 
     @Synchronized
     fun installBaseHooks(): Boolean {
+        if (!active) return false
         if (baseHooksInstalled) return true
         val footerClass = KavaReflector.loadClass(CHAT_FOOTER_CLASS, featureContext.hostClassLoader())
             ?: run {
@@ -98,11 +100,11 @@ class ChatToolbarRuntime(
                 return@forEach
             }
             val ok = runCatching {
-                HookRegistry.get().hook(constructor, object : XC_MethodHook() {
+                hookResources.register(HookRegistry.get().hook(constructor, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         (param.thisObject as? ViewGroup)?.let(::attachFooter)
                     }
-                })
+                }).let { unhook -> { HookRegistry.get().unhook(unhook) } })
                 true
             }.getOrElse {
                 hookedConstructors.remove(constructor)
@@ -113,6 +115,8 @@ class ChatToolbarRuntime(
         }
         if (installed == 0) return false
         preferences.registerOnSharedPreferenceChangeListener(preferenceListener)
+        hookResources.register { preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
+        if (!active) return false
         baseHooksInstalled = true
         return true
     }
@@ -124,8 +128,9 @@ class ChatToolbarRuntime(
         if (gridHookInstalled) return baseReady
         val initMethod = locateInitAppGridMethod() ?: return false
         val measureMethod = locatePanelMeasureMethod() ?: return false
+        if (!active) return false
         val installed = runCatching {
-            HookRegistry.get().hook(initMethod, object : XC_MethodHook() {
+            hookResources.register(HookRegistry.get().hook(initMethod, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     panelFromHook(param)?.let { panel ->
                         measureMethod?.let { preparePanelMeasure(panel, it) }
@@ -135,7 +140,7 @@ class ChatToolbarRuntime(
                 override fun afterHookedMethod(param: MethodHookParam) {
                     panelFromHook(param)?.let(::scheduleSnapshot)
                 }
-            })
+            }).let { unhook -> { HookRegistry.get().unhook(unhook) } })
             initAppGridMethod = initMethod
             gridHookInstalled = true
             true
@@ -148,10 +153,11 @@ class ChatToolbarRuntime(
     }
 
     fun destroy() {
+        if (!active) return
         active = false
-        if (baseHooksInstalled) {
-            runCatching { preferences.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
-        }
+        hookResources.close()
+        hookedConstructors.clear()
+        initAppGridMethod = null
         mainHandler.removeCallbacksAndMessages(null)
         runOnMain {
             synchronized(bindings) {
@@ -253,6 +259,7 @@ class ChatToolbarRuntime(
     }
 
     private fun initializeKnownPanels() {
+        if (!active) return
         synchronized(bindings) {
             bindings.values.toList().forEach { binding ->
                 binding.panel.get()?.let { panel ->

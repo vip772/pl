@@ -19,7 +19,7 @@ object KavaReflector {fun loadClass(n:String,l:ClassLoader):Class<*>?=runCatchin
 ''')
  (p/'Handler.kt').write_text('''package android.os
 class Looper {companion object {fun getMainLooper()=Looper()}}
-class Handler(l:Looper){fun postDelayed(r:Runnable,d:Long)=true}
+class Handler(l:Looper){fun removeCallbacks(r:Runnable){};fun postDelayed(r:Runnable,d:Long)=true}
 ''')
  cp = f'{classes}:{std}:{dex}'
  subprocess.run(compiler+['-classpath',cp,'-d',str(classes),str(core),str(p/'Log.kt'),str(p/'Handler.kt')],check=True,timeout=45)

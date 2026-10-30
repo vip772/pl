@@ -49,7 +49,7 @@ object DexInstallScheduler {
         HLog.d("$TAG 调度功能: $label key=$key stage=$stage priority=$priority")
         val state = states.computeIfAbsent(key) { State(label) }
         synchronized(state) {
-            if (state.installed.get()) return
+            if (state.cancelled || state.installed.get()) return
             state.label = label
             state.stage = stage
             state.priority = priority
@@ -64,6 +64,41 @@ object DexInstallScheduler {
         runNow(key, state)
     }
 
+    /** Feature-local installation ownership. Never use this for shared API keys. */
+    class Installation internal constructor(
+        private val key: String,
+        private val label: String,
+        private val stage: Stage,
+        private val priority: Int
+    ) : AutoCloseable {
+        private var closed = false
+        @Synchronized
+        fun schedule(installer: () -> Boolean) {
+            if (!closed) DexInstallScheduler.schedule(key, label, stage, priority, installer)
+        }
+        @Synchronized
+        override fun close() {
+            if (closed) return
+            closed = true
+            cancel(key)
+        }
+    }
+    fun installation(
+        key: String, label: String = key, stage: Stage = Stage.BRIDGE, priority: Int = 0
+    ): Installation = Installation(key, label, stage, priority)
+    /** Does not interrupt an installer already executing; its owner must release acquired resources. */
+    private fun cancel(key: String) {
+        states.computeIfPresent(key) { _, state ->
+            synchronized(state) {
+                state.cancelled = true
+                state.installer = null
+                state.retryCallback?.let { mainHandler.removeCallbacks(it) }
+                state.retryCallback = null
+                state.retryScheduled.set(false)
+            }
+            null
+        }
+    }
     @JvmStatic
     fun scheduleTask(key: String, label: String, stage: Stage, priority: Int, installer: Callable<Boolean>) {
         schedule(key, label, stage, priority) {
@@ -119,7 +154,7 @@ object DexInstallScheduler {
     private fun runNow(key: String, state: State) {
         if (!isReady(state.stage)) return
         synchronized(state) {
-            if (state.installed.get() || state.installer == null) return
+            if (state.cancelled || state.installed.get() || state.installer == null) return
             if (!state.running.compareAndSet(false, true)) return
         }
         HLog.d("$TAG 安装入队: ${state.label} key=$key attempt=${state.retryIndex.get() + 1}")
@@ -129,9 +164,9 @@ object DexInstallScheduler {
                 ok = synchronized(dexKitExecutionLock) {
                     HLog.i("$TAG 开始执行: ${state.label} key=$key attempt=${state.retryIndex.get() + 1} thread=${Thread.currentThread().name}")
                     val installer = synchronized(state) {
-                        if (state.installed.get()) null else state.installer
+                        if (state.cancelled || state.installed.get()) null else state.installer
                     }
-                    if (installer == null) state.installed.get() else installer()
+                    if (installer == null) !state.cancelled && state.installed.get() else installer()
 
                 }
             } catch (e: Throwable) {
@@ -139,7 +174,7 @@ object DexInstallScheduler {
             } finally {
                 if (ok) {
                     synchronized(state) {
-                        state.installed.set(true)
+                        if (!state.cancelled) state.installed.set(true)
                         state.installer = null
                     }
                     HLog.i("$TAG 功能生效: ${state.label} key=$key")
@@ -165,20 +200,29 @@ object DexInstallScheduler {
     }
 
     private fun scheduleRetry(key: String, state: State) {
-        if (state.installed.get()) return
-        if (!state.retryScheduled.compareAndSet(false, true)) return
-        val index = state.retryIndex.getAndIncrement()
-        if (index >= MAX_RETRY_ATTEMPTS) {
-            state.retryScheduled.set(false)
-            HLog.e("$TAG ${state.label} 多次安装失败，停止本轮重试 key=$key")
-            return
+        synchronized(state) {
+            if (state.cancelled || state.installed.get()) return
+            if (!state.retryScheduled.compareAndSet(false, true)) return
+            val index = state.retryIndex.getAndIncrement()
+            if (index >= MAX_RETRY_ATTEMPTS) {
+                state.retryScheduled.set(false)
+                HLog.e("$TAG ${state.label} 多次安装失败，停止本轮重试 key=$key")
+                return
+            }
+            val callback = Runnable {
+                synchronized(state) {
+                    state.retryCallback = null
+                    state.retryScheduled.set(false)
+                }
+                if (isReady(state.stage)) runNow(key, state)
+            }
+            state.retryCallback = callback
+            if (!mainHandler.postDelayed(callback, retryDelayMs(index))) {
+                state.retryCallback = null
+                state.retryScheduled.set(false)
+            }
         }
-        mainHandler.postDelayed({
-            state.retryScheduled.set(false)
-            if (isReady(state.stage)) runNow(key, state)
-        }, retryDelayMs(index))
     }
-
     private fun retryDelayMs(attempt: Int): Long {
         if (attempt <= 0) return 1_000L
         if (attempt == 1) return 3_000L
@@ -190,6 +234,8 @@ object DexInstallScheduler {
     }
 
     private class State(@Volatile var label: String) {
+        @Volatile var cancelled = false
+        var retryCallback: Runnable? = null
         @Volatile var stage: Stage = Stage.BRIDGE
         @Volatile var priority: Int = 0
         @Volatile var installer: (() -> Boolean)? = null

@@ -69,3 +69,9 @@ BaseFeature 新增捕获创建时资源作用域的 subscriptionRegistrar。QQ �
 ### 生产入口失败注入与回归补充
 生命周期 fixture 现编译实际 QQMusicOrderFeature，以及 ScheduledTaskFeature 的生产功能入口（运行时由 fixture 替换）。注入运行时启动异常，验证订阅释放、独占运行时关闭、定时任务 coordinator 解绑；再次安装、重复销毁及旧订阅登记回调也通过。此验证覆盖入口归属，不替代真实 QQ 音乐网络或微信发送。
 已有 13 项资源定向回归与新增两项（feature_resource_scope、dex_query_consumers）均通过；背景综合测试曾被组合命令总限时取消，单独重跑通过。没有执行本地 Gradle，没有安装手机。
+
+## 接续：功能独占安装状态和聊天工具栏 Hook
+98fccda 的 Actions 41047526655 中“构建当前频道 APK”成功；工作流整体失败发生在发行版发布，日志明确为 v10.2.0 已存在。758df97 的运行 41046821381 已整体成功。两个并发工作流在构建前选中同一版本；单频道工作流现使用仓库级 concurrency（cancel-in-progress=false），将版本选择到发布置于同一互斥区间，避免后续单频道运行互相竞争。没有覆盖已有发行版。
+DexInstallScheduler 新增功能独占 Installation 凭证：关闭后拒绝再次登记、清除 installer 和 installed 状态、撤销延迟重试；排队旧状态不再执行，执行中的安装不打断，完成后也不会复活旧状态。新一轮使用新凭证重新安装。共享 API key 继续沿用原语义，不能用功能清理撤销共享安装。凭证要求 key 为该功能独占。
+聊天工具栏实际接入此凭证，安装闭包绑定具体运行时，事件迟到时不会操作新运行时；构造 Hook、工具面板 Hook 和偏好监听由运行时作用域释放。关闭不等待 Dex 查询锁，关闭后迟到获得的 Hook/监听立即解除，清理已有工具栏 View。未开启全部功能统一热启停。
+test_resource_schedulers.py 新增：失败待重试关闭、关闭后禁止登记、同 key 下一轮安装、正在执行时关闭并重建、排队安装取消；与 Dex 查询及生命周期测试均通过。完整聊天工具栏编译与 R8 由本提交 Actions 验证，手机验证尚缺。

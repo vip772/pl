@@ -7,6 +7,10 @@ on:
       - alt-entry
   workflow_dispatch:
 
+# Version selection and release publication share one repository-wide namespace.
+concurrency:
+  group: android-single-release
+  cancel-in-progress: false
 permissions:
   contents: write
 
