@@ -29,7 +29,10 @@ internal class ScriptAsyncScope(
 
     fun execute(block: () -> Unit) {
         synchronized(lock) {
-            if (disposed) return
+            if (disposed) {
+                onError(RejectedExecutionException("插件异步作用域已关闭"))
+                return
+            }
             if (pending.size >= MAX_PENDING) {
                 onError(RejectedExecutionException("插件待执行异步任务达到上限 $MAX_PENDING"))
                 return

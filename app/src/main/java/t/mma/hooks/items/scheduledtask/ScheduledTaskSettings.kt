@@ -108,6 +108,7 @@ class ScheduledTaskSettings(context: Context?) {
 
         const val STATUS_PENDING = "pending"
         const val STATUS_RUNNING = "running"
+        const val STATUS_DEFERRED = "deferred"
 
         const val DEFAULT_INTERVAL_SECONDS = 0
         const val DEFAULT_MEDIA_INTERVAL_SECONDS = 0

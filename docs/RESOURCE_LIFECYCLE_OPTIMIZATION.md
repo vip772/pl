@@ -41,3 +41,10 @@
 5. 不承诺节省具体 MiB，不将此前 ANR 归因于某一个候选风险。
 
 本次按用户授权提交并推送 dev，推送触发仓库现有安卓单频道构建。最终编译和 R8 结果以对应提交的 Actions 为准；手机实测尚未进行。DexKit 释放、全项目队列硬背压和统一启停清理仍是后续任务，不能将此次推送称为全部优化完成。
+
+## 接续：通用和定时发送背压
+上一基线 e5af71b 的 Actions 41034226426 已成功完成编译和发布构建。
+本次通用队列为 256、发送队列为 32；两个池仍各自两线程。runAsync 保留 void 签名，用明确拒绝异常反馈繁忙/关闭。已核查项目内唯一 runAsync 提交方为 ScriptWaBridge 的 ScriptAsyncScope，拒绝会取消 FutureTask 并记录插件错误，不转到主线程也不无限重试。插件关闭后提交也报告错误。
+通用关闭改为排空，避免中断已开始的网络或发送操作。定时发送的 deferred 状态写入原有任务 JSON，跨进程恢复时保留该次未接收计划；有限定时重试及完成唤醒，手动立即执行拒绝返回 false。
+定向验证：test_wechat_task_executor.py（满载拒绝、取消清队列、排空）、test_resource_schedulers.py（32 项发送队列满载及状态恢复）、test_scheduled_send_state.py（deferred 超过原窗口仍保留、重启恢复、有限重试）、test_script_resource_scope.py（关闭/过载错误）通过。以上仍不替代 Android 整项目编译与真实发送。
+DexKit 安全释放、全功能统一启停仍未完成；本次未启用 native close。

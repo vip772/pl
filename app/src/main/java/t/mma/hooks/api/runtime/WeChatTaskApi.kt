@@ -17,6 +17,8 @@ import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * 模块任务调度 API。
@@ -32,19 +34,24 @@ class WeChatTaskApi(
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    // Both workers must be core workers: with an unbounded queue, maximumPoolSize
-    // alone does not start a second worker. Idle workers still time out.
-    // Queue capacity and cancellation require caller-specific delivery contracts.
+    // Reject overload; never execute blocking work on the submitting UI thread.
     private val executor = ThreadPoolExecutor(
         2,
         2,
         30L,
         TimeUnit.SECONDS,
-        LinkedBlockingQueue(),
-        Executors.defaultThreadFactory()
+        LinkedBlockingQueue<Runnable>(256),
+        java.util.concurrent.ThreadFactory { runnable ->
+            Executors.defaultThreadFactory().newThread(runnable).apply {
+                uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, error ->
+                    log("异步任务执行失败: ${error.message}")
+                }
+            }
+        }
     )
     init { executor.allowCoreThreadTimeOut(true) }
 
+    private val closed = AtomicBoolean(false)
     private val delayedTasks = ConcurrentHashMap<String, Runnable>()
     private val exactTasks = ConcurrentHashMap<String, ExactTask>()
     private val lastRunTimes = ConcurrentHashMap<String, Long>()
@@ -62,7 +69,7 @@ class WeChatTaskApi(
     private val exactReceiverRegistered = registerExactReceiver()
 
     val isAvailable: Boolean
-        get() = true
+        get() = !closed.get()
 
     fun runOnMain(runnable: Runnable?) {
         if (runnable == null) return
@@ -117,7 +124,14 @@ class WeChatTaskApi(
 
     fun runAsync(runnable: Runnable?) {
         if (runnable == null) return
-        executor.execute { safeRun(runnable) }
+        if (closed.get()) throw RejectedExecutionException("通用任务服务已关闭")
+        try {
+            executor.purge()
+            executor.execute(runnable)
+        } catch (error: RejectedExecutionException) {
+            log(if (executor.isShutdown) "异步任务未接收：服务已关闭" else "异步任务未接收：队列繁忙（256）")
+            throw error
+        }
     }
 
     fun runOnce(key: String?, runnable: Runnable?): Boolean {
@@ -147,12 +161,13 @@ class WeChatTaskApi(
     }
 
     fun shutdown() {
+        if (!closed.compareAndSet(false, true)) return
         delayedTasks.keys.toList().forEach(::cancel)
         exactTasks.keys.toList().forEach(::cancel)
         if (exactReceiverRegistered) {
             runCatching { appContext.unregisterReceiver(exactReceiver) }
         }
-        executor.shutdownNow()
+        executor.shutdown()
     }
 
     fun clearRunState(key: String?) {

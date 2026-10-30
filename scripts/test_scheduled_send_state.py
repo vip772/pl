@@ -10,7 +10,7 @@ finish=s[a:b]
 code='''import java.util.concurrent.ConcurrentHashMap
 data class ScheduledTaskItem(val id:String,val planTime:Long,val planTimes:List<Long> = listOf(planTime),val status:Int=1,val repeatType:Int=0,val repeatDays:List<Int> = emptyList(),val sendOnTimeout:Boolean=true,val lastExecutedTime:Long=0,val lastSuccessCount:Int=0,val lastFailCount:Int=0)
 object ScheduledTaskSettings {
- const val STATUS_RUNNING=1;const val STATUS_PENDING=0;const val REPEAT_NONE=0
+ const val STATUS_RUNNING=1;const val STATUS_PENDING=0;const val STATUS_DEFERRED=2;const val REPEAT_NONE=0
  fun normalizedPlanTimes(t:ScheduledTaskItem)=t.planTimes
  fun normalizeForSave(t:ScheduledTaskItem)=t
  fun resolveNextPlanTime(p:Long,r:Int,d:List<Int>,now:Long)=now+60000
@@ -22,6 +22,7 @@ class Settings {
 }
 class Fixture {
  val settings=Settings();var started=true;val acceptedSends=mutableSetOf<String>();val uncertainSends=ConcurrentHashMap<String,Long>()
+ val deferredSends=ConcurrentHashMap<String,Long>();val admissionRetries=ConcurrentHashMap<String,Int>()
  val scheduled=mutableSetOf<String>();val SINGLE_TIMEOUT_WINDOW_MS=600000L
  fun cancelAll(){scheduled.clear()};fun schedule(t:ScheduledTaskItem,delay:Long){scheduled+=t.id}
 '''+reload+finish+'''
@@ -46,6 +47,11 @@ fun main(){
  val manual=ScheduledTaskItem("manual",now+120000)
  f.settings.saveTask(manual);f.acceptedSends+="manual";f.immediate(manual)
  check("manual" in f.scheduled && f.settings.findTask("manual")!!.lastSuccessCount==1)
+ val deferred=ScheduledTaskItem("deferred",now-3600000,status=2,sendOnTimeout=false)
+ f.settings.saveTask(deferred);f.reload()
+ check(f.settings.findTask(deferred.id)!=null && deferred.id in f.scheduled)
+ f.admissionRetries[deferred.id]=6;f.reload();check(deferred.id !in f.scheduled && f.settings.findTask(deferred.id)!=null)
+ f.admissionRetries.clear();f.reload();check(deferred.id in f.scheduled)
  val stale=ScheduledTaskItem("stale",now+100000);f.settings.saveTask(stale);f.reload();check(f.settings.findTask("stale")!!.status==0 && "stale" in f.scheduled)
  println("PASS production send state: reload preserves in-flight ownership, no cross-task resend, one-shot deletion, repeat advancement, uncertain occurrence held, edited time recovery, manual send plan retained, crash-stale reset")
 }

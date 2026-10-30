@@ -13,10 +13,12 @@ import java.util.concurrent.atomic.AtomicInteger
 import t.mma.hooks.core.DexInstallScheduler as D
 import android.os.Handler
 class ScheduledTaskItem(val id:String,val planTime:Long,val status:Int){fun copy(status:Int)=ScheduledTaskItem(id,planTime,status)}
-object ScheduledTaskSettings {const val STATUS_RUNNING=1;const val STATUS_PENDING=0}
-class Settings {val tasks=ConcurrentHashMap<String,ScheduledTaskItem>();fun findTask(id:String)=tasks[id];fun saveTask(t:ScheduledTaskItem){tasks[t.id]=t}}
+object ScheduledTaskSettings {const val STATUS_RUNNING=1;const val STATUS_PENDING=0;const val STATUS_DEFERRED=2}
+class Settings {val tasks=ConcurrentHashMap<String,ScheduledTaskItem>();fun findTask(id:String)=tasks[id];fun saveTask(t:ScheduledTaskItem){tasks[t.id]=t};fun isEnabled()=true}
 class Sender {
- val settings=Settings();var errors=0
+ val settings=Settings();var errors=0;var started=true
+ val deferredSends=ConcurrentHashMap<String,Long>();val admissionRetries=ConcurrentHashMap<String,Int>()
+ fun schedule(t:ScheduledTaskItem,d:Long){}
  val acceptedSends=ConcurrentHashMap.newKeySet<String>()
  val uncertainSends=ConcurrentHashMap<String,Long>()
  var reloads=0
@@ -43,8 +45,12 @@ fun main(){
  repeat(2){check(sender.send("s$it",Runnable{started.countDown();gate.await(3,TimeUnit.SECONDS);finished.countDown()}))}
  check(started.await(3,TimeUnit.SECONDS));check(!sender.send("s0",Runnable{error("duplicate send")}));val other=Executors.newSingleThreadExecutor()
  try {other.submit{}.get(1,TimeUnit.SECONDS)}finally{other.shutdownNow()}
- check(sender.send("queued",Runnable{finished.countDown()}));sender.shutdown()
- check(!sender.send("rejected",Runnable{error("rejected ran")}));check(sender.settings.findTask("rejected")!!.status==0 && sender.errors==1)
+ check(sender.send("queued",Runnable{finished.countDown()}))
+ repeat(31){check(sender.send("fill$it",Runnable{}))}
+ check(!sender.send("busy",Runnable{error("busy task ran")}))
+ check(sender.settings.findTask("busy")!!.status==2 && sender.deferredSends["busy"]==1L)
+ sender.shutdown()
+ check(!sender.send("rejected",Runnable{error("rejected ran")}));check(sender.settings.findTask("rejected")!!.status==2 && sender.errors==2)
  gate.countDown();check(finished.await(3,TimeUnit.SECONDS))
  val failed=Sender();val failedDone=CountDownLatch(1)
  check(failed.send("failure",Runnable{throw IllegalStateException("persistence failed")}))

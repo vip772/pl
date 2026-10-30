@@ -21,7 +21,7 @@ fun main(){
  val queued=mutableListOf<Runnable>();var calls=0;var errors=0
  val scope=ScriptAsyncScope({queued+=it},{errors++})
  scope.execute{calls++};scope.execute{calls++};scope.dispose();queued.forEach{it.run()};check(calls==0)
- scope.execute{calls++};check(queued.size==2)
+ scope.execute{calls++};check(queued.size==2 && errors==1);errors=0
  val pool=Executors.newSingleThreadExecutor();val entered=CountDownLatch(1);val release=CountDownLatch(1);val done=CountDownLatch(1)
  val active=ScriptAsyncScope({pool.execute(it)},{errors++})
  active.execute{entered.countDown();check(release.await(3,TimeUnit.SECONDS));calls++;done.countDown()}

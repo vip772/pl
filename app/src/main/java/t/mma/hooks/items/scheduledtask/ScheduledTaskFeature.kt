@@ -82,11 +82,14 @@ class ScheduledTaskRuntime(
     private val settings = ScheduledTaskSettings(context.hostContext())
     private val scheduled = ConcurrentHashMap<String, Boolean>()
     private val acceptedSends = ConcurrentHashMap.newKeySet<String>()
+    // Rejected occurrences remain pending after their original lateness window.
+    private val deferredSends = ConcurrentHashMap<String, Long>()
+    private val admissionRetries = ConcurrentHashMap<String, Int>()
     // Completion persistence may fail after delivery. Do not replay automatically in this process.
     private val uncertainSends = ConcurrentHashMap<String, Long>()
     // Sending may wait for another channel for minutes. Never occupy script workers.
     private val executionWorker = ThreadPoolExecutor(
-        2, 2, 30L, TimeUnit.SECONDS, LinkedBlockingQueue(),
+        2, 2, 30L, TimeUnit.SECONDS, LinkedBlockingQueue<Runnable>(32),
         java.util.concurrent.ThreadFactory { runnable ->
             Thread(runnable, "Hchat-ScheduledSend").apply { isDaemon = true }
         }
@@ -118,14 +121,26 @@ class ScheduledTaskRuntime(
         val storedTasks = settings.tasks()
         val storedIds = storedTasks.mapTo(HashSet()) { it.id }
         uncertainSends.keys.removeAll { it !in storedIds }
+        deferredSends.keys.removeAll { it !in storedIds }
+        admissionRetries.keys.removeAll { it !in storedIds }
         storedTasks.forEach { stored ->
             var task = withPlanTimes(stored, ScheduledTaskSettings.normalizedPlanTimes(stored))
             if (task != stored) changed = true
+            if (task.status == ScheduledTaskSettings.STATUS_DEFERRED) deferredSends[task.id] = task.planTime
             val uncertainTime = uncertainSends[task.id]
             if (uncertainTime != null && uncertainTime != task.planTime) uncertainSends.remove(task.id)
             if (uncertainTime == task.planTime || task.id in acceptedSends) {
                 // This occurrence is queued/running in this process, not stale after a crash.
                 nextTasks += task
+                return@forEach
+            }
+            if (deferredSends[task.id] != null && deferredSends[task.id] != task.planTime) {
+                deferredSends.remove(task.id)
+                admissionRetries.remove(task.id)
+            }
+            if (deferredSends[task.id] == task.planTime) {
+                nextTasks += task
+                if ((admissionRetries[task.id] ?: 0) < 6) schedule(task, 5_000L)
                 return@forEach
             }
             if (task.status == ScheduledTaskSettings.STATUS_RUNNING) {
@@ -205,7 +220,7 @@ class ScheduledTaskRuntime(
             }
             finishImmediateTask(running, result.first, result.second)
         }
-        return submitSend(running, job)
+        return submitSend(running, job, automatic = false)
     }
 
     private fun schedule(task: ScheduledTaskItem, delayMs: Long) {
@@ -239,7 +254,7 @@ class ScheduledTaskRuntime(
             return
         }
         cancel(taskId)
-        if (!shouldExecuteOccurrence(task, now)) {
+        if (task.status != ScheduledTaskSettings.STATUS_DEFERRED && deferredSends[task.id] != task.planTime && !shouldExecuteOccurrence(task, now)) {
             finishTask(task, 0, 0)
             return
         }
@@ -261,7 +276,7 @@ class ScheduledTaskRuntime(
     }
 
     @Synchronized
-    private fun submitSend(task: ScheduledTaskItem, job: Runnable): Boolean {
+    private fun submitSend(task: ScheduledTaskItem, job: Runnable, automatic: Boolean = true): Boolean {
         if (!acceptedSends.add(task.id)) return false
         try {
             executionWorker.execute {
@@ -277,10 +292,15 @@ class ScheduledTaskRuntime(
                         acceptedSends.remove(task.id)
                         // A send may have succeeded before persistence failed. Do not immediately
                         // replay an occurrence whose completion state is unknown.
-                        if (finished) reload()
+                        if (finished) {
+                            admissionRetries.clear()
+                            reload()
+                        }
                     }
                 }
             }
+            deferredSends.remove(task.id)
+            admissionRetries.remove(task.id)
             return true
         } catch (error: RejectedExecutionException) {
             acceptedSends.remove(task.id)
@@ -288,8 +308,16 @@ class ScheduledTaskRuntime(
             val latest = settings.findTask(task.id)
             if (latest != null && latest.status == ScheduledTaskSettings.STATUS_RUNNING &&
                 latest.planTime == task.planTime) {
-                settings.saveTask(latest.copy(status = ScheduledTaskSettings.STATUS_PENDING))
+                val pending = latest.copy(status = if (automatic) ScheduledTaskSettings.STATUS_DEFERRED else ScheduledTaskSettings.STATUS_PENDING)
+                settings.saveTask(pending)
+                if (automatic && started && settings.isEnabled() && !executionWorker.isShutdown) {
+                    deferredSends[task.id] = task.planTime
+                    val attempt = (admissionRetries[task.id] ?: 0) + 1
+                    admissionRetries[task.id] = attempt
+                    if (attempt < 6) schedule(pending, 5_000L)
+                }
             }
+            if (!automatic && started && !executionWorker.isShutdown) reload()
             logger("定时任务未入队，已保留待执行状态", error)
             return false
         }
