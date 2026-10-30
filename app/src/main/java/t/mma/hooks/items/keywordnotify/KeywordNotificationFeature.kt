@@ -16,6 +16,8 @@ class KeywordNotificationFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
+        KeywordNotificationRuntime.start()
+        trackResource { KeywordNotificationRuntime.stop() }
         subscribe(Events.DexReady::class.java) {
             val observe = WeChatApis.message().observe()
             if (observe == null) {

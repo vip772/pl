@@ -152,3 +152,12 @@ Agent 工具执行的宿主 Binding 读取已移入共享门和 targetLock 内�
 ## 接续：QQ 点歌运行时主开关
 QQMusicOrderFeature 监听既有 `qq_music_order_enable`，开关关闭时逆序释放消息变更订阅并销毁独占 QQMusicOrderRuntime，重新开启创建新运行时。偏好 listener 与 DexReady 回调在功能销毁后由原资源代拦截；运行时创建后先登记销毁，安装失败继续抛回 BaseFeature 的原清理路径。共享 `shared:send_button` Hook 仍按共享所有权安装，不随点歌功能关闭卸载；点歌 handler 订阅跟随运行时释放。
 `test_qq_music_lifecycle.py` 编译完整生产 Feature，覆盖多轮开关、重复开启去重、关闭/重开、旧偏好监听、旧运行时登记器和共享 Hook 隔离；`test_feature_resource_scope.py` 保留生产入口安装失败/迟到订阅清理检查并增加 QQ 点歌关闭后迟到监听隔离，均通过。实际 QQ 音乐网络和微信卡片/语音发送、手机验证仍未执行；开关关闭不会撤销已经进入发送流程的请求。
+
+## 接续：全功能资源清单与关键词通知运行时释放
+全功能资源归属清单见 `docs/RESOURCE_LIFECYCLE_INVENTORY.md`。按功能 Feature、资源类别（线程/Handler/订阅/Hook/缓存）、共享所有者与设备验证边界梳理；这是一份源码清单，不是运行时堆分析或项目所有功能均已完成热启停的结论。
+
+源码核查确认 `KeywordNotificationRuntime` 原在 object 初始化时创建永久单线程执行器，Feature 销毁只释放消息订阅。现改为按 Feature 代际创建执行器并登记 `stop()`，销毁关闭运行门、取消待执行消息任务、清理主线程待通知/Toast/铃声回调及头像缓存，关闭私有执行器。运行代际编号贯穿后台消息任务、主线程投递和延迟铃声停止；旧代尚未执行的回调不能在关闭后新一代重开时复活。`MessageBlockFeature` 同步使用的 `shouldAllowBlockedMessageIntoDatabase` 保持可用且不要求通知 Feature 的工作线程。
+
+`test_keyword_notification_lifecycle.py` 编译实际 `KeywordNotificationFeature` 生产入口，验证作用域资源先登记、重复销毁、重开；独立 generation model 覆盖旧任务跨代拒绝与队列清理。该 fixture 对 Android Runtime 及通知服务使用替身，不能证明微信 Hook、系统通知/音频或实际线程/Bitmap 回收。`test_feature_resource_scope.py`、`test_input_hint_lifecycle.py`、`test_qq_music_lifecycle.py`、`test_text_speech_shutdown.py`、`test_auto_cache_lifecycle.py`、`test_home_side_panel_lifecycle.py`、`test_member_title_lifecycle.py`、`test_resource_schedulers.py`、`test_script_resource_scope.py` 均通过，且 `git diff --check` 通过。未执行 Gradle；完整 APK/R8 构建以本次提交对应 Actions 为准，手机功能与内存测量仍需独立验证。
+
+用户于微信 8.0.78 / Android 16 反馈 QQ 点歌（卡片、语音、主开关关闭/重开、重复启停和不同触发方式）、语音播报和自动缓存功能测试成功。此处记录为用户功能验收反馈，不等同于线程/native 释放测量，也不扩展为其他微信版本兼容性结论；本次没有改变这三项已验收行为。

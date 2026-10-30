@@ -40,7 +40,9 @@ import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.regex.Pattern
 
@@ -51,14 +53,62 @@ object KeywordNotificationRuntime {
     private const val EXTRA_KEYWORD_NOTIFY = "hchat_keyword_notification"
     private val notifySeq = AtomicInteger(0)
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Hchat-KeywordNotify").apply { isDaemon = true }
-    }
     private val avatarCache = ConcurrentHashMap<String, Bitmap?>()
+    @Volatile private var executor: ExecutorService? = null
     @Volatile private var avatarRoot: String? = null
     @Volatile private var lastManualSoundAt: Long = 0L
 
+    /** Feature-owned notify gate: async paths stay inert until [start] and after [stop]. */
+    @Volatile private var notifyGate: Boolean = false
+    @Volatile private var notifyGeneration: Long = 0L
+    private val processingGeneration = ThreadLocal<Long>()
+    @JvmStatic
+    @Synchronized
+    fun start() {
+        if (notifyGate && executor?.isShutdown == false) return
+        val nextGeneration = notifyGeneration + 1L
+        val nextExecutor = Executors.newSingleThreadExecutor { runnable ->
+            Thread(runnable, "Hchat-KeywordNotify").apply { isDaemon = true }
+        }
+        notifyGeneration = nextGeneration
+        executor = nextExecutor
+        notifyGate = true
+    }
+    @JvmStatic
+    @Synchronized
+    fun stop() {
+        val stoppedGeneration = notifyGeneration + 1L
+        notifyGate = false
+        notifyGeneration = stoppedGeneration
+        val worker = executor
+        executor = null
+        mainHandler.removeCallbacksAndMessages(null)
+        avatarCache.clear()
+        avatarRoot = null
+        lastManualSoundAt = 0L
+        worker?.shutdownNow()
+    }
+
+    private fun isCurrentGeneration(generation: Long): Boolean =
+        notifyGate && notifyGeneration == generation
+
+    private fun mainPost(block: () -> Unit) {
+        val generation = processingGeneration.get() ?: notifyGeneration
+        mainHandler.post {
+            if (!isCurrentGeneration(generation)) return@post
+            val previous = processingGeneration.get()
+            processingGeneration.set(generation)
+            try {
+                block()
+            } finally {
+                if (previous == null) processingGeneration.remove() else processingGeneration.set(previous)
+            }
+        }
+    }
+
     fun handleMessage(context: Context, message: WeChatMessageObserveApi.ObservedMessage) {
+        val generation = notifyGeneration
+        if (!isCurrentGeneration(generation)) return
         val settings = KeywordNotificationSettings(context)
         if (!settings.isEnabled()) return
         if (message.isSend()) return
@@ -66,16 +116,31 @@ object KeywordNotificationRuntime {
         if (talker.isBlank() || !settings.shouldHandleTalker(talker)) return
         if (isInQuietWindow(settings)) return
 
-        executor.execute {
-            runCatching {
-                handleMessageInternal(context, settings, message, talker)
-            }.onFailure {
-                HLog.e("$TAG 处理消息失败: ${it.message}", it)
+        val worker = executor ?: return
+        if (!isCurrentGeneration(generation)) return
+        runCatching {
+            worker.execute {
+                if (!isCurrentGeneration(generation)) return@execute
+                val previous = processingGeneration.get()
+                processingGeneration.set(generation)
+                try {
+                    runCatching {
+                        handleMessageInternal(context, settings, message, talker)
+                    }.onFailure {
+                        HLog.e("$TAG 处理消息失败: ${it.message}", it)
+                    }
+                } finally {
+                    if (previous == null) processingGeneration.remove() else processingGeneration.set(previous)
+                }
+            }
+        }.onFailure { error ->
+            if (error !is RejectedExecutionException || notifyGate) {
+                HLog.e("$TAG 处理消息任务提交失败: ${error.message}", error)
             }
         }
     }
-
     fun handleBlockedMessage(context: Context, event: Events.MessageBlocked) {
+        if (!notifyGate) return
         val talker = event.talker.orEmpty()
         val sender = event.sender.orEmpty()
         val content = event.content.orEmpty()
@@ -348,10 +413,10 @@ object KeywordNotificationRuntime {
             .formatKeyword(keyword, senderInfo, wxidDisplay, content, type)
 
         if (settings.getBoolean(KeywordNotificationSettings.KEY_NOTIFY, KeywordNotificationSettings.DEFAULT_NOTIFY)) {
-            mainHandler.post { sendNotification(context, settings, scene, talker, title, body, keyword, group) }
+            mainPost { sendNotification(context, settings, scene, talker, title, body, keyword, group) }
         }
         if (settings.getBoolean(KeywordNotificationSettings.KEY_TOAST, KeywordNotificationSettings.DEFAULT_TOAST)) {
-            mainHandler.post {
+            mainPost {
                 runCatching { Toast.makeText(context, toastText, Toast.LENGTH_SHORT).show() }
                     .onFailure { HLog.e("$TAG Toast失败: ${it.message}", it) }
             }
@@ -448,14 +513,17 @@ object KeywordNotificationRuntime {
         val now = System.currentTimeMillis()
         if (now - lastManualSoundAt < 1200L) return
         lastManualSoundAt = now
-        mainHandler.post {
-            val ringtone = runCatching { RingtoneManager.getRingtone(context, uri) }.getOrNull() ?: return@post
+        mainPost {
+            val ringtone = runCatching { RingtoneManager.getRingtone(context, uri) }.getOrNull() ?: return@mainPost
             runCatching {
                 @Suppress("DEPRECATION")
                 ringtone.setStreamType(android.media.AudioManager.STREAM_NOTIFICATION)
             }
             runCatching { ringtone.play() }
-            mainHandler.postDelayed({ stopRingtone(ringtone) }, 3500L)
+            val generation = processingGeneration.get() ?: notifyGeneration
+            mainHandler.postDelayed({
+                if (isCurrentGeneration(generation)) stopRingtone(ringtone)
+            }, 3500L)
         }
     }
 
