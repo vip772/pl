@@ -44,6 +44,25 @@ object AutoCacheSettings {
 }
 
 class AutoCacheFeature : BaseFeature() {
+    override fun featureId(): String = ID
+    override fun name(): String = "自动缓存"
+    override fun onFeatureInit(context: FeatureContext) {
+        registerSettingsProvider(AutoCacheSettingsProvider())
+    }
+    override fun onFeatureInstall(context: FeatureContext) {
+        val runtime = AutoCacheRuntime(context, subscriptionRegistrar())
+        trackResource { runtime.shutdown() }
+        runtime.start()
+    }
+    companion object { const val ID = "auto_cache" }
+}
+internal class AutoCacheRuntime(
+    private val context: FeatureContext,
+    private val registerSubscription: (Any) -> Unit
+) {
+    private val installation = DexInstallScheduler.installation(
+        AutoCacheFeature.ID, "自动缓存", DexInstallScheduler.Stage.WARMUP
+    )
     private val worker = Executors.newSingleThreadScheduledExecutor { task ->
         Thread(task, "Hchat-AutoCache").apply { isDaemon = true }
     }
@@ -52,18 +71,17 @@ class AutoCacheFeature : BaseFeature() {
     private val lastSubmitted = ConcurrentHashMap<String, Long>()
     @Volatile private var native: NativeMediaCache? = null
     private val observing = AtomicBoolean(false)
-    override fun featureId(): String = ID
-    override fun name(): String = "自动缓存"
-    override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(AutoCacheSettingsProvider())
-    }
-    override fun onFeatureInstall(context: FeatureContext) {
+    fun start() {
+        if (stopped.get()) return
         val prefs = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
-        DexInstallScheduler.schedule(ID, name(), DexInstallScheduler.Stage.WARMUP) {
+        installation.schedule {
             if (stopped.get()) return@schedule true
             val observer = WeChatApis.message().observe() ?: return@schedule false
             if (!observer.isAvailable) return@schedule false
-            val downloader = native ?: NativeMediaCache(context).also { native = it }
+            val downloader = synchronized(this) {
+                if (stopped.get()) return@schedule true
+                native ?: NativeMediaCache(context).also { native = it }
+            }
             val ready = try {
                 downloader.install()
             } catch (error: Throwable) {
@@ -71,10 +89,11 @@ class AutoCacheFeature : BaseFeature() {
                 false
             }
             if (!ready) HLog.e("[Hchat:AutoCache] 部分原生入口未就绪，已就绪媒体继续处理，等待补装")
+            if (stopped.get()) return@schedule true
             observer.install()
             if (observing.compareAndSet(false, true)) {
                 HLog.i("[Hchat:AutoCache] 新消息监听已接入 enabled=${prefs.getBoolean(AutoCacheSettings.KEY_ENABLE, false)}")
-                trackSubscription(observer.subscribe { event ->
+                registerSubscription(observer.subscribe { event ->
                     if (stopped.get() || event.outgoing || !prefs.getBoolean(AutoCacheSettings.KEY_ENABLE, false)) return@subscribe
                     val message = event.storedMessage ?: event.message ?: return@subscribe
                     if (!message.isIncoming() || !AutoCacheSettings.accepts(message,
@@ -100,72 +119,81 @@ class AutoCacheFeature : BaseFeature() {
     }
 
     private fun enqueue(context: FeatureContext, initial: WeChatMessage, account: String, key: String, attempt: Int) {
-        if (stopped.get()) { pending.remove(key); return }
-        worker.schedule({
-            val enabled = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
-                .getBoolean(AutoCacheSettings.KEY_ENABLE, false)
-            if (stopped.get() || !enabled || WeChatApis.account()?.selfWxId() != account) {
-                pending.remove(key)
-                lastSubmitted.remove(key)
-                return@schedule
-            }
-            try {
-                val store = WeChatApis.message().store()
-                val message = initial.msgId.takeIf { it > 0 }?.let { store?.getMessageById(it) }
-                    ?: initial.msgSvrId.takeIf { it > 0 }?.let { store?.getMessageBySvrId(initial.talker, it) }
-                    ?: initial
-                val cacheType = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
-                    .getString(AutoCacheSettings.KEY_CACHE_TYPE, AutoCacheSettings.TYPE_ALL)
-                val selectedChats = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
-                    .getStringSet(AutoCacheSettings.KEY_CHATS, emptySet()).orEmpty()
-                if (!AutoCacheSettings.acceptsChat(message.talker, selectedChats) ||
-                    !AutoCacheSettings.accepts(message, cacheType)) {
+        if (stopped.get()) { pending.remove(key); lastSubmitted.remove(key); return }
+        try {
+            worker.schedule({
+                val enabled = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
+                    .getBoolean(AutoCacheSettings.KEY_ENABLE, false)
+                if (stopped.get() || !enabled || WeChatApis.account()?.selfWxId() != account) {
                     pending.remove(key)
                     lastSubmitted.remove(key)
                     return@schedule
                 }
-                if (native?.complete(message) == true) {
-                    HLog.i("[Hchat:AutoCache] 下载完成 msgId=${message.msgId} type=${message.type}")
-                    pending.remove(key)
-                    lastSubmitted.remove(key)
-                    return@schedule
-                }
-                val now = android.os.SystemClock.elapsedRealtime()
-                val last = lastSubmitted[key]
-                if (last == null || now - last >= 60_000L) {
-                    val submitted = native?.submit(message) == true
-                    if (submitted) lastSubmitted[key] = now
-                    if (submitted || attempt == 0 || attempt % 60 == 0) {
-                        HLog.i("[Hchat:AutoCache] 下载提交=$submitted msgId=${message.msgId} type=${message.type} attempt=$attempt")
+                try {
+                    val store = WeChatApis.message().store()
+                    val message = initial.msgId.takeIf { it > 0 }?.let { store?.getMessageById(it) }
+                        ?: initial.msgSvrId.takeIf { it > 0 }?.let { store?.getMessageBySvrId(initial.talker, it) }
+                        ?: initial
+                    val cacheType = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
+                        .getString(AutoCacheSettings.KEY_CACHE_TYPE, AutoCacheSettings.TYPE_ALL)
+                    val selectedChats = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
+                        .getStringSet(AutoCacheSettings.KEY_CHATS, emptySet()).orEmpty()
+                    if (!AutoCacheSettings.acceptsChat(message.talker, selectedChats) ||
+                        !AutoCacheSettings.accepts(message, cacheType)) {
+                        pending.remove(key)
+                        lastSubmitted.remove(key)
+                        return@schedule
+                    }
+                    if (native?.complete(message) == true) {
+                        HLog.i("[Hchat:AutoCache] 下载完成 msgId=${message.msgId} type=${message.type}")
+                        pending.remove(key)
+                        lastSubmitted.remove(key)
+                        return@schedule
+                    }
+                    val now = android.os.SystemClock.elapsedRealtime()
+                    val last = lastSubmitted[key]
+                    if (last == null || now - last >= 60_000L) {
+                        if (stopped.get()) return@schedule
+                        val submitted = native?.submit(message) == true
+                        synchronized(this) {
+                            if (submitted && !stopped.get()) lastSubmitted[key] = now
+                        }
+                        if (submitted || attempt == 0 || attempt % 60 == 0) {
+                            HLog.i("[Hchat:AutoCache] 下载提交=$submitted msgId=${message.msgId} type=${message.type} attempt=$attempt")
+                        }
+                    }
+                    if (attempt < 720) {
+                        // 上传占位、元数据未落库和网络未就绪时持续补查，最多一小时。
+                        enqueue(context, initial, account, key, attempt + 1)
+                    } else {
+                        pending.remove(key)
+                        lastSubmitted.remove(key)
+                        HLog.e("[Hchat:AutoCache] 等待原生下载超时 msgId=${message.msgId} type=${message.type}")
+                    }
+                } catch (error: Throwable) {
+                    if (attempt == 0 || attempt % 60 == 0) HLog.e("[Hchat:AutoCache] 原生下载异常 msgId=${initial.msgId}", error)
+                    if (attempt < 720) enqueue(context, initial, account, key, attempt + 1)
+                    else {
+                        pending.remove(key)
+                        lastSubmitted.remove(key)
                     }
                 }
-                if (attempt < 720) {
-                    // 上传占位、元数据未落库和网络未就绪时持续补查，最多一小时。
-                    enqueue(context, initial, account, key, attempt + 1)
-                } else {
-                    pending.remove(key)
-                    lastSubmitted.remove(key)
-                    HLog.e("[Hchat:AutoCache] 等待原生下载超时 msgId=${message.msgId} type=${message.type}")
-                }
-            } catch (error: Throwable) {
-                if (attempt == 0 || attempt % 60 == 0) HLog.e("[Hchat:AutoCache] 原生下载异常 msgId=${initial.msgId}", error)
-                if (attempt < 720) enqueue(context, initial, account, key, attempt + 1)
-                else {
-                    pending.remove(key)
-                    lastSubmitted.remove(key)
-                }
-            }
-        }, if (attempt == 0) 500L else 5000L, TimeUnit.MILLISECONDS)
+            }, if (attempt == 0) 500L else 5000L, TimeUnit.MILLISECONDS)
+        } catch (error: java.util.concurrent.RejectedExecutionException) {
+            pending.remove(key)
+            lastSubmitted.remove(key)
+            if (!stopped.get()) HLog.e("[Hchat:AutoCache] 下载检查入队失败", error)
+        }
     }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        stopped.set(true)
+    @Synchronized
+    fun shutdown() {
+        if (!stopped.compareAndSet(false, true)) return
+        installation.close()
         worker.shutdownNow()
         pending.clear()
         lastSubmitted.clear()
         native = null
     }
-    companion object { const val ID = "auto_cache" }
 }
 
 private class AutoCacheSettingsProvider : SimpleFeatureSettingsProvider(
