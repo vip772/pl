@@ -8,6 +8,8 @@ end=agent.index('        }.getOrElse {',start)
 section=agent[start:end]
 assert section.index('queryDexKit') < section.index('synchronized(targetLock)') < section.index('findClasses(target,')
 assert section.index('attachTarget(targetResult, target)') < section.rindex('result')
+install=agent[agent.index('    fun install(holder:'):agent.index('    fun toolCatalog()')]
+assert install.index('queryDexKit {') < install.index('synchronized(targetLock)') < install.index('activeExternalBinding?.close()')
 scheduler=(r/'app/src/main/java/t/mma/hooks/core/DexInstallScheduler.kt').read_text()
 s=(r/'app/src/main/java/t/mma/hooks/items/scheduledtask/ScheduledTaskFeature.kt').read_text()
 a=s.index('    private val executionWorker');b=s.index('    @Volatile private var started',a)

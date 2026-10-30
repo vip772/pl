@@ -66,14 +66,16 @@ object ScriptPluginAgentLocalReverseTools {
 
     @JvmStatic
     fun install(holder: DexBridgeHolder, context: Context) {
-        synchronized(targetLock) {
-            activeExternalBinding?.close()
-            activeExternalBinding = null
-            val host = Binding.host(holder, context.applicationContext)
-            binding.getAndSet(host)?.close()
-            targetSessions.clear()
-            targetSessions[host.sessionId] = TargetSession.fromBinding(host, System.currentTimeMillis())
-            loadPersistedTargets(host)
+        DexInstallScheduler.queryDexKit {
+            synchronized(targetLock) {
+                activeExternalBinding?.close()
+                activeExternalBinding = null
+                val host = Binding.host(holder, context.applicationContext)
+                binding.getAndSet(host)?.close()
+                targetSessions.clear()
+                targetSessions[host.sessionId] = TargetSession.fromBinding(host, System.currentTimeMillis())
+                loadPersistedTargets(host)
+            }
         }
     }
 

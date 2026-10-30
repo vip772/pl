@@ -90,3 +90,6 @@ test_home_side_panel_lifecycle.py 提取生产销毁方法、执行器和回调�
 
 ## 接续：首页侧边栏实际开关
 首页侧边栏主开关现驱动独占运行时创建/释放，关闭时解除生命周期/聊天页订阅、Hook、头像任务和页面挂载；设置 Provider 和功能级开关监听保留，重新开启创建新运行时并挂到当前主页。共享 QuickMarkReadRuntime 仅调用幂等 install，不随侧边栏关闭。生产 HomeSidePanelFeature 编译进 fixture，20 轮重复开关、启动失败及恢复、销毁后重装和旧监听迟到均通过；头像销毁链 fixture 同时通过。尚缺真实手机 UI 验证。
+
+## 接续：Agent 重绑入口锁顺序
+Agent install 公开入口现自行取得共享 Dex 门后再取 targetLock，外部目标关闭和宿主重绑都在门内。原 ModuleEntry 外层门保持可重入；不能只依赖当前唯一调用位置的外层锁。调度测试增加生产重绑入口的锁顺序约束，原并发、嵌套和异常恢复测试继续覆盖同一共享门。此项不启用宿主 Dex 闲置关闭。
