@@ -14,6 +14,7 @@ import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.core.FeatureContext
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.HookRegistry
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
@@ -43,8 +44,9 @@ object WeContactHeaderApi {
     @Volatile private var currentGroupId: String? = null
     @Volatile private var currentMemberId: String? = null
 
+    fun install(context: FeatureContext): Boolean = DexInstallScheduler.queryDexKit { installLocked(context) }
     @Synchronized
-    fun install(context: FeatureContext): Boolean {
+    private fun installLocked(context: FeatureContext): Boolean {
         if (installed) return true
         val method = locateBindMethod(context) ?: run {
             HLog.e("[$TAG] 未找到资料页头部绑定方法")

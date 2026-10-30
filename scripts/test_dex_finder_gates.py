@@ -13,9 +13,12 @@ with tempfile.TemporaryDirectory() as td:
  cp=':'.join(map(str,[classes,std,dex,sdk,kava,libs/"kotlinx-coroutines-core-jvm-1.8.0.jar"]))
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-jvm-target','17','-nowarn','-no-stdlib','-no-reflect','-classpath',cp,'-d',str(classes),str(base/'utils/KavaReflector.kt'),str(base/'hooks/core/DexInstallScheduler.kt'),str(base/'hooks/api/model/WeChatVersionInfo.kt')],check=True,timeout=45)
  subprocess.run(['javac','-cp',cp,'-d',str(classes),str(base/'hooks/api/runtime/WeChatVersionApi.java'),str(base/'dexkit/DexFinder.java'),str(base/'dexkit/CacheSnapshotEditor.java'),str(base/'dexkit/SettingsDexFinder.java')],check=True,timeout=30)
+ (p/'Hook.kt').write_text('package de.robv.android.xposed\nopen class XC_MethodHook{class MethodHookParam{var result:Any?=null;var args=arrayOf<Any>();var thisObject:Any?=null};open fun afterHookedMethod(p:MethodHookParam){}}')
+ (p/'Registry.kt').write_text('package t.mma.hooks.core\nobject HookRegistry{fun get()=this;fun hook(m:java.lang.reflect.Member,c:de.robv.android.xposed.XC_MethodHook){}}')
+ (p/'Identity.kt').write_text('package t.mma.hooks.api.sns\nobject SnsLocalPostIdentity{fun isLocalOnly(c:android.content.Context,id:Any?)=false}')
  (p/'Apis.kt').write_text('package t.mma.hooks.api.core\nclass Tasks{fun runOnMain(r:Runnable){}}\nobject WeChatApis{fun tasks():Tasks?=null}')
  (p/'Context.kt').write_text('package t.mma.hooks.core\nclass FeatureContext{fun hostContext():android.content.Context=error("fixture");fun hostClassLoader():ClassLoader=error("fixture");fun dexKitBridge():org.luckypray.dexkit.DexKitBridge=error("fixture")}')
- subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-jvm-target','17','-nowarn','-no-stdlib','-no-reflect','-classpath',cp,'-d',str(p/'sns.jar'),str(base/'dexkit/DexMethodCache.kt'),str(base/'hooks/api/sns/SnsInteractionLocator.kt'),str(base/'hooks/api/sns/SnsLivePhotoUploadLocator.kt'),str(p/'Context.kt'),str(base/'hooks/api/message/SingleMessageMenuLocator.kt'),str(base/'hooks/api/message/MultiSelectMessageMenuLocator.kt'),str(base/'hooks/api/media/FavoriteMenuLocator.kt'),str(p/'Apis.kt'),str(base/'hooks/api/media/FavoriteVoiceResolver.kt'),*[str(base/'hooks/api/sns'/n) for n in ['SnsForwardNativeMediaLocator.kt','SnsForwardLocalMediaLocator.kt','SnsContextMenuLocator.kt']]],check=True,timeout=45)
+ subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-jvm-target','17','-nowarn','-no-stdlib','-no-reflect','-classpath',cp,'-d',str(p/'sns.jar'),str(base/'dexkit/DexMethodCache.kt'),str(base/'hooks/api/sns/SnsInteractionLocator.kt'),str(base/'hooks/api/sns/SnsLivePhotoUploadLocator.kt'),str(p/'Context.kt'),str(base/'hooks/api/message/SingleMessageMenuLocator.kt'),str(base/'hooks/api/message/MultiSelectMessageMenuLocator.kt'),str(base/'hooks/api/media/FavoriteMenuLocator.kt'),str(p/'Apis.kt'),str(p/'Hook.kt'),str(p/'Registry.kt'),str(p/'Identity.kt'),str(base/'hooks/api/contact/WeContactHeaderApi.kt'),str(base/'hooks/api/sns/WeChatSnsPostObserver.kt'),str(base/'hooks/api/media/FavoriteVoiceResolver.kt'),*[str(base/'hooks/api/sns'/n) for n in ['SnsForwardNativeMediaLocator.kt','SnsForwardLocalMediaLocator.kt','SnsContextMenuLocator.kt']]],check=True,timeout=45)
 for name in ['DexFinder.java','SettingsDexFinder.java']:
  s=(base/'dexkit'/name).read_text()
  for m in re.finditer(r'public (?:synchronized )?void (resolve\w+)\(([^)]*)\) \{([^}]+)\}',s):
@@ -39,3 +42,8 @@ voice=(base/'hooks/api/media/FavoriteVoiceResolver.kt').read_text()
 assert 'DexInstallScheduler.queryDexKit { favoriteDownloadMethodLocked(' in voice
 assert 'DexInstallScheduler.queryDexKit { locateFavoriteDataPathMethodsLocked(' in voice
 print('PASS complete favorite menu/voice resolver compile; lazy invokes consumed within query gate')
+
+for relative in ['sns/WeChatSnsPostObserver.kt','contact/WeContactHeaderApi.kt']:
+ source=(base/'hooks/api'/relative).read_text()
+ assert 'DexInstallScheduler.queryDexKit { installLocked(' in source
+print('PASS shared post observer and contact header complete production SDK compile; gate precedes install monitor')

@@ -1030,3 +1030,5 @@ DexFinder/SettingsDexFinder 公开定位入口现自行通过 DexInstallSchedule
 SingleMessageMenuLocator、MultiSelectMessageMenuLocator、FavoriteMenuLocator 以及收藏语音定位自行串行查询并返回反射成员；参数、缓存与实际发送/下载调度语义不变。
 
 朋友圈转发原生媒体、本地媒体路径和上下文菜单定位入口（含折叠卡片绑定完成）现自行通过共享 Dex 门，native 查询及 Method 转换均在返回前完成。缓存和定位条件不变；完整生产定位器已加入 test_dex_finder_gates.py 并通过 SDK/DexKit 编译。手机转发与菜单交互尚未验证。
+
+共享 WeChatSnsPostObserver 和 WeContactHeaderApi 的 install 入口现先取共享 Dex 门，再取原安装 monitor；定位查询及关联 Hook 安装处于同一区间。共享 Hook 所有权不变，不随单个功能消费者关闭。test_dex_finder_gates.py 编译完整生产入口（Xposed/Hook 注册外围 fixture）通过，实际手机 Hook 尚未验证。

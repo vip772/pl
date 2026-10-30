@@ -3,6 +3,7 @@ package t.mma.hooks.api.sns
 import android.content.Context
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.HookRegistry
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.DexKitBridge
@@ -52,8 +53,9 @@ class WeChatSnsPostObserver(
         }
     }
 
+    fun install(): Boolean = DexInstallScheduler.queryDexKit { installLocked() }
     @Synchronized
-    fun install(): Boolean {
+    private fun installLocked(): Boolean {
         hookedMethod?.takeIf(::isPostStoreMethod)?.let { return true }
         val runtimeKey = DexMethodCache.runtimeKey(context, classLoader)
         val method = DexMethodCache.load(prefs, runtimeKey, classLoader, CACHE_STORE)
