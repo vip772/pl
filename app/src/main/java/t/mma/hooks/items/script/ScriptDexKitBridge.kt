@@ -1,7 +1,7 @@
 package t.mma.hooks.items.script
 import t.mma.utils.HLog
 
-import de.robv.android.xposed.XposedBridge
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.dexkit.DexBridgeHolder
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.DexKitBridge
@@ -26,16 +26,18 @@ class ScriptDexKitBridge internal constructor(
         val strings = usingStrings?.filter { it.isNotBlank() }.orEmpty()
         if (strings.isEmpty()) return emptyList()
         return runCatching {
-            val bridge = dexKitBridge ?: return emptyList()
-            val out = linkedSetOf<Class<*>>()
-            collectClassMatches(bridge, strings, out)
-            if (out.isEmpty() && strings.size > 1) {
-                strings.forEach {
-                    val single = listOf(it)
-                    collectClassMatches(bridge, single, out)
+            DexInstallScheduler.queryDexKit {
+                val bridge = dexKitBridge ?: return@queryDexKit emptyList()
+                val out = linkedSetOf<Class<*>>()
+                collectClassMatches(bridge, strings, out)
+                if (out.isEmpty() && strings.size > 1) {
+                    strings.forEach {
+                        val single = listOf(it)
+                        collectClassMatches(bridge, single, out)
+                    }
                 }
+                ArrayList(out)
             }
-            ArrayList(out)
         }.onFailure {
             HLog.e("[Hchat:Script] DexKit查找类失败: ${it.message}", it)
         }.getOrDefault(emptyList())
@@ -53,16 +55,18 @@ class ScriptDexKitBridge internal constructor(
         val strings = usingStrings?.filter { it.isNotBlank() }.orEmpty()
         if (strings.isEmpty()) return emptyList()
         return runCatching {
-            val bridge = dexKitBridge ?: return emptyList()
-            val out = linkedSetOf<Member>()
-            collectMemberMatches(bridge, strings, out)
-            if (out.isEmpty() && strings.size > 1) {
-                strings.forEach {
-                    val single = listOf(it)
-                    collectMemberMatches(bridge, single, out)
+            DexInstallScheduler.queryDexKit {
+                val bridge = dexKitBridge ?: return@queryDexKit emptyList()
+                val out = linkedSetOf<Member>()
+                collectMemberMatches(bridge, strings, out)
+                if (out.isEmpty() && strings.size > 1) {
+                    strings.forEach {
+                        val single = listOf(it)
+                        collectMemberMatches(bridge, single, out)
+                    }
                 }
+                ArrayList(out)
             }
-            ArrayList(out)
         }.onFailure {
             HLog.e("[Hchat:Script] DexKit查找成员失败: ${it.message}", it)
         }.getOrDefault(emptyList())

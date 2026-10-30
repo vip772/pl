@@ -1,5 +1,6 @@
 package t.mma.dexkit;
 import t.mma.utils.HLog;
+import t.mma.hooks.core.DexInstallScheduler;
 
 import t.mma.dexkit.DexFinder;
 
@@ -54,6 +55,9 @@ public final class DexBridgeHolder {
      * @return 匹配到的类名列表
      */
     public java.util.List<String> findClassesByStrings(String... anchorStrings) {
+        return DexInstallScheduler.queryDexKitTask(() -> findClassesByStringsLocked(anchorStrings));
+    }
+    private java.util.List<String> findClassesByStringsLocked(String... anchorStrings) {
         java.util.List<String> result = new java.util.ArrayList<>();
         if (dexKitBridge == null || anchorStrings == null) return result;
         try {
@@ -76,6 +80,9 @@ public final class DexBridgeHolder {
      * @return 匹配到的方法信息列表（className + methodName）
      */
     public java.util.List<MethodInfo> findMethodsByStrings(String... anchorStrings) {
+        return DexInstallScheduler.queryDexKitTask(() -> findMethodsByStringsLocked(anchorStrings));
+    }
+    private java.util.List<MethodInfo> findMethodsByStringsLocked(String... anchorStrings) {
         java.util.List<MethodInfo> result = new java.util.ArrayList<>();
         if (dexKitBridge == null || anchorStrings == null) return result;
         try {

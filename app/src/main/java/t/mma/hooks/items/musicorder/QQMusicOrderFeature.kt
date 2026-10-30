@@ -20,14 +20,11 @@ class QQMusicOrderFeature : BaseFeature() {
     override fun onFeatureInstall(context: FeatureContext) {
         scheduleSendButtonHook(context)
         subscribe(Events.DexReady::class.java) { scheduleSendButtonHook(context) }
-        runtime = QQMusicOrderRuntime(context.hostContext(), ::logError).also { musicRuntime ->
-            musicRuntime.install { subscription -> trackSubscription(subscription) }
-        }
-    }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
+        val track = subscriptionRegistrar()
+        val installed = QQMusicOrderRuntime(context.hostContext(), ::logError)
+        runtime = installed
+        trackResource { installed.destroy(); if (runtime === installed) runtime = null }
+        installed.install(track)
     }
 
     private fun scheduleSendButtonHook(context: FeatureContext) {

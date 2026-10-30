@@ -2124,3 +2124,6 @@ void onMemberChange(String type, String groupWxid, String userWxid, String userN
 - 文件路径建议使用 `pluginDir` 或 `cacheDir`。
 
 资源调度补充：每插件最多保留 256 个未完成异步任务，达到上限时记录“异步任务失败”日志并拒绝新任务。公共任务服务尚未就绪时使用进程共享备用双线程池（队列 256 项），过载同样记录错误；卸载取消未开始任务，已开始操作继续完成。
+
+### DexKit 便捷查询的资源约束
+ScriptDexKitBridge.findClassList / findMemberList（含各参数重载）现在与模块内部安装、Agent 查询共用串行门，返回前已完成结果转换。原有 bridge()、holder()、dexKitBridge 注入及返回类型保持兼容；脚本直接调用原始对象不会自动进入串行门。当前仍不自动关闭共享原始实例，不能据此假定 native 结果可在关闭后继续使用。

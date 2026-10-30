@@ -59,3 +59,9 @@ test_feature_resource_scope.py、test_background_resource_lifecycle.py、test_co
 7c8d20f 的 Actions 41041713476 已成功完成。原有 13 项定向资源回归及新增生命周期回归通过（不代表整项目无回归）。
 Agent 工具原来仅持有 targetLock，未通过共享 Dex 串行门；现在查询、延迟结果读取及 JSON 整理整体位于 DexInstallScheduler.queryDexKit 区间，锁顺序为共享 Dex 门→targetLock，与初始化一致。调度测试新增 40 次并发查询不重叠、嵌套可重入、异常后恢复，以及实际 Agent 区间源码约束。完整 Agent 编译以 Actions 为准。
 这只是 A 的串行约束接入，不启用闲置关闭或重建。ModuleEntry 静态 bridge 集合、原始对象接口、内部持有链及脚本兼容保活契约仍未完成迁移。
+
+## 接续：脚本与 Holder 查询区间、运行时订阅归属
+c17dd61 的 Actions 41042601510 已核实 completed/success，包含完整 APK/R8 构建。
+ScriptDexKitBridge 的类/成员便捷查询及 DexBridgeHolder 的字符串查询现在通过与安装器、Agent 相同的可重入串行门；结果转换为 Class、Member 或字符串信息后才离开区间。Java 调用入口为 queryDexKitTask(Callable)。原始 bridge()/holder() 和脚本原始对象注入保持兼容；外部直接操作原始对象仍不受此门自动约束，本次不启用 native close。
+BaseFeature 新增捕获创建时资源作用域的 subscriptionRegistrar。QQ 点歌实际使用该登记器，独占运行时构造后、安装前即登记 destroy，订阅清理先于运行时关闭；安装中途抛错也能释放该运行时。定时任务同样在 coordinator attach/start 前登记独占运行时，启动失败会 detach 并排空已接收任务。旧登记器在关闭并重新初始化后继续回调时立即释放旧资源，不登记到新一代。本次不代表所有异步安装器已迁移，也没有开启全局热卸载。
+验证：test_dex_query_consumers.py 使用真实 DexKit JAR 编译生产 Java Holder、Kotlin 脚本查询与调度器；验证空/不可用实例路径、120 次 Java/Kotlin 混合串行、嵌套及异常恢复。test_feature_resource_scope.py 新增跨两代登记验证；test_resource_schedulers.py 通过。native 查询、关闭重建、真实发送及手机验证仍未完成。

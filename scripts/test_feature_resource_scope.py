@@ -31,6 +31,7 @@ class F:BaseFeature(){var installs=0;var destroys=0;var fail=false;val sub=Sub()
  override fun onFeatureInstall(c:FeatureContext){installs++;subscribe(String::class.java){};trackSubscription(sub);if(fail)error("install")}
  override fun onFeatureDestroy(c:FeatureContext){destroys++}
  fun late(release:()->Unit)=trackResource(release)
+ fun registrar()=subscriptionRegistrar()
  fun held()=context()!=null
 }
 fun main(){
@@ -46,6 +47,12 @@ fun main(){
  f.onDestroy(c);f.onDestroy(c);check(c.ui.count==0&&c.bus.count==0&&f.destroys==1&&!f.held()&&f.sub.removed==1)
  f.late{released.incrementAndGet()};check(released.get()==1001)
  f.onInit(c);f.install(c);f.onDestroy(c);check(f.installs==2&&f.destroys==2&&c.ui.count==0&&c.bus.count==0)
+ val generations=F();generations.onInit(c);generations.install(c)
+ val oldRegistrar=generations.registrar();generations.onDestroy(c)
+ generations.onInit(c);generations.install(c)
+ val oldSub=Sub();oldRegistrar(oldSub);check(oldSub.removed==1)
+ val newSub=Sub();generations.registrar()(newSub);check(newSub.removed==0)
+ generations.onDestroy(c);check(oldSub.removed==1&&newSub.removed==1&&c.ui.count==0&&c.bus.count==0)
  val failed=F();failed.fail=true;failed.onInit(c);try{failed.install(c);error("expected failure")}catch(_:IllegalStateException){}
  check(c.ui.count==0&&c.bus.count==0&&!failed.held()&&failed.sub.removed==1)
  val disabled=F();disabled.onInit(c);disabled.onDestroy(c);check(c.ui.count==0)

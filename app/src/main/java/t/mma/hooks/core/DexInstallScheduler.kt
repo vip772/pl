@@ -96,6 +96,9 @@ object DexInstallScheduler {
     /** Consume native-backed results before returning; only detached values may escape. */
     fun <T> queryDexKit(task: () -> T): T = synchronized(dexKitExecutionLock) { task() }
 
+    /** Java entry: query and lazy result reads share the same reentrant gate. */
+    @JvmStatic
+    fun <T> queryDexKitTask(task: Callable<T>): T = synchronized(dexKitExecutionLock) { task.call() }
     private fun advanceReady(stage: Stage) {
         while (true) {
             val current = readyLevel.get()

@@ -33,16 +33,15 @@ class ScheduledTaskFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = ScheduledTaskRuntime(context, ::logFeatureError).also {
-            ScheduledTaskRuntimeCoordinator.attach(it)
-            it.start()
+        val installed = ScheduledTaskRuntime(context, ::logFeatureError)
+        runtime = installed
+        trackResource {
+            ScheduledTaskRuntimeCoordinator.detach(installed)
+            installed.shutdown()
+            if (runtime === installed) runtime = null
         }
-    }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        ScheduledTaskRuntimeCoordinator.detach(runtime)
-        runtime?.shutdown()
-        runtime = null
+        ScheduledTaskRuntimeCoordinator.attach(installed)
+        installed.start()
     }
 
     private fun logFeatureError(message: String, throwable: Throwable?) {

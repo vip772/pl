@@ -56,6 +56,19 @@ abstract class BaseFeature : Feature {
     }
     /** Register only resources owned by this feature, never shared API executors. */
     protected fun trackResource(release: () -> Unit) { resources.register(release) }
+    /** Capture before handing a registrar to a runtime; old callbacks keep their original owner. */
+    @Synchronized
+    protected fun subscriptionRegistrar(): (Any) -> Unit {
+        val owner = resources
+        return { subscription ->
+            owner.register { releaseSubscription(subscription) }
+        }
+    }
+    private fun releaseSubscription(subscription: Any) {
+        KavaReflector.invoke(
+            KavaReflector.findMethod(subscription.javaClass, "unsubscribe"), subscription
+        )
+    }
     @Throws(Throwable::class)
     protected open fun onFeatureInit(context: FeatureContext) {
     }
@@ -100,11 +113,7 @@ abstract class BaseFeature : Feature {
 
     protected fun <T : Any> trackSubscription(subscription: T?): T? {
         if (subscription != null) {
-            trackResource {
-                KavaReflector.invoke(
-                    KavaReflector.findMethod(subscription.javaClass, "unsubscribe"), subscription
-                )
-            }
+            trackResource { releaseSubscription(subscription) }
         }
         return subscription
     }

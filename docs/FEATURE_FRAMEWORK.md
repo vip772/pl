@@ -2126,3 +2126,7 @@ BaseFeature 的事件订阅、外部 unsubscribe 凭证、设置 Provider 现统
 验证脚本 scripts/test_feature_resource_scope.py 编译真实作用域、BaseFeature、FeatureManager，验证并发/迟到登记、逆序及异常隔离、重复启停、失败安装、仅初始化清理。宿主由 fixture 替代，不能证明所有功能运行时都能热重启。现有 notifyConfigChanged 没有调用方；此次未据此开启全局热卸载，其他功能的 Hook/监听/系统资源仍需逐项接入。
 
 Agent 内置逆向工具现与 Hook 安装共用 DexInstallScheduler 的串行门，结果读取和 JSON 整理也在门内。锁顺序固定共享 Dex 门→Agent targetLock；不得在持有 targetLock 时反向获取共享门。queryDexKit 本身不代表 idle close 已实现，返回值不得保留 native-backed 查询结果。
+
+### 资源作用域登记补充
+BaseFeature.subscriptionRegistrar() 返回绑定创建时作用域的订阅登记函数，适用于交给运行时保存的登记回调；跨关闭/重新初始化的迟到资源由原作用域立即释放。QQ 点歌已接入，运行时在 install 前登记清理；定时任务运行时在 coordinator attach/start 前登记 detach/shutdown，覆盖启动失败。trackResource/trackSubscription 仍登记当前作用域，不能把它们的动态包装回调当作跨代安全保证。
+DexInstallScheduler.queryDexKitTask(Callable) 是 Java 查询入口，与 queryDexKit、runDexKitTask 和安装执行共用串行门。Holder 字符串查询和脚本便捷查询实际接入；结果应在区间内消费，返回脱离 native 的值。未启用 DexKit 闲置关闭。

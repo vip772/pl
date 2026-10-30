@@ -1019,3 +1019,6 @@ scripts/test_message_single_cursor.py提取生产读取及旧实现做1215组类
 引用原文剥离的 token 正则改为延迟初始化的共享只读规则；xmlTag 仅对 atuserlist、atall、type、title 四个字面标签复用 CDATA/plain 两条规则，各自按需初始化。最多九条固定规则，未增加任意标签无界缓存；其它标签维持原动态表达式路径。匹配结果、Matcher 与消息输入均不缓存，每次匹配创建独立状态。CDATA 优先、返回空白、选项和剥离算法保持原样。
 
 `scripts/test_mention_regex_reuse.py` 对照 f568876 生产模型，18,568 项结果与 1,000 组并发输入一致；临时编译计数确认九条固定规则不重复构造。来源管线、绑定资格和引用范围回归通过。未运行 Gradle，尚未测量新包实机分配量或帧收益。此项不合并重复解析次数，避免改变解码和后备来源语义。
+
+### Dex 查询串行补充
+DexBridgeHolder.findClassesByStrings / findMethodsByStrings 在共享 DexInstallScheduler 门内查询并整理结果，返回字符串或 MethodInfo。Java 内部需要受控查询时使用 queryDexKitTask(Callable)，所有延迟 native 结果读取应在 Callable 返回前完成；此入口不能拦截持有原始 DexKitBridge 的外部代码，也不表示已启用闲置释放。
