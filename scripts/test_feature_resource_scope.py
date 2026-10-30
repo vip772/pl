@@ -11,7 +11,8 @@ object KavaReflector {fun findMethod(c:Class<*>,n:String)=c.getMethod(n);fun inv
 fun interface EventHandler<E>{fun handleEvent(e:E)}
 class EventBus {fun post(e:Any){};var count=0;class Subscription{companion object{fun empty()=Subscription()}};fun <E> subscribe(c:Class<E>,h:EventHandler<E>,p:Int):Subscription {count++;return Subscription()};fun unsubscribe(s:Subscription){count--}}''',
 'UI.kt': '''package t.mma.ui
-interface FeatureSettingsProvider {fun featureId():String}
+interface FeatureSettingsProvider {fun featureId():String;companion object{const val CATEGORY_PRACTICAL="practical"}}
+open class SimpleFeatureSettingsProvider(val id:String,a:String,b:String,c:String,d:Boolean):FeatureSettingsProvider{override fun featureId()=id}
 object FeatureToggleRegistry{fun isEnabled(c:Any,id:String)=true}
 class UIRegistry {var count=0;fun registerProvider(p:FeatureSettingsProvider,c:()->Boolean){count++};fun unregisterProvider(id:String){count--}}''',
 'Settings.kt': 'package t.mma.hooks.items.settings\nobject SettingsFeature {const val ID="settings"}',
@@ -47,8 +48,15 @@ class ChatToolbarRuntime(c:Any,logger:(String,Throwable?)->Unit){var active=true
 ''',
 'Apis.kt': '''package t.mma.hooks.api.core
 class Lifecycle{class Event{val isDestroy=true;val activity=Any()};var subscriptions=0;inner class Subscription{fun unsubscribe(){subscriptions--}};fun subscribe(callback:(Event)->Unit):Subscription{subscriptions++;return Subscription()}}
-object WeChatApis{val events=Lifecycle();fun lifecycle()=events}
+class Current{fun currentActivity():Any?=Any()}
+object WeChatApis{val events=Lifecycle();val chats=Lifecycle();fun lifecycle()=events;fun chatPage()=chats;fun currentActivity()=Current()}
 ''',
+'Home.kt': '''package t.mma.hooks.items.homesidepanel
+object HomeSidePanelSettings{const val KEY_ENABLE="enable";const val DEFAULT_ENABLE=false;val prefs=t.mma.hooks.items.chattoolbar.Prefs();fun preferences(c:Any)=prefs}
+object HomeState{var created=0;var destroyed=0;var fail=false}
+class HomeSidePanelRuntime(c:Any){init{HomeState.created++};fun install(){if(HomeState.fail)error("home install")};fun destroy(){HomeState.destroyed++};fun onActivityEvent(e:Any){};fun onChatPageChanged(e:Any){};fun attach(a:Any){}}
+''',
+'QuickRead.kt': 'package t.mma.hooks.items.quickread\nobject QuickMarkReadRuntime{fun install(c:Any){}}',
 'Test.kt': '''package t.mma.hooks.core
 import java.util.concurrent.*
 import java.util.concurrent.atomic.AtomicInteger
@@ -122,6 +130,16 @@ fun main(){
  check(prefs.listeners.isEmpty()&&t.mma.hooks.items.chattoolbar.ToolbarState.destroyed==22&&t.mma.hooks.api.core.WeChatApis.events.subscriptions==0)
  toolbar.install(c);val before=t.mma.hooks.items.chattoolbar.ToolbarState.created;oldListener.onSharedPreferenceChanged(prefs,"enable");check(t.mma.hooks.items.chattoolbar.ToolbarState.created==before)
  toolbar.onDestroy(c);check(prefs.listeners.isEmpty()&&c.ui.count==0&&c.bus.count==0)
+ val home=t.mma.hooks.items.homesidepanel.HomeSidePanelFeature()
+ val homePrefs=t.mma.hooks.items.homesidepanel.HomeSidePanelSettings.prefs
+ home.install(c);check(t.mma.hooks.items.homesidepanel.HomeState.created==0)
+ repeat(20){homePrefs.toggle(true);homePrefs.toggle(true);check(t.mma.hooks.api.core.WeChatApis.events.subscriptions==1&&t.mma.hooks.api.core.WeChatApis.chats.subscriptions==1);homePrefs.toggle(false);homePrefs.toggle(false);check(t.mma.hooks.api.core.WeChatApis.events.subscriptions==0&&t.mma.hooks.api.core.WeChatApis.chats.subscriptions==0)}
+ check(t.mma.hooks.items.homesidepanel.HomeState.created==20&&t.mma.hooks.items.homesidepanel.HomeState.destroyed==20)
+ t.mma.hooks.items.homesidepanel.HomeState.fail=true;homePrefs.toggle(true);check(t.mma.hooks.items.homesidepanel.HomeState.destroyed==21)
+ t.mma.hooks.items.homesidepanel.HomeState.fail=false;homePrefs.toggle(false);homePrefs.toggle(true)
+ val homeOld=homePrefs.listeners.single();home.onDestroy(c);home.install(c)
+ val homeBefore=t.mma.hooks.items.homesidepanel.HomeState.created;homeOld.onSharedPreferenceChanged(homePrefs,"enable");check(t.mma.hooks.items.homesidepanel.HomeState.created==homeBefore)
+ home.onDestroy(c);check(homePrefs.listeners.isEmpty()&&c.ui.count==0&&t.mma.hooks.api.core.WeChatApis.events.subscriptions==0&&t.mma.hooks.api.core.WeChatApis.chats.subscriptions==0)
  println("PASS lifecycle: reverse cleanup, failure isolation, late/racing registration, duplicate install/destroy, restart, partial failure, initialized-only release")
 }
 '''}
@@ -131,6 +149,7 @@ with tempfile.TemporaryDirectory() as td:
  scheduled=(r/'app/src/main/java/t/mma/hooks/items/scheduledtask/ScheduledTaskFeature.kt').read_text().split('object ScheduledTaskRuntimeCoordinator')[0]
  scheduled='\n'.join(line for line in scheduled.splitlines() if not line.startswith('import '))
  scheduled=scheduled.replace('package t.mma.hooks.items.scheduledtask','package t.mma.hooks.items.scheduledtask\nimport t.mma.hooks.core.BaseFeature\nimport t.mma.hooks.core.FeatureContext')
+ (p/'HomeFeature.kt').write_text((r/'app/src/main/java/t/mma/hooks/items/homesidepanel/HomeSidePanelFeature.kt').read_text())
  (p/'ToolbarFeature.kt').write_text((r/'app/src/main/java/t/mma/hooks/items/chattoolbar/ChatToolbarFeature.kt').read_text())
  (p/'MusicFeature.kt').write_text(music)
  (p/'ScheduledFeature.kt').write_text(scheduled)

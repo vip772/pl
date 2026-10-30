@@ -87,3 +87,6 @@ test_home_side_panel_lifecycle.py 提取生产销毁方法、执行器和回调�
 ## 接续：定时发送拒绝后人工恢复
 确认设置页开关实际调用 ScheduledTaskRuntimeCoordinator.reload。原先达到 6 次入队重试后，关闭再开启仍保留计数；现关闭 reload 仅清 admissionRetries，保留 deferred 计划、已接收身份和 uncertain 记录。重新开启允许新一轮有界重试，不立即重放结果不确定的发送。
 生产 reload/finish fixture 新增：耗尽后关闭重开、deferred 删除及编辑计划时间、执行中删除后完成不重建任务、执行中改计划后完成不覆盖新计划，均通过。test_resource_schedulers.py 也通过。真实微信发送、跨进程 exactly-once 和持久化磁盘失败仍不在已验证结论内。299eec8 的 Actions 41049693859 已整体成功，含 APK/R8。
+
+## 接续：首页侧边栏实际开关
+首页侧边栏主开关现驱动独占运行时创建/释放，关闭时解除生命周期/聊天页订阅、Hook、头像任务和页面挂载；设置 Provider 和功能级开关监听保留，重新开启创建新运行时并挂到当前主页。共享 QuickMarkReadRuntime 仅调用幂等 install，不随侧边栏关闭。生产 HomeSidePanelFeature 编译进 fixture，20 轮重复开关、启动失败及恢复、销毁后重装和旧监听迟到均通过；头像销毁链 fixture 同时通过。尚缺真实手机 UI 验证。
