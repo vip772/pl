@@ -4,7 +4,8 @@ package t.mma.hooks.core
 internal class FeatureResourceScope(private val onError: (Throwable) -> Unit) {
     private val lock = Any()
     private val releases = ArrayList<() -> Unit>()
-    private var closed = false
+    @Volatile private var closed = false
+    fun isClosed(): Boolean = closed
     fun register(release: () -> Unit) {
         val releaseNow = synchronized(lock) {
             if (closed) true else { releases.add(release); false }

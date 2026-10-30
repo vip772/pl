@@ -2163,3 +2163,5 @@ DexFinder 的公开 resolve 方法及 findNativeNetSceneClass、SettingsDexFinde
 共享 WeChatSnsPostObserver 和 WeContactHeaderApi 的 install 入口现先取共享 Dex 门，再取原安装 monitor；定位查询及关联 Hook 安装处于同一区间。共享 Hook 所有权不变，不随单个功能消费者关闭。test_dex_finder_gates.py 编译完整生产入口（Xposed/Hook 注册外围 fixture）通过，实际手机 Hook 尚未验证。
 
 独占 Installation 现为每个凭证分配 owner 身份，只有相同身份可撤销其状态；同 key 其他凭证的迟到关闭不会删除现有安装。并发重复占用同 key 明确拒绝，原 owner 关闭后新凭证可接管。生产调度测试新增未登记同名 close、冲突登记、冲突凭证 close 不影响原安装、关闭后新 owner 安装，均通过。共享 schedule 的 owner 为 null，现有共享 API 语义保留。
+
+BaseFeature 事件订阅包装现绑定订阅时的资源作用域，作用域已关闭时拒绝快照中的迟到回调。已开始回调不中断，其线程内 trackResource/trackSubscription/subscribe 继续归属原代，跨关闭重开后的迟到登记立即释放，不污染新代；ThreadLocal 在 finally 恢复/移除，不传递到另外启动的线程。跨线程异步任务仍需显式捕获登记器，不能据此认为所有异步安装器已安全。生命周期 fixture 验证旧快照回调不执行、回调运行中关闭重开、旧回调随后登记资源立即释放，通过。

@@ -9,7 +9,7 @@ object HLog {fun d(s:String){};fun i(s:String){};fun w(s:String){};fun e(s:Strin
 object KavaReflector {fun findMethod(c:Class<*>,n:String)=c.getMethod(n);fun invoke(m:java.lang.reflect.Method,o:Any)=m.invoke(o)}''',
 'Event.kt': '''package t.mma.event
 fun interface EventHandler<E>{fun handleEvent(e:E)}
-class EventBus {fun post(e:Any){};var count=0;class Subscription{companion object{fun empty()=Subscription()}};fun <E> subscribe(c:Class<E>,h:EventHandler<E>,p:Int):Subscription {count++;return Subscription()};fun unsubscribe(s:Subscription){count--}}''',
+class EventBus {val callbacks=mutableListOf<()->Unit>();fun post(e:Any){};var count=0;class Subscription{companion object{fun empty()=Subscription()}};fun <E> subscribe(c:Class<E>,h:EventHandler<E>,p:Int):Subscription {count++;if(c==String::class.java){callbacks+={h.handleEvent(c.cast("fixture"))}};return Subscription()};fun unsubscribe(s:Subscription){count--}}''',
 'UI.kt': '''package t.mma.ui
 interface FeatureSettingsProvider {fun featureId():String;companion object{const val CATEGORY_PRACTICAL="practical"}}
 open class SimpleFeatureSettingsProvider(val id:String,a:String,b:String,c:String,d:Boolean):FeatureSettingsProvider{override fun featureId()=id}
@@ -67,6 +67,7 @@ class F:BaseFeature(){var installs=0;var destroys=0;var fail=false;val sub=Sub()
  override fun onFeatureInstall(c:FeatureContext){installs++;subscribe(String::class.java){};trackSubscription(sub);if(fail)error("install")}
  override fun onFeatureDestroy(c:FeatureContext){destroys++}
  fun late(release:()->Unit)=trackResource(release)
+ fun listen(action:()->Unit){subscribe(String::class.java){action()}}
  fun registrar()=subscriptionRegistrar()
  fun held()=context()!=null
 }
@@ -89,6 +90,15 @@ fun main(){
  val oldSub=Sub();oldRegistrar(oldSub);check(oldSub.removed==1)
  val newSub=Sub();generations.registrar()(newSub);check(newSub.removed==0)
  generations.onDestroy(c);check(oldSub.removed==1&&newSub.removed==1&&c.ui.count==0&&c.bus.count==0)
+ val eventsFeature=F();eventsFeature.onInit(c);eventsFeature.install(c)
+ var callbacks=0;eventsFeature.listen{callbacks++};val oldCallback=c.bus.callbacks.last()
+ oldCallback();check(callbacks==1);eventsFeature.onDestroy(c);eventsFeature.onInit(c);eventsFeature.install(c)
+ oldCallback();check(callbacks==1)
+ val enteredCallback=CountDownLatch(1);val finishCallback=CountDownLatch(1);val callbackReleased=AtomicInteger()
+ eventsFeature.listen{enteredCallback.countDown();finishCallback.await(5,TimeUnit.SECONDS);eventsFeature.late{callbackReleased.incrementAndGet()}}
+ val inFlight=c.bus.callbacks.last();val callbackThread=Thread{inFlight()};callbackThread.start();check(enteredCallback.await(3,TimeUnit.SECONDS))
+ eventsFeature.onDestroy(c);eventsFeature.onInit(c);eventsFeature.install(c);finishCallback.countDown();callbackThread.join(3000)
+ check(!callbackThread.isAlive&&callbackReleased.get()==1);eventsFeature.onDestroy(c)
  val failed=F();failed.fail=true;failed.onInit(c);try{failed.install(c);error("expected failure")}catch(_:IllegalStateException){}
  check(c.ui.count==0&&c.bus.count==0&&!failed.held()&&failed.sub.removed==1)
  val disabled=F();disabled.onInit(c);disabled.onDestroy(c);check(c.ui.count==0)

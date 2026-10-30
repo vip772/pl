@@ -11,7 +11,8 @@ import t.mma.utils.KavaReflector
  * 功能模块基类。
  */
 abstract class BaseFeature : Feature {
-    private var resources = newResourceScope()
+    @Volatile private var resources = newResourceScope()
+    private val callbackOwner = ThreadLocal<FeatureResourceScope>()
     private var initialized = false
     private var installed = false
     private fun newResourceScope() = FeatureResourceScope { logError("资源释放异常", it) }
@@ -55,11 +56,11 @@ abstract class BaseFeature : Feature {
         }
     }
     /** Register only resources owned by this feature, never shared API executors. */
-    protected fun trackResource(release: () -> Unit) { resources.register(release) }
+    protected fun trackResource(release: () -> Unit) { (callbackOwner.get() ?: resources).register(release) }
     /** Capture before handing a registrar to a runtime; old callbacks keep their original owner. */
     @Synchronized
     protected fun subscriptionRegistrar(): (Any) -> Unit {
-        val owner = resources
+        val owner = callbackOwner.get() ?: resources
         return { subscription ->
             owner.register { releaseSubscription(subscription) }
         }
@@ -106,8 +107,18 @@ abstract class BaseFeature : Feature {
         priority: Int
     ): EventBus.Subscription {
         val currentContext = context ?: return EventBus.Subscription.empty()
-        val subscription = currentContext.eventBus().subscribe(eventType, handler, priority)
-        trackResource { currentContext.eventBus().unsubscribe(subscription) }
+        val owner = callbackOwner.get() ?: resources
+        val guarded = EventHandler<E> { event ->
+            if (!owner.isClosed()) {
+                val previous = callbackOwner.get()
+                callbackOwner.set(owner)
+                try { handler.handleEvent(event) } finally {
+                    if (previous == null) callbackOwner.remove() else callbackOwner.set(previous)
+                }
+            }
+        }
+        val subscription = currentContext.eventBus().subscribe(eventType, guarded, priority)
+        owner.register { currentContext.eventBus().unsubscribe(subscription) }
         return subscription
     }
 
