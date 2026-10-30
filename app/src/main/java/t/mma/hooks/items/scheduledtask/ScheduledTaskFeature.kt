@@ -113,7 +113,11 @@ class ScheduledTaskRuntime(
     fun reload() {
         if (!started) return
         cancelAll()
-        if (!settings.isEnabled()) return
+        if (!settings.isEnabled()) {
+            // An explicit disable/re-enable begins a new bounded admission round.
+            admissionRetries.clear()
+            return
+        }
         val now = System.currentTimeMillis()
         val nextTasks = ArrayList<ScheduledTaskItem>()
         var changed = false

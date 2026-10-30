@@ -83,3 +83,7 @@ test_resource_schedulers.py 新增：失败待重试关闭、关闭后禁止登�
 ## 接续：首页侧边栏销毁链
 核查发现 HomeSidePanelRuntime.destroy 未关闭头像执行器，旧安装和页面回调也缺运行时失效门。现新增 active 门、合并回填检查；销毁时移除 Handler 回调，清空等待头像任务并 shutdown，已开始任务不中断，结果不再更新已销毁页面。头像执行器空闲 30 秒退出。页面逐项清理隔离异常，解绑后清除 Session 持有的 avatar/retainedAvatar 引用；不 recycle 已显示 Bitmap。Hook 和偏好监听继续由该运行时独占释放，重复销毁不重复清理。
 test_home_side_panel_lifecycle.py 提取生产销毁方法、执行器和回调门，验证排队丢弃、已开始任务不中断、迟到回填、异常隔离、Hook/监听只清一次及关闭后拒绝。此测试不替代完整页面、网络加载和 Android 产物验证。本轮未将首页侧边栏改成全局热启停，DexKit 自动关闭仍未启用。
+
+## 接续：定时发送拒绝后人工恢复
+确认设置页开关实际调用 ScheduledTaskRuntimeCoordinator.reload。原先达到 6 次入队重试后，关闭再开启仍保留计数；现关闭 reload 仅清 admissionRetries，保留 deferred 计划、已接收身份和 uncertain 记录。重新开启允许新一轮有界重试，不立即重放结果不确定的发送。
+生产 reload/finish fixture 新增：耗尽后关闭重开、deferred 删除及编辑计划时间、执行中删除后完成不重建任务、执行中改计划后完成不覆盖新计划，均通过。test_resource_schedulers.py 也通过。真实微信发送、跨进程 exactly-once 和持久化磁盘失败仍不在已验证结论内。299eec8 的 Actions 41049693859 已整体成功，含 APK/R8。

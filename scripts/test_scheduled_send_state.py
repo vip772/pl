@@ -16,7 +16,7 @@ object ScheduledTaskSettings {
  fun resolveNextPlanTime(p:Long,r:Int,d:List<Int>,now:Long)=now+60000
 }
 class Settings {
- val data=linkedMapOf<String,ScheduledTaskItem>();fun isEnabled()=true
+ val data=linkedMapOf<String,ScheduledTaskItem>();var enabled=true;fun isEnabled()=enabled
  fun tasks()=data.values.toList();fun saveTasks(t:List<ScheduledTaskItem>){data.clear();t.forEach{data[it.id]=it}}
  fun findTask(id:String)=data[id];fun saveTask(t:ScheduledTaskItem){data[t.id]=t};fun deleteTask(id:String){data.remove(id)}
 }
@@ -52,6 +52,19 @@ fun main(){
  check(f.settings.findTask(deferred.id)!=null && deferred.id in f.scheduled)
  f.admissionRetries[deferred.id]=6;f.reload();check(deferred.id !in f.scheduled && f.settings.findTask(deferred.id)!=null)
  f.admissionRetries.clear();f.reload();check(deferred.id in f.scheduled)
+ f.admissionRetries[deferred.id]=6;f.settings.enabled=false;f.reload()
+ check(f.scheduled.isEmpty()&&f.admissionRetries.isEmpty()&&f.settings.findTask(deferred.id)!!.status==2)
+ f.settings.enabled=true;f.reload();check(deferred.id in f.scheduled)
+ f.settings.deleteTask(deferred.id);f.reload();check(deferred.id !in f.scheduled&&!f.deferredSends.containsKey(deferred.id)&&!f.admissionRetries.containsKey(deferred.id))
+ val edit=ScheduledTaskItem("edited-deferred",now-3600000,status=2,sendOnTimeout=false)
+ f.settings.saveTask(edit);f.reload();f.admissionRetries[edit.id]=6
+ f.settings.saveTask(edit.copy(planTime=now+80000,planTimes=listOf(now+80000),status=0));f.reload()
+ check(edit.id in f.scheduled&&!f.deferredSends.containsKey(edit.id)&&!f.admissionRetries.containsKey(edit.id))
+ val deleted=ScheduledTaskItem("deleted-running",now-1000);f.settings.saveTask(deleted);f.acceptedSends+=deleted.id;f.settings.deleteTask(deleted.id);f.finish(deleted)
+ check(f.settings.findTask(deleted.id)==null)
+ val moved=ScheduledTaskItem("edited-running",now-1000);f.settings.saveTask(moved);f.acceptedSends+=moved.id
+ f.settings.saveTask(moved.copy(planTime=now+90000,planTimes=listOf(now+90000),status=0));f.finish(moved)
+ check(f.settings.findTask(moved.id)!!.planTime==now+90000&&moved.id in f.scheduled)
  val stale=ScheduledTaskItem("stale",now+100000);f.settings.saveTask(stale);f.reload();check(f.settings.findTask("stale")!!.status==0 && "stale" in f.scheduled)
  println("PASS production send state: reload preserves in-flight ownership, no cross-task resend, one-shot deletion, repeat advancement, uncertain occurrence held, edited time recovery, manual send plan retained, crash-stale reset")
 }

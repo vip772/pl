@@ -2140,3 +2140,6 @@ DexInstallScheduler.installation(key, label, stage, priority) 返回可关闭 In
 
 ### 首页侧边栏异步清理
 HomeSidePanelRuntime 的运行时失效门覆盖页面挂载及头像回填；destroy 移除 Handler 回调，清空排队头像任务并 shutdown 执行器，已开始任务结束后不回填。头像线程空闲 30 秒退出。Session 解绑清除头像引用；页面清理异常隔离，不回收显示中的 Bitmap。
+
+### 定时任务拒绝重试恢复
+定时任务主开关关闭触发 reload 时清除入队重试次数；未接收的 deferred 计划和结果不确定记录保留。重新开启开始新一轮最多 6 次入队重试，已接收发送照常完成。
