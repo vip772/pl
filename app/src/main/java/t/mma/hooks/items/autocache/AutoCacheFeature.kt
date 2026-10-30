@@ -4,6 +4,9 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.model.WeChatMessage
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
+import android.content.SharedPreferences
+import t.mma.hooks.core.FeatureResourceScope
+import t.mma.utils.KavaReflector
 import t.mma.hooks.core.FeatureContext
 import t.mma.preferences.HchatStorage
 import t.mma.ui.FeatureSettingsProvider
@@ -44,15 +47,56 @@ object AutoCacheSettings {
 }
 
 class AutoCacheFeature : BaseFeature() {
+    private var runningResources: FeatureResourceScope? = null
     override fun featureId(): String = ID
     override fun name(): String = "自动缓存"
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(AutoCacheSettingsProvider())
     }
     override fun onFeatureInstall(context: FeatureContext) {
-        val runtime = AutoCacheRuntime(context, subscriptionRegistrar())
-        trackResource { runtime.shutdown() }
-        runtime.start()
+        val preferences = HchatStorage.preferences(context.hostContext(), AutoCacheSettings.PREFS_NAME)
+        var active = true
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == AutoCacheSettings.KEY_ENABLE || key == null) {
+                synchronized(this) { if (active) updateRuntime(context, preferences) }
+            }
+        }
+        trackResource {
+            synchronized(this) {
+                active = false
+                preferences.unregisterOnSharedPreferenceChangeListener(listener)
+                stopRuntime()
+            }
+        }
+        preferences.registerOnSharedPreferenceChangeListener(listener)
+        updateRuntime(context, preferences)
+    }
+    @Synchronized
+    private fun updateRuntime(context: FeatureContext, preferences: SharedPreferences) {
+        if (!preferences.getBoolean(AutoCacheSettings.KEY_ENABLE, false)) {
+            stopRuntime()
+            return
+        }
+        if (runningResources != null) return
+        val resources = FeatureResourceScope { logError("自动缓存释放失败", it) }
+        runningResources = resources
+        try {
+            val runtime = AutoCacheRuntime(context) { subscription ->
+                resources.register {
+                    KavaReflector.invoke(KavaReflector.findMethod(subscription.javaClass, "unsubscribe"), subscription)
+                }
+            }
+            resources.register { runtime.shutdown() }
+            runtime.start()
+        } catch (error: Throwable) {
+            stopRuntime()
+            logError("自动缓存启动失败", error)
+        }
+    }
+    private fun stopRuntime() {
+        val resources = runningResources
+        runningResources = null
+        resources?.close()
     }
     companion object { const val ID = "auto_cache" }
 }

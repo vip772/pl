@@ -1034,3 +1034,6 @@ SingleMessageMenuLocator、MultiSelectMessageMenuLocator、FavoriteMenuLocator �
 共享 WeChatSnsPostObserver 和 WeContactHeaderApi 的 install 入口现先取共享 Dex 门，再取原安装 monitor；定位查询及关联 Hook 安装处于同一区间。共享 Hook 所有权不变，不随单个功能消费者关闭。test_dex_finder_gates.py 编译完整生产入口（Xposed/Hook 注册外围 fixture）通过，实际手机 Hook 尚未验证。
 
 视频号详情定位、聊天实况图片 fresh 定位、官方群发运行时定位及转账实名 ensureReady 现自行通过共享 Dex 门，含延迟 invokes 消费、缓存整理及关联 Hook。网络发送和响应等待不放在查询区间内。test_dex_query_consumers.py 新增这些生产入口及官方群发子定位的源码约束；完整四文件编译仍依赖 Actions，不能把该约束当作真实发送/网络查询通过。原 matcher 和缓存 key 未改。
+
+### 自动缓存运行时与共享消息观察者
+自动缓存主开关关闭时取消自身消息订阅、独占 Dex 安装凭证和延迟检查，重新开启创建新运行时；公共消息观察者保留给其它功能。关闭不保证撤销已交给微信的原生下载，也不补处理关闭期间的消息事件。
