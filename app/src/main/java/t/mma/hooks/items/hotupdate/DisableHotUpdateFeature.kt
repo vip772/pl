@@ -5,6 +5,7 @@ import android.content.Context
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import t.mma.dexkit.DexMethodCache
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
@@ -63,6 +64,9 @@ class DisableHotUpdateFeature : BaseFeature() {
 
         @JvmStatic
         fun install(context: Context?, classLoader: ClassLoader?, dexKit: DexKitBridge?) {
+            DexInstallScheduler.queryDexKit { installLocked(context, classLoader, dexKit) }
+        }
+        private fun installLocked(context: Context?, classLoader: ClassLoader?, dexKit: DexKitBridge?) {
             if (context == null || classLoader == null || dexKit == null) return
             if (!isEnabled(context)) return
             installEarly(context, classLoader)

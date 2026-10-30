@@ -7,6 +7,7 @@ import android.view.View
 import android.widget.Button
 import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
@@ -52,6 +53,9 @@ class WeChatTabletFeature : BaseFeature() {
 
         @JvmStatic
         fun install(context: Context?, classLoader: ClassLoader?, dexKit: org.luckypray.dexkit.DexKitBridge?) {
+            DexInstallScheduler.queryDexKit { installLocked(context, classLoader, dexKit) }
+        }
+        private fun installLocked(context: Context?, classLoader: ClassLoader?, dexKit: org.luckypray.dexkit.DexKitBridge?) {
             if (context == null || classLoader == null || dexKit == null) return
             if (!isEnabled(context)) return
             val cache = HchatStorage.preferences(context, CACHE_PREFS)

@@ -24,6 +24,9 @@ import org.luckypray.dexkit.result.MethodData
 import java.io.File
 import java.security.MessageDigest
 import java.util.LinkedHashMap
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.zip.ZipFile
 
@@ -63,6 +66,37 @@ object ScriptPluginAgentLocalReverseTools {
     private val targetLock = Any()
     private val targetSessions = LinkedHashMap<String, TargetSession>()
     private var activeExternalBinding: Binding? = null
+    private const val EXTERNAL_IDLE_SECONDS = 30L
+    private val idleCloser = ScheduledThreadPoolExecutor(1) { runnable ->
+        Thread(runnable, "Hchat-ReverseIdleClose").apply { isDaemon = true }
+    }.apply {
+        removeOnCancelPolicy = true
+        setKeepAliveTime(30, TimeUnit.SECONDS)
+        allowCoreThreadTimeOut(true)
+    }
+    private var externalIdleTicket: Any? = null
+    private var externalIdleFuture: ScheduledFuture<*>? = null
+    // Called with shared Dex gate -> targetLock; no native result escapes a tool call.
+    private fun armExternalIdleClose() {
+        externalIdleFuture?.cancel(false)
+        externalIdleFuture = null
+        externalIdleTicket = null
+        val target = activeExternalBinding ?: return
+        val ticket = Any()
+        externalIdleTicket = ticket
+        externalIdleFuture = idleCloser.schedule({
+            DexInstallScheduler.queryDexKit {
+                synchronized(targetLock) {
+                    if (externalIdleTicket === ticket && activeExternalBinding === target) {
+                        externalIdleTicket = null
+                        externalIdleFuture = null
+                        activeExternalBinding = null
+                        target.close()
+                    }
+                }
+            }
+        }, EXTERNAL_IDLE_SECONDS, TimeUnit.SECONDS)
+    }
 
     @JvmStatic
     fun install(holder: DexBridgeHolder, context: Context) {
@@ -70,6 +104,7 @@ object ScriptPluginAgentLocalReverseTools {
             synchronized(targetLock) {
                 activeExternalBinding?.close()
                 activeExternalBinding = null
+                armExternalIdleClose()
                 val host = Binding.host(holder, context.applicationContext)
                 binding.getAndSet(host)?.close()
                 targetSessions.clear()
@@ -404,39 +439,43 @@ object ScriptPluginAgentLocalReverseTools {
             // Lock order matches ModuleEntry initialization: shared Dex gate, then target lock.
             DexInstallScheduler.queryDexKit {
                 synchronized(targetLock) {
-                    onProgress?.invoke(progressLabel(normalizedName))
-                    val result = when (normalizedName) {
-                        "open_target_session" -> openTarget(current, arguments, allowedExternalApkRoots)
-                        "list_target_sessions" -> listTargets(current)
-                        "get_target_session" -> getTarget(current, arguments)
-                        "close_target_session" -> closeTarget(current, arguments)
-                        "compare_methods_using_strings" -> compareMethodsUsingStrings(current, arguments, cancellation)
-                        else -> {
-                            val target = resolveTarget(current, arguments.optString("session_id", ""))
-                            val targetResult = when (normalizedName) {
-                                "find_classes_using_strings" -> findClasses(target, arguments, cancellation)
-                                "find_methods_using_strings" -> findMethodsUsingStrings(target, arguments, cancellation)
-                                "find_methods_using_resource" -> findMethodsUsingResource(target, arguments, cancellation)
-                                "find_methods" -> findMethods(target, arguments, cancellation)
-                                "inspect_method" -> inspectMethod(target, arguments, cancellation)
-                                "inspect_class" -> inspectClass(target, arguments, cancellation)
-                                "export_method_java" -> exportMethodJava(target, arguments, cancellation)
-                                "export_class_java" -> exportClassJava(target, arguments, cancellation)
-                                "export_method_smali" -> exportMethodSmali(target, arguments, cancellation)
-                                "export_class_smali" -> exportClassSmali(target, arguments, cancellation)
-                                "find_resource_values" -> findResourceValues(target, arguments)
-                                "get_resource_value" -> getResourceValue(target, arguments)
-                                "list_res" -> listResources(target, arguments)
-                                "decode_xml" -> decodeXml(target, arguments)
-                                "manifest" -> manifest(target, arguments)
-                                else -> error("未知的内置逆向工具: $name")
+                    try {
+                        onProgress?.invoke(progressLabel(normalizedName))
+                        val result = when (normalizedName) {
+                            "open_target_session" -> openTarget(current, arguments, allowedExternalApkRoots)
+                            "list_target_sessions" -> listTargets(current)
+                            "get_target_session" -> getTarget(current, arguments)
+                            "close_target_session" -> closeTarget(current, arguments)
+                            "compare_methods_using_strings" -> compareMethodsUsingStrings(current, arguments, cancellation)
+                            else -> {
+                                val target = resolveTarget(current, arguments.optString("session_id", ""))
+                                val targetResult = when (normalizedName) {
+                                    "find_classes_using_strings" -> findClasses(target, arguments, cancellation)
+                                    "find_methods_using_strings" -> findMethodsUsingStrings(target, arguments, cancellation)
+                                    "find_methods_using_resource" -> findMethodsUsingResource(target, arguments, cancellation)
+                                    "find_methods" -> findMethods(target, arguments, cancellation)
+                                    "inspect_method" -> inspectMethod(target, arguments, cancellation)
+                                    "inspect_class" -> inspectClass(target, arguments, cancellation)
+                                    "export_method_java" -> exportMethodJava(target, arguments, cancellation)
+                                    "export_class_java" -> exportClassJava(target, arguments, cancellation)
+                                    "export_method_smali" -> exportMethodSmali(target, arguments, cancellation)
+                                    "export_class_smali" -> exportClassSmali(target, arguments, cancellation)
+                                    "find_resource_values" -> findResourceValues(target, arguments)
+                                    "get_resource_value" -> getResourceValue(target, arguments)
+                                    "list_res" -> listResources(target, arguments)
+                                    "decode_xml" -> decodeXml(target, arguments)
+                                    "manifest" -> manifest(target, arguments)
+                                    else -> error("未知的内置逆向工具: $name")
+                                }
+                                attachTarget(targetResult, target)
                             }
-                            attachTarget(targetResult, target)
                         }
+                        cancellation?.throwIfCancelled()
+                        onProgress?.invoke("整理逆向结果")
+                        result
+                    } finally {
+                        armExternalIdleClose()
                     }
-                    cancellation?.throwIfCancelled()
-                    onProgress?.invoke("整理逆向结果")
-                    result
                 }
             }
         }.getOrElse {
@@ -726,11 +765,14 @@ object ScriptPluginAgentLocalReverseTools {
         activeExternalBinding?.close()
         activeExternalBinding = null
         val dex = DexKitBridge.create(file.path)
-        if (!dex.isValid) {
-            dex.close()
-            throw IllegalStateException("DexKit 无法打开目标 APK: ${file.name}")
+        try {
+            check(dex.isValid) { "DexKit 无法打开目标 APK: ${file.name}" }
+            dex.setThreadNum(2)
+            return Binding.external(host.context, dex, session).also { activeExternalBinding = it }
+        } catch (error: Throwable) {
+            runCatching { dex.close() }.onFailure { error.addSuppressed(it) }
+            throw error
         }
-        return Binding.external(host.context, dex, session).also { activeExternalBinding = it }
     }
 
     private fun attachTarget(rawResult: String, target: Binding): String {

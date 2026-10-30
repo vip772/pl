@@ -75,3 +75,11 @@ assert 'locateEmojiRuntime(cacheKey)' in mass[a:b] and 'locateNativeSubmitRuntim
 
 transfer=(r/'app/src/main/java/t/mma/hooks/items/payment/transfer/TransferReceiveAccountStore.kt').read_text()
 assert 'DexInstallScheduler.queryDexKit { installLocked(context, logger) }' in transfer
+
+# Early installation entry points must own the gate even when called directly.
+for file in ['tablet/WeChatTabletFeature.kt', 'hotupdate/DisableHotUpdateFeature.kt']:
+ source=(base/file).read_text()
+ assert 'DexInstallScheduler.queryDexKit { installLocked(context, classLoader, dexKit) }' in source,file
+ assert source.index('queryDexKit { installLocked') < source.index('private fun installLocked'),file
+monet=(base/'monetgenerator/engine/MonetDexEvidenceCollector.kt').read_text()
+assert 'DexInstallScheduler.queryDexKit {\n        collectLocked(bridge, candidates)' in monet

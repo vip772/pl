@@ -3,7 +3,8 @@ from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1]
 agent=(r/'app/src/main/java/t/mma/hooks/items/script/agent/ScriptPluginAgentLocalReverseTools.kt').read_text()
-start=agent.index('            DexInstallScheduler.queryDexKit {')
+execute=agent.index("val normalizedName = normalize(name)")
+start=agent.index('            DexInstallScheduler.queryDexKit {',execute)
 end=agent.index('        }.getOrElse {',start)
 section=agent[start:end]
 assert section.index('queryDexKit') < section.index('synchronized(targetLock)') < section.index('findClasses(target,')

@@ -4,11 +4,18 @@
  */
 package t.mma.hooks.items.monetgenerator.engine
 
+import t.mma.hooks.core.DexInstallScheduler
 import org.luckypray.dexkit.result.FieldUsingType
 import org.luckypray.dexkit.result.MethodData
 
 object MonetDexEvidenceCollector {
     fun collect(
+        bridge: org.luckypray.dexkit.DexKitBridge,
+        candidates: List<MonetDexCandidate>,
+    ): List<MonetResourceDexEvidence> = DexInstallScheduler.queryDexKit {
+        collectLocked(bridge, candidates)
+    }
+    private fun collectLocked(
         bridge: org.luckypray.dexkit.DexKitBridge,
         candidates: List<MonetDexCandidate>,
     ): List<MonetResourceDexEvidence> {

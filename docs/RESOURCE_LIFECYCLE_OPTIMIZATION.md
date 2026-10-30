@@ -125,3 +125,9 @@ BaseFeature 事件订阅包装现绑定订阅时的资源作用域，作用域�
 视频号详情定位、聊天实况图片 fresh 定位、官方群发运行时定位及转账实名 ensureReady 现自行通过共享 Dex 门，含延迟 invokes 消费、缓存整理及关联 Hook。网络发送和响应等待不放在查询区间内。test_dex_query_consumers.py 新增这些生产入口及官方群发子定位的源码约束；完整四文件编译仍依赖 Actions，不能把该约束当作真实发送/网络查询通过。原 matcher 和缓存 key 未改。
 
 会话长按菜单和朋友圈头像菜单定位入口自行通过共享 Dex 门，完整生产定位器加入 SDK/DexKit 编译并通过。收款账户解析共享 Hook 安装先取共享门再取安装 monitor，源码入口约束已覆盖，整文件编译以 Actions 为准；不改账户解析字段、收款行为或缓存定位条件。1e7a88c 的完整 Actions 41056337449 已成功。
+
+## 接续：早期入口与外部 APK 闲置回收
+平板模式、屏蔽热更新的公开 install 入口现自行进入共享 Dex 门，屏蔽热更新内部 monitor 在共享门内；Monet 证据采集也自行持有门直到 callers/invokes/usingFields 转换为独立数据完成。定位条件、缓存、Hook 行为保持原实现。test_early_dex_gates.py 编译三个完整生产文件及生产缓存/调度器/Monet 模型，依赖真实 Android SDK 和 DexKit ABI，通过；test_dex_query_consumers.py 的入口约束和并发测试通过。
+Agent 外部 APK 在最后一次工具执行结束 30 秒后释放独占 Binding，包括已初始化的资源解析模块和 Dex native 实例；回收在后台取得共享门→targetLock，查询进行中不关闭。每次执行（含失败、取消）重新登记票据，迟到旧票据和旧目标身份均不能关闭新目标；重绑会取消票据。只卸载解析实例，已登记目标会话和 APK 文件保留；下次查询沿原 resolveTarget 校验文件后重建。外部实例发布前设置 native 线程数为 2，初始化失败关闭未发布实例。定时执行器取消后移除任务，闲置核心线程可退出，不在主线程执行 native close。
+test_agent_external_idle.py 提取生产回收方法并结合生产共享门，验证旧票据、目标替换、关闭/重绑取消、活动查询排斥、重调度和只释放一次；test_resource_schedulers.py 通过。该 fixture 不包含真实 native close/重建，整文件编译和 R8 仍以对应 Actions 为准。宿主共享 DexKit 未启用闲置关闭，脚本原始对象兼容保活契约和全持有链迁移仍待完成。
+累计构建证据：7992896 对应 Actions 41057094593、3c05219 对应 Actions 41057865324 均已 completed/success；包括群员头衔完整源码编译。本轮新增修改需等待新的 Actions，不将前一提交成功扩大到当前修改。手机昵称布局、实际查询重建和真实发送仍未验证。
