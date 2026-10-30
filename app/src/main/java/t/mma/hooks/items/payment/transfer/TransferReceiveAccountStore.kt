@@ -4,6 +4,7 @@ import android.content.Context
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
@@ -30,8 +31,10 @@ object TransferReceiveAccountStore {
     private const val KEY_ACCOUNTS = "transfer_receive_accounts"
     @Volatile private var installed = false
 
+    fun install(context: FeatureContext, logger: (String, Throwable?) -> Unit): Boolean =
+        DexInstallScheduler.queryDexKit { installLocked(context, logger) }
     @Synchronized
-    fun install(context: FeatureContext, logger: (String, Throwable?) -> Unit): Boolean {
+    private fun installLocked(context: FeatureContext, logger: (String, Throwable?) -> Unit): Boolean {
         if (installed) return true
         val prefs = DexMethodCache.prefs(
             context.hostContext(),

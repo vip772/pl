@@ -72,3 +72,6 @@ for file,contract in contracts.items():
 mass=(base/'selectedmessages/OfficialMassSendSender.kt').read_text()
 a=mass.index('    private fun locateRuntimeLocked()');b=mass.index('    private fun locateNativeSubmitRuntime',a)
 assert 'locateEmojiRuntime(cacheKey)' in mass[a:b] and 'locateNativeSubmitRuntime(' in mass[a:b]
+
+transfer=(r/'app/src/main/java/t/mma/hooks/items/payment/transfer/TransferReceiveAccountStore.kt').read_text()
+assert 'DexInstallScheduler.queryDexKit { installLocked(context, logger) }' in transfer

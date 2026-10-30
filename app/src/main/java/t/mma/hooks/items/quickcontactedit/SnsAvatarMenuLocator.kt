@@ -4,6 +4,7 @@ import android.view.ContextMenu
 import android.view.MenuItem
 import android.view.View
 import t.mma.dexkit.DexMethodCache
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
@@ -20,7 +21,9 @@ internal object SnsAvatarMenuLocator {
     private const val CACHE_CREATE = "avatar_menu_create_v2"
     private const val CACHE_CLICK = "avatar_menu_click_v2"
 
-    fun locate(context: FeatureContext, logger: (String, Throwable?) -> Unit): SnsAvatarMenuMethods {
+    fun locate(context: FeatureContext, logger: (String, Throwable?) -> Unit): SnsAvatarMenuMethods =
+        DexInstallScheduler.queryDexKit { locateLocked(context, logger) }
+    private fun locateLocked(context: FeatureContext, logger: (String, Throwable?) -> Unit): SnsAvatarMenuMethods {
         val prefs = DexMethodCache.prefs(context.hostContext(), PREFS_NAME)
         val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         val cachedCreate = DexMethodCache.loadList(

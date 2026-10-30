@@ -4,6 +4,7 @@ import android.widget.AdapterView
 import android.view.ContextMenu
 import android.view.View
 import t.mma.dexkit.DexMethodCache
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
@@ -18,7 +19,9 @@ internal object ConversationMenuLocator {
     private const val CONVERSATION_PACKAGE = "com.tencent.mm.ui.conversation."
     private const val LONG_CLICK_LOG = "headercount:%d, postion:%d"
 
-    fun menuCreateMethod(context: FeatureContext, logger: (String, Throwable?) -> Unit): Method? {
+    fun menuCreateMethod(context: FeatureContext, logger: (String, Throwable?) -> Unit): Method? =
+        DexInstallScheduler.queryDexKit { menuCreateMethodLocked(context, logger) }
+    private fun menuCreateMethodLocked(context: FeatureContext, logger: (String, Throwable?) -> Unit): Method? {
         val prefs = DexMethodCache.prefs(context.hostContext(), PREFS_NAME)
         val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         DexMethodCache.load(prefs, runtimeKey, context.hostClassLoader(), CACHE_CREATE)
