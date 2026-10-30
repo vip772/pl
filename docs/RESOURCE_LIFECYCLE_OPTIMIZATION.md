@@ -145,3 +145,6 @@ Agent 工具执行的宿主 Binding 读取已移入共享门和 targetLock 内�
 ## 接续：语音播报回调代际与订阅去重
 文字转语音播报消息与音量键回调固定创建时的 TextSpeechRuntime，不再通过可变 runtime 字段查找新实例。每轮安装捕获 subscriptionRegistrar，重复 DexReady 通过原子状态避免重复消息订阅，订阅异常重置以允许重试；关闭过程中迟到订阅立即交回原作用域释放。test_text_speech_feature.py 编译完整生产功能入口并验证重复 readiness、订阅失败恢复、跨代旧消息/按键隔离及订阅中关闭；test_text_speech_shutdown.py 验证主后台关闭，均通过。未接通语音播报全主开关重建，真实 TTS/手机仍待验证。
 累计 9437a6f 的 Actions 41062098925 已成功，覆盖自动缓存主开关完整 APK/R8 构建；166be58 及此后提交仍以各自 Actions 为准。
+
+## 接续：语音播报主开关与独占运行时重建
+文字转语音播报现由主开关创建/释放独占 TextSpeechRuntime、音量键 Hook 和消息订阅。关闭按运行时作用域逆序解除 Hook、订阅并调用幂等 TTS shutdown；再次开启创建新实例。DexReady 安装闭包固定该代实例，重复 ready 不重复订阅，订阅异常可重试，销毁后的旧偏好监听快照被 active 拦截。运行时自身偏好监听也先检查 destroyed。test_text_speech_feature.py 现编译完整生产 Feature 和资源作用域，20 轮主开关、旧代回调、订阅失败恢复、重复 ready、关闭/重开和销毁后迟到监听通过；test_text_speech_shutdown.py 原主/后台关闭测试通过。真实 TTS 引擎、音量键设备行为和手机仍待验证；不保证撤销已经交给语音服务的播放。

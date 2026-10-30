@@ -90,6 +90,7 @@ class TextSpeechRuntime(context: Context) {
     private val pendingVoiceKeys = ConcurrentHashMap.newKeySet<String>()
     private val restartTtsRunnable = Runnable { restartTtsForEngineChange() }
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (destroyed) return@OnSharedPreferenceChangeListener
         when (key) {
             TextSpeechSettings.KEY_ENABLE -> if (!settings().isEnabled()) {
                 mainHandler.post {

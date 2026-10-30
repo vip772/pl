@@ -22,9 +22,9 @@ with tempfile.TemporaryDirectory() as td:
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(p/'test.jar'),str(p/'Test.kt')],check=True,timeout=45)
  subprocess.run(['java','-cp',f'{p/"test.jar"}:{std}','TestKt'],check=True,timeout=15)
 f=(r/'app/src/main/java/t/mma/hooks/items/textspeech/TextSpeechFeature.kt').read_text()
-assert f.index('trackResource { installed.shutdown()') < f.index('installVolumeKeyHook(installed)')
-assert 'trackResource { HookRegistry.get().unhook(unhook) }' in f
+assert f.index('resources.register { installed.shutdown()') < f.index('installVolumeKeyHook(installed, resources)')
+assert 'resources.register { HookRegistry.get().unhook(unhook) }' in f
 assert 'if (destroyed) return false' in s[s.index('    fun handleVolumeKey'):s.index('    @Synchronized\n    fun shutdown')]
 
 assert "installed.handleMessage(message)" in f and "installed.handleVolumeKey(event)" in f
-assert "observing.compareAndSet(false, true)" in f and "val registerSubscription = subscriptionRegistrar()" in f
+assert "observing.compareAndSet(false, true)" in f and "resources.register {" in f
