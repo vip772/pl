@@ -55,6 +55,15 @@ fun main(){
  release.countDown();flush();check(installer("block")==null)
  val attempts=AtomicInteger();D.schedule("retry"){attempts.incrementAndGet()>1};flush();check(attempts.get()==1 && installer("retry")!=null)
  Handler.drain();flush();check(attempts.get()==2 && installer("retry")==null)
+ val realOwner=D.installation("owner-identity");realOwner.schedule{true};flush()
+ val unusedOwner=D.installation("owner-identity");unusedOwner.close()
+ check(installer("owner-identity")==null)
+ var collision=false
+ val conflictingOwner=D.installation("owner-identity")
+ try{conflictingOwner.schedule{error("owner stolen")}}catch(_:IllegalStateException){collision=true}
+ check(collision);conflictingOwner.close()
+ realOwner.schedule{error("installed ownership was cleared")};flush();realOwner.close()
+ val freshOwner=D.installation("owner-identity");freshOwner.schedule{true};flush();freshOwner.close()
  val cancelledAttempts=AtomicInteger()
  val cancelled=D.installation("owned-retry")
  cancelled.schedule{cancelledAttempts.incrementAndGet();false};flush()

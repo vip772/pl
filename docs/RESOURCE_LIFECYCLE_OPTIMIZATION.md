@@ -111,3 +111,5 @@ test_dex_finder_gates.py 扩展编译上述完整生产定位器、收藏语音�
 TextSpeechFeature 在后续安装前即登记独占 TextSpeechRuntime，音量键 Hook 也登记解除。运行时 shutdown 幂等，移除 Handler 旧回调，主线程立即停止播放并关闭 TTS，后台调用只投递一次清理；销毁后音量键回调直接退出。TTS 原有 generation 和 destroyed 校验保留。test_text_speech_shutdown.py 通过主/后台清理、旧回调移除、重复关闭及生产资源登记约束。实际 TTS 引擎、音频会话和手机播报尚未验证；本项不等于语音播报已接入完整主开关重建。
 
 共享 WeChatSnsPostObserver 和 WeContactHeaderApi 的 install 入口现先取共享 Dex 门，再取原安装 monitor；定位查询及关联 Hook 安装处于同一区间。共享 Hook 所有权不变，不随单个功能消费者关闭。test_dex_finder_gates.py 编译完整生产入口（Xposed/Hook 注册外围 fixture）通过，实际手机 Hook 尚未验证。
+
+独占 Installation 现为每个凭证分配 owner 身份，只有相同身份可撤销其状态；同 key 其他凭证的迟到关闭不会删除现有安装。并发重复占用同 key 明确拒绝，原 owner 关闭后新凭证可接管。生产调度测试新增未登记同名 close、冲突登记、冲突凭证 close 不影响原安装、关闭后新 owner 安装，均通过。共享 schedule 的 owner 为 null，现有共享 API 语义保留。

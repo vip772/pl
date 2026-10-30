@@ -44,11 +44,15 @@ object DexInstallScheduler {
         stage: Stage = Stage.BRIDGE,
         priority: Int = 0,
         installer: () -> Boolean
+    ) = scheduleOwned(key, label, stage, priority, null, installer)
+    private fun scheduleOwned(
+        key: String, label: String, stage: Stage, priority: Int, owner: Any?, installer: () -> Boolean
     ) {
         if (key.isBlank()) return
         HLog.d("$TAG 调度功能: $label key=$key stage=$stage priority=$priority")
-        val state = states.computeIfAbsent(key) { State(label) }
+        val state = states.computeIfAbsent(key) { State(label, owner) }
         synchronized(state) {
+            check(state.owner === owner) { "Dex installation key already belongs to another owner: $key" }
             if (state.cancelled || state.installed.get()) return
             state.label = label
             state.stage = stage
@@ -72,31 +76,34 @@ object DexInstallScheduler {
         private val priority: Int
     ) : AutoCloseable {
         private var closed = false
+        private val owner = Any()
         @Synchronized
         fun schedule(installer: () -> Boolean) {
-            if (!closed) DexInstallScheduler.schedule(key, label, stage, priority, installer)
+            if (!closed) scheduleOwned(key, label, stage, priority, owner, installer)
         }
         @Synchronized
         override fun close() {
             if (closed) return
             closed = true
-            cancel(key)
+            cancel(key, owner)
         }
     }
     fun installation(
         key: String, label: String = key, stage: Stage = Stage.BRIDGE, priority: Int = 0
     ): Installation = Installation(key, label, stage, priority)
     /** Does not interrupt an installer already executing; its owner must release acquired resources. */
-    private fun cancel(key: String) {
+    private fun cancel(key: String, owner: Any) {
         states.computeIfPresent(key) { _, state ->
-            synchronized(state) {
-                state.cancelled = true
-                state.installer = null
-                state.retryCallback?.let { mainHandler.removeCallbacks(it) }
-                state.retryCallback = null
-                state.retryScheduled.set(false)
+            if (state.owner !== owner) state else {
+                synchronized(state) {
+                    state.cancelled = true
+                    state.installer = null
+                    state.retryCallback?.let { mainHandler.removeCallbacks(it) }
+                    state.retryCallback = null
+                    state.retryScheduled.set(false)
+                }
+                null
             }
-            null
         }
     }
     @JvmStatic
@@ -233,7 +240,7 @@ object DexInstallScheduler {
         return readyLevel.get() >= stage.level
     }
 
-    private class State(@Volatile var label: String) {
+    private class State(@Volatile var label: String, val owner: Any? = null) {
         @Volatile var cancelled = false
         var retryCallback: Runnable? = null
         @Volatile var stage: Stage = Stage.BRIDGE
