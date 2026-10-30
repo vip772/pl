@@ -4,6 +4,7 @@ import android.view.ContextMenu
 import android.view.MenuItem
 import android.view.View
 import t.mma.dexkit.DexMethodCache
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
@@ -24,6 +25,10 @@ internal object SnsContextMenuLocator {
     )
 
     fun menuCreateMethods(
+        context: FeatureContext,
+        logger: (String, Throwable?) -> Unit
+    ): List<Method> = DexInstallScheduler.queryDexKit { menuCreateMethodsLocked(context, logger) }
+    private fun menuCreateMethodsLocked(
         context: FeatureContext,
         logger: (String, Throwable?) -> Unit
     ): List<Method> {
@@ -47,6 +52,10 @@ internal object SnsContextMenuLocator {
     }
 
     fun menuClickMethods(
+        context: FeatureContext,
+        logger: (String, Throwable?) -> Unit
+    ): List<Method> = DexInstallScheduler.queryDexKit { menuClickMethodsLocked(context, logger) }
+    private fun menuClickMethodsLocked(
         context: FeatureContext,
         logger: (String, Throwable?) -> Unit
     ): List<Method> {
@@ -83,6 +92,10 @@ internal object SnsContextMenuLocator {
     }
 
     fun foldBindCompletionMethods(
+        context: FeatureContext,
+        logger: (String, Throwable?) -> Unit
+    ): List<Method> = DexInstallScheduler.queryDexKit { foldBindCompletionMethodsLocked(context, logger) }
+    private fun foldBindCompletionMethodsLocked(
         context: FeatureContext,
         logger: (String, Throwable?) -> Unit
     ): List<Method> {

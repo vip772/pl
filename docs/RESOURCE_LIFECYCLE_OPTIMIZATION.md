@@ -104,3 +104,5 @@ SnsInteractionLocator 的点赞、评论、评论保护方法和刷新构造定�
 ## 接续：消息菜单与收藏运行时查询
 SingleMessageMenuLocator、MultiSelectMessageMenuLocator 的所有公开定位入口和 FavoriteMenuLocator 两个菜单入口现通过共享 Dex 门；返回前完成反射 Method 转换。FavoriteVoiceResolver 的下载方法、媒体路径定位入口也在门内，包含延迟 invokes 读取；实际下载/发送不在定位区间执行。定位 matcher、缓存 key、返回类型保持原语义。
 test_dex_finder_gates.py 扩展编译上述完整生产定位器、收藏语音解析器及实际缓存，依赖真实 SDK/DexKit/KavaRef/协程；FeatureContext 和任务 API 为外围 fixture。通过，仍不代表真实菜单交互或语音下载已手机验证。5764c96 的完整 Actions 41052126713 已成功。
+
+朋友圈转发原生媒体、本地媒体路径和上下文菜单定位入口（含折叠卡片绑定完成）现自行通过共享 Dex 门，native 查询及 Method 转换均在返回前完成。缓存和定位条件不变；完整生产定位器已加入 test_dex_finder_gates.py 并通过 SDK/DexKit 编译。手机转发与菜单交互尚未验证。

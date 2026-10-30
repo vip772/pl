@@ -2155,3 +2155,5 @@ DexFinder 的公开 resolve 方法及 findNativeNetSceneClass、SettingsDexFinde
 朋友圈交互及实况上传定位器自行取得共享 Dex 门，先门后定位器 monitor，延迟 usingFields 读取完成后才返回反射成员；定位条件和缓存语义不变。
 
 消息单选/多选菜单、收藏菜单公开定位入口及收藏语音内部定位统一通过共享 Dex 门，结果转换和 invokes 消费在门内；实际下载和发送保留原调度路径。
+
+朋友圈转发原生媒体、本地媒体路径和上下文菜单定位入口（含折叠卡片绑定完成）现自行通过共享 Dex 门，native 查询及 Method 转换均在返回前完成。缓存和定位条件不变；完整生产定位器已加入 test_dex_finder_gates.py 并通过 SDK/DexKit 编译。手机转发与菜单交互尚未验证。

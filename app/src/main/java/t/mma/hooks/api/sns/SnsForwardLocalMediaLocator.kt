@@ -1,6 +1,7 @@
 package t.mma.hooks.api.sns
 
 import t.mma.dexkit.DexMethodCache
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
@@ -23,6 +24,10 @@ internal object SnsForwardLocalMediaLocator {
     private const val SNS_MODEL_PACKAGE = "com.tencent.mm.plugin.sns.model."
 
     fun locate(
+        context: FeatureContext,
+        logger: (String, Throwable?) -> Unit
+    ): SnsForwardLocalMediaMethods = DexInstallScheduler.queryDexKit { locateLocked(context, logger) }
+    private fun locateLocked(
         context: FeatureContext,
         logger: (String, Throwable?) -> Unit
     ): SnsForwardLocalMediaMethods {

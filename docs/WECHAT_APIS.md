@@ -1028,3 +1028,5 @@ DexFinder/SettingsDexFinder 公开定位入口现自行通过 DexInstallSchedule
 朋友圈原生点赞/评论/评论保护/刷新和实况上传定位由公共 API 内部串行，结果消费留在共享 Dex 区间内。此资源约束不改变对外发送参数或返回语义。
 
 SingleMessageMenuLocator、MultiSelectMessageMenuLocator、FavoriteMenuLocator 以及收藏语音定位自行串行查询并返回反射成员；参数、缓存与实际发送/下载调度语义不变。
+
+朋友圈转发原生媒体、本地媒体路径和上下文菜单定位入口（含折叠卡片绑定完成）现自行通过共享 Dex 门，native 查询及 Method 转换均在返回前完成。缓存和定位条件不变；完整生产定位器已加入 test_dex_finder_gates.py 并通过 SDK/DexKit 编译。手机转发与菜单交互尚未验证。
