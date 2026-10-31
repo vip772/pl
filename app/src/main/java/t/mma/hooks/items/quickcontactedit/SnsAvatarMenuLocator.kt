@@ -117,10 +117,12 @@ internal object SnsAvatarMenuLocator {
         logger: (String, Throwable?) -> Unit
     ): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply { matcher(matcher) })
-                .mapNotNull { data ->
-                    runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
-                }
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(FindMethod().apply { matcher(matcher) })
+                    .mapNotNull { data ->
+                        runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+                    }
+            }
                 .filter(predicate)
                 .distinctBy(Method::toGenericString)
         }.onFailure {

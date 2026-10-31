@@ -100,7 +100,8 @@ private class TypingReportBlockHooker(
         if (!allowDexSearch) return null
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -112,6 +113,7 @@ private class TypingReportBlockHooker(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isSendTypingMethod)
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("定位正在输入上报方法失败", it)
             emptyList()

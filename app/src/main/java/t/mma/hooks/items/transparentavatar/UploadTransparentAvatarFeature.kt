@@ -103,7 +103,8 @@ private class UploadTransparentAvatarRuntime(
             return true
         }
         val candidates = runCatching {
-            context.dexKitBridge().findClass(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findClass(
                 FindClass().apply {
                     matcher(
                         ClassMatcher().apply {
@@ -111,7 +112,8 @@ private class UploadTransparentAvatarRuntime(
                         }
                     )
                 }
-            ).map { it.name }
+                ).map { it.name }
+            }
                 .filter { it.isNotBlank() }
                 .distinct()
         }.getOrElse {

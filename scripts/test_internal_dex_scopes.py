@@ -13,6 +13,9 @@ files = [
     'groupleave/GroupLeaveMonitorHighlighter.kt',
     'autocache/NativeMediaCache.kt',
     'emojiat/EmojiAtLocator.kt',
+    'typingreport/TypingReportBlockFeature.kt',
+    'transparentavatar/UploadTransparentAvatarFeature.kt',
+    'quickcontactedit/SnsAvatarMenuLocator.kt',
 ]
 total = 0
 scopes = []
@@ -29,7 +32,7 @@ for relative in files:
             end += 1
         scope = source[match.start():end]
         assert 'bridge.findMethod(' in scope or 'bridge.findClass(' in scope, relative
-        assert any(token in scope for token in ['getMethodInstance', 'getConstructorInstance', 'R.loadClass(it.name, loader)']), relative
+        assert any(token in scope for token in ['getMethodInstance', 'getConstructorInstance', 'R.loadClass(it.name, loader)', 'map { it.name }']), relative
         total += 1
         scopes.append(scope)
 print(f'PASS internal DexKit source boundaries: {total} manager-protected query scopes; no raw bridge calls in migrated files')
@@ -69,13 +72,15 @@ val matcher: ClassMatcher = ClassMatcher()
 object R {fun loadClass(n:String,l:ClassLoader):Class<*>? = null}
 fun isLaunchConstructor(c: Constructor<*>) = true
 fun isPrivateOpenUrlMethod(m: Method) = true
+fun isSendTypingMethod(m: Method) = true
 '''
     names = set(re.findall(r'\b[A-Z][A-Z_]+\b', '\n'.join(scopes))) - {'R', 'ERR'}
     prelude += '\n'.join(f'const val {name} = "anchor"' for name in sorted(names))
     types = ['List<Constructor<*>>', 'List<Method>', 'List<Method>', 'List<Member>',
-             'List<Method>', 'List<Method>', 'List<Class<*>>', 'List<Method>', 'List<Class<*>>']
+             'List<Method>', 'List<Method>', 'List<Class<*>>', 'List<Method>', 'List<Class<*>>',
+             'List<Method>', 'List<String>', 'List<Method>']
     assert len(types) == len(scopes)
-    body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = ClassMatcher(); return {s} }}'
+    body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))
     (p / 'Scopes.kt').write_text(prelude + '\n' + body)
     subprocess.run(compiler + ['-classpath', f'{classes}:{std}:{dex}', '-d', str(p / 'scopes.jar'),
