@@ -24,6 +24,8 @@ files = [
     'realtail/BeforeTransferNameQuery.kt',
     'antirecall/AntiRecallFeature.kt',
     'customnotify/CustomNotificationRuntime.kt',
+    'moments/SnsAntiRecallFeature.kt',
+    'moments/OriginalMomentsUploadFeature.kt',
 ]
 total = 0
 scopes = []
@@ -95,6 +97,7 @@ fun isMsgProcessingClearByKey(m: Method) = true
 fun isLegacySelfRecallMediaCleanupMethod(m: Method) = true
 fun isRevokeEntry(m: Method) = true
 fun isNativeNotificationBuilderCandidate(m: Method) = true
+fun isEnableFlutterSnsPageMethod(m: Method) = true
 '''
     names = set(re.findall(r'\b[A-Z][A-Z_]+\b', '\n'.join(scopes))) - {'R', 'ERR'}
     prelude += '\n'.join(f'const val {name} = "anchor"' for name in sorted(names))
@@ -103,7 +106,8 @@ fun isNativeNotificationBuilderCandidate(m: Method) = true
              'List<Method>', 'List<String>', 'List<Method>',
              'List<Method>', 'List<Member>', 'Method?', 'Method?',
              'Method?', 'List<Constructor<*>>', 'List<String>',
-             'List<Method>', 'List<Method>', 'List<RevokeEntry>', 'List<Method>', 'List<Method>']
+             'List<Method>', 'List<Method>', 'List<RevokeEntry>', 'List<Method>', 'List<Method>',
+             'Method?', 'List<Method>', 'List<Method>']
     assert len(types) == len(scopes)
     body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))

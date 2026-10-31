@@ -225,7 +225,8 @@ private class OriginalMomentsUploadHooker(
 
     private fun findMethodsByStrings(vararg strings: String): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -234,6 +235,7 @@ private class OriginalMomentsUploadHooker(
                     )
                 }
             ).mapNotNull { it.getMethodInstance(context.hostClassLoader()) }
+            }
         }.getOrElse {
             HLog.e("$TAG DexKit 定位失败(${strings.joinToString()}): ${it.message}", it)
             emptyList()
@@ -242,7 +244,8 @@ private class OriginalMomentsUploadHooker(
 
     private fun findMethodsByExactStrings(vararg strings: String): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -251,6 +254,7 @@ private class OriginalMomentsUploadHooker(
                     )
                 }
             ).mapNotNull { it.getMethodInstance(context.hostClassLoader()) }
+            }
         }.getOrElse {
             HLog.e("$TAG DexKit 精确定位失败(${strings.joinToString()}): ${it.message}", it)
             emptyList()

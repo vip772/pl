@@ -40,6 +40,7 @@
 - 宿主共享 DexKit：已新增 `DexKitBridgeManager` 记录当前代际、活动查询和租约数量，并由 `ModuleEntry` 发布当前 bridge；`DexBridgeHolder` 持有显式 raw-compatibility 租约，使旧脚本/未迁移入口继续保活。管理器提供受控 `closeIfIdle` / `closeRetiredIfIdle`，但当前没有启用自动回收，仍不得宣称宿主 native close 已完成。
 
 ## 修复后的限制与下一步
+- 朋友圈防撤回、原图上传追加 3 个即时反射转换查询区间，累计 27 个内联区间通过真实 ABI 编译；未改变上传调用和页面 Hook，仍须最终统一设备验收。
 - Monet 生成器绑定改为管理器及弱引用所有者，解除独立运行时对原始 bridge 的直接持有；证据收集期间登记活动查询，其他 ZIP/资源处理不持有 bridge。detach 按 FeatureContext 身份匹配，避免旧所有者卸载新绑定。导出任务取消及手机导出验收尚不属于该查询迁移的完成证据。
 - 自定义通知两处查询完成代际保护，签名筛选与去重在保护区间内结束，既有通知 Hook 所有权未改变；累计 24 个内联生产查询表达式通过 ABI 检查，另有转发记录私有解析区间通过源码边界检查。
 - 转发记录类型标签的缓存未命中解析整体进入管理器，`getMethodData`、`usingFields` 与字段反射转换均由私有 `locateFresh` 同步消费；返回结构只含 `Method`、`Class` 和 `Field`。源码边界已检查，整文件编译仍以 Actions 为准。

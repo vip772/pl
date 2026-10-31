@@ -261,7 +261,8 @@ private class SnsAntiRecallHooker(
             ?.let { return it }
 
         val method = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -271,6 +272,7 @@ private class SnsAntiRecallHooker(
                 }
             ).mapNotNull { it.getMethodInstance(context.hostClassLoader()) }
                 .firstOrNull { isEnableFlutterSnsPageMethod(it) }
+            }
         }.getOrElse {
             HLog.e("[Hchat:SnsAntiRecall] 定位旧版朋友圈主页开关失败: ${it.message}", it)
             null
