@@ -193,7 +193,16 @@ internal class ForwardedRecordTypeLabels(
         DexMethodCache.clear(prefs, key, "bind")
         DexMethodCache.clear(prefs, key, "detail")
         prefs.edit().remove("datatype").apply()
-        val bridge = context.dexKitBridge()
+        return context.dexKitManager().withCurrentBridge { bridge ->
+            locateFresh(bridge, loader, key, prefs)
+        }
+    }
+    private fun locateFresh(
+        bridge: org.luckypray.dexkit.DexKitBridge,
+        loader: ClassLoader,
+        key: String,
+        prefs: android.content.SharedPreferences
+    ): Targets? {
         val bindData = bridge.findMethod(FindMethod().apply {
             matcher(MethodMatcher().apply {
                 usingStrings(listOf("com/tencent/mm/plugin/record/ui/RecordMsgBaseAdapter"))

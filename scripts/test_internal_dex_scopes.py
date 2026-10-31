@@ -112,3 +112,13 @@ assert 'MethodData' not in anti and 'entry.data' not in anti
 assert 'val invokedMethods: List<Method>' in anti
 assert 'RevokeEntry(it, emptyList())' in anti
 assert 'locateLegacyMessageStorageUpdateMethod(context, revokeEntries.map { it.method })' in anti
+record = (base / 'hchatextra/ForwardedRecordTypeLabels.kt').read_text()
+assert 'context.dexKitBridge()' not in record
+assert 'withCurrentBridge { bridge ->\n            locateFresh(bridge, loader, key, prefs)' in record
+assert record.count('locateFresh(') == 2
+assert 'data class Targets(val bind: Method, val detail: Class<*>, val dataType: Field)' in record
+fresh = record[record.index('    private fun locateFresh('):record.index('    private fun validBind(')]
+assert 'bridge.getMethodData(viewType)?.usingFields' in fresh
+assert 'bindData.usingFields' in fresh
+assert 'typeFieldData.getFieldInstance(loader)' in fresh
+print('PASS forwarded record field-data consumption: private fresh resolver owned by manager scope')
