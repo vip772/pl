@@ -3,6 +3,8 @@ import t.mma.utils.HLog
 
 import t.mma.event.Events
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.core.PreferenceRuntimeOwner
+import t.mma.preferences.HchatStorage
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.items.customnotify.CustomNotificationRuntime
@@ -18,18 +20,21 @@ class AtAllNotificationBlockFeature : BaseFeature() {
 
     override fun onFeatureInstall(context: FeatureContext) {
         CustomNotificationRuntime.install(context)
-        subscribe(Events.DexReady::class.java) {
-            val observe = WeChatApis.message().observe()
-            if (observe == null) {
-                HLog.e("$TAG 消息观察 API 未就绪")
-                return@subscribe
-            }
-            trackSubscription(observe.subscribe { message ->
-                AtAllNotificationBlockRuntime.record(context.hostContext(), message)
-            })
-        }
+        val prefs = HchatStorage.preferences(context.hostContext(), AtAllNotificationBlockSettings.PREFS_NAME)
+        var dexReady = WeChatApis.message().observe()?.isAvailable == true
+        val owner = PreferenceRuntimeOwner(prefs, setOf(AtAllNotificationBlockSettings.KEY_ENABLE),
+            enabled = { dexReady && prefs.getBoolean(AtAllNotificationBlockSettings.KEY_ENABLE, AtAllNotificationBlockSettings.DEFAULT_ENABLE) },
+            create = { resources ->
+                val observe = WeChatApis.message().observe() ?: error("消息观察 API 未就绪")
+                val subscription = observe.subscribe { message ->
+                    if (!resources.isClosed()) AtAllNotificationBlockRuntime.record(context.hostContext(), message)
+                }
+                resources.register { subscription.unsubscribe() }
+            }, onError = { logError("通知订阅启停失败", it) })
+        trackResource { owner.close() }
+        owner.start()
+        subscribe(Events.DexReady::class.java) { dexReady = true; owner.refresh() }
     }
-
     override fun onFeatureDestroy(context: FeatureContext) {
         AtAllNotificationBlockRuntime.clear()
     }

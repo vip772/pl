@@ -98,15 +98,20 @@ object CustomNotificationRuntime {
     private const val EXTRA_REPLY_COMPLETION_TOKEN = "hchat_custom_notification_reply_completion_token"
     private const val MAX_MERGED_NOTIFICATION_LINES = 7
 
+    private val notificationEpoch = java.util.concurrent.atomic.AtomicLong(0L)
+    private var preferenceListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
+    private val activeRingtones = ConcurrentHashMap.newKeySet<Ringtone>()
+    private fun epochActive(context: Context, epoch: Long): Boolean =
+        notificationEpoch.get() == epoch && CustomNotificationSettings(context).isEnabled()
+    private fun newIdleExecutor(name: String) = java.util.concurrent.ThreadPoolExecutor(
+        1, 1, 30L, java.util.concurrent.TimeUnit.SECONDS, java.util.concurrent.LinkedBlockingQueue<Runnable>(),
+        java.util.concurrent.ThreadFactory { task -> Thread(task, name).apply { isDaemon = true } }
+    ).apply { allowCoreThreadTimeOut(true) }
     private val installed = java.util.concurrent.atomic.AtomicBoolean(false)
     private val receiverRegistered = java.util.concurrent.atomic.AtomicBoolean(false)
     private val notifySeq = AtomicInteger(0)
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Hchat-CustomNotify").apply { isDaemon = true }
-    }
-    private val quickReplyExecutor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Hchat-QuickReply").apply { isDaemon = true }
-    }
+    private val executor = newIdleExecutor("Hchat-CustomNotify")
+    private val quickReplyExecutor = newIdleExecutor("Hchat-QuickReply")
     private val mainHandler = Handler(Looper.getMainLooper())
     private val avatarCache = ConcurrentHashMap<String, Bitmap?>()
     private val nativeNotifyAt = ConcurrentHashMap<String, Long>()
@@ -126,7 +131,9 @@ object CustomNotificationRuntime {
         return notification.extras?.getString(EXTRA_TALKER).orEmpty()
     }
 
+    @Synchronized
     fun install(context: FeatureContext) {
+        installEpochListener(context.hostContext())
         if (installed.compareAndSet(false, true)) {
             QuickMarkReadRuntime.install(context)
             installNotificationHooks(context)
@@ -134,7 +141,24 @@ object CustomNotificationRuntime {
         }
     }
 
+    private fun installEpochListener(context: Context) {
+        if (preferenceListener != null) return
+        val prefs = t.mma.preferences.HchatStorage.preferences(context, CustomNotificationSettings.PREFS_NAME)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == CustomNotificationSettings.KEY_ENABLE) {
+                notificationEpoch.incrementAndGet()
+                executor.queue.clear()
+                avatarCache.clear()
+                avatarRoot = null
+                nativeNotifyAt.clear(); nativeHandledMessages.clear(); notificationDedupAt.clear(); nativeMentions.clear()
+                mainHandler.post { activeRingtones.toList().forEach(::stopRingtone) }
+            }
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        preferenceListener = listener
+    }
     fun handleMessage(context: Context, message: WeChatMessageObserveApi.ObservedMessage) {
+        val epoch = notificationEpoch.get()
         if (AtAllNotificationBlockRuntime.shouldSuppress(context, message)) return
         val settings = CustomNotificationSettings(context)
         if (!settings.isEnabled()) return
@@ -152,13 +176,15 @@ object CustomNotificationRuntime {
         val msgSvrId = message.message?.msgSvrId ?: 0L
 
         mainHandler.postDelayed({
+            if (!epochActive(context, epoch)) return@postDelayed
             if (isHandledByNative(talker, msgSvrId, observedAt)) return@postDelayed
             executor.execute {
+                if (!epochActive(context, epoch)) return@execute
                 if (isHandledByNative(talker, msgSvrId, observedAt)) return@execute
                 if (wechatDoNotDisturbState(rule, talker) != false) return@execute
                 runCatching {
                     val payload = buildPayload(context, rule, message)
-                    sendNotification(context, rule, payload)
+                    sendNotification(context, rule, payload, epoch)
                 }.onFailure {
                     HLog.e("$TAG 发送自定义通知失败: ${it.message}", it)
                 }
@@ -193,6 +219,7 @@ object CustomNotificationRuntime {
                         param.result = null
                         return
                     }
+                    val epoch = notificationEpoch.get()
                     val settings = CustomNotificationSettings(hostContext)
                     if (!settings.isEnabled()) return
                     val rule = settings.effectiveRule(talker) ?: return
@@ -220,7 +247,7 @@ object CustomNotificationRuntime {
                     param.result = null
                     val payload = buildNativePayload(hostContext, rule, notification)
                     executor.execute {
-                        runCatching { sendNotification(hostContext, rule, payload) }
+                        runCatching { sendNotification(hostContext, rule, payload, epoch) }
                             .onFailure { HLog.e("$TAG 转发微信原生通知失败: ${it.message}", it) }
                     }
                 }
@@ -1006,12 +1033,13 @@ object CustomNotificationRuntime {
         nativeHandledMessages.entries.removeIf { now - it.value > NATIVE_OWNERSHIP_TTL_MS }
     }
 
-    private fun sendNotification(context: Context, rule: CustomNotificationRule, payload: NotifyPayload) {
+    private fun sendNotification(context: Context, rule: CustomNotificationRule, payload: NotifyPayload, epoch: Long) {
+        if (!epochActive(context, epoch)) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
         val dedupKey = notificationDedupKey(rule.talker, payload)
         val claimedAt = if (dedupKey != null) claimNotification(dedupKey) ?: return else 0L
         try {
-            publishNotification(context, manager, rule, payload)
+            publishNotification(context, manager, rule, payload, epoch)
         } catch (throwable: Throwable) {
             if (dedupKey != null) notificationDedupAt.remove(dedupKey, claimedAt)
             throw throwable
@@ -1022,8 +1050,10 @@ object CustomNotificationRuntime {
         context: Context,
         manager: NotificationManager,
         rule: CustomNotificationRule,
-        payload: NotifyPayload
+        payload: NotifyPayload,
+        epoch: Long
     ) {
+        if (!epochActive(context, epoch)) return
         val channelId = CHANNEL_PREFIX + "s${if (rule.sound) "1" else "0"}_v${if (rule.vibrate) "1" else "0"}_${rule.ringtone.hashCode()}"
         if (Build.VERSION.SDK_INT >= 26) {
             trimOldChannels(manager)
@@ -1114,12 +1144,13 @@ object CustomNotificationRuntime {
                 extras?.putCharSequenceArray(Notification.EXTRA_TEXT_LINES, mergedLines.toTypedArray())
             }
         }
+        if (!epochActive(context, epoch)) return
         manager.notify(notificationId, notification)
         if (rule.mergeByTalker) {
             cancelOtherCustomNotificationsForTalker(manager, rule.talker, notificationId)
         }
         if (Build.VERSION.SDK_INT >= 26 && rule.sound) {
-            playManualNotificationSound(context, soundUri(rule.ringtone))
+            playManualNotificationSound(context, soundUri(rule.ringtone), epoch)
         }
     }
 
@@ -1323,6 +1354,8 @@ object CustomNotificationRuntime {
         if (!receiverRegistered.compareAndSet(false, true)) return
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context, intent: Intent?) {
+                val epoch = notificationEpoch.get()
+                if (!epochActive(context, epoch)) return
                 val action = intent?.action ?: return
                 val talker = intent.getStringExtra(EXTRA_TALKER).orEmpty()
                 if (talker.isBlank()) return
@@ -1343,12 +1376,13 @@ object CustomNotificationRuntime {
                         runCatching {
                             quickReplyExecutor.execute {
                                 try {
+                                    if (!epochActive(context, epoch)) return@execute
                                     val sent = runCatching {
                                         sendQuickReply(talker, msgId, msgSvrId, reply, quoteQuickReply)
                                     }.onFailure {
                                         HLog.e("$TAG 快捷回复发送异常: $talker", it)
                                     }.getOrDefault(false)
-                                    finishQuickReply(context, notifyId, notificationToken, reply, sent)
+                                    if (epochActive(context, epoch)) finishQuickReply(context, notifyId, notificationToken, reply, sent)
                                     if (!sent) HLog.e("$TAG 快捷回复发送失败: $talker")
                                 } finally {
                                     pendingResult.finish()
@@ -1360,6 +1394,7 @@ object CustomNotificationRuntime {
                         }
                     }
                     ACTION_MARK_READ -> executor.execute {
+                        if (!epochActive(context, epoch)) return@execute
                         if (QuickMarkReadRuntime.markConversationRead(context, talker, true)) {
                             cancelCustomNotificationsForTalker(context, talker, notifyId)
                         }
@@ -1559,23 +1594,26 @@ object CustomNotificationRuntime {
         }.getOrDefault(rawUri)
     }
 
-    private fun playManualNotificationSound(context: Context, uri: Uri?) {
+    private fun playManualNotificationSound(context: Context, uri: Uri?, epoch: Long) {
         if (uri == null) return
         val now = System.currentTimeMillis()
         if (now - lastManualSoundAt < 1200L) return
         lastManualSoundAt = now
         mainHandler.post {
+            if (!epochActive(context, epoch)) return@post
             val ringtone = runCatching { RingtoneManager.getRingtone(context, uri) }.getOrNull() ?: return@post
             runCatching {
                 @Suppress("DEPRECATION")
                 ringtone.setStreamType(android.media.AudioManager.STREAM_NOTIFICATION)
             }
+            activeRingtones.add(ringtone)
             runCatching { ringtone.play() }
             mainHandler.postDelayed({ stopRingtone(ringtone) }, 3500L)
         }
     }
 
     private fun stopRingtone(ringtone: Ringtone) {
+        activeRingtones.remove(ringtone)
         runCatching {
             if (ringtone.isPlaying) ringtone.stop()
         }
@@ -1620,6 +1658,7 @@ object CustomNotificationRuntime {
 
 
     private fun loadAvatarBitmap(context: Context, talker: String): Bitmap? {
+        val epoch = notificationEpoch.get()
         if (talker.isBlank()) return null
         if (CustomFriendAvatarSettings.notificationsEnabled(context)) {
             CustomFriendAvatarStore.loadBitmap(context, talker)?.let { return it }
@@ -1631,7 +1670,10 @@ object CustomNotificationRuntime {
         val bitmap = avatarSources(context, talker, primary, backup).firstNotNullOfOrNull { source ->
             loadBitmap(source)
         }
-        avatarCache[talker] = bitmap
+        if (bitmap != null && epochActive(context, epoch)) {
+            if (avatarCache.size >= 64) avatarCache.clear()
+            avatarCache[talker] = bitmap
+        }
         return bitmap
     }
 
