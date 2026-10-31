@@ -110,19 +110,21 @@ private class FakeLocationHooker(
         val methods = LinkedHashSet<Method>()
         CALLBACK_ANCHORS.forEach { anchors ->
             val candidates = runCatching {
-                context.dexKitBridge().findMethod(
-                    FindMethod().apply {
-                        matcher(MethodMatcher().apply { usingEqStrings(*anchors) })
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findMethod(
+                        FindMethod().apply {
+                            matcher(MethodMatcher().apply { usingEqStrings(*anchors) })
+                        }
+                    ).mapNotNull { data ->
+                        runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+                            ?.takeIf(::isLocationCallback)
                     }
-                )
+                }
             }.getOrElse {
                 logger("定位微信定位回调失败: ${anchors.joinToString()}", it)
                 emptyList()
             }
-            candidates.mapNotNullTo(methods) { data ->
-                runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
-                    ?.takeIf(::isLocationCallback)
-            }
+            methods.addAll(candidates)
         }
 
         val result = methods.distinctBy { it.toGenericString() }
