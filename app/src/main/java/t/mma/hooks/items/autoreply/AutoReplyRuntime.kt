@@ -36,7 +36,6 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -56,22 +55,79 @@ object AutoReplyRuntime {
     private const val XIAOZHI_SOCKET_IDLE_MS = 90_000L
     private const val XIAOZHI_OPUS_PCM_SAMPLE_RATE = 48000
     private const val XIAOZHI_SILK_SAMPLE_RATE = 24000
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Hchat-AutoReply").apply { isDaemon = true }
+    private class RuntimeGeneration(val id: Long) {
+        @Volatile var active = true
+        val worker = java.util.concurrent.ThreadPoolExecutor(1, 1, 30L, TimeUnit.SECONDS,
+            java.util.concurrent.LinkedBlockingQueue<Runnable>(), java.util.concurrent.ThreadFactory { task ->
+                Thread(task, "Hchat-AutoReply").apply { isDaemon = true }
+            }).apply { allowCoreThreadTimeOut(true) }
+        val timer = java.util.concurrent.ScheduledThreadPoolExecutor(1) { task ->
+            Thread(task, "Hchat-AutoReply-Timer").apply { isDaemon = true }
+        }.apply { removeOnCancelPolicy = true; setKeepAliveTime(30L, TimeUnit.SECONDS); allowCoreThreadTimeOut(true) }
+        val client = OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build()
+        val tts = ConcurrentHashMap.newKeySet<TextToSpeech>()
+        val replyCounts = ConcurrentHashMap<String, Int>()
+        val lastReplyTimes = ConcurrentHashMap<String, Long>()
+        val aiHistories = ConcurrentHashMap<String, MutableList<AiMessage>>()
+        val xiaozhiSessions = ConcurrentHashMap<String, String>()
+        val xiaozhiSockets = ConcurrentHashMap<String, XiaozhiSocketSession>()
+        val xiaozhiMcpBridgeRef = AtomicReference<XiaozhiMcpBridge?>()
+        val xiaozhiMcpToolCallTimes = ConcurrentHashMap<String, Long>()
+
     }
-    private val scheduler = Executors.newSingleThreadScheduledExecutor { runnable ->
-        Thread(runnable, "Hchat-AutoReply-Timer").apply { isDaemon = true }
+    @Volatile private var generation: RuntimeGeneration? = null
+    private var nextGeneration = 0L
+    private val processingGeneration = ThreadLocal<RuntimeGeneration>()
+    private val utilityClient by lazy { OkHttpClient.Builder().pingInterval(30, TimeUnit.SECONDS).build() }
+    private val httpClient: OkHttpClient get() = processingGeneration.get()?.client ?: utilityClient
+    private val scheduler: java.util.concurrent.ScheduledThreadPoolExecutor
+        get() = processingGeneration.get()?.timer
+            ?: throw java.util.concurrent.RejectedExecutionException("自动回复已关闭")
+    @Synchronized fun start() {
+        if (generation?.active == true) return
+        generation = RuntimeGeneration(++nextGeneration)
     }
-    private val httpClient = OkHttpClient.Builder()
-        .pingInterval(30, TimeUnit.SECONDS)
-        .build()
-    private val replyCounts = ConcurrentHashMap<String, Int>()
-    private val lastReplyTimes = ConcurrentHashMap<String, Long>()
-    private val aiHistories = ConcurrentHashMap<String, MutableList<AiMessage>>()
-    private val xiaozhiSessions = ConcurrentHashMap<String, String>()
-    private val xiaozhiSockets = ConcurrentHashMap<String, XiaozhiSocketSession>()
-    private val xiaozhiMcpBridgeRef = AtomicReference<XiaozhiMcpBridge?>()
-    private val xiaozhiMcpToolCallTimes = ConcurrentHashMap<String, Long>()
+    @Synchronized fun stop() {
+        val old = generation ?: return
+        old.active = false
+        generation = null
+        old.worker.queue.clear()
+        // An already-started host send must finish; never interrupt it or retry delivery.
+        runCatching { old.worker.shutdown() }.onFailure { HLog.e("$TAG 关闭资源失败", it) }
+        runCatching { old.timer.shutdownNow() }.onFailure { HLog.e("$TAG 关闭资源失败", it) }
+        runCatching { old.xiaozhiMcpBridgeRef.getAndSet(null)?.close("feature stopped") }.onFailure { HLog.e("$TAG 关闭资源失败", it) }
+        old.xiaozhiSockets.values.forEach { runCatching { it.close("feature stopped") } }
+        old.xiaozhiSockets.clear(); old.aiHistories.clear(); old.xiaozhiSessions.clear()
+        runCatching { old.client.dispatcher.cancelAll() }.onFailure { HLog.e("$TAG 关闭资源失败", it) }
+        runCatching { old.client.connectionPool.evictAll() }.onFailure { HLog.e("$TAG 关闭资源失败", it) }
+        runCatching { old.client.dispatcher.executorService.shutdown() }.onFailure { HLog.e("$TAG 关闭资源失败", it) }
+        old.tts.forEach { runCatching { it.stop() }; runCatching { it.shutdown() } }
+        old.tts.clear()
+        old.replyCounts.clear(); old.lastReplyTimes.clear(); old.xiaozhiMcpToolCallTimes.clear()
+    }
+    private fun isCurrent(owner: RuntimeGeneration?): Boolean = owner != null && owner.active && generation === owner
+    private fun canRun(): Boolean = isCurrent(processingGeneration.get())
+    private fun enqueue(action: () -> Unit) {
+        val owner = generation ?: return
+        if (!isCurrent(owner)) return
+        runCatching { owner.worker.execute {
+            if (isCurrent(owner)) withOwner(owner, action)
+        } }.onFailure { if (it !is java.util.concurrent.RejectedExecutionException) HLog.e("$TAG 入队失败", it) }
+    }
+    private fun withOwner(owner: RuntimeGeneration, action: () -> Unit) {
+        val previous = processingGeneration.get()
+        processingGeneration.set(owner)
+        try { if (isCurrent(owner)) action() }
+        finally { if (previous == null) processingGeneration.remove() else processingGeneration.set(previous) }
+    }
+    private fun state(): RuntimeGeneration = processingGeneration.get() ?: generation ?: error("自动回复运行时已关闭")
+    private val replyCounts get() = state().replyCounts
+    private val lastReplyTimes get() = state().lastReplyTimes
+    private val aiHistories get() = state().aiHistories
+    private val xiaozhiSessions get() = state().xiaozhiSessions
+    private val xiaozhiSockets get() = state().xiaozhiSockets
+    private val xiaozhiMcpBridgeRef get() = state().xiaozhiMcpBridgeRef
+    private val xiaozhiMcpToolCallTimes get() = state().xiaozhiMcpToolCallTimes
     private const val XIAOZHI_MCP_SESSION_TTL_MS = 10 * 60 * 1000L
     private const val XIAOZHI_MCP_RECONNECT_MS = 30_000L
     private const val XIAOZHI_MAX_VOICE_SEGMENTS_BEFORE_MERGE = 3
@@ -88,10 +144,10 @@ object AutoReplyRuntime {
     }
 
     fun clearAiHistories() {
-        aiHistories.clear()
-        xiaozhiSessions.clear()
-        xiaozhiSockets.values.forEach { it.close("context cleared") }
-        xiaozhiSockets.clear()
+        val current = generation ?: return
+        current.aiHistories.clear(); current.xiaozhiSessions.clear()
+        current.xiaozhiSockets.values.forEach { it.close("context cleared") }
+        current.xiaozhiSockets.clear()
     }
 
     fun xiaozhiDeviceUuid(context: Context): String {
@@ -216,7 +272,8 @@ object AutoReplyRuntime {
         if (shouldSkipMessage(message)) return
         val talker = message.talker.ifBlank { message.getTalker() }
         if (settings.shouldExcludeTalker(talker)) return
-        executor.execute {
+        enqueue {
+            if (!canRun() || !settings.isEnabled()) return@enqueue
             runCatching {
                 handleFriendAccepted(context, settings, message)
                 handleAutoReply(context, settings, message)
@@ -229,7 +286,8 @@ object AutoReplyRuntime {
     fun handleNewFriend(context: Context, wxid: String, ticket: String, scene: Int) {
         val settings = AutoReplySettings(context)
         if (!settings.getBoolean(AutoReplySettings.KEY_AUTO_ACCEPT_ENABLE, false)) return
-        executor.execute {
+        enqueue {
+            if (!canRun() || !settings.getBoolean(AutoReplySettings.KEY_AUTO_ACCEPT_ENABLE, false)) return@enqueue
             runCatching {
                 val verifyWxid = t.mma.hooks.items.script.ScriptNewFriendHook.resolveVerifyUsername(wxid, ticket, scene)
                 WeChatApis.contact().verifyUser()?.verifyUser(verifyWxid, ticket, scene)
@@ -316,12 +374,15 @@ object AutoReplyRuntime {
         initialDelayMs: Long = 0L,
         replyAsQuote: Boolean = false
     ): Boolean {
-        if (steps.isEmpty()) return false
+        if (!canRun() || steps.isEmpty()) return false
         if (initialDelayMs > 0) sleep(initialDelayMs)
+        if (!canRun()) return false
         var sent = false
         for ((index, step) in steps.withIndex()) {
+            if (!canRun()) return sent
             val delay = step.delayMs + if (step.randomDelay) Random.nextLong(0L, 2001L) else 0L
             if (delay > 0) sleep(delay)
+            if (!canRun()) return sent
             sent = sendStep(context, target, step, message, replyAsQuote) || sent
             if (index < steps.lastIndex && step.delayMs <= 0L) sleep(300L)
         }
@@ -335,6 +396,7 @@ object AutoReplyRuntime {
         message: MessageContext,
         replyAsQuote: Boolean
     ): Boolean {
+        if (!canRun()) return false
         val content = format(step.content, message)
         val messageApi = WeChatApis.message().sender()
         val mediaApi = WeChatApis.media()
@@ -344,6 +406,7 @@ object AutoReplyRuntime {
                     val parts = splitReplies(content)
                     var sent = false
                     parts.forEachIndexed { index, text ->
+                        if (!canRun()) return@forEachIndexed
                         val currentSent = if (replyAsQuote && message.msgId > 0 && !text.contains("[AtWx=")) {
                             messageApi?.sendQuote(target, message.msgId, text) == true
                         } else {
@@ -398,7 +461,8 @@ object AutoReplyRuntime {
         val question = aiQuestion(message)
         if (question.isBlank()) return false
         val answer = requestAi(target, config, question)
-        if (answer.isBlank()) return false
+        if (answer.isBlank() || !canRun()) return false
+        if (!canRun()) return false
         val sender = WeChatApis.message().sender() ?: return false
         return if (replyAsQuote && message.msgId > 0L) {
             sender.sendQuote(target, message.msgId, answer)
@@ -417,11 +481,17 @@ object AutoReplyRuntime {
         if (question.isBlank()) return false
         val reply = requestXiaozhiReply(context, target, question)
         val answer = reply.text
+        if (!canRun()) {
+            reply.voiceSegments.forEach { runCatching { it.file.delete() } }
+            if (reply.voicePath.isNotBlank()) runCatching { File(reply.voicePath).delete() }
+            return false
+        }
         if (!reply.mergeVoiceSegments && reply.voiceSegments.isNotEmpty()) {
             val media = WeChatApis.media()
             var sentAny = false
             try {
                 reply.voiceSegments.forEachIndexed { index, segment ->
+                    if (!canRun()) return@forEachIndexed
                     val path = segment.file.absolutePath
                     if (isXiaozhiVoiceSendable(path) || path.endsWith(".silk", ignoreCase = true)) {
                         val sent = media?.sendVoice(target, path, segment.durationMs.coerceAtLeast(1000)) == true
@@ -444,6 +514,7 @@ object AutoReplyRuntime {
         if (answer.isBlank()) {
             return false
         }
+        if (!canRun()) return false
         val sender = WeChatApis.message().sender() ?: return false
         return if (replyAsQuote && message.msgId > 0L) {
             sender.sendQuote(target, message.msgId, answer)
@@ -472,6 +543,7 @@ object AutoReplyRuntime {
         return try {
             val media = WeChatApis.media() ?: return false
             voiceSegments.forEachIndexed { index, segment ->
+                if (!canRun()) return@forEachIndexed
                 if (media.sendVoice(target, segment.file.absolutePath, segment.durationMs.coerceAtLeast(1000))) {
                     sent = true
                 }
@@ -821,6 +893,7 @@ object AutoReplyRuntime {
     ): XiaozhiSocketSession {
         val signature = xiaozhiSocketSignature(config, mcpEnabledForRequest)
         while (true) {
+            check(canRun()) { "自动回复代际已关闭" }
             val current = xiaozhiSockets[sessionKey]
             if (current != null && !current.isClosed() && !current.isBusy() && current.signature == signature) {
                 current.touch()
@@ -880,19 +953,23 @@ object AutoReplyRuntime {
         private val config: AutoReplyXiaozhiConfig,
         private val mcpEnabledForRequest: Boolean
     ) {
+        private val owner = processingGeneration.get()
         private val socketRef = AtomicReference<WebSocket?>()
         private val activeRequest = AtomicReference<XiaozhiSocketRequest?>()
         private val closed = AtomicBoolean(false)
         private val ready = AtomicBoolean(false)
         private val lastActiveAt = AtomicLong(System.currentTimeMillis())
         private val audioParamsRef = AtomicReference<JSONObject?>()
+        private var idleFuture: ScheduledFuture<*>? = null
         private val listener = object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (!isCurrent(owner) || closed.get()) { webSocket.close(1000, "stale generation"); return }
                 touch()
                 webSocket.send(xiaozhiHelloPayload(config, mcpEnabledForRequest).toString())
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
+                if (!isCurrent(owner) || closed.get()) return
                 touch()
                 runCatching {
                     val obj = JSONObject(text)
@@ -900,9 +977,9 @@ object AutoReplyRuntime {
                         val audioParams = obj.optJSONObject("audio_params")
                         audioParamsRef.set(audioParams)
                         ready.set(true)
-                        activeRequest.get()?.start(webSocket, audioParams)
+                        withOwner(owner!!) { activeRequest.get()?.start(webSocket, audioParams) }
                     } else {
-                        activeRequest.get()?.onText?.invoke(webSocket, obj)
+                        withOwner(owner!!) { activeRequest.get()?.onText?.invoke(webSocket, obj) }
                     }
                 }.onFailure {
                     HLog.e("$TAG 小智AI 数据解析失败: ${it.message}", it)
@@ -910,8 +987,9 @@ object AutoReplyRuntime {
             }
 
             override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                if (!isCurrent(owner) || closed.get()) return
                 touch()
-                activeRequest.get()?.onBytes?.invoke(bytes)
+                withOwner(owner!!) { activeRequest.get()?.onBytes?.invoke(bytes) }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -926,11 +1004,15 @@ object AutoReplyRuntime {
         }
 
         fun connect(request: Request) {
-            socketRef.set(httpClient.newWebSocket(request, listener))
-            scheduleIdleClose()
+            if (!isCurrent(owner)) { close("stale generation"); return }
+            val socket = owner!!.client.newWebSocket(request, listener)
+            socketRef.set(socket)
+            if (!isCurrent(owner) || closed.get()) socketRef.getAndSet(null)?.cancel()
+            else scheduleIdleClose()
         }
 
         fun submit(request: XiaozhiSocketRequest) {
+            if (!isCurrent(owner)) { request.onCancel(); return }
             activeRequest.getAndSet(request)?.onCancel?.invoke()
             touch()
             val socket = socketRef.get()
@@ -956,28 +1038,35 @@ object AutoReplyRuntime {
             return activeRequest.get() != null
         }
 
+        @Synchronized
         fun scheduleIdleClose() {
+            if (!isCurrent(owner) || closed.get()) return
             touch()
-            scheduler.schedule({
-                if (closed.get()) return@schedule
-                if (activeRequest.get() != null) return@schedule
-                if (System.currentTimeMillis() - lastActiveAt.get() < XIAOZHI_SOCKET_IDLE_MS) return@schedule
-                close("idle timeout")
-            }, XIAOZHI_SOCKET_IDLE_MS, TimeUnit.MILLISECONDS)
+            idleFuture?.cancel(false)
+            runCatching {
+                idleFuture = owner!!.timer.schedule({
+                    if (isCurrent(owner) && !closed.get() && activeRequest.get() == null) {
+                        if (System.currentTimeMillis() - lastActiveAt.get() >= XIAOZHI_SOCKET_IDLE_MS) close("idle timeout")
+                        else scheduleIdleClose()
+                    }
+                }, XIAOZHI_SOCKET_IDLE_MS, TimeUnit.MILLISECONDS)
+            }
         }
-
         fun markClosed(webSocket: WebSocket) {
             if (socketRef.compareAndSet(webSocket, null)) {
                 closed.set(true)
                 ready.set(false)
-                xiaozhiSockets.remove(sessionKey, this)
+                owner?.xiaozhiSockets?.remove(sessionKey, this)
             }
         }
 
+        @Synchronized
         fun close(reason: String) {
             if (closed.compareAndSet(false, true)) {
-                xiaozhiSockets.remove(sessionKey, this)
-                socketRef.getAndSet(null)?.close(1000, reason)
+                idleFuture?.cancel(false); idleFuture = null
+                owner?.xiaozhiSockets?.remove(sessionKey, this)
+                try { activeRequest.getAndSet(null)?.onCancel?.invoke() }
+                finally { socketRef.getAndSet(null)?.close(1000, reason) }
             }
         }
     }
@@ -1116,6 +1205,8 @@ object AutoReplyRuntime {
     }
 
     private fun synthesizeQuestionWav(context: Context, question: String, outFile: File): Boolean {
+        val owner = processingGeneration.get() ?: return false
+        if (!isCurrent(owner)) return false
         val ready = CountDownLatch(1)
         val done = CountDownLatch(1)
         val ok = AtomicBoolean(false)
@@ -1125,8 +1216,10 @@ object AutoReplyRuntime {
             initStatus = status
             ready.countDown()
         }
+        owner.tts.add(tts)
+        if (!isCurrent(owner)) { owner.tts.remove(tts); runCatching { tts.shutdown() }; return false }
         return try {
-            if (!ready.await(8, TimeUnit.SECONDS)) return false
+            if (!ready.await(8, TimeUnit.SECONDS) || !isCurrent(owner)) return false
             if (initStatus != TextToSpeech.SUCCESS) return false
             runCatching { tts.language = Locale.CHINA }
             tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -1155,6 +1248,7 @@ object AutoReplyRuntime {
             if (result == TextToSpeech.ERROR) return false
             done.await(20, TimeUnit.SECONDS) && ok.get() && outFile.isFile && outFile.length() > 44L
         } finally {
+            owner.tts.remove(tts)
             runCatching { tts.shutdown() }
         }
     }
@@ -1564,6 +1658,7 @@ object AutoReplyRuntime {
     }
 
     private fun ensureXiaozhiMcpBridge(config: AutoReplyXiaozhiConfig, sessionId: String, target: String): XiaozhiMcpBridge? {
+        if (!canRun()) return null
         val endpoint = config.mcpEndpointUrl.trim()
         if (!config.mcpBridgeEnabled) {
             xiaozhiMcpBridgeRef.getAndSet(null)?.close("disabled")
@@ -1612,11 +1707,13 @@ object AutoReplyRuntime {
         )
 
         val target = AtomicReference(initialTarget)
+        private val owner = processingGeneration.get()
         private val socketRef = AtomicReference<WebSocket?>()
         private val sessionTargets = ConcurrentHashMap<String, SessionTarget>()
         private val closed = AtomicBoolean(false)
         private val reconnecting = AtomicBoolean(false)
-        private val idleClosing = AtomicBoolean(false)
+        private var idleFuture: ScheduledFuture<*>? = null
+        private var reconnectFuture: ScheduledFuture<*>? = null
         private val lastActiveAt = AtomicLong(System.currentTimeMillis())
         private val readyLatch = CountDownLatch(if (endpoint.isBlank()) 0 else 1)
 
@@ -1644,7 +1741,7 @@ object AutoReplyRuntime {
         }
 
         fun connect() {
-            if (closed.get()) return
+            if (closed.get() || !isCurrent(owner)) return
             runCatching {
                 if (endpoint.isBlank()) {
                     socketRef.getAndSet(null)?.close(1000, "main websocket mcp only")
@@ -1652,8 +1749,9 @@ object AutoReplyRuntime {
                     return
                 }
                 val request = Request.Builder().url(endpoint).build()
-                val socket = AutoReplyRuntime.httpClient.newWebSocket(request, object : WebSocketListener() {
+                val socket = owner!!.client.newWebSocket(request, object : WebSocketListener() {
                     override fun onOpen(webSocket: WebSocket, response: Response) {
+                        if (!isCurrent(owner) || closed.get()) { webSocket.cancel(); return }
                         lastActiveAt.set(System.currentTimeMillis())
                         scheduleIdleClose()
                         reconnecting.set(false)
@@ -1677,61 +1775,48 @@ object AutoReplyRuntime {
                     }
                 })
                 socketRef.set(socket)
+                if (!isCurrent(owner) || closed.get()) socketRef.getAndSet(null)?.cancel()
             }.onFailure {
                 reconnecting.set(false)
                 HLog.e("$TAG 小智MCP桥接连接失败: ${it.message}", it)
             }
         }
 
+        @Synchronized
         fun close(reason: String) {
             closed.set(true)
+            idleFuture?.cancel(false); idleFuture = null
+            reconnectFuture?.cancel(false); reconnectFuture = null
+            readyLatch.countDown()
             sessionTargets.clear()
             socketRef.getAndSet(null)?.close(1000, reason)
         }
 
+        @Synchronized
         private fun scheduleIdleClose() {
-            if (closed.get()) return
-            if (!idleClosing.compareAndSet(false, true)) return
-            val bridge = this
-            Thread({
-                runCatching {
-                    while (!closed.get()) {
-                        val idleMs = System.currentTimeMillis() - lastActiveAt.get()
-                        val waitMs = idleCloseMs - idleMs
-                        if (waitMs <= 0L) {
-                            if (AutoReplyRuntime.xiaozhiMcpBridgeRef.compareAndSet(bridge, null)) {
-                                close("idle timeout")
-                            } else {
-                                close("idle replaced")
-                            }
-                            return@runCatching
-                        }
-                        Thread.sleep(waitMs.coerceAtLeast(1000L))
-                    }
-                }.also {
-                    idleClosing.set(false)
-                }.onFailure {
-                    idleClosing.set(false)
-                    HLog.e("$TAG 小智MCP空闲检查失败: ${it.message}", it)
+            if (closed.get() || !isCurrent(owner)) return
+            idleFuture?.cancel(false)
+            idleFuture = runCatching { owner!!.timer.schedule({
+                if (isCurrent(owner) && !closed.get()) {
+                    val remaining = idleCloseMs - (System.currentTimeMillis() - lastActiveAt.get())
+                    if (remaining <= 0L) {
+                        owner?.xiaozhiMcpBridgeRef?.compareAndSet(this, null)
+                        close("idle timeout")
+                    } else scheduleIdleClose()
                 }
-            }, "Hchat-Xiaozhi-MCP-Idle").apply { isDaemon = true }.start()
+            }, idleCloseMs, TimeUnit.MILLISECONDS) }.getOrNull()
         }
-
+        @Synchronized
         private fun scheduleReconnect() {
-            if (closed.get()) return
-            if (!reconnecting.compareAndSet(false, true)) return
-            Thread({
-                runCatching {
-                    Thread.sleep(XIAOZHI_MCP_RECONNECT_MS)
-                    if (!closed.get()) connect()
-                }.onFailure {
-                    reconnecting.set(false)
-                    HLog.e("$TAG 小智MCP桥接重连失败: ${it.message}", it)
-                }
-            }, "Hchat-Xiaozhi-MCP-Reconnect").apply { isDaemon = true }.start()
+            if (closed.get() || !isCurrent(owner) || !reconnecting.compareAndSet(false, true)) return
+            reconnectFuture = runCatching { owner!!.timer.schedule({
+                reconnecting.set(false)
+                if (isCurrent(owner) && !closed.get()) connect()
+            }, XIAOZHI_MCP_RECONNECT_MS, TimeUnit.MILLISECONDS) }.getOrNull()
+            if (reconnectFuture == null) reconnecting.set(false)
         }
-
         private fun handleMessage(webSocket: WebSocket, text: String) {
+            if (!isCurrent(owner) || closed.get()) return
             runCatching {
                 val request = JSONObject(text)
                 val method = request.optString("method")
@@ -1747,7 +1832,7 @@ object AutoReplyRuntime {
         }
 
         fun handleMcpPayload(payload: JSONObject?, source: String): JSONObject? {
-            if (payload == null) return null
+            if (!isCurrent(owner) || closed.get() || payload == null) return null
             if (!payload.has("id")) return null
             val id = payload.opt("id")
             val method = payload.optString("method")
@@ -1874,7 +1959,11 @@ object AutoReplyRuntime {
                 "hchat_send_text" -> {
                     val text = args.optString("text").trim()
                     val target = targetFor(args)
-                    text.isNotBlank() && AutoReplyRuntime.sendText(target, text)
+                    text.isNotBlank() && isCurrent(owner) && run {
+                        var sent = false
+                        withOwner(owner!!) { sent = AutoReplyRuntime.sendText(target, text) }
+                        sent
+                    }
                 }
                 "hchat_share_music" -> {
                     val title = args.optString("title").trim()
@@ -1883,7 +1972,7 @@ object AutoReplyRuntime {
                     val musicDataUrl = args.optString("musicDataUrl").trim()
                     val appId = args.optString("appId").trim()
                     val target = targetFor(args)
-                    title.isNotBlank() && musicUrl.isNotBlank() && musicDataUrl.isNotBlank() &&
+                    isCurrent(owner) && !closed.get() && title.isNotBlank() && musicUrl.isNotBlank() && musicDataUrl.isNotBlank() &&
                         WeChatApis.media()?.shareMusic(
                             target,
                             title,
@@ -1912,12 +2001,12 @@ object AutoReplyRuntime {
         private fun targetFor(args: JSONObject): String {
             val sessionId = args.optString("session_id").trim()
             val resolved = sessionTargets[sessionId]?.target ?: target.get()
-            xiaozhiMcpToolCallTimes[resolved] = System.currentTimeMillis()
+            owner?.xiaozhiMcpToolCallTimes?.set(resolved, System.currentTimeMillis())
             return resolved
         }
 
         private fun invokeKugouOrderMusic(args: JSONObject, keyword: String): Boolean {
-            if (kugouEnabled && kugouPluginId.isNotBlank()) {
+            if (isCurrent(owner) && !closed.get() && kugouEnabled && kugouPluginId.isNotBlank()) {
                 val result = ScriptPluginRuntime.callPluginFunction(
                     kugouPluginId,
                     kugouFunctionName,
@@ -2238,7 +2327,7 @@ object AutoReplyRuntime {
     }
 
     private fun sendText(talker: String, content: String): Boolean {
-        if (talker.isBlank() || content.isBlank()) return false
+        if (!canRun() || talker.isBlank() || content.isBlank()) return false
         val sender = WeChatApis.message().sender() ?: return false
         val atRegex = Regex("""\[AtWx=([^\]]+)]""")
         val atList = atRegex.findAll(content).map { it.groupValues[1].trim() }.filter { it.isNotBlank() }.toList()
@@ -2254,12 +2343,15 @@ object AutoReplyRuntime {
             }
             "@$name\u2005"
         }
+        if (!canRun()) return false
         return if (atList.isEmpty()) sender.sendText(talker, text) else sender.sendTextWithAtList(talker, text, atList)
     }
 
     private fun sendPaths(value: String, sender: (String) -> Boolean): Boolean {
+        if (!canRun()) return false
         var ok = false
         for (path in splitMulti(value)) {
+            if (!canRun()) return ok
             val file = File(path)
             if (file.isFile && sender(path)) ok = true
             sleep(300L)
@@ -2268,8 +2360,10 @@ object AutoReplyRuntime {
     }
 
     private fun sendFavorites(value: String, sender: (String) -> Boolean): Boolean {
+        if (!canRun()) return false
         var ok = false
         for (localId in splitMulti(value)) {
+            if (!canRun()) return ok
             if (sender(localId)) ok = true
             sleep(300L)
         }
@@ -2408,7 +2502,12 @@ object AutoReplyRuntime {
 
     private fun sleep(ms: Long) {
         if (ms <= 0L) return
-        runCatching { Thread.sleep(ms) }
+        var remaining = ms
+        while (remaining > 0 && canRun()) {
+            val slice = minOf(remaining, 100L)
+            try { Thread.sleep(slice) } catch (_: InterruptedException) { Thread.currentThread().interrupt(); return }
+            remaining -= slice
+        }
     }
 
     private fun String.cleanAiText(): String = replace("\u0000", "")
