@@ -23,7 +23,6 @@ import java.util.Collections
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
-import org.luckypray.dexkit.result.MethodData
 
 class AntiRecallFeature : BaseFeature() {
     private val handledRecalls = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
@@ -299,11 +298,7 @@ class AntiRecallFeature : BaseFeature() {
             ?.let { return it }
         val result = LinkedHashSet<Method>()
         for (entry in revokeEntries) {
-            val data = entry.data ?: continue
-            val invokes = runCatching { data.invokes }.getOrDefault(emptyList())
-            for (invoke in invokes) {
-                val method = runCatching { invoke.getMethodInstance(context.hostClassLoader()) }.getOrNull()
-                    ?: continue
+            for (method in entry.invokedMethods) {
                 if (isMessageStorageUpdateMethod(method)) result.add(method)
             }
         }
@@ -986,7 +981,7 @@ class AntiRecallFeature : BaseFeature() {
         loadCachedMethods(context, "revoke_entries")
             .filter { isRevokeEntry(it) }
             .takeIf { it.isNotEmpty() }
-            ?.map { RevokeEntry(it, null) }
+            ?.map { RevokeEntry(it, emptyList()) }
             ?.let { return it }
         val anchors = arrayOf(
             arrayOf("doRevokeMsg xmlSrvMsgId", "summerbadcr get a revoke"),
@@ -1010,7 +1005,8 @@ class AntiRecallFeature : BaseFeature() {
             .takeIf { it.isNotEmpty() }
             ?.let { return it }
         return runCatching {
-            val methods = context.dexKitBridge().findMethod(
+            val methods = context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 org.luckypray.dexkit.query.FindMethod().apply {
                     matcher(org.luckypray.dexkit.query.matchers.MethodMatcher().apply {
                         usingStrings(
@@ -1027,6 +1023,7 @@ class AntiRecallFeature : BaseFeature() {
                     isMsgProcessingClearByMessage(method) || isMsgProcessingClearByKey(method)
                 }
             }.distinctBy { it.toGenericString() }
+            }
             saveCachedMethods(context, "msg_processing_clear", methods)
             methods
         }.getOrElse {
@@ -1041,7 +1038,8 @@ class AntiRecallFeature : BaseFeature() {
             .takeIf { it.isNotEmpty() }
             ?.let { return it }
         return runCatching {
-            val methods = context.dexKitBridge().findMethod(
+            val methods = context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 org.luckypray.dexkit.query.FindMethod().apply {
                     matcher(org.luckypray.dexkit.query.matchers.MethodMatcher().apply {
                         usingStrings(
@@ -1060,6 +1058,7 @@ class AntiRecallFeature : BaseFeature() {
             }.filter { method ->
                 isLegacySelfRecallMediaCleanupMethod(method)
             }.distinctBy { it.toGenericString() }
+            }
             saveCachedMethods(context, "legacy_self_recall_media_cleanup", methods)
             methods
         }.getOrElse {
@@ -1093,7 +1092,8 @@ class AntiRecallFeature : BaseFeature() {
 
     private fun findRevokeEntriesByStrings(context: FeatureContext, vararg strings: String): List<RevokeEntry> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 org.luckypray.dexkit.query.FindMethod().apply {
                     matcher(org.luckypray.dexkit.query.matchers.MethodMatcher().apply {
                         usingStrings(strings.toList())
@@ -1102,7 +1102,13 @@ class AntiRecallFeature : BaseFeature() {
             ).mapNotNull { data ->
                 val method = runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                     ?: return@mapNotNull null
-                if (isRevokeEntry(method)) RevokeEntry(method, data) else null
+                if (!isRevokeEntry(method)) return@mapNotNull null
+                val invokedMethods = runCatching { data.invokes }.getOrDefault(emptyList())
+                    .mapNotNull { invoke ->
+                        runCatching { invoke.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+                    }
+                RevokeEntry(method, invokedMethods)
+            }
             }
         }.getOrElse {
             logError("防撤回入口定位失败", it)
@@ -1170,6 +1176,6 @@ class AntiRecallFeature : BaseFeature() {
 
     private data class RevokeEntry(
         val method: Method,
-        val data: MethodData?
+        val invokedMethods: List<Method>
     )
 }
