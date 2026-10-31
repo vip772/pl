@@ -9,6 +9,7 @@ import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.items.chatname.NativeGroupNicknameGate
 import t.mma.hooks.items.chatname.ChatNameDecorationLayout
 import t.mma.hooks.items.groupnicknamecolor.GroupNicknameColorStore
 import t.mma.hooks.items.membertitle.MemberTitleStore
@@ -26,6 +27,9 @@ class RealNameTailRenderer(
     private val scheduler: RealNameTailScheduler,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    private val active = java.util.concurrent.atomic.AtomicBoolean(true)
+    private var bindHook: XC_MethodHook.Unhook? = null
+    private var nativeNicknameGate: NativeGroupNicknameGate? = null
     private val msgSenderCache = Collections.synchronizedMap(WeakHashMap<Any, String>())
     private val boundViews = Collections.synchronizedMap(WeakHashMap<TextView, String>())
     private val holderTextFieldCache = ConcurrentHashMap<Class<*>, Field?>()
@@ -36,15 +40,32 @@ class RealNameTailRenderer(
     @Volatile private var installed = false
     var profilePrefetcher: ContactProfilePrefetcher? = null
 
+    fun destroy() {
+        if (!active.compareAndSet(true, false)) return
+        HookRegistry.get().unhook(bindHook)
+        bindHook = null
+        nativeNicknameGate?.release()
+        nativeNicknameGate = null
+        val views = synchronized(boundViews) { boundViews.keys.toList().also { boundViews.clear() } }
+        views.forEach { view ->
+            WeChatApis.tasks()?.cancel("real_tail_apply_${System.identityHashCode(view)}")
+            colorRebinds.remove(view)?.let(view::removeCallbacks)
+        }
+        WeChatApis.tasks()?.runOnMain { views.forEach { view -> hideTail(view); hideNicknameColor(view) } }
+    }
+
     fun install(): Boolean {
         return installUsernameBindHook()
     }
 
     private fun installUsernameBindHook(): Boolean {
+        if (!active.get()) return false
         if (installed) return true
         val method = locateUsernameBindMethod() ?: return false
+        if (nativeNicknameGate == null) nativeNicknameGate = NativeGroupNicknameGate.acquire(context, method, logger)
+        if (nativeNicknameGate == null) return false
         return try {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            bindHook = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     handleUsernameBind(param)
                 }
@@ -58,9 +79,11 @@ class RealNameTailRenderer(
     }
 
     fun applyForSender(wxid: String) {
+        if (!active.get()) return
         val id = wxid.trim()
         if (!RealNameTailStore.isValidWxid(id)) return
         WeChatApis.tasks()?.runOnMain {
+            if (!active.get()) return@runOnMain
             val snapshot = synchronized(boundViews) { boundViews.entries.toList() }
             snapshot.forEach { (view, sender) ->
                 if (sender == id) {
@@ -71,6 +94,7 @@ class RealNameTailRenderer(
     }
 
     private fun handleUsernameBind(param: XC_MethodHook.MethodHookParam) {
+        if (!active.get()) return
         val args = param.args ?: return
         val holder = args.firstOrNull() ?: return
         val tv = findUserTextView(holder) ?: return
@@ -82,6 +106,7 @@ class RealNameTailRenderer(
         }
         val roomId = currentRoomId()
         if (!isRoom(roomId)) {
+            nativeNicknameGate?.forget(tv)
             clearBoundDecorations(tv)
             return
         }
@@ -97,11 +122,17 @@ class RealNameTailRenderer(
             if (it != null && isLikelyMessageClass(it.javaClass)) msg = it
         }
         if (isOutgoingMessage(msg)) {
+            nativeNicknameGate?.forget(tv)
             clearBoundDecorations(tv)
             return
         }
         val sender = resolveBindSender(msg, raw, stringCandidates)
         if (!RealNameTailStore.isValidWxid(sender) || isSelf(sender)) {
+            nativeNicknameGate?.forget(tv)
+            clearBoundDecorations(tv)
+            return
+        }
+        if (nativeNicknameGate?.bind(tv, args.getOrNull(1), roomId, sender) != true) {
             clearBoundDecorations(tv)
             return
         }
@@ -176,7 +207,11 @@ class RealNameTailRenderer(
     }
 
     private fun applyTail(tv: TextView, sender: String, rawTail: String): Boolean {
-        if (!RealNameTailStore.isValidWxid(sender)) return false
+        if (!active.get() || !store.isEnabled() || !RealNameTailStore.isValidWxid(sender)) return false
+        if (nativeNicknameGate?.allows(tv, sender = sender) != true) {
+            clearBoundDecorations(tv)
+            return true // do not queue retries for an intentionally hidden name
+        }
         boundViews[tv] = sender
         val tail = store.displayTail(sender)
         if (tail.isEmpty()) {
@@ -301,7 +336,7 @@ class RealNameTailRenderer(
     private fun scheduleDelayedApply(tv: TextView, sender: String, rawTail: String) {
         boundViews[tv] = sender
         WeChatApis.tasks()?.runOnMainDelayed("real_tail_apply_${System.identityHashCode(tv)}", 120L) {
-            if (boundViews[tv] == sender) {
+            if (active.get() && boundViews[tv] == sender) {
                 applyTail(tv, sender, rawTail)
                 if (nicknameColorStore.isEnabled()) applyNicknameColor(tv)
             }

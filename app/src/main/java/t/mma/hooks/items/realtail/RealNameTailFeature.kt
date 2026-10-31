@@ -37,6 +37,8 @@ class RealNameTailFeature : BaseFeature() {
         renderer = RealNameTailRenderer(context, localStore, nicknameColorStore, scheduler, ::logFeatureError).also {
             it.profilePrefetcher = prefetcher
         }
+        val installedRenderer = renderer!!
+        trackResource { installedRenderer.destroy(); if (renderer === installedRenderer) renderer = null }
         scheduleInstall()
         subscribe(Events.DexReady::class.java) {
             scheduleInstall()

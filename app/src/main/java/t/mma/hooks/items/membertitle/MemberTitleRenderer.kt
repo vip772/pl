@@ -11,6 +11,7 @@ import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureResourceScope
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.items.chatname.NativeGroupNicknameGate
 import t.mma.hooks.items.chatname.ChatNameDecorationLayout
 import t.mma.ui.miuix.MemberTitleMiuixDialog
 import t.mma.utils.KavaReflector
@@ -25,12 +26,15 @@ class MemberTitleRenderer(
     private val store: MemberTitleStore,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    private var nativeNicknameGate: NativeGroupNicknameGate? = null
     private val active = java.util.concurrent.atomic.AtomicBoolean(true)
     private val resources = FeatureResourceScope { logger("群员头衔资源释放失败", it) }
     private val pendingApplyKeys = ConcurrentHashMap.newKeySet<String>()
     fun destroy() {
         if (!active.compareAndSet(true, false)) return
         resources.close()
+        nativeNicknameGate?.release()
+        nativeNicknameGate = null
         pendingApplyKeys.toList().forEach { WeChatApis.tasks()?.cancel(it) }
         pendingApplyKeys.clear()
         val views = synchronized(boundViews) { boundViews.keys.toList().also { boundViews.clear() } }
@@ -105,6 +109,8 @@ class MemberTitleRenderer(
     private fun installUsernameBindHook(): Boolean {
         if (usernameBindInstalled) return true
         val method = locateUsernameBindMethod() ?: return false
+        if (nativeNicknameGate == null) nativeNicknameGate = NativeGroupNicknameGate.acquire(context, method, logger)
+        if (nativeNicknameGate == null) return false
         return try {
             val unhook = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
@@ -140,11 +146,17 @@ class MemberTitleRenderer(
             if (it != null && isLikelyMessageClass(it.javaClass)) msg = it
         }
         if (isOutgoingMessage(msg)) {
+            nativeNicknameGate?.forget(tv)
             clearBoundTitle(tv)
             return
         }
         val sender = resolveBindSender(msg, raw, stringCandidates)
         if (!MemberTitleStore.isValidMemberId(sender) || isSelf(sender)) {
+            nativeNicknameGate?.forget(tv)
+            clearBoundTitle(tv)
+            return
+        }
+        if (nativeNicknameGate?.bind(tv, args.getOrNull(1), roomId, sender) != true) {
             clearBoundTitle(tv)
             return
         }
@@ -152,7 +164,11 @@ class MemberTitleRenderer(
     }
 
     private fun applyTitle(tv: TextView, roomId: String, sender: String): Boolean {
-        if (!active.get() || !MemberTitleStore.isValidMemberId(sender) || !isRoom(roomId)) return false
+        if (!active.get() || !store.isEnabled() || !MemberTitleStore.isValidMemberId(sender) || !isRoom(roomId)) return false
+        if (nativeNicknameGate?.allows(tv, roomId, sender) != true) {
+            clearBoundTitle(tv)
+            return true // suppression is final, not a reason to schedule a retry
+        }
         val target = Target(roomId, sender)
         boundViews[tv] = target
         synchronized(visibleBindings) { visibleBindings[tv] = target }

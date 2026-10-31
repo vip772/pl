@@ -19,6 +19,7 @@ internal class Renderer{
  val active=java.util.concurrent.atomic.AtomicBoolean(true);var errors=0;val store=Store();var roomId="room@chatroom";val visibleBindings=VisibleBindings.values;val logger:(String,Throwable?)->Unit={_,_->errors++}
  val resources=FeatureResourceScope{errors++};val pendingApplyKeys=ConcurrentHashMap.newKeySet<String>();val boundViews=linkedMapOf<TextView,Target>()
  val msgSenderCache=mutableMapOf<Any,String>();val holderTextFieldCache=mutableMapOf<Any,Any>();val likelyMsgCache=mutableMapOf<Any,Boolean>()
+ class Gate{fun release(){}};var nativeNicknameGate:Gate?=null
  var removed=0;var applied=0
  fun currentRoomId()=roomId
  fun isRoom(id:String)=id.endsWith("@chatroom")

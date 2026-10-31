@@ -131,6 +131,16 @@ object ChatNameDecorationLayout {
         compose(row)
     }
 
+    /** Clear both decorations together; do not alter stored feature configuration. */
+    fun suppressNativeName(view: TextView) {
+        val row = current(view) ?: return
+        val state = stateForDecoration(row)
+        if (state.title.text.isEmpty() && state.tail.isEmpty()) return
+        state.title = TitleState()
+        state.tail = ""
+        compose(row)
+    }
+
     fun requestFit(row: Row) {
         row.nameView.requestLayout()
     }
