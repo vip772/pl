@@ -7,6 +7,8 @@ import t.mma.dexkit.DexMethodCache
 import t.mma.event.Events
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
+import t.mma.hooks.core.FeatureResourceScope
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
@@ -27,27 +29,28 @@ class UploadTransparentAvatarFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val installed = UploadTransparentAvatarRuntime(context)
-        runtime = installed
-        installed.installCompressHook()
-        scheduleMediaTailorLocate()
-        subscribe(Events.DexReady::class.java) { scheduleMediaTailorLocate() }
+        val prefs = HchatStorage.preferences(context.hostContext(), UploadTransparentAvatarSettings.PREFS_NAME)
+        var schedule: (() -> Unit)? = null
+        val owner = PreferenceRuntimeOwner(prefs, setOf(UploadTransparentAvatarSettings.KEY_ENABLE),
+            enabled = { prefs.getBoolean(UploadTransparentAvatarSettings.KEY_ENABLE, UploadTransparentAvatarSettings.DEFAULT_ENABLE) },
+            create = { resources ->
+                val installed = UploadTransparentAvatarRuntime(context)
+                runtime = installed
+                resources.register { installed.destroy(); if (runtime === installed) runtime = null }
+                val ticket = DexInstallScheduler.installation(ID + ":runtime", "透明头像裁剪入口")
+                resources.register { ticket.close(); schedule = null }
+                check(installed.installCompressHook()) { "透明头像 Hook安装失败" }
+                schedule = { if (!resources.isClosed()) ticket.schedule { installed.locateMediaTailorClass() } }
+                schedule?.invoke()
+            }, onError = { logError("头像热启停失败", it) })
+        trackResource { owner.close() }
+        subscribe(Events.DexReady::class.java) { schedule?.invoke() }
+        owner.start()
     }
-
     override fun onFeatureDestroy(context: FeatureContext) {
+        runtime?.destroy()
         runtime = null
     }
-
-    private fun scheduleMediaTailorLocate() {
-        DexInstallScheduler.schedule(
-            MEDIA_TAILOR_TASK_ID,
-            "上传透明头像裁剪入口",
-            stage = DexInstallScheduler.Stage.BRIDGE
-        ) {
-            runtime?.locateMediaTailorClass() == true
-        }
-    }
-
     companion object {
         const val ID = "upload_transparent_avatar"
         private const val MEDIA_TAILOR_TASK_ID = "${ID}_media_tailor"
@@ -57,6 +60,22 @@ class UploadTransparentAvatarFeature : BaseFeature() {
 private class UploadTransparentAvatarRuntime(
     private val context: FeatureContext
 ) {
+    @Volatile private var destroyed = false
+    private val hookResources = FeatureResourceScope { HLog.e("[Hchat:Avatar] Hook释放失败", it) }
+    private fun hookOwned(member: java.lang.reflect.Member, callback: XC_MethodHook): XC_MethodHook.Unhook {
+        check(!destroyed) { "头像运行时已销毁" }
+        val handle = HookRegistry.get().hook(member, callback)
+        hookResources.register { HookRegistry.get().unhook(handle) }
+        return handle
+    }
+
+
+    @Synchronized fun destroy() {
+        if (destroyed) return
+        destroyed = true
+        hookResources.close()
+        compressHookInstalled = false; mediaTailorClassName = null
+    }
     private val settingsPrefs = UploadTransparentAvatarSettings.preferences(context.hostContext())
     private val cachePrefs = HchatStorage.preferences(context.hostContext(), CACHE_PREFS_NAME)
 
@@ -68,6 +87,7 @@ private class UploadTransparentAvatarRuntime(
 
     @Synchronized
     fun installCompressHook(): Boolean {
+        if (destroyed) return false
         if (compressHookInstalled) return true
         val method = KavaReflector.findMethod(
             Bitmap::class.java,
@@ -80,8 +100,9 @@ private class UploadTransparentAvatarRuntime(
             return false
         }
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            hookOwned(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     if (!isEnabled()) return
                     if (param.args.getOrNull(0) == Bitmap.CompressFormat.PNG) return
                     if (isAvatarUploadCall(Thread.currentThread().stackTrace)) {
@@ -100,6 +121,7 @@ private class UploadTransparentAvatarRuntime(
 
     @Synchronized
     fun locateMediaTailorClass(): Boolean {
+        if (destroyed) return false
         loadCachedMediaTailorClass()?.let {
             mediaTailorClassName = it
             return true

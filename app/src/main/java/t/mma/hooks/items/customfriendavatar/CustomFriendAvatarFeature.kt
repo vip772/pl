@@ -1,4 +1,6 @@
 package t.mma.hooks.items.customfriendavatar
+import t.mma.utils.HLog
+import t.mma.preferences.HchatStorage
 
 import android.app.Activity
 import android.app.Notification
@@ -25,6 +27,8 @@ import t.mma.hooks.core.ConversationMenuExtension
 import t.mma.hooks.core.ConversationMenuExtensionRegistry
 import t.mma.hooks.core.ConversationMenuExtensionTarget
 import t.mma.hooks.core.DexInstallScheduler
+import t.mma.hooks.core.FeatureResourceScope
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.items.customnotify.CustomNotificationRuntime
@@ -55,29 +59,35 @@ class CustomFriendAvatarFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val installed = CustomFriendAvatarRuntime(context, ::logFeatureError)
-        runtime = installed
-        installed.installNotificationHooks()
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
+        val prefs = HchatStorage.preferences(context.hostContext(), CustomFriendAvatarSettings.PREFS_NAME)
+        var schedule: (() -> Unit)? = null
+        val owner = PreferenceRuntimeOwner(prefs, setOf(CustomFriendAvatarSettings.KEY_ENABLE),
+            enabled = { CustomFriendAvatarSettings.enabled(context.hostContext()) },
+            create = { resources ->
+                val installed = CustomFriendAvatarRuntime(context, ::logFeatureError)
+                runtime = installed
+                resources.register { installed.destroy(); if (runtime === installed) runtime = null }
+                val ticket = DexInstallScheduler.installation(ID + ":runtime", name())
+                val shortcut = DexInstallScheduler.installation(DESKTOP_SHORTCUT_TASK_ID, "自定义头像桌面快捷方式")
+                resources.register { ticket.close(); shortcut.close(); schedule = null }
+                installed.installNotificationHooks()
+                schedule = {
+                    if (!resources.isClosed()) {
+                        ticket.schedule { installed.install() }
+                        shortcut.schedule { installed.installDesktopShortcutHook() }
+                    }
+                }
+                schedule?.invoke()
+            }, onError = { logError("自定义头像热启停失败", it) })
+        trackResource { owner.close() }
+        subscribe(Events.DexReady::class.java) { schedule?.invoke() }
+        owner.start()
     }
-
     override fun onFeatureDestroy(context: FeatureContext) {
         runtime?.destroy()
         runtime = null
     }
-
-    private fun logFeatureError(message: String, throwable: Throwable?) {
-        logError(message, throwable)
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) { runtime?.install() == true }
-        DexInstallScheduler.schedule(DESKTOP_SHORTCUT_TASK_ID, "自定义头像桌面快捷方式") {
-            runtime?.installDesktopShortcutHook() == true
-        }
-    }
-
+    private fun logFeatureError(message: String, throwable: Throwable?) { logError(message, throwable) }
     companion object {
         const val ID = "custom_friend_avatar"
         private const val DESKTOP_SHORTCUT_TASK_ID = "custom_friend_avatar_desktop_shortcut"
@@ -88,6 +98,15 @@ private class CustomFriendAvatarRuntime(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var destroyed = false
+    private val hookResources = FeatureResourceScope { HLog.e("[Hchat:Avatar] Hook释放失败", it) }
+    private fun hookOwned(member: java.lang.reflect.Member, callback: XC_MethodHook): XC_MethodHook.Unhook {
+        check(!destroyed) { "头像运行时已销毁" }
+        val handle = HookRegistry.get().hook(member, callback)
+        hookResources.register { HookRegistry.get().unhook(handle) }
+        return handle
+    }
+
     private val hookedMembers = ConcurrentHashMap.newKeySet<Member>()
     private val drawableWxids = Collections.synchronizedMap(WeakHashMap<Any, String>())
     private val drawableSurfaces = Collections.synchronizedMap(WeakHashMap<Any, AvatarSurface>())
@@ -101,11 +120,12 @@ private class CustomFriendAvatarRuntime(
         override fun title(target: ConversationMenuExtensionTarget): String = MENU_TITLE
 
         override fun isVisible(target: ConversationMenuExtensionTarget): Boolean {
-            return CustomFriendAvatarSettings.conversationMenuEnabled(context.hostContext()) &&
+            return !destroyed && CustomFriendAvatarSettings.conversationMenuEnabled(context.hostContext()) &&
                 isAvatarTarget(target.talker)
         }
 
         override fun onClick(target: ConversationMenuExtensionTarget) {
+            if (destroyed) return
             showAvatarActions(target.activity, target.talker)
         }
     }
@@ -113,6 +133,7 @@ private class CustomFriendAvatarRuntime(
     private var desktopShortcutInstalled = false
 
     fun installNotificationHooks() {
+        if (destroyed) return
         NotificationManager::class.java.declaredMethods
             .asSequence()
             .filter { method ->
@@ -122,6 +143,7 @@ private class CustomFriendAvatarRuntime(
             .forEach { method ->
                 hook(method, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                         if (!CustomFriendAvatarSettings.notificationsEnabled(context.hostContext())) return
                         val notification = param.args.lastOrNull() as? Notification ?: return
                         val talker = CustomNotificationRuntime.notificationTalker(notification)
@@ -134,10 +156,12 @@ private class CustomFriendAvatarRuntime(
 
     @Synchronized
     fun installDesktopShortcutHook(): Boolean {
+        if (destroyed) return false
         if (desktopShortcutInstalled) return true
         val method = locateDesktopShortcutMethod() ?: return false
         desktopShortcutInstalled = hook(method, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                 runCatching { replaceDesktopShortcutIcon(param) }
                     .onFailure { logger("替换桌面快捷方式头像失败", it) }
             }
@@ -164,10 +188,12 @@ private class CustomFriendAvatarRuntime(
 
     @Synchronized
     fun install(): Boolean {
+        if (destroyed) return false
         CustomFriendAvatarStore.preload(context.hostContext())
         val avatarMembers = locateAvatarMembers() ?: return false
         val legacy = hook(avatarMembers.legacyLoad, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                 val requestedWxid = param.args.getOrNull(1) as? String ?: return
                 val source = automaticGroupAvatarSource(requestedWxid) ?: return
                 if (conversationGroupHasCustomAvatar(requestedWxid)) return
@@ -176,6 +202,7 @@ private class CustomFriendAvatarRuntime(
             }
 
             override fun afterHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                 val image = param.args.getOrNull(0) as? ImageView ?: return
                 val wxid = param.getObjectExtra(ORIGINAL_GROUP_WXID) as? String
                     ?: param.args.getOrNull(1) as? String
@@ -191,6 +218,7 @@ private class CustomFriendAvatarRuntime(
         })
         val constructor = hook(avatarMembers.workerConstructor, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                 val requestedWxid = param.args.getOrNull(1) as? String ?: return
                 val source = automaticGroupAvatarSource(requestedWxid) ?: return
                 if (conversationGroupHasCustomAvatar(requestedWxid)) return
@@ -199,6 +227,7 @@ private class CustomFriendAvatarRuntime(
             }
 
             override fun afterHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                 val wxid = param.getObjectExtra(ORIGINAL_GROUP_WXID) as? String
                     ?: param.args.getOrNull(1) as? String
                     ?: return
@@ -212,6 +241,7 @@ private class CustomFriendAvatarRuntime(
         val modify = avatarMembers.workerModify?.let { method ->
             hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val target = param.args.getOrNull(0) ?: return
                     val requestedWxid = param.args.getOrNull(2) as? String ?: return
                     val source = automaticGroupAvatarSource(requestedWxid)
@@ -232,6 +262,7 @@ private class CustomFriendAvatarRuntime(
         } ?: true
         val draw = hook(avatarMembers.draw, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                 val wxid = drawableWxids[param.thisObject].orEmpty()
                 if (wxid.isBlank()) return
                 val surface = drawableSurfaces[param.thisObject] ?: AvatarSurface.OTHER
@@ -256,6 +287,11 @@ private class CustomFriendAvatarRuntime(
     }
 
     fun destroy() {
+        destroyed = true
+        hookResources.close()
+        hookedMembers.clear()
+        installed = false
+        desktopShortcutInstalled = false
         ConversationMenuExtensionRegistry.unregister(conversationMenuExtension)
         drawableWxids.clear()
         drawableSurfaces.clear()
@@ -265,10 +301,14 @@ private class CustomFriendAvatarRuntime(
     }
 
     private fun installConversationMenu() {
+        if (destroyed) return
         ConversationMenuExtensionRegistry.register(conversationMenuExtension)
+        hookResources.register { ConversationMenuExtensionRegistry.unregister(conversationMenuExtension) }
+        if (destroyed) return
         val method = ConversationMenuLocator.menuCreateMethod(context, logger) ?: return
         hook(method, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                 if (!CustomFriendAvatarSettings.conversationMenuEnabled(context.hostContext())) return
                 val menu = param.args.getOrNull(0) as? ContextMenu ?: return
                 val target = resolveAvatarTarget(param.thisObject) ?: return
@@ -296,6 +336,7 @@ private class CustomFriendAvatarRuntime(
             ?: return
         hook(method, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                 val clicked = param.args.getOrNull(0) as? MenuItem ?: return
                 if (clicked.itemId != CONVERSATION_MENU_ID) return
                 val target = conversationBindings.remove(clicked) ?: return
@@ -381,7 +422,7 @@ private class CustomFriendAvatarRuntime(
         if (member is Method && (Modifier.isAbstract(member.modifiers) || member.declaringClass.isInterface)) return false
         if (!hookedMembers.add(member)) return true
         return runCatching {
-            HookRegistry.get().hook(member, callback)
+            hookOwned(member, callback)
             true
         }.getOrElse {
             hookedMembers.remove(member)
