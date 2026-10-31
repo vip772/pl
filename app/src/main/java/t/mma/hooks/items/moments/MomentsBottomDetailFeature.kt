@@ -376,11 +376,13 @@ private class MomentsBottomDetailRuntime(
         predicate: (Method) -> Boolean
     ): Method? {
         return runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply { matcher(methodMatcher) })
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(FindMethod().apply { matcher(methodMatcher) })
                 .mapNotNull { data ->
                     runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                 }
                 .firstOrNull(predicate)
+            }
         }.onFailure {
             logger("朋友圈底部详情 DexKit 定位失败", it)
         }.getOrNull()

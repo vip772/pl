@@ -48,6 +48,9 @@ files = [
     'securemessage/AntiSecureMessageFeature.kt',
     'securemessage/SendSecureMessageFeature.kt',
     'swipequote/SwipeQuoteFeature.kt',
+    'zombiecheck/ZombieCheckFeature.kt',
+    'moments/MomentsKeywordBlockFeature.kt',
+    'moments/MomentsBottomDetailFeature.kt',
 ]
 total = 0
 scopes = []
@@ -115,6 +118,8 @@ fun isLimitMethod(m:Method) = true
 fun isUicConfigMethod(m:Method) = true
 fun isRetransmitDoneCandidate(m:Method) = true
 fun isNewQuoteCandidate(m:Method) = true
+fun isProbeConstructor(c:Constructor<*>) = true
+fun isDeleteMethod(m:Method) = true
 class Context {
  fun dexKitManager() = DexKitBridgeManager()
  fun hostClassLoader() = ClassLoader.getSystemClassLoader()
@@ -126,6 +131,8 @@ val anchor = "a"
 val methodName: String? = "method"
 val predicate: (Method) -> Boolean = { true }
 val query = FindMethod()
+val methodMatcher = MethodMatcher()
+fun isSnsTimelineQueryMethod(m:Method) = true
 val loader = context.hostClassLoader()
 val matcher: ClassMatcher = ClassMatcher()
 object R {fun loadClass(n:String,l:ClassLoader):Class<*>? = null}
@@ -167,6 +174,8 @@ fun isRecorderDurationMethod(m: Method) = true
     types += ['List<Method>', 'List<Method>', 'List<Method>', 'Method?', 'ChatLivePhotoMethods?']
     types += ['List<Method>', 'List<Method>']
     types += ['List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'Method?']
+    types += ['List<Constructor<*>>', 'List<Method>']
+    types += ['List<Method>', 'Method?', 'Method?']
     assert len(types) == len(scopes)
     body = '\n'.join(f'fun query{i}(): {t} {{ val strings = {"listOf" if i == 54 else "arrayOf"}("anchor"); val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))

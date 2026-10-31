@@ -186,7 +186,8 @@ internal class ZombieCheckHooker(
             ?.let { return it }
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -203,6 +204,7 @@ internal class ZombieCheckHooker(
                 runCatching { data.getConstructorInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isProbeConstructor)
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("定位转账核验构造器失败", it)
             emptyList()
@@ -242,7 +244,8 @@ internal class ZombieCheckHooker(
                 return it
             }
         val candidates = runCatching {
-            val clearRecordFound = context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+            val clearRecordFound = bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -263,7 +266,7 @@ internal class ZombieCheckHooker(
             if (clearRecordCandidates.isNotEmpty()) {
                 clearRecordCandidates
             } else {
-                val legacyFound = context.dexKitBridge().findMethod(
+                val legacyFound = bridge.findMethod(
                     FindMethod().apply {
                         matcher(
                             MethodMatcher().apply {
@@ -277,6 +280,7 @@ internal class ZombieCheckHooker(
                 }
                 legacyMethods.filter(::isDeleteMethod)
                     .distinctBy { it.toGenericString() }
+            }
             }
         }.getOrElse {
             logger("定位删除好友方法失败", it)

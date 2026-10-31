@@ -935,7 +935,8 @@ private class MomentsKeywordBlockRuntime(
         )?.takeIf(::isSnsTimelineQueryMethod)?.let { return it }
 
         val methods = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -947,6 +948,7 @@ private class MomentsKeywordBlockRuntime(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isSnsTimelineQueryMethod)
                 .distinctBy(Method::toGenericString)
+            }
         }.onFailure {
             logger("定位朋友圈数据库查询方法失败", it)
         }.getOrDefault(emptyList())
@@ -1084,11 +1086,13 @@ private class MomentsKeywordBlockRuntime(
 
     private fun findMethod(methodMatcher: MethodMatcher, predicate: (Method) -> Boolean): Method? {
         return runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply { matcher(methodMatcher) })
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(FindMethod().apply { matcher(methodMatcher) })
                 .mapNotNull { data ->
                     runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                 }
                 .firstOrNull(predicate)
+            }
         }.onFailure {
             logger("朋友圈关键词屏蔽 DexKit 定位失败", it)
         }.getOrNull()
