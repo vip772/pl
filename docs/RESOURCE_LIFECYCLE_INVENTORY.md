@@ -40,6 +40,7 @@
 - 宿主共享 DexKit：已新增 `DexKitBridgeManager` 记录当前代际、活动查询和租约数量，并由 `ModuleEntry` 发布当前 bridge；`DexBridgeHolder` 持有显式 raw-compatibility 租约，使旧脚本/未迁移入口继续保活。管理器提供受控 `closeIfIdle` / `closeRetiredIfIdle`，但当前没有启用自动回收，仍不得宣称宿主 native close 已完成。
 
 ## 修复后的限制与下一步
+- 自定义通知两处查询完成代际保护，签名筛选与去重在保护区间内结束，既有通知 Hook 所有权未改变；累计 24 个内联生产查询表达式通过 ABI 检查，另有转发记录私有解析区间通过源码边界检查。
 - 转发记录类型标签的缓存未命中解析整体进入管理器，`getMethodData`、`usingFields` 与字段反射转换均由私有 `locateFresh` 同步消费；返回结构只含 `Method`、`Class` 和 `Field`。源码边界已检查，整文件编译仍以 Actions 为准。
 - 防撤回补齐 3 个查询区间，`RevokeEntry` 从保存 `MethodData` 改为保存 `List<Method>` 调用关系；读取 `invokes` 和方法转换在同一活动查询内完成，缓存命中仍保留旧版 storage 定位回退。累计 22 个区间通过查询表达式 ABI 检查；消息撤回及媒体保留仍需真实微信验收。
 - 既有共享串行门的会话菜单、视频号详情请求和转账前实名查询继续补入代际保护；懒序列在区间内终结，实名查询只输出类名字符串。累计新增迁移 19 个查询区间、15 个文件，已通过生产查询表达式 ABI 检查；原串行门契约测试仍通过。

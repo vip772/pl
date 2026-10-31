@@ -508,7 +508,8 @@ object CustomNotificationRuntime {
             .takeIf { it.isNotEmpty() }
             ?.let { return it }
         val located = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply { usingStrings(listOf(anchor)) })
                 }
@@ -516,6 +517,7 @@ object CustomNotificationRuntime {
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(predicate)
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             HLog.e("$TAG 定位微信通知方法失败 anchor=$anchor: ${it.message}", it)
             emptyList()
@@ -577,7 +579,8 @@ object CustomNotificationRuntime {
 
     private fun findNativeNotificationBuilderMethods(context: FeatureContext): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         usingStrings(listOf("MicroMsg.Notification.AppMsg.Handle"))
@@ -587,6 +590,7 @@ object CustomNotificationRuntime {
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter { isNativeNotificationBuilderCandidate(it) }
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             HLog.e("$TAG 定位微信原生通知构建方法失败: ${it.message}", it)
             emptyList()

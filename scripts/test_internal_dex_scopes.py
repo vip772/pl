@@ -23,6 +23,7 @@ files = [
     'shortvideo/FinderFeedDetailResolver.kt',
     'realtail/BeforeTransferNameQuery.kt',
     'antirecall/AntiRecallFeature.kt',
+    'customnotify/CustomNotificationRuntime.kt',
 ]
 total = 0
 scopes = []
@@ -77,6 +78,8 @@ class Context {
 val context = Context()
 val strings = arrayOf("a")
 val tag = "a"
+val anchor = "a"
+val predicate: (Method) -> Boolean = { true }
 val loader = context.hostClassLoader()
 val matcher: ClassMatcher = ClassMatcher()
 object R {fun loadClass(n:String,l:ClassLoader):Class<*>? = null}
@@ -91,6 +94,7 @@ fun isMsgProcessingClearByMessage(m: Method) = true
 fun isMsgProcessingClearByKey(m: Method) = true
 fun isLegacySelfRecallMediaCleanupMethod(m: Method) = true
 fun isRevokeEntry(m: Method) = true
+fun isNativeNotificationBuilderCandidate(m: Method) = true
 '''
     names = set(re.findall(r'\b[A-Z][A-Z_]+\b', '\n'.join(scopes))) - {'R', 'ERR'}
     prelude += '\n'.join(f'const val {name} = "anchor"' for name in sorted(names))
@@ -99,7 +103,7 @@ fun isRevokeEntry(m: Method) = true
              'List<Method>', 'List<String>', 'List<Method>',
              'List<Method>', 'List<Member>', 'Method?', 'Method?',
              'Method?', 'List<Constructor<*>>', 'List<String>',
-             'List<Method>', 'List<Method>', 'List<RevokeEntry>']
+             'List<Method>', 'List<Method>', 'List<RevokeEntry>', 'List<Method>', 'List<Method>']
     assert len(types) == len(scopes)
     body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))
