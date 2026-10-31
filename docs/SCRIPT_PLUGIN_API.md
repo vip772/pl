@@ -2135,3 +2135,8 @@ ScriptDexKitBridge.findClassList / findMemberList（含各参数重载）现在�
 
 ### Agent 外部 APK 解析实例回收
 内置逆向工具打开的外部 APK 目标在最后一次工具执行结束后闲置 30 秒会卸载解析实例，释放独占 DexKit 和已加载的资源解析模块。目标会话仍保留，后续使用原 session_id 查询会校验 APK 文件并按需重建；APK 变化仍需重新 open_target_session。关闭在共享查询门内后台执行，不中断正在运行的查询；loaded 表示查询时的驻留状态，不能作为后续调用的驻留保证。此规则只作用于 Agent 独占外部目标，不作用于脚本获得的宿主 dexKitBridge。
+
+
+### 2026-10-31 原始 DexKit 对象兼容边界
+`dexKitBridge`、`dexBridgeHolder` 等旧全局变量仍按旧协议注入。解释器建立这些变量时，宿主当前代际按进程保活；即使脚本卸载也不关闭可能已逸出至任意 Java 线程/静态变量的原始对象。`dexKit.bridge()` / `holder()` 及 FeatureContext 原始 bridge 访问遵循相同规则。此行为有明确日志，不应误判为闲置回收故障。
+新查询 API 的 native-backed Data 在同步保护内完整消费，返回 Class/Member/字符串等 detached 结果；不使用原始接口时允许宿主 30 秒闲置关闭、后续查询按需重建。当前解释器为兼容旧 globals 会固定代际，不能承诺“运行旧解释器同时宿主必定回收”。

@@ -13,7 +13,7 @@ with tempfile.TemporaryDirectory() as td:
  stubs={
  'Core.kt':'''package t.mma.hooks.core
 open class BaseFeature {open fun featureId()="";open fun name()="";open fun onFeatureInit(c:FeatureContext){};open fun onFeatureInstall(c:FeatureContext){};fun registerSettingsProvider(p:Any){}}
-class FeatureContext {fun hostContext():android.content.Context=error("fixture");fun hostClassLoader():ClassLoader=error("fixture");fun dexKitBridge():org.luckypray.dexkit.DexKitBridge=error("fixture")}
+class FeatureContext {fun hostContext():android.content.Context=error("fixture");fun hostClassLoader():ClassLoader=error("fixture");fun dexKitBridge():org.luckypray.dexkit.DexKitBridge=error("fixture");fun dexKitManager():t.mma.dexkit.DexKitBridgeManager=error("fixture")}
 object HookRegistry {fun get()=this;fun hook(m:java.lang.reflect.Member,c:de.robv.android.xposed.XC_MethodHook){}}
 ''',
  'Xposed.kt':'''package de.robv.android.xposed
@@ -39,6 +39,6 @@ object DisableHotUpdateSettings {const val PREFS_NAME="fixture";const val KEY_EN
 ''',
  }
  for name,s in stubs.items():(p/name).write_text(s)
- sources=[base/'hooks/core/DexInstallScheduler.kt',base/'hooks/api/model/WeChatVersionInfo.kt',base/'dexkit/DexMethodCache.kt',base/'hooks/items/tablet/WeChatTabletFeature.kt',base/'hooks/items/hotupdate/DisableHotUpdateFeature.kt',base/'hooks/items/monetgenerator/engine/MonetDexEvidenceCollector.kt',base/'hooks/items/monetgenerator/engine/MonetGenerationModels.kt']
+ sources=[base/'dexkit/DexKitBridgeManager.java',base/'hooks/core/DexInstallScheduler.kt',base/'hooks/api/model/WeChatVersionInfo.kt',base/'dexkit/DexMethodCache.kt',base/'hooks/items/tablet/WeChatTabletFeature.kt',base/'hooks/items/hotupdate/DisableHotUpdateFeature.kt',base/'hooks/items/monetgenerator/engine/MonetDexEvidenceCollector.kt',base/'hooks/items/monetgenerator/engine/MonetGenerationModels.kt']
  subprocess.run(compiler+['-classpath',f'{std}:{sdk}:{dex}','-d',str(p/'result.jar'),*map(str,p.glob('*.kt')),*map(str,sources)],check=True,timeout=55)
 print('PASS complete early tablet/hot-update installers and Monet collector: SDK + real DexKit ABI compile')

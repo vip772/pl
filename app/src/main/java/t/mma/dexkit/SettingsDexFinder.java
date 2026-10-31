@@ -47,7 +47,9 @@ public class SettingsDexFinder {
     private static final String CACHE_KEY = "cache.key";
     private static final boolean VERBOSE = false;
 
-    private final DexKitBridge dexKit;
+    private final DexKitBridge legacyDexKit;
+    private DexKitBridgeManager manager;
+    private final ThreadLocal<DexKitBridge> queryBridge = new ThreadLocal<>();
     private final ClassLoader classLoader;
     private final SharedPreferences cachePrefs;
     private final String runtimeCacheKey;
@@ -83,12 +85,35 @@ public class SettingsDexFinder {
     // ===== 旧版 SettingsUI =====
     public Class<?> settingsUIClass;
 
+    public static SettingsDexFinder managed(DexKitBridgeManager manager, ClassLoader loader, Context context) {
+        SettingsDexFinder finder = new SettingsDexFinder((DexKitBridge) null, loader, context);
+        finder.manager = java.util.Objects.requireNonNull(manager);
+        return finder;
+    }
+    private DexKitBridge activeBridge() {
+        DexKitBridge bridge = queryBridge.get();
+        if (bridge == null) bridge = legacyDexKit;
+        if (bridge == null) throw new IllegalStateException("定位器查询未进入代际保护");
+        return bridge;
+    }
+    private <T> T withBridge(java.util.concurrent.Callable<T> task) {
+        if (manager == null) return DexInstallScheduler.queryDexKitTask(task);
+        return manager.withCurrentBridge(bridge -> {
+            DexKitBridge previous = queryBridge.get();
+            queryBridge.set(bridge);
+            try { return DexInstallScheduler.queryDexKitTask(task); }
+            finally { if (previous == null) queryBridge.remove(); else queryBridge.set(previous); }
+        });
+    }
+    private void runWithBridge(Runnable task) {
+        withBridge(() -> { task.run(); return null; });
+    }
     public SettingsDexFinder(DexKitBridge dexKit, ClassLoader classLoader) {
         this(dexKit, classLoader, null);
     }
 
     public SettingsDexFinder(DexKitBridge dexKit, ClassLoader classLoader, Context context) {
-        this.dexKit = dexKit;
+        this.legacyDexKit = dexKit;
         this.classLoader = classLoader;
         this.cachePrefs = context != null ? HchatStorage.preferences(context, CACHE_PREFS) : null;
         this.versionInfo = WeChatVersionApi.build(context, classLoader);
@@ -100,7 +125,7 @@ public class SettingsDexFinder {
     }
 
     public void resolveAll(boolean includePlusMenu) {
-        DexInstallScheduler.runDexKitTask(() -> resolveAllLocked(includePlusMenu));
+        runWithBridge(() -> resolveAllLocked(includePlusMenu));
     }
     private void resolveAllLocked(boolean includePlusMenu) {
         if (loadCache()) {
@@ -163,7 +188,7 @@ public class SettingsDexFinder {
             mm.paramTypes("java.lang.String");
             mm.usingStrings(Arrays.asList("Preference"));
             fm.matcher(mm);
-            List<MethodData> results = dexKit.findMethod(fm);
+            List<MethodData> results = activeBridge().findMethod(fm);
             for (MethodData md : results) {
                 Class<?> cl = KavaReflector.loadClass(md.getClassName(), classLoader);
                 methodSetKey = KavaReflector.findMethod(cl, md.getName(), String.class);
@@ -184,14 +209,14 @@ public class SettingsDexFinder {
             ClassMatcher cm = new ClassMatcher();
             cm.className(PREF_CLASS);
             fc.matcher(cm);
-            List<ClassData> classes = dexKit.findClass(fc);
+            List<ClassData> classes = activeBridge().findClass(fc);
             for (ClassData cd : classes) {
                 FindMethod fm2 = new FindMethod();
                 MethodMatcher mm2 = new MethodMatcher();
                 mm2.returnType("void");
                 mm2.paramTypes("java.lang.CharSequence");
                 fm2.matcher(mm2);
-                List<MethodData> candidates = dexKit.findMethod(fm2);
+                List<MethodData> candidates = activeBridge().findMethod(fm2);
                 // 过滤只保留声明在 Preference 中的
                 List<MethodData> filtered = new java.util.ArrayList<>();
                 for (MethodData md : candidates) {
@@ -222,7 +247,7 @@ public class SettingsDexFinder {
             mm.paramCount(0);
             mm.returnType("java.lang.String");
             fm.matcher(mm);
-            List<MethodData> candidates = dexKit.findMethod(fm);
+            List<MethodData> candidates = activeBridge().findMethod(fm);
             for (MethodData md : candidates) {
                 if (!"toString".equals(md.getName())) {
                     Class<?> cl = KavaReflector.loadClass(md.getClassName(), classLoader);
@@ -247,7 +272,7 @@ public class SettingsDexFinder {
             cm2.superClass("android.widget.BaseAdapter");
             fc2.searchPackages("com.tencent.mm.ui.base.preference");
             fc2.matcher(cm2);
-            List<ClassData> allClasses = dexKit.findClass(fc2);
+            List<ClassData> allClasses = activeBridge().findClass(fc2);
             String adapterClassName = null;
             for (ClassData cd : allClasses) {
                 try {
@@ -287,7 +312,7 @@ public class SettingsDexFinder {
             mm3.returnType("void");
             fm3.searchPackages("com.tencent.mm.ui.base.preference");
             fm3.matcher(mm3);
-            List<MethodData> results = dexKit.findMethod(fm3);
+            List<MethodData> results = activeBridge().findMethod(fm3);
             for (MethodData md : results) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(md.getClassName(), classLoader);
@@ -387,7 +412,7 @@ public class SettingsDexFinder {
             ClassMatcher cm = new ClassMatcher();
             cm.usingEqStrings("Repairer_Setting");
             fc.matcher(cm);
-            List<ClassData> results = dexKit.findClass(fc);
+            List<ClassData> results = activeBridge().findClass(fc);
             Class<?> fallback = null;
             for (ClassData cd : results) {
                 Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
@@ -423,7 +448,7 @@ public class SettingsDexFinder {
             ClassMatcher cm = new ClassMatcher();
             cm.usingEqStrings("", "activity", "context", "intent");
             fc.matcher(cm);
-            List<ClassData> results = dexKit.findClass(fc);
+            List<ClassData> results = activeBridge().findClass(fc);
             Class<?> fallback = null;
             for (ClassData cd : results) {
                 try {
@@ -516,7 +541,7 @@ public class SettingsDexFinder {
             ClassMatcher cm = new ClassMatcher();
             cm.usingEqStrings("SettingLocation(parentGroup=", ", frontItem=");
             fc.matcher(cm);
-            List<ClassData> results = dexKit.findClass(fc);
+            List<ClassData> results = activeBridge().findClass(fc);
             for (ClassData cd : results) {
                 settingLocationClass = KavaReflector.loadClass(cd.getName(), classLoader);
                 logDetail("SettingLocation: " + cd.getName());
@@ -538,7 +563,7 @@ public class SettingsDexFinder {
             mm.usingNumbers(1);
             mm.returnType("int");
             fm.matcher(mm);
-            List<MethodData> results = dexKit.findMethod(fm);
+            List<MethodData> results = activeBridge().findMethod(fm);
             for (MethodData md : results) {
                 methodAccountInfoReturns1 = KavaReflector.findMethod(
                         KavaReflector.loadClass(md.getClassName(), classLoader), md.getName());
@@ -562,7 +587,7 @@ public class SettingsDexFinder {
             mm.returnType("java.lang.String");
             mm.usingStrings(Arrays.asList("SettingGroup_Main_AccountInfo"));
             fm.matcher(mm);
-            List<MethodData> results = dexKit.findMethod(fm);
+            List<MethodData> results = activeBridge().findMethod(fm);
             for (MethodData md : results) {
                 methodAccountInfoSettingKey = KavaReflector.findMethod(
                         KavaReflector.loadClass(md.getClassName(), classLoader), md.getName());
@@ -613,7 +638,7 @@ public class SettingsDexFinder {
             ClassMatcher cm = new ClassMatcher();
             cm.usingStrings(Arrays.asList("MicroMsg.PlusSubMenuHelper"));
             fc.matcher(cm);
-            List<ClassData> results = dexKit.findClass(fc);
+            List<ClassData> results = activeBridge().findClass(fc);
             for (ClassData cd : results) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);

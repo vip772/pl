@@ -28,7 +28,8 @@ object MultiSelectMessageMenuLocator {
             ?.takeIf(::isMenuCreateMethod)
             ?.let { return it }
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         name("onCreateMMMenu")
@@ -41,6 +42,8 @@ object MultiSelectMessageMenuLocator {
             ).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter(::isMenuCreateMethod)
                 .distinctBy { it.toGenericString() }
+
+            }
         }.onFailure { logger("定位多选消息菜单创建方法失败", it) }.getOrDefault(emptyList())
         return saveSingleMethod(prefs, cacheKey, CACHE_MENU_CREATE, candidates, "菜单创建", logger)
     }
@@ -55,7 +58,8 @@ object MultiSelectMessageMenuLocator {
             ?.takeIf(::isMenuClickMethod)
             ?.let { return it }
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         name("onMMMenuItemSelected")
@@ -67,6 +71,8 @@ object MultiSelectMessageMenuLocator {
             ).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter(::isMenuClickMethod)
                 .distinctBy { it.toGenericString() }
+
+            }
         }.onFailure { logger("定位多选消息菜单点击方法失败", it) }.getOrDefault(emptyList())
         return saveSingleMethod(prefs, cacheKey, CACHE_MENU_CLICK, candidates, "菜单点击", logger)
     }
@@ -90,7 +96,8 @@ object MultiSelectMessageMenuLocator {
             ?.takeIf(::isMultiSelectExitMethod)
             ?.let { return it }
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         returnType("void")
@@ -102,6 +109,8 @@ object MultiSelectMessageMenuLocator {
             ).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter(::isMultiSelectExitMethod)
                 .distinctBy { it.toGenericString() }
+
+            }
         }.onFailure { logger("定位多选消息原生退出方法失败", it) }.getOrDefault(emptyList())
         return saveSingleMethod(
             prefs,

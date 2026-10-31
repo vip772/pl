@@ -36,8 +36,8 @@ class ScriptPluginFeature : BaseFeature() {
             FinderMediaDownloadSupport.install(context)
         }
         DexInstallScheduler.schedule("$ID:menus", "${name()}-菜单", stage = DexInstallScheduler.Stage.WARMUP) {
-            val finder = SettingsDexFinder(
-                context.dexKitBridge(),
+            val finder = SettingsDexFinder.managed(
+                context.dexKitManager(),
                 context.hostClassLoader(),
                 context.hostContext()
             )

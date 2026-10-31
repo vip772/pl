@@ -6,7 +6,7 @@ import android.database.Cursor
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.utils.KavaReflector
-import org.luckypray.dexkit.DexKitBridge
+import t.mma.dexkit.DexKitBridgeManager
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Method
@@ -25,7 +25,7 @@ internal data class SnsCachedNativeLookup(
 internal class SnsCachedPostStorage(
     private val context: Context,
     private val classLoader: ClassLoader,
-    private val dexKitBridge: DexKitBridge,
+    private val dexKitManager: DexKitBridgeManager,
     private val logger: (String) -> Unit
 ) {
     private val prefs = DexMethodCache.prefs(context, PREFS_NAME)
@@ -240,9 +240,9 @@ internal class SnsCachedPostStorage(
 
     private fun findMethods(anchors: List<String>): List<Method> {
         lateinit var methods: List<Method>
-        DexInstallScheduler.runDexKitTask {
+        dexKitManager.withCurrentBridge { bridge ->
             methods = runCatching {
-                dexKitBridge.findMethod(
+                bridge.findMethod(
                     FindMethod().apply {
                         matcher(MethodMatcher().apply { usingStrings(anchors) })
                     }

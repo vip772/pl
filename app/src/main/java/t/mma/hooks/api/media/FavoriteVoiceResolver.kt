@@ -1,10 +1,10 @@
 package t.mma.hooks.api.media
 
-import t.mma.hooks.core.DexInstallScheduler
 import android.content.Context
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.utils.KavaReflector
+import t.mma.dexkit.DexKitBridgeManager
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
@@ -32,14 +32,14 @@ internal object FavoriteVoiceResolver {
     fun resolve(
         hostContext: Context,
         classLoader: ClassLoader,
-        dexKitBridge: DexKitBridge?,
+        dexKitManager: DexKitBridgeManager?,
         favorite: Any,
         logger: ((String, Throwable?) -> Unit)? = null
     ): VoiceSource? {
         if (favoriteType(favorite) != 3) return null
         val data = firstFavoriteDataItem(favorite) ?: return null
         val rawPaths = linkedSetOf<String>()
-        favoriteDataPaths(hostContext, classLoader, dexKitBridge, data, logger).forEach { rawPaths += it }
+        favoriteDataPaths(hostContext, classLoader, dexKitManager, data, logger).forEach { rawPaths += it }
         scanFavoriteVoicePath(classLoader, data)?.let { rawPaths += it }
         scanFavoriteVoicePath(classLoader, favorite)?.let { rawPaths += it }
         val path = rawPaths.asSequence()
@@ -60,7 +60,7 @@ internal object FavoriteVoiceResolver {
     fun resolvePreviewPath(
         hostContext: Context,
         classLoader: ClassLoader,
-        dexKitBridge: DexKitBridge?,
+        dexKitManager: DexKitBridgeManager?,
         favorite: Any,
         logger: ((String, Throwable?) -> Unit)? = null
     ): String? {
@@ -68,7 +68,7 @@ internal object FavoriteVoiceResolver {
         if (type != 2 && type != 4) return null
         val data = firstFavoriteDataItem(favorite) ?: return null
         val fallbackExtension = if (type == 4) "mp4" else "jpg"
-        return favoriteDataPaths(hostContext, classLoader, dexKitBridge, data, logger)
+        return favoriteDataPaths(hostContext, classLoader, dexKitManager, data, logger)
             .asSequence()
             .mapNotNull {
                 materializePath(
@@ -85,7 +85,7 @@ internal object FavoriteVoiceResolver {
     fun requestDownload(
         hostContext: Context,
         classLoader: ClassLoader,
-        dexKitBridge: DexKitBridge?,
+        dexKitManager: DexKitBridgeManager?,
         favorite: Any,
         logger: ((String, Throwable?) -> Unit)? = null
     ): Boolean {
@@ -93,7 +93,7 @@ internal object FavoriteVoiceResolver {
         val method = favoriteDownloadMethod(
             hostContext,
             classLoader,
-            dexKitBridge,
+            dexKitManager,
             favorite.javaClass,
             logger
         ) ?: return false
@@ -112,12 +112,12 @@ internal object FavoriteVoiceResolver {
     suspend fun requestDownloadAwait(
         hostContext: Context,
         classLoader: ClassLoader,
-        dexKitBridge: DexKitBridge?,
+        dexKitManager: DexKitBridgeManager?,
         favorite: Any,
         logger: ((String, Throwable?) -> Unit)? = null
     ): Boolean {
         if (favoriteType(favorite) != 3) return false
-        val method = favoriteDownloadMethod(hostContext, classLoader, dexKitBridge, favorite.javaClass, logger)
+        val method = favoriteDownloadMethod(hostContext, classLoader, dexKitManager, favorite.javaClass, logger)
             ?: return false
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
             try {
@@ -135,10 +135,19 @@ internal object FavoriteVoiceResolver {
     private fun favoriteDownloadMethod(
         hostContext: Context,
         classLoader: ClassLoader,
-        dexKitBridge: DexKitBridge?,
+        dexKitManager: DexKitBridgeManager?,
         favoriteClass: Class<*>,
         logger: ((String, Throwable?) -> Unit)?
-    ): Method? = DexInstallScheduler.queryDexKit { favoriteDownloadMethodLocked(hostContext, classLoader, dexKitBridge, favoriteClass, logger) }
+    ): Method? {
+        // Disk/reflection cache does not require opening a native generation.
+        favoriteDownloadMethodLocked(hostContext, classLoader, null, favoriteClass, logger)?.let { return it }
+        if (dexKitManager == null) return null
+        return runCatching {
+            dexKitManager.withCurrentBridge { bridge ->
+                favoriteDownloadMethodLocked(hostContext, classLoader, bridge, favoriteClass, logger)
+            }
+        }.getOrElse { logger?.invoke("收藏语音查询代际失败", it); null }
+    }
     private fun favoriteDownloadMethodLocked(
         hostContext: Context,
         classLoader: ClassLoader,
@@ -218,7 +227,7 @@ internal object FavoriteVoiceResolver {
     private fun favoriteDataPaths(
         hostContext: Context,
         classLoader: ClassLoader,
-        dexKitBridge: DexKitBridge?,
+        dexKitManager: DexKitBridgeManager?,
         data: Any,
         logger: ((String, Throwable?) -> Unit)? = null
     ): List<String> {
@@ -240,7 +249,7 @@ internal object FavoriteVoiceResolver {
                 ?.takeIf { favoriteDataPathScore(classLoader, it, dataId, cached) >= 0 }
                 ?.let { paths += it }
         }
-        val candidates = locateFavoriteDataPathMethods(dexKitBridge, classLoader, dataClass, logger)
+        val candidates = locateFavoriteDataPathMethods(dexKitManager, classLoader, dataClass, logger)
         val ranked = candidates
             .mapNotNull { method ->
                 val path = KavaReflector.invoke(method, null, data) as? String ?: return@mapNotNull null
@@ -259,11 +268,18 @@ internal object FavoriteVoiceResolver {
     }
 
     private fun locateFavoriteDataPathMethods(
-        dexKitBridge: DexKitBridge?,
+        dexKitManager: DexKitBridgeManager?,
         classLoader: ClassLoader,
         dataClass: Class<*>,
         logger: ((String, Throwable?) -> Unit)? = null
-    ): List<Method> = DexInstallScheduler.queryDexKit { locateFavoriteDataPathMethodsLocked(dexKitBridge, classLoader, dataClass, logger) }
+    ): List<Method> {
+        if (dexKitManager == null) return emptyList()
+        return runCatching {
+            dexKitManager.withCurrentBridge { bridge ->
+                locateFavoriteDataPathMethodsLocked(bridge, classLoader, dataClass, logger)
+            }
+        }.getOrElse { logger?.invoke("收藏媒体查询代际失败", it); emptyList() }
+    }
     private fun locateFavoriteDataPathMethodsLocked(
         dexKitBridge: DexKitBridge?,
         classLoader: ClassLoader,

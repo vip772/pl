@@ -30,7 +30,9 @@ class WeChatTabletFeature : BaseFeature() {
 
     override fun onFeatureInstall(context: FeatureContext) {
         if (!isEnabled(context.hostContext())) return
-        install(context.hostContext(), context.hostClassLoader(), context.dexKitBridge())
+        context.dexKitManager().withCurrentBridge { bridge ->
+            install(context.hostContext(), context.hostClassLoader(), bridge)
+        }
     }
 
     companion object {

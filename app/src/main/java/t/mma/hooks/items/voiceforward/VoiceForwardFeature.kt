@@ -761,11 +761,11 @@ private class VoiceForwardHooker(
                     val prepared = awaitFavoriteVoiceFile(
                         resolve = {
                             FavoriteVoiceResolver.resolve(context.hostContext(), context.hostClassLoader(),
-                                context.dexKitBridge(), favorite, logger)
+                                context.dexKitManager(), favorite, logger)
                         },
                         startDownload = {
                             FavoriteVoiceResolver.requestDownloadAwait(context.hostContext(), context.hostClassLoader(),
-                                context.dexKitBridge(), favorite, logger)
+                                context.dexKitManager(), favorite, logger)
                         },
                         downloading = downloading
                     )

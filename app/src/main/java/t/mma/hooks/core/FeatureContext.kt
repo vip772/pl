@@ -18,7 +18,7 @@ class FeatureContext(
     private val moduleContext: Context,
     private val hostClassLoader: ClassLoader,
     private val loadPackageParam: XC_LoadPackage.LoadPackageParam,
-    private val dexKitBridge: DexKitBridge,
+    dexKitBridge: DexKitBridge?,
     private val dexFinder: DexFinder,
     private val eventBus: EventBus,
     private val configStore: ConfigStore,
@@ -34,7 +34,7 @@ class FeatureContext(
 
     fun loadPackageParam(): XC_LoadPackage.LoadPackageParam = loadPackageParam
 
-    fun dexKitBridge(): DexKitBridge = dexKitBridge
+    fun dexKitBridge(): DexKitBridge = dexKitManager.rawCompatibilityBridge("legacy-feature-context")
 
     fun dexFinder(): DexFinder = dexFinder
 
@@ -43,7 +43,7 @@ class FeatureContext(
     fun configStore(): ConfigStore = configStore
 
     fun dexBridgeHolder(): DexBridgeHolder = dexBridgeHolder
-    /** 生命周期治理入口；默认仅提供管理器，不启用宿主 bridge 自动回收。 */
+    /** 生命周期治理入口；内部定位使用受保护管理器；原始接口按进程保活兼容。 */
     fun dexKitManager(): DexKitBridgeManager = dexKitManager
     fun uiRegistry(): UIRegistry = uiRegistry
 }

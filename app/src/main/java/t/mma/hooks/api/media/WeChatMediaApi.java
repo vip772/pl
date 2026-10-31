@@ -4,7 +4,7 @@ import android.content.Context;
 
 import t.mma.dexkit.DexFinder;
 import t.mma.hooks.api.ui.WeChatCurrentActivityApi;
-import org.luckypray.dexkit.DexKitBridge;
+import t.mma.dexkit.DexKitBridgeManager;
 
 /**
  * 微信媒体 API 聚合入口。
@@ -26,7 +26,7 @@ public final class WeChatMediaApi {
     public WeChatMediaApi(Context hostContext,
                           DexFinder dexFinder,
                           ClassLoader hostClassLoader,
-                          DexKitBridge dexKitBridge,
+                          DexKitBridgeManager dexKitManager,
                           WeChatCurrentActivityApi currentActivityApi,
                           Logger logger) {
         this.imageApi = new WeChatImageApi(hostContext, dexFinder,
@@ -37,7 +37,7 @@ public final class WeChatMediaApi {
         this.emojiApi = new WeChatEmojiApi(hostContext, dexFinder, message -> log(logger, message));
         this.fileApi = new WeChatFileApi(dexFinder, message -> log(logger, message));
         this.favoriteApi = new WeChatFavoriteApi(hostContext, dexFinder, hostClassLoader,
-                dexKitBridge, currentActivityApi, message -> log(logger, message));
+                dexKitManager, currentActivityApi, message -> log(logger, message));
     }
 
     public boolean isAvailable() {

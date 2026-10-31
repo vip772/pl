@@ -4,7 +4,7 @@ import t.mma.hooks.core.DexInstallScheduler
 import android.content.Context
 import t.mma.dexkit.DexMethodCache
 import t.mma.utils.KavaReflector
-import org.luckypray.dexkit.DexKitBridge
+import t.mma.dexkit.DexKitBridgeManager
 import org.luckypray.dexkit.query.FindClass
 import org.luckypray.dexkit.query.matchers.ClassMatcher
 import java.lang.reflect.Constructor
@@ -14,7 +14,7 @@ import java.lang.reflect.Modifier
 internal class SnsInteractionLocator(
     private val context: Context,
     private val classLoader: ClassLoader,
-    private val dexKitBridge: DexKitBridge?,
+    private val dexKitManager: DexKitBridgeManager?,
     private val logger: (String) -> Unit
 ) {
     private val prefs = DexMethodCache.prefs(context, PREFS_NAME)
@@ -42,9 +42,10 @@ internal class SnsInteractionLocator(
                 likeMethod = it
                 return it
             }
-        val bridge = dexKitBridge ?: return null
+        val manager = dexKitManager ?: return null
         return runCatching {
-            bridge.findClass(
+            manager.withCurrentBridge { nativeBridge ->
+            nativeBridge.findClass(
                 FindClass().apply {
                     matcher(
                         ClassMatcher().apply {
@@ -60,6 +61,8 @@ internal class SnsInteractionLocator(
                     likeMethod = it
                     DexMethodCache.save(prefs, runtimeKey, CACHE_LIKE, it)
                 }
+
+            }
         }.onFailure {
             logger("定位朋友圈原生点赞方法失败: ${it.message}")
         }.getOrNull()
@@ -76,9 +79,10 @@ internal class SnsInteractionLocator(
                 commentMethod = it
                 return it
             }
-        val bridge = dexKitBridge ?: return null
+        val manager = dexKitManager ?: return null
         return runCatching {
-            bridge.findClass(
+            manager.withCurrentBridge { nativeBridge ->
+            nativeBridge.findClass(
                 FindClass().apply {
                     matcher(
                         ClassMatcher().apply {
@@ -94,6 +98,8 @@ internal class SnsInteractionLocator(
                     commentMethod = it
                     DexMethodCache.save(prefs, runtimeKey, CACHE_COMMENT, it)
                 }
+
+            }
         }.onFailure {
             logger("定位朋友圈原生评论方法失败: ${it.message}")
         }.getOrNull()
@@ -146,9 +152,10 @@ internal class SnsInteractionLocator(
                 refreshConstructor = it
                 return it
             }
-        val bridge = dexKitBridge ?: return null
+        val manager = dexKitManager ?: return null
         return runCatching {
-            bridge.findClass(
+            manager.withCurrentBridge { nativeBridge ->
+            nativeBridge.findClass(
                 FindClass().apply {
                     matcher(
                         ClassMatcher().apply {
@@ -164,6 +171,8 @@ internal class SnsInteractionLocator(
                     refreshConstructor = it
                     DexMethodCache.saveConstructor(prefs, runtimeKey, CACHE_REFRESH, it)
                 }
+
+            }
         }.onFailure {
             logger("定位朋友圈原生刷新请求失败: ${it.message}")
         }.getOrNull()

@@ -32,7 +32,8 @@ object SingleMessageMenuLocator {
         if (cached.isNotEmpty()) return cached
 
         val methods = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -47,6 +48,8 @@ object SingleMessageMenuLocator {
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isMenuCreateMethod)
                 .distinctBy { it.toGenericString() }
+
+            }
         }.onFailure {
             logger("定位单消息菜单创建方法失败", it)
         }.getOrDefault(emptyList())
@@ -67,7 +70,8 @@ object SingleMessageMenuLocator {
         if (cached.isNotEmpty()) return cached
 
         val methods = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -85,6 +89,8 @@ object SingleMessageMenuLocator {
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isMenuClickMethod)
                 .distinctBy { it.toGenericString() }
+
+            }
         }.onFailure {
             logger("定位单消息菜单点击方法失败", it)
         }.getOrDefault(emptyList())

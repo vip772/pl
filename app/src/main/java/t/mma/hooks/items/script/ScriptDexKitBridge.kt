@@ -21,9 +21,12 @@ class ScriptDexKitBridge internal constructor(
     private val classLoader: ClassLoader,
     private val manager: DexKitBridgeManager? = null
 ) {
-    fun bridge(): DexKitBridge? = dexKitBridge
+    fun bridge(): DexKitBridge? = manager?.rawCompatibilityBridge("legacy-script") ?: dexKitBridge
 
-    fun holder(): DexBridgeHolder? = dexBridgeHolder
+    fun holder(): DexBridgeHolder? {
+        manager?.rawCompatibilityBridge("legacy-script-holder")
+        return dexBridgeHolder
+    }
 
     fun findClassList(usingStrings: List<String>?): List<Class<*>> {
         val strings = usingStrings?.filter { it.isNotBlank() }.orEmpty()

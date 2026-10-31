@@ -87,9 +87,11 @@ with tempfile.TemporaryDirectory() as td:
     classes.mkdir()
     (p / 'DexInstallScheduler.java').write_text('''package t.mma.hooks.core;
 public class DexInstallScheduler {
- public static <T> T queryDexKitTask(java.util.concurrent.Callable<T> t) throws Exception {return t.call();}
+ public static void runDexKitTask(Runnable task) {task.run();}
+ public static <T> T queryDexKitTask(java.util.concurrent.Callable<T> t) {try{return t.call();}catch(Exception e){throw new RuntimeException(e);}}
 }''')
-    subprocess.run(['javac', '-cp', str(dex), '-d', str(classes), str(p / 'DexInstallScheduler.java'),
+    (p / 'HLog.java').write_text('package t.mma.utils; public class HLog {public static void i(String s){} public static void w(String s){}}')
+    subprocess.run(['javac', '-cp', str(dex), '-d', str(classes), str(p / 'DexInstallScheduler.java'),str(p / 'HLog.java'),
                     str(root / 'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java')], check=True, timeout=30)
     prelude = '''import java.lang.reflect.*
 import org.luckypray.dexkit.query.FindMethod

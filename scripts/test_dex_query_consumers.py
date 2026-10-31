@@ -59,7 +59,8 @@ for method, collector in [('findClassList','collectClassMatches'),('findMemberLi
  assert block.index('queryDexKit {') < block.index(collector+'(') < block.index('ArrayList(out)') < block.index('}.onFailure')
 s=holder.read_text()
 for name in ['findClassesByStrings','findMethodsByStrings']:
- assert f'queryDexKitTask(() -> {name}Locked(anchorStrings))' in s
+ assert f'manager.withCurrentBridge(bridge -> {name}Locked(bridge, anchorStrings))' in s
+ assert f'queryDexKitTask(() -> {name}Locked(dexKitBridge, anchorStrings))' in s
 
 # Runtime locator entry contracts; whole-file Android linkage is checked by Actions.
 base=r/'app/src/main/java/t/mma/hooks/items'

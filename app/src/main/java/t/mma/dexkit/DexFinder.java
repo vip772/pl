@@ -44,7 +44,9 @@ public class DexFinder {
     private static final String CACHE_COMPLETE = "cache.complete";
     private static final String CACHE_KEY = "cache.key";
     private static final boolean VERBOSE = false;
-    private final DexKitBridge dexKit;
+    private final DexKitBridge legacyDexKit;
+    private DexKitBridgeManager manager;
+    private final ThreadLocal<DexKitBridge> queryBridge = new ThreadLocal<>();
     private final ClassLoader classLoader;
     private final SharedPreferences cachePrefs;
     private final SharedPreferences chatPageCachePrefs;
@@ -241,12 +243,35 @@ public class DexFinder {
     // 脚本发送按钮 hook
     public Method chatFooterSendClickMethod;
 
+    public static DexFinder managed(DexKitBridgeManager manager, ClassLoader loader, Context context) {
+        DexFinder finder = new DexFinder((DexKitBridge) null, loader, context);
+        finder.manager = java.util.Objects.requireNonNull(manager);
+        return finder;
+    }
+    private DexKitBridge activeBridge() {
+        DexKitBridge bridge = queryBridge.get();
+        if (bridge == null) bridge = legacyDexKit;
+        if (bridge == null) throw new IllegalStateException("定位器查询未进入代际保护");
+        return bridge;
+    }
+    private <T> T withBridge(java.util.concurrent.Callable<T> task) {
+        if (manager == null) return DexInstallScheduler.queryDexKitTask(task);
+        return manager.withCurrentBridge(bridge -> {
+            DexKitBridge previous = queryBridge.get();
+            queryBridge.set(bridge);
+            try { return DexInstallScheduler.queryDexKitTask(task); }
+            finally { if (previous == null) queryBridge.remove(); else queryBridge.set(previous); }
+        });
+    }
+    private void runWithBridge(Runnable task) {
+        withBridge(() -> { task.run(); return null; });
+    }
     public DexFinder(DexKitBridge dexKit, ClassLoader classLoader) {
         this(dexKit, classLoader, null);
     }
 
     public DexFinder(DexKitBridge dexKit, ClassLoader classLoader, Context hostContext) {
-        this.dexKit = dexKit;
+        this.legacyDexKit = dexKit;
         this.classLoader = classLoader;
         this.chatPageCachePrefs = hostContext != null
                 ? HchatStorage.preferences(hostContext, "Hchat_chat_page_cache") : null;
@@ -262,7 +287,7 @@ public class DexFinder {
     private final boolean restoredCacheUsable;
 
     public void resolveAll() {
-        DexInstallScheduler.runDexKitTask(() -> resolveAllLocked());
+        runWithBridge(() -> resolveAllLocked());
     }
     private synchronized void resolveAllLocked() {
         if (resolvedAll) {
@@ -561,13 +586,13 @@ public class DexFinder {
     private void resolveAddMsgClasses() {
         try {
             // 策略1: 搜索 "dkAddMsg" (OR 搜索，不同时要求两个字符串)
-            List<MethodData> methods1 = dexKit.findMethod(
+            List<MethodData> methods1 = activeBridge().findMethod(
                     mkMethodUsingStrings("dkAddMsg"));
             collectMethodOwnerClass(methods1, addMsgClasses);
 
             // 策略2: 搜索 "processAddMsg"
             if (addMsgClasses.isEmpty()) {
-                List<MethodData> methods2 = dexKit.findMethod(
+                List<MethodData> methods2 = activeBridge().findMethod(
                         mkMethodUsingStrings("processAddMsg"));
                 collectMethodOwnerClass(methods2, addMsgClasses);
             }
@@ -582,7 +607,7 @@ public class DexFinder {
     private void resolveReceiveLuckyMoney() {
         try {
             // 策略1: 用真实的 CGI URL 字符串定位
-            List<ClassData> classes = dexKit.findClass(
+            List<ClassData> classes = activeBridge().findClass(
                     mkClassUsingStrings("cgi-bin/mmpay-bin/receivewxhb"));
             for (ClassData cd : classes) {
                 try {
@@ -598,7 +623,7 @@ public class DexFinder {
 
             // 策略2: 回退到旧锚点
             if (receiveLuckyMoneyClass == null) {
-                List<ClassData> classes2 = dexKit.findClass(
+                List<ClassData> classes2 = activeBridge().findClass(
                         mkClassUsingStrings("receivehongbao"));
                 for (ClassData cd : classes2) {
                     try {
@@ -614,7 +639,7 @@ public class DexFinder {
             }
 
             // Union
-            List<MethodData> unionMethods = dexKit.findMethod(
+            List<MethodData> unionMethods = activeBridge().findMethod(
                     mkMethodUsingStrings("receiveunion"));
             Class<?> fallbackUnionReceiveClass = null;
             for (MethodData m : unionMethods) {
@@ -647,7 +672,7 @@ public class DexFinder {
     private void resolveOpenLuckyMoney() {
         try {
             // 策略1: 用真实的 CGI URL 字符串定位
-            List<ClassData> classes = dexKit.findClass(
+            List<ClassData> classes = activeBridge().findClass(
                     mkClassUsingStrings("cgi-bin/mmpay-bin/openwxhb"));
             for (ClassData cd : classes) {
                 try {
@@ -667,7 +692,7 @@ public class DexFinder {
 
             // 策略2: 回退到旧锚点
             if (openLuckyMoneyClass == null) {
-                List<ClassData> classes2 = dexKit.findClass(
+                List<ClassData> classes2 = activeBridge().findClass(
                         mkClassUsingStrings("open lucky"));
                 for (ClassData cd : classes2) {
                     try {
@@ -687,7 +712,7 @@ public class DexFinder {
             }
 
             // Union
-            List<MethodData> unionMethods = dexKit.findMethod(
+            List<MethodData> unionMethods = activeBridge().findMethod(
                     mkMethodUsingStrings("openluckyunion"));
             Class<?> fallbackUnionOpenClass = null;
             for (MethodData m : unionMethods) {
@@ -726,7 +751,7 @@ public class DexFinder {
             collectKnownNetworkQueueClasses();
 
             // 策略1: 搜索 doSceneImp 字符串，找到包含 dispatch 方法的类
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("doSceneImp"));
             for (MethodData m : methods) {
                 try {
@@ -773,7 +798,7 @@ public class DexFinder {
                     {"NetSceneWishWxHb"}
             };
             for (String[] anchor : anchors) {
-                List<ClassData> classes = dexKit.findClass(mkClassUsingStrings(anchor));
+                List<ClassData> classes = activeBridge().findClass(mkClassUsingStrings(anchor));
                 for (ClassData cd : classes) {
                     try {
                         Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
@@ -796,12 +821,12 @@ public class DexFinder {
 
     // ============ 文本消息发送 ============
     public void resolveServiceManagerApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveServiceManagerApiLocked());
+        runWithBridge(() -> resolveServiceManagerApiLocked());
     }
     private void resolveServiceManagerApiLocked() {
         try {
             if (isServiceGetterMethod(serviceGetterMethod)) return;
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("calling getService(...)"));
             for (MethodData methodData : methods) {
                 try {
@@ -819,7 +844,7 @@ public class DexFinder {
     }
 
     public void resolveSendTextMsg() {
-        DexInstallScheduler.runDexKitTask(() -> resolveSendTextMsgLocked());
+        runWithBridge(() -> resolveSendTextMsgLocked());
     }
     private void resolveSendTextMsgLocked() {
         try {
@@ -877,7 +902,7 @@ public class DexFinder {
     }
 
     public void resolveGetContactServiceApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveGetContactServiceApiLocked());
+        runWithBridge(() -> resolveGetContactServiceApiLocked());
     }
     private void resolveGetContactServiceApiLocked() {
         try {
@@ -896,7 +921,7 @@ public class DexFinder {
 
     private void collectGetContactAddMethods(String anchor) {
         try {
-            List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(anchor));
+            List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings(anchor));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -928,7 +953,7 @@ public class DexFinder {
             mm.paramCount(0);
             mm.returnType(serviceType);
             fm.matcher(mm);
-            List<MethodData> methods = dexKit.findMethod(fm);
+            List<MethodData> methods = activeBridge().findMethod(fm);
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -944,7 +969,7 @@ public class DexFinder {
 
     // ============ 图片消息发送 ============
     public void resolveSendImageApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveSendImageApiLocked());
+        runWithBridge(() -> resolveSendImageApiLocked());
     }
     private void resolveSendImageApiLocked() {
         try {
@@ -954,7 +979,7 @@ public class DexFinder {
                 return;
             }
 
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("sendImg: args error"));
             for (MethodData methodData : methods) {
                 try {
@@ -986,7 +1011,7 @@ public class DexFinder {
     }
 
     public void resolveImageCdnDownloadApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveImageCdnDownloadApiLocked());
+        runWithBridge(() -> resolveImageCdnDownloadApiLocked());
     }
     private void resolveImageCdnDownloadApiLocked() {
         try {
@@ -1000,7 +1025,7 @@ public class DexFinder {
             imageCdnServiceGetterMethod = null;
 
             if (!isImageCdnTaskClass(imageCdnTaskClass)) {
-                List<ClassData> classes = dexKit.findClass(mkClassUsingStrings(
+                List<ClassData> classes = activeBridge().findClass(mkClassUsingStrings(
                         "field_fullpath",
                         "field_fileId",
                         "field_aesKey",
@@ -1016,7 +1041,7 @@ public class DexFinder {
             }
 
             if (!isImageCdnTaskClass(imageCdnTaskClass)) {
-                List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(
+                List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings(
                         "field_fullpath",
                         "field_fileId",
                         "field_fileType"));
@@ -1043,7 +1068,7 @@ public class DexFinder {
                 MethodMatcher mm = new MethodMatcher();
                 mm.paramCount(2);
                 fm.matcher(mm);
-                List<MethodData> methods = dexKit.findMethod(fm);
+                List<MethodData> methods = activeBridge().findMethod(fm);
                 for (MethodData methodData : methods) {
                     try {
                         Method method = methodData.getMethodInstance(classLoader);
@@ -1060,7 +1085,7 @@ public class DexFinder {
                 MethodMatcher mm = new MethodMatcher();
                 mm.paramCount(1);
                 fm.matcher(mm);
-                List<MethodData> methods = dexKit.findMethod(fm);
+                List<MethodData> methods = activeBridge().findMethod(fm);
                 for (MethodData methodData : methods) {
                     try {
                         Method method = methodData.getMethodInstance(classLoader);
@@ -1073,7 +1098,7 @@ public class DexFinder {
             }
 
             if (imageCdnSubmitMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(
+                List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings(
                         "field_fileId",
                         "field_aesKey",
                         "field_fullpath"));
@@ -1095,7 +1120,7 @@ public class DexFinder {
                 MethodMatcher mm = new MethodMatcher();
                 mm.paramCount(0);
                 fm.matcher(mm);
-                List<MethodData> methods = dexKit.findMethod(fm);
+                List<MethodData> methods = activeBridge().findMethod(fm);
                 for (MethodData methodData : methods) {
                     try {
                         Method method = methodData.getMethodInstance(classLoader);
@@ -1131,7 +1156,7 @@ public class DexFinder {
                 } catch (Throwable ignored) {}
             }
             if (marsCdnDownloadRequestClass == null) {
-                List<ClassData> classes = dexKit.findClass(mkClassUsingStrings("must set marscdnBizType,apptype"));
+                List<ClassData> classes = activeBridge().findClass(mkClassUsingStrings("must set marscdnBizType,apptype"));
                 for (ClassData classData : classes) {
                     try {
                         Class<?> clazz = classData.getInstance(classLoader);
@@ -1153,7 +1178,7 @@ public class DexFinder {
                 } catch (Throwable ignored) {}
             }
             if (marsCdnDownloadCallbackClass == null) {
-                List<ClassData> classes = dexKit.findClass(mkClassUsingStrings("aeskey must be 32 bytes"));
+                List<ClassData> classes = activeBridge().findClass(mkClassUsingStrings("aeskey must be 32 bytes"));
                 for (ClassData classData : classes) {
                     try {
                         Class<?> clazz = classData.getInstance(classLoader);
@@ -1228,7 +1253,7 @@ public class DexFinder {
         try {
             if (!isImageBestPathMethod(imageBestPathMethod)) {
                 imageBestPathMethod = null;
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("[getBigPicPath] msg is null."));
                 for (MethodData methodData : methods) {
                     try {
@@ -1247,7 +1272,7 @@ public class DexFinder {
             }
             if (!isImageTokenPathMethod(imageTokenPathMethod)) {
                 imageTokenPathMethod = null;
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings(
                                 "THUMBNAIL://",
                                 "THUMBNAIL_DIRPATH://",
@@ -1277,7 +1302,7 @@ public class DexFinder {
             mm.paramCount(0);
             mm.returnType(storageClass.getName());
             fm.matcher(mm);
-            for (MethodData methodData : dexKit.findMethod(fm)) {
+            for (MethodData methodData : activeBridge().findMethod(fm)) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
                     if (!isImageStorageGetter(method, storageClass)) continue;
@@ -1317,7 +1342,7 @@ public class DexFinder {
     private void resolveSendImageAsyncParamClasses() {
         if (sendImageAsyncParamsClass != null && sendImageCrossParamsClass != null) return;
         try {
-            List<ClassData> classes = dexKit.findClass(
+            List<ClassData> classes = activeBridge().findClass(
                     mkClassUsingStrings("msg_raw_img_send", "crossParams", "imgPath", "fromUsername", "toUsername"));
             for (ClassData classData : classes) {
                 try {
@@ -1336,7 +1361,7 @@ public class DexFinder {
         Class<?> fromCrossParams = findSendImageAppInfoClassFromCrossParams();
         if (fromCrossParams != null) return fromCrossParams;
         try {
-            List<ClassData> classes = dexKit.findClass(
+            List<ClassData> classes = activeBridge().findClass(
                     mkClassUsingStrings("appid", "mediatagname", "messageext", "messageaction", "appinfo"));
             for (ClassData classData : classes) {
                 try {
@@ -1355,7 +1380,7 @@ public class DexFinder {
             MethodMatcher mm = new MethodMatcher();
             mm.paramTypes(sendImageAsyncParamsClass.getName());
             fm.matcher(mm);
-            List<MethodData> methods = dexKit.findMethod(fm);
+            List<MethodData> methods = activeBridge().findMethod(fm);
             Method fallback = null;
             for (MethodData methodData : methods) {
                 try {
@@ -1372,7 +1397,7 @@ public class DexFinder {
     }
 
     public void resolveSendFileApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveSendFileApiLocked());
+        runWithBridge(() -> resolveSendFileApiLocked());
     }
     private void resolveSendFileApiLocked() {
         try {
@@ -1410,7 +1435,7 @@ public class DexFinder {
     }
 
     public void resolveSendXmlApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveSendXmlApiLocked());
+        runWithBridge(() -> resolveSendXmlApiLocked());
     }
     private void resolveSendXmlApiLocked() {
         try {
@@ -1421,7 +1446,7 @@ public class DexFinder {
 
             List<Method> candidates = new ArrayList<>();
             List<Method> rawCandidates = new ArrayList<>();
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("summerbig sendAppMsg attachFilePath"));
             for (MethodData methodData : methods) {
                 collectMethodForDiagnostics(rawCandidates, methodData, true);
@@ -1457,13 +1482,13 @@ public class DexFinder {
     }
 
     public void resolveMsgDescTextApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveMsgDescTextApiLocked());
+        runWithBridge(() -> resolveMsgDescTextApiLocked());
     }
     private void resolveMsgDescTextApiLocked() {
         try {
             if (!msgDescTextMethods.isEmpty()) return;
             // 跨版本通用：微信消息描述文本方法名稳定为 "l"（各版本 xN0.q/r.l），用 "string" 字符串缩小范围后按签名过滤
-            List<MethodData> methods = dexKit.findMethod(mkMethodUsingStringsAndName("l", "string"));
+            List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStringsAndName("l", "string"));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -1538,13 +1563,13 @@ public class DexFinder {
     }
 
     public void resolveSendVideoApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveSendVideoApiLocked());
+        runWithBridge(() -> resolveSendVideoApiLocked());
     }
     private void resolveSendVideoApiLocked() {
         try {
             if (sendVideoMethod != null) return;
 
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("send vedio args error"));
             for (MethodData methodData : methods) {
                 try {
@@ -1563,7 +1588,7 @@ public class DexFinder {
     }
 
     public void resolveSendVideoTaskApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveSendVideoTaskApiLocked());
+        runWithBridge(() -> resolveSendVideoTaskApiLocked());
     }
     private void resolveSendVideoTaskApiLocked() {
         try {
@@ -1579,19 +1604,19 @@ public class DexFinder {
     }
 
     public void resolveVideoPathApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveVideoPathApiLocked());
+        runWithBridge(() -> resolveVideoPathApiLocked());
     }
     private void resolveVideoPathApiLocked() {
         try {
             if (!isVideoPathMethod(videoPathMethod)) {
                 videoPathMethod = null;
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings(
                                 "MicroMsg.C2CVideoPathFeatureService",
                                 "success restore file, from ",
                                 ".mp4"));
                 if (methods.isEmpty()) {
-                    methods = dexKit.findMethod(
+                    methods = activeBridge().findMethod(
                             mkMethodUsingStrings(
                                     "MicroMsg.VideoInfoStorage",
                                     "success restore file, from ",
@@ -1636,7 +1661,7 @@ public class DexFinder {
             mm.paramCount(0);
             mm.returnType(owner.getName());
             fm.matcher(mm);
-            for (MethodData methodData : dexKit.findMethod(fm)) {
+            for (MethodData methodData : activeBridge().findMethod(fm)) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
                     if (!isVideoPathOwnerGetter(method, owner)) continue;
@@ -1656,7 +1681,7 @@ public class DexFinder {
     }
 
     public void resolveVideoInfoApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveVideoInfoApiLocked());
+        runWithBridge(() -> resolveVideoInfoApiLocked());
     }
     private void resolveVideoInfoApiLocked() {
         try {
@@ -1673,7 +1698,7 @@ public class DexFinder {
             find.matcher(matcher);
 
             List<Method> candidates = new ArrayList<>();
-            for (MethodData data : dexKit.findMethod(find)) {
+            for (MethodData data : activeBridge().findMethod(find)) {
                 try {
                     Method method = data.getMethodInstance(classLoader);
                     if (!isVideoInfoByFileNameMethod(method, videoInfoClass)) continue;
@@ -1712,12 +1737,12 @@ public class DexFinder {
     }
 
     public void resolveSendVoiceApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveSendVoiceApiLocked());
+        runWithBridge(() -> resolveSendVoiceApiLocked());
     }
     private void resolveSendVoiceApiLocked() {
         try {
             if (voiceStartRecordMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("startRecord insert voicestg success"));
                 for (MethodData methodData : methods) {
                     try {
@@ -1731,7 +1756,7 @@ public class DexFinder {
             }
 
             if (voiceFullPathMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("getAmrFullPath cost:"));
                 for (MethodData methodData : methods) {
                     try {
@@ -1745,7 +1770,7 @@ public class DexFinder {
             }
 
             if (voiceMessagePathMethod == null && !voiceMessagePathLookupComplete) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("[f11]getVoiceFullPath, businessType: "));
                 for (MethodData methodData : methods) {
                     try {
@@ -1773,7 +1798,7 @@ public class DexFinder {
             }
 
             if (voiceUploadClass == null || (voiceUploadCtor == null && voiceUploadCdnCtor == null)) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("/cgi-bin/micromsg-bin/uploadvoice"));
                 for (MethodData methodData : methods) {
                     try {
@@ -1846,7 +1871,7 @@ public class DexFinder {
                                            Class<?> returnType,
                                            Class<?>... parameterTypes) {
         try {
-            for (MethodData data : dexKit.findMethod(mkMethodUsingStrings(anchor))) {
+            for (MethodData data : activeBridge().findMethod(mkMethodUsingStrings(anchor))) {
                 try {
                     Method method = data.getMethodInstance(classLoader);
                     Class<?> expectedOwner = owner != null ? owner : method.getDeclaringClass();
@@ -1888,7 +1913,7 @@ public class DexFinder {
             matcher.paramTypes(String.class);
             matcher.addUsingString("voiceinfo WHERE FileName= ?", StringMatchType.Contains, false);
             find.matcher(matcher);
-            for (MethodData data : dexKit.findMethod(find)) {
+            for (MethodData data : activeBridge().findMethod(find)) {
                 Method storageMethod;
                 try {
                     storageMethod = data.getMethodInstance(classLoader);
@@ -1928,12 +1953,12 @@ public class DexFinder {
     }
 
     public void resolveSendEmojiApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveSendEmojiApiLocked());
+        runWithBridge(() -> resolveSendEmojiApiLocked());
     }
     private void resolveSendEmojiApiLocked() {
         try {
             if (emojiSendMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("NetSceneUploadEmoji: msgId"));
                 for (MethodData methodData : methods) {
                     try {
@@ -1947,7 +1972,7 @@ public class DexFinder {
             }
 
             if (emojiManagerSendMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("sendEmoji: context is null", "sendEmoji: emoji not found"));
                 for (MethodData methodData : methods) {
                     try {
@@ -1961,7 +1986,7 @@ public class DexFinder {
             }
 
             if (emojiGetByMd5Method == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("getEmojiByMd5"));
                 for (MethodData methodData : methods) {
                     try {
@@ -1975,7 +2000,7 @@ public class DexFinder {
             }
 
             if (emojiCreateInfoMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("createEmojiInfo"));
                 for (MethodData methodData : methods) {
                     try {
@@ -1989,7 +2014,7 @@ public class DexFinder {
             }
 
             if (emojiUpdateInfoMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("updateEmojiInfo"));
                 for (MethodData methodData : methods) {
                     try {
@@ -2003,7 +2028,7 @@ public class DexFinder {
             }
 
             if (emojiAccPathMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("getAccPath"));
                 for (MethodData methodData : methods) {
                     try {
@@ -2017,7 +2042,7 @@ public class DexFinder {
             }
 
             if (emojiCheckGifMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("checkGifFile"));
                 for (MethodData methodData : methods) {
                     try {
@@ -2031,7 +2056,7 @@ public class DexFinder {
             }
 
             if (emojiFilePathMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("[cpan] get icon path failed. productid and md5 are null."));
                 for (MethodData methodData : methods) {
                     try {
@@ -2045,7 +2070,7 @@ public class DexFinder {
             }
 
             if (emojiDecodeDataMethod == null || emojiDecodeManagerGetterMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings(
                                 "MicroMsg.emoji.EmojiFileEncryptMgr",
                                 "decode emoji file failed. path is no exist :%s "));
@@ -2074,7 +2099,7 @@ public class DexFinder {
     }
 
     public void resolveFavoriteApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveFavoriteApiLocked());
+        runWithBridge(() -> resolveFavoriteApiLocked());
     }
     private void resolveFavoriteApiLocked() {
         try {
@@ -2109,7 +2134,7 @@ public class DexFinder {
             favoriteListCursorMethod = null;
             favoriteGetMethod = null;
             Method cursor = findFavoriteListCursorMethod();
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings(
                             "getItemList error, getFavItemInfoStorage null.",
                             "MicroMsg.Fav.FavApiLogic"));
@@ -2203,7 +2228,7 @@ public class DexFinder {
     }
 
     private Method findFavoriteListCursorMethod() {
-        List<MethodData> methods = dexKit.findMethod(
+        List<MethodData> methods = activeBridge().findMethod(
                 mkMethodUsingStrings("tryStartBatchGet..."));
         for (MethodData methodData : methods) {
             try {
@@ -2271,7 +2296,7 @@ public class DexFinder {
             favoriteItemClass = null;
             favoriteItemConvertFromCursorMethod = null;
 
-            List<ClassData> classes = dexKit.findClass(mkClassUsingStrings("FavItemInfo"));
+            List<ClassData> classes = activeBridge().findClass(mkClassUsingStrings("FavItemInfo"));
             for (ClassData classData : classes) {
                 Class<?> clazz = KavaReflector.loadClass(classData.getName(), classLoader);
                 if (!isFavoriteItemClass(clazz)) continue;
@@ -2280,7 +2305,7 @@ public class DexFinder {
                 if (favoriteItemConvertFromCursorMethod != null) return;
             }
 
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("sendFavMsg: processing favId=%d, favType=%d, dataListSize=%d"));
             for (MethodData methodData : methods) {
                 Class<?> clazz = favoriteItemClassFromUsingFields(methodData);
@@ -2303,7 +2328,7 @@ public class DexFinder {
             }
 
             favoriteSendMethod = null;
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings(
                             "want to send fav msg, but context is null",
                             "want to send fav msg, but info is null"));
@@ -2400,7 +2425,7 @@ public class DexFinder {
     }
 
     public void resolveTransferOperationApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveTransferOperationApiLocked());
+        runWithBridge(() -> resolveTransferOperationApiLocked());
     }
     private void resolveTransferOperationApiLocked() {
         try {
@@ -2416,7 +2441,7 @@ public class DexFinder {
                 }
             } catch (Throwable ignored) {}
 
-            List<ClassData> classes = dexKit.findClass(
+            List<ClassData> classes = activeBridge().findClass(
                     mkClassUsingStrings("Micromsg.NetSceneTenpayRemittanceConfirm",
                             "recv_account_type"));
             for (ClassData cd : classes) {
@@ -2429,7 +2454,7 @@ public class DexFinder {
             }
 
             if (transferOperationClass == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("/cgi-bin/mmpay-bin/transferoperation"));
                 for (MethodData methodData : methods) {
                     try {
@@ -2449,14 +2474,14 @@ public class DexFinder {
     }
 
     public void resolveTransferQueryApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveTransferQueryApiLocked());
+        runWithBridge(() -> resolveTransferQueryApiLocked());
     }
     private void resolveTransferQueryApiLocked() {
         try {
             if (isTransferQueryClass(transferQueryClass)
                     && isTransferQueryResponseMethod(transferQueryResponseMethod, transferQueryClass)) return;
 
-            List<ClassData> classes = dexKit.findClass(
+            List<ClassData> classes = activeBridge().findClass(
                     mkClassUsingStrings("Micromsg.NetSceneTenpayRemittanceQuery",
                             "recv_account_info", "recv_channel"));
             for (ClassData cd : classes) {
@@ -2478,13 +2503,13 @@ public class DexFinder {
     }
 
     public void resolveVerifyUserApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveVerifyUserApiLocked());
+        runWithBridge(() -> resolveVerifyUserApiLocked());
     }
     private void resolveVerifyUserApiLocked() {
         try {
             if (isVerifyUserClass(verifyUserClass)) return;
 
-            List<ClassData> classes = dexKit.findClass(
+            List<ClassData> classes = activeBridge().findClass(
                     mkClassUsingStrings("/cgi-bin/micromsg-bin/verifyuser",
                             "MicroMsg.NetSceneVerifyUser.dkverify"));
             for (ClassData cd : classes) {
@@ -2497,7 +2522,7 @@ public class DexFinder {
             }
 
             if (verifyUserClass == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("/cgi-bin/micromsg-bin/verifyuser"));
                 for (MethodData methodData : methods) {
                     try {
@@ -2517,13 +2542,13 @@ public class DexFinder {
     }
 
     public void resolveContactCardApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveContactCardApiLocked());
+        runWithBridge(() -> resolveContactCardApiLocked());
     }
     private void resolveContactCardApiLocked() {
         try {
             if (isContactCardXmlMethod(contactCardXmlMethod)) return;
 
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("MicroMsg.SendContactCardHelper", "getBizNameCardString"));
             for (MethodData methodData : methods) {
                 try {
@@ -2535,7 +2560,7 @@ public class DexFinder {
             }
 
             if (contactCardXmlMethod == null) {
-                methods = dexKit.findMethod(mkMethodUsingStrings("bigheadimgurl", "smallheadimgurl"));
+                methods = activeBridge().findMethod(mkMethodUsingStrings("bigheadimgurl", "smallheadimgurl"));
                 for (MethodData methodData : methods) {
                     try {
                         Method method = methodData.getMethodInstance(classLoader);
@@ -2553,12 +2578,12 @@ public class DexFinder {
     }
 
     public void resolvePatMessageApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolvePatMessageApiLocked());
+        runWithBridge(() -> resolvePatMessageApiLocked());
     }
     private void resolvePatMessageApiLocked() {
         try {
             if (!isPatDisplayTemplateMethod(patDisplayTemplateMethod)) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("MicroMsg.PluginPatMsg",
                                 "parseDisplayTemplate realtime templateStr:%s"));
                 for (MethodData methodData : methods) {
@@ -2656,7 +2681,7 @@ public class DexFinder {
 
     private Method findPatCreatePairMethodByStrings(String... strings) {
         try {
-            List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(strings));
+            List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings(strings));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -2670,7 +2695,7 @@ public class DexFinder {
 
     private Method findPatSuffixMethodByStrings(String... strings) {
         try {
-            List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(strings));
+            List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings(strings));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -2684,7 +2709,7 @@ public class DexFinder {
 
     private Method findPatCanSendMethodByStrings(String... strings) {
         try {
-            List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(strings));
+            List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings(strings));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -2727,7 +2752,7 @@ public class DexFinder {
 
     // ============ 数据库/联系人公共 API ============
     public void resolveDatabaseApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveDatabaseApiLocked());
+        runWithBridge(() -> resolveDatabaseApiLocked());
     }
     private void resolveDatabaseApiLocked() {
         try {
@@ -2737,7 +2762,7 @@ public class DexFinder {
                     "MicroMsg.MMKernel",
                     "Kernel not null, has initialized.");
 
-            List<MethodData> storageMethods = dexKit.findMethod(
+            List<MethodData> storageMethods = activeBridge().findMethod(
                     mkMethodUsingStrings("mCoreStorage not initialized!"));
             for (MethodData methodData : storageMethods) {
                 try {
@@ -2777,7 +2802,7 @@ public class DexFinder {
     }
 
     public void resolveConversationDeleteApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveConversationDeleteApiLocked());
+        runWithBridge(() -> resolveConversationDeleteApiLocked());
     }
     private void resolveConversationDeleteApiLocked() {
         try {
@@ -2789,7 +2814,7 @@ public class DexFinder {
             MethodMatcher matcher = new MethodMatcher();
             matcher.usingEqStrings("delChatContact username:%s  stack:%s");
             find.matcher(matcher);
-            for (MethodData methodData : dexKit.findMethod(find)) {
+            for (MethodData methodData : activeBridge().findMethod(find)) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
                     if (!isConversationDeleteMethod(method) || candidates.contains(method)) continue;
@@ -2822,7 +2847,7 @@ public class DexFinder {
     }
 
     public void resolveMessageClearApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveMessageClearApiLocked());
+        runWithBridge(() -> resolveMessageClearApiLocked());
     }
     private void resolveMessageClearApiLocked() {
         try {
@@ -2841,7 +2866,7 @@ public class DexFinder {
                     "summerdel deleteMsgByTalker is null or empty",
                     "AsyncDeleteMessageStage1");
             find.matcher(matcher);
-            for (MethodData methodData : dexKit.findMethod(find)) {
+            for (MethodData methodData : activeBridge().findMethod(find)) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
                     if (!isMessageClearBatchMethod(method) || batchCandidates.contains(method)) continue;
@@ -2901,7 +2926,7 @@ public class DexFinder {
     }
 
     public void resolveConversationMuteApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveConversationMuteApiLocked());
+        runWithBridge(() -> resolveConversationMuteApiLocked());
     }
     private void resolveConversationMuteApiLocked() {
         try {
@@ -2948,7 +2973,7 @@ public class DexFinder {
 
     private Method findUniqueMethodUsingString(String anchor) {
         List<Method> candidates = new ArrayList<>();
-        for (MethodData data : dexKit.findMethod(mkMethodUsingStrings(anchor))) {
+        for (MethodData data : activeBridge().findMethod(mkMethodUsingStrings(anchor))) {
             try {
                 Method method = data.getMethodInstance(classLoader);
                 if (candidates.contains(method)) continue;
@@ -2973,7 +2998,7 @@ public class DexFinder {
         Method mute = contactMuteEnableMethod;
         if (!isContactMuteMethod(mute)) return null;
         List<Method> candidates = new ArrayList<>();
-        for (MethodData entry : dexKit.findMethod(mkMethodUsingStrings("room_notify_new_msg"))) {
+        for (MethodData entry : activeBridge().findMethod(mkMethodUsingStrings("room_notify_new_msg"))) {
             if (!"com.tencent.mm.ui.SingleChatInfoUI".equals(entry.getClassName())) continue;
             for (MethodData invokeData : entry.getInvokes()) {
                 try {
@@ -3004,7 +3029,7 @@ public class DexFinder {
 
         Class<?> contactType = mute.getParameterTypes()[0];
         List<Method> invokes = new ArrayList<>();
-        for (MethodData data : dexKit.findMethod(
+        for (MethodData data : activeBridge().findMethod(
                 mkMethodUsingStrings("setMute contact invalid username"))) {
             try {
                 Method candidate = data.getMethodInstance(classLoader);
@@ -3064,10 +3089,10 @@ public class DexFinder {
         chatroomMuteBuildMethod = null;
         chatroomMuteSubmitMethod = null;
 
-        List<MethodData> entries = dexKit.findMethod(mkMethodUsingStrings(
+        List<MethodData> entries = activeBridge().findMethod(mkMethodUsingStrings(
                 "ChatroomMuteRefine OpModChatRoomNotify roomId = %s, notifyMsg = %d, defaultNeedPushFlag=%d"));
         if (entries.isEmpty()) {
-            entries = dexKit.findMethod(mkMethodUsingStrings("room_notify_new_msg"));
+            entries = activeBridge().findMethod(mkMethodUsingStrings("room_notify_new_msg"));
         }
         for (MethodData entry : entries) {
             List<Method> invokes = new ArrayList<>();
@@ -3138,7 +3163,7 @@ public class DexFinder {
     }
 
     public void resolveLocalMessageApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveLocalMessageApiLocked());
+        runWithBridge(() -> resolveLocalMessageApiLocked());
     }
     private void resolveLocalMessageApiLocked() {
         try {
@@ -3185,7 +3210,7 @@ public class DexFinder {
             mm.returnType(long.class);
             mm.paramCount(1);
             fm.matcher(mm);
-            List<MethodData> methods = dexKit.findMethod(fm);
+            List<MethodData> methods = activeBridge().findMethod(fm);
             count = methods != null ? methods.size() : 0;
             if (methods == null) return 0;
             for (MethodData methodData : methods) {
@@ -3203,7 +3228,7 @@ public class DexFinder {
     private void resolveLocalSystemMessageMethod() {
         if (localSystemMessageMethod != null) return;
         try {
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings(
                             "will insert sysmsg from:",
                             "content null, cannot to insert sysmsg!",
@@ -3241,12 +3266,12 @@ public class DexFinder {
     }
 
     public void resolveGroupMemberDisplayName() {
-        DexInstallScheduler.runDexKitTask(() -> resolveGroupMemberDisplayNameLocked());
+        runWithBridge(() -> resolveGroupMemberDisplayNameLocked());
     }
     private void resolveGroupMemberDisplayNameLocked() {
         try {
             if (groupMemberDisplayNameMethod != null) return;
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("ChatroomDisplayNameCache"));
             for (MethodData methodData : methods) {
                 try {
@@ -3272,7 +3297,7 @@ public class DexFinder {
     }
 
     public void resolveInviteChatroomMemberApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveInviteChatroomMemberApiLocked());
+        runWithBridge(() -> resolveInviteChatroomMemberApiLocked());
     }
     private void resolveInviteChatroomMemberApiLocked() {
         try {
@@ -3307,7 +3332,7 @@ public class DexFinder {
     }
 
     public void resolveAddChatroomMemberApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveAddChatroomMemberApiLocked());
+        runWithBridge(() -> resolveAddChatroomMemberApiLocked());
     }
     private void resolveAddChatroomMemberApiLocked() {
         try {
@@ -3342,7 +3367,7 @@ public class DexFinder {
     }
 
     public void resolveDelChatroomMemberApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveDelChatroomMemberApiLocked());
+        runWithBridge(() -> resolveDelChatroomMemberApiLocked());
     }
     private void resolveDelChatroomMemberApiLocked() {
         try {
@@ -3375,7 +3400,7 @@ public class DexFinder {
     }
 
     public void resolveRevokeMsgApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveRevokeMsgApiLocked());
+        runWithBridge(() -> resolveRevokeMsgApiLocked());
     }
     private void resolveRevokeMsgApiLocked() {
         try {
@@ -3409,7 +3434,7 @@ public class DexFinder {
     }
 
     public void resolveUploadDeviceStepApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveUploadDeviceStepApiLocked());
+        runWithBridge(() -> resolveUploadDeviceStepApiLocked());
     }
     private void resolveUploadDeviceStepApiLocked() {
         try {
@@ -3443,7 +3468,7 @@ public class DexFinder {
     }
 
     public void resolveContactLabelNetworkApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveContactLabelNetworkApiLocked());
+        runWithBridge(() -> resolveContactLabelNetworkApiLocked());
     }
     private void resolveContactLabelNetworkApiLocked() {
         try {
@@ -3510,7 +3535,7 @@ public class DexFinder {
     }
 
     public void resolveSnsUploadApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveSnsUploadApiLocked());
+        runWithBridge(() -> resolveSnsUploadApiLocked());
     }
     private void resolveSnsUploadApiLocked() {
         try {
@@ -3613,7 +3638,7 @@ public class DexFinder {
     }
 
     public void resolveChatPageApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveChatPageApiLocked());
+        runWithBridge(() -> resolveChatPageApiLocked());
     }
     private synchronized void resolveChatPageApiLocked() {
         SharedPreferences chatCache = null;
@@ -3642,7 +3667,7 @@ public class DexFinder {
                     chatPageFragmentEnterMethod == null || chatPageFragmentExitMethod.getDeclaringClass() != chatPageFragmentEnterMethod.getDeclaringClass())) chatPageFragmentExitMethod = null;
             }
             if (chatPageStartMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("try startChatting, ishow:%b userName:%s needAnim:%b"));
                 for (MethodData methodData : methods) {
                     try {
@@ -3656,7 +3681,7 @@ public class DexFinder {
             }
 
             if (chatPageFragmentEnterMethod == null) {
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("onEnterBegin", "Chat_User"));
                 for (MethodData methodData : methods) {
                     try {
@@ -3671,7 +3696,7 @@ public class DexFinder {
 
             if (chatPageFragmentExitMethod == null && chatPageFragmentEnterMethod != null) {
                 Class<?> fragmentClass = chatPageFragmentEnterMethod.getDeclaringClass();
-                List<MethodData> methods = dexKit.findMethod(
+                List<MethodData> methods = activeBridge().findMethod(
                         mkMethodUsingStrings("onExitBegin"));
                 for (MethodData methodData : methods) {
                     try {
@@ -3704,12 +3729,12 @@ public class DexFinder {
     }
 
     public void resolveScriptSendHookApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveScriptSendHookApiLocked());
+        runWithBridge(() -> resolveScriptSendHookApiLocked());
     }
     private void resolveScriptSendHookApiLocked() {
         try {
             if (chatFooterSendClickMethod != null) return;
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStringsAndName("onClick",
                             "MicroMsg.ChatFooter",
                             "send msg onClick",
@@ -3724,7 +3749,7 @@ public class DexFinder {
                 } catch (Throwable ignored) {}
             }
             if (chatFooterSendClickMethod == null) {
-                methods = dexKit.findMethod(
+                methods = activeBridge().findMethod(
                         mkMethodUsingStringsAndName("onClick", "send msg onClick"));
                 for (MethodData methodData : methods) {
                     try {
@@ -4805,7 +4830,7 @@ public class DexFinder {
     private Method findSnsUploadManagerGetter(Class<?> managerClass) {
         if (managerClass == null) return null;
         try {
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("getSnsUploadManager"));
             for (MethodData methodData : methods) {
                 try {
@@ -4823,7 +4848,7 @@ public class DexFinder {
     private Method findSnsHelperChainMethod(String marker) {
         if (snsUploadPackHelperClass == null) return null;
         try {
-            List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(marker));
+            List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings(marker));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -4841,7 +4866,7 @@ public class DexFinder {
     private Method findSnsAddImageMethod(Class<?> helperClass) {
         if (helperClass == null) return null;
         try {
-            List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings("addImageMediaObjByPath"));
+            List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings("addImageMediaObjByPath"));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -4867,7 +4892,7 @@ public class DexFinder {
     private Method findSnsAddVideoMethod(Class<?> helperClass) {
         if (helperClass == null) return null;
         try {
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("addSightObjectByPath"));
             for (MethodData methodData : methods) {
                 try {
@@ -4886,7 +4911,7 @@ public class DexFinder {
             }
         } catch (Throwable ignored) {}
         try {
-            List<MethodData> methods = dexKit.findMethod(
+            List<MethodData> methods = activeBridge().findMethod(
                     mkMethodUsingStrings("produceSightByPath"));
             for (MethodData methodData : methods) {
                 try {
@@ -4910,7 +4935,7 @@ public class DexFinder {
     private Method findSnsCommitMethod(Class<?> helperClass) {
         if (helperClass == null) return null;
         try {
-            List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings("commit sns info ret %d"));
+            List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings("commit sns info ret %d"));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -4931,7 +4956,7 @@ public class DexFinder {
     private Method findSnsUploadCheckMethod(Class<?> managerClass) {
         if (managerClass == null) return null;
         try {
-            List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings("checkPostInUI"));
+            List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings("checkPostInUI"));
             for (MethodData methodData : methods) {
                 try {
                     Method method = methodData.getMethodInstance(classLoader);
@@ -5392,7 +5417,7 @@ public class DexFinder {
         if (out == null || anchors == null) return;
         for (String[] anchor : anchors) {
             try {
-                List<ClassData> classes = dexKit.findClass(mkClassUsingStrings(anchor));
+                List<ClassData> classes = activeBridge().findClass(mkClassUsingStrings(anchor));
                 int max = Math.min(classes.size(), maxCount);
                 for (int i = 0; i < max; i++) {
                     try {
@@ -5407,7 +5432,7 @@ public class DexFinder {
 
     private Class<?> findFirstClassByStrings(String... strings) {
         try {
-            List<ClassData> classes = dexKit.findClass(mkClassUsingStrings(strings));
+            List<ClassData> classes = activeBridge().findClass(mkClassUsingStrings(strings));
             for (ClassData cd : classes) {
                 try {
                     return KavaReflector.loadClass(cd.getName(), classLoader);
@@ -5482,7 +5507,7 @@ public class DexFinder {
     }
 
     public void resolveGroupSolitaireApi() {
-        DexInstallScheduler.runDexKitTask(() -> resolveGroupSolitaireApiLocked());
+        runWithBridge(() -> resolveGroupSolitaireApiLocked());
     }
     private void resolveGroupSolitaireApiLocked() {
         try {
@@ -5555,7 +5580,7 @@ public class DexFinder {
             matcher.returnType(long.class);
             matcher.paramTypes(String.class, long.class);
             find.matcher(matcher);
-            for (MethodData data : dexKit.findMethod(find)) {
+            for (MethodData data : activeBridge().findMethod(find)) {
                 try {
                     Method method = data.getMethodInstance(classLoader);
                     if (!isLocalMessageCreateTimeMethod(method)) continue;
@@ -5630,7 +5655,7 @@ public class DexFinder {
         if (out == null || anchors == null) return;
         for (String[] anchor : anchors) {
             try {
-                List<ClassData> classes = dexKit.findClass(mkClassUsingStrings(anchor));
+                List<ClassData> classes = activeBridge().findClass(mkClassUsingStrings(anchor));
                 int max = Math.min(classes.size(), maxCount);
                 for (int i = 0; i < max; i++) {
                     try {
@@ -5646,7 +5671,7 @@ public class DexFinder {
         if (out == null || anchors == null) return;
         for (String[] anchor : anchors) {
             try {
-                List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(anchor));
+                List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings(anchor));
                 int max = Math.min(methods.size(), maxCount);
                 for (int i = 0; i < max; i++) {
                     try {
@@ -5662,7 +5687,7 @@ public class DexFinder {
         if (out == null || anchors == null) return;
         for (String[] anchor : anchors) {
             try {
-                List<MethodData> methods = dexKit.findMethod(mkMethodUsingStrings(anchor));
+                List<MethodData> methods = activeBridge().findMethod(mkMethodUsingStrings(anchor));
                 int max = Math.min(methods.size(), maxCount);
                 for (int i = 0; i < max; i++) {
                     try {
@@ -5793,7 +5818,7 @@ public class DexFinder {
             methods.add(new MethodMatcher().name("op").paramTypes("int", "java.lang.Object[]"));
             cm.methods(methods);
             fc.matcher(cm);
-            for (ClassData cd : dexKit.findClass(fc)) {
+            for (ClassData cd : activeBridge().findClass(fc)) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
                     if (cl != null) return cl;
@@ -5812,7 +5837,7 @@ public class DexFinder {
             cm.addMethod(new MethodMatcher().name("<init>").paramTypes("byte[]"));
             cm.addMethod(new MethodMatcher().name("toByteArray").returnType("byte[]"));
             fc.matcher(cm);
-            for (ClassData cd : dexKit.findClass(fc)) {
+            for (ClassData cd : activeBridge().findClass(fc)) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
                     if (KavaReflector.findConstructor(cl, byte[].class) != null
@@ -5835,7 +5860,7 @@ public class DexFinder {
             cm.fieldCount(1);
             cm.addMethod(new MethodMatcher().name("op").paramTypes("int", "java.lang.Object[]"));
             fc.matcher(cm);
-            for (ClassData cd : dexKit.findClass(fc)) {
+            for (ClassData cd : activeBridge().findClass(fc)) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
                     if (cl != null && protoBase.isAssignableFrom(cl)) return cl;
@@ -5850,7 +5875,7 @@ public class DexFinder {
             methods.add(new MethodMatcher().name("toProtoBuf").returnType(byte[].class));
             cm.methods(methods);
             fc.matcher(cm);
-            for (ClassData cd : dexKit.findClass(fc)) {
+            for (ClassData cd : activeBridge().findClass(fc)) {
                 try {
                     Class<?> wrapper = KavaReflector.loadClass(cd.getName(), classLoader);
                     for (java.lang.reflect.Field field : KavaReflector.declaredFields(wrapper)) {
@@ -5879,7 +5904,7 @@ public class DexFinder {
             cm.addFieldForType(int.class);
             cm.addFieldForType(java.util.LinkedList.class);
             fc.matcher(cm);
-            for (ClassData cd : dexKit.findClass(fc)) {
+            for (ClassData cd : activeBridge().findClass(fc)) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
                     if (cl != null && hasParseFromMethod(cl)) return cl;
@@ -5888,7 +5913,7 @@ public class DexFinder {
         } catch (Throwable ignored) {}
         try {
             FindClass fc = mkClassUsingStrings("/cgi-bin/micromsg-bin/newsendmsg");
-            for (ClassData cd : dexKit.findClass(fc)) {
+            for (ClassData cd : activeBridge().findClass(fc)) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
                     if (cl != null
@@ -5907,7 +5932,7 @@ public class DexFinder {
     }
 
     public Class<?> findNativeNetSceneClass(String uri, int cgiId) {
-        return DexInstallScheduler.queryDexKitTask(() -> findNativeNetSceneClassLocked(uri, cgiId));
+        return withBridge(() -> findNativeNetSceneClassLocked(uri, cgiId));
     }
     private Class<?> findNativeNetSceneClassLocked(String uri, int cgiId) {
         if (uri == null || uri.length() == 0 || cgiId <= 0) return null;
@@ -5919,7 +5944,7 @@ public class DexFinder {
             methods.add(new MethodMatcher().name("getType").returnType(int.class).usingNumbers(cgiId));
             cm.methods(methods);
             fc.matcher(cm);
-            for (ClassData cd : dexKit.findClass(fc)) {
+            for (ClassData cd : activeBridge().findClass(fc)) {
                 Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
                 if (isNativeNetSceneCandidate(cl, cgiId)) {
                     logDetail("原生NetScene定位: uri=" + uri + " type=" + cgiId + " class=" + cl.getName());
@@ -5930,7 +5955,7 @@ public class DexFinder {
 
         try {
             FindMethod fm = mkMethodUsingStrings(uri);
-            for (MethodData md : dexKit.findMethod(fm)) {
+            for (MethodData md : activeBridge().findMethod(fm)) {
                 Class<?> cl = KavaReflector.loadClass(md.getClassName(), classLoader);
                 if (isNativeNetSceneCandidate(cl, cgiId)) {
                     logDetail("原生NetScene定位: uri=" + uri + " type=" + cgiId + " class=" + cl.getName());
@@ -5973,7 +5998,7 @@ public class DexFinder {
             cm.addMethod(new MethodMatcher().name("<init>"));
             cm.addMethod(new MethodMatcher().name("op").paramTypes("int", "java.lang.Object[]").returnType("int"));
             fc.matcher(cm);
-            for (ClassData cd : dexKit.findClass(fc)) {
+            for (ClassData cd : activeBridge().findClass(fc)) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
                     if (KavaReflector.findConstructor(cl) != null
@@ -5997,7 +6022,7 @@ public class DexFinder {
             cm.addFieldForType(protoBase);
             cm.addFieldForType(String.class);
             fc.matcher(cm);
-            for (ClassData cd : dexKit.findClass(fc)) {
+            for (ClassData cd : activeBridge().findClass(fc)) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
                     if (cl != null && hasConfigBuilderShape(cl, protoBase)) return cl;
@@ -6060,7 +6085,7 @@ public class DexFinder {
     private Class<?> findProtobufNetSceneBaseClass() {
         try {
             FindClass fc = mkClassUsingStrings("MicroMsg.NetSceneBase");
-            for (ClassData cd : dexKit.findClass(fc)) {
+            for (ClassData cd : activeBridge().findClass(fc)) {
                 try {
                     Class<?> cl = KavaReflector.loadClass(cd.getName(), classLoader);
                     if (isProtobufNetSceneBaseClass(cl)) return cl;
@@ -6096,7 +6121,7 @@ public class DexFinder {
             mm.returnType(int.class);
             mm.paramCount(5);
             fm.matcher(mm);
-            for (MethodData md : dexKit.findMethod(fm)) {
+            for (MethodData md : activeBridge().findMethod(fm)) {
                 try {
                     Method method = md.getMethodInstance(classLoader);
                     if (!isProtobufCallbackMethod(method)) continue;
@@ -6132,7 +6157,7 @@ public class DexFinder {
             mm.name("onGYNetEnd");
             mm.paramCount(6);
             fm.matcher(mm);
-            for (MethodData md : dexKit.findMethod(fm)) {
+            for (MethodData md : activeBridge().findMethod(fm)) {
                 try {
                     Method method = md.getMethodInstance(classLoader);
                     if (isOnGYNetEndMethod(method)) {
@@ -6183,7 +6208,7 @@ public class DexFinder {
             mm.addParamType(callback);
             mm.addParamType(boolean.class);
             fm.matcher(mm);
-            for (MethodData md : dexKit.findMethod(fm)) {
+            for (MethodData md : activeBridge().findMethod(fm)) {
                 try {
                     Method method = md.getMethodInstance(classLoader);
                     Class<?>[] params = method != null ? method.getParameterTypes() : null;
@@ -6209,7 +6234,7 @@ public class DexFinder {
             mm.name("d");
             mm.paramCount(3);
             fm.matcher(mm);
-            for (MethodData md : dexKit.findMethod(fm)) {
+            for (MethodData md : activeBridge().findMethod(fm)) {
                 try {
                     Method method = md.getMethodInstance(classLoader);
                     if (isProtobufStaticDispatch(method, reqResp, callback)) {
@@ -6373,7 +6398,7 @@ public class DexFinder {
         };
         for (String[] anchor : anchors) {
             try {
-                List<ClassData> classes = dexKit.findClass(mkClassUsingStrings(anchor));
+                List<ClassData> classes = activeBridge().findClass(mkClassUsingStrings(anchor));
                 int max = Math.min(classes.size(), 30);
                 for (int i = 0; i < max; i++) {
                     try {

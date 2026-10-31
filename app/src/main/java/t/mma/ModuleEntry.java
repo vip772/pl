@@ -56,8 +56,6 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class ModuleEntry implements IXposedHookLoadPackage {
     private static final String TAG = "[Hchat:Entry]";
     private static final String WECHAT_PKG = "com.tencent.mm";
-    private static final Object DEXKIT_CREATE_LOCK = new Object();
-    private static final Map<String, DexKitBridge> DEXKIT_BRIDGES = new ConcurrentHashMap<>();
     private static final DexKitBridgeManager DEXKIT_MANAGER = new DexKitBridgeManager();
 
     // 全局基础设施实例（模块生命周期内单例）
@@ -438,26 +436,22 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                 String apkPath = lpparam.appInfo.sourceDir;
                 ClassLoader hostClassLoader = resolveHostClassLoader(hostContext, lpparam);
                 DexKitBridge dexKit = createDexKitBridge(hostClassLoader, apkPath);
-                DexFinder finder = new DexFinder(dexKit, hostClassLoader, hostContext);
+                DEXKIT_MANAGER.publish(dexKit, hostClassLoader, apkPath);
+                DexFinder finder = DexFinder.managed(DEXKIT_MANAGER, hostClassLoader, hostContext);
                 WeChatImageApi.installMarsCdnManagerHook(
                         finder.marsCdnManagerClass,
                         message -> XposedBridge.log("[Hchat:WechatApi] " + message));
 
-                // 4. 创建共享 DexKit 服务
-                DEXKIT_MANAGER.publish(dexKit, hostClassLoader, apkPath);
-                DexKitBridgeManager.Lease dexKitCompatibilityLease =
-                        DEXKIT_MANAGER.acquire("host-runtime-compatibility", true);
-                DexBridgeHolder dexBridgeHolder = new DexBridgeHolder(
-                        dexKit, finder, hostClassLoader, apkPath, dexKitCompatibilityLease);
-                ScriptPluginAgentLocalReverseTools.install(dexBridgeHolder, hostContext);
-
+                // 4. 创建不持有原始 bridge 的共享服务。
+                DexBridgeHolder dexBridgeHolder = DexBridgeHolder.managed(
+                        DEXKIT_MANAGER, finder, hostClassLoader, apkPath);
                 // 5. 创建统一上下文
                 featureContext = new FeatureContext(
                         hostContext,
                         moduleContext != null ? moduleContext : hostContext,
                         hostClassLoader,
                         lpparam,
-                        dexKit,
+                        null,
                         finder,
                         eventBus,
                         configStore,
@@ -473,6 +467,11 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                 // 7. 防崩兜底：微信 8.0.76 消息描述文本方法对 null 调 isEmpty() 崩溃（收到特殊小程序电商卡片消息触发）
                 installMsgDescTextFallback(finder);
             });
+            // Never take the Agent target lock while holding the shared native gate.
+            ScriptPluginAgentLocalReverseTools.install(featureContext.dexBridgeHolder(), hostContext);
+            final String managedApkPath = lpparam.appInfo.sourceDir;
+            DEXKIT_MANAGER.enableIdleRebuild(() -> newDexKitBridge(managedApkPath),
+                    featureContext.hostClassLoader(), managedApkPath, 30_000L);
 
         } catch (Throwable e) {
             HLog.e(TAG + " 初始化失败: " + e, e);
@@ -555,24 +554,23 @@ public class ModuleEntry implements IXposedHookLoadPackage {
         return lpClassLoader;
     }
 
-    private DexKitBridge createDexKitBridge(ClassLoader classLoader, String apkPath) {
-        String key = apkPath != null ? apkPath : "";
-        synchronized (DEXKIT_CREATE_LOCK) {
-            DexKitBridge cached = DEXKIT_BRIDGES.get(key);
-            if (cached != null) return cached;
-            DexKitBridge bridge = DexKitBridge.create(apkPath);
-            try {
-                // The Java scheduler is serial, but each native query has its own workers.
-                // Bound those workers before publishing the bridge or running any query.
-                bridge.setThreadNum(2);
-            } catch (Throwable error) {
-                bridge.close();
-                throw error;
-            }
-            DEXKIT_BRIDGES.put(key, bridge);
-            HLog.i(TAG + " DexKit共享查询线程数=2");
-            return bridge;
+    private static DexKitBridge newDexKitBridge(String apkPath) {
+        DexKitBridge bridge = DexKitBridge.create(apkPath);
+        try { bridge.setThreadNum(2); }
+        catch (Throwable error) {
+            try { bridge.close(); } catch (Throwable cleanup) { error.addSuppressed(cleanup); }
+            throw error;
         }
+        HLog.i(TAG + " DexKit共享查询线程数=2");
+        return bridge;
+    }
+    /** All callers are synchronous early installers or initialization under the shared gate. */
+    private DexKitBridge createDexKitBridge(ClassLoader classLoader, String apkPath) {
+        return DexInstallScheduler.queryDexKitTask(() -> {
+            DexKitBridgeManager.Generation generation = DEXKIT_MANAGER.currentGeneration();
+            if (generation == null) DEXKIT_MANAGER.publish(newDexKitBridge(apkPath), classLoader, apkPath);
+            return DEXKIT_MANAGER.withCurrentBridge(bridge -> bridge);
+        });
     }
     private boolean isTinkerClassLoader(ClassLoader classLoader) {
         if (classLoader == null) return false;

@@ -4,14 +4,16 @@ import subprocess,tempfile
 r=Path(__file__).resolve().parents[1]
 agent=(r/'app/src/main/java/t/mma/hooks/items/script/agent/ScriptPluginAgentLocalReverseTools.kt').read_text()
 execute=agent.index("val normalizedName = normalize(name)")
-start=agent.index('            DexInstallScheduler.queryDexKit {',execute)
+start=agent.index('synchronized(targetLock)',execute)
 end=agent.index('        }.getOrElse {',start)
 section=agent[start:end]
 assert section.index("synchronized(targetLock)") < section.index("val current = binding.get()") < section.index("findClasses(target,")
-assert section.index('queryDexKit') < section.index('synchronized(targetLock)') < section.index('findClasses(target,')
+assert 'DexInstallScheduler.queryDexKit {' not in section
+assert 'val detached = binding.withDex { findClassesLocked(binding, args, cancellation) }' in agent
 assert section.index('attachTarget(targetResult, target)') < section.rindex('result')
 install=agent[agent.index('    fun install(holder:'):agent.index('    fun toolCatalog()')]
-assert install.index('queryDexKit {') < install.index('synchronized(targetLock)') < install.index('activeExternalBinding?.close()')
+assert 'queryDexKit {' not in install
+assert install.index('synchronized(targetLock)') < install.index('activeExternalBinding?.close()')
 scheduler=(r/'app/src/main/java/t/mma/hooks/core/DexInstallScheduler.kt').read_text()
 s=(r/'app/src/main/java/t/mma/hooks/items/scheduledtask/ScheduledTaskFeature.kt').read_text()
 a=s.index('    private val executionWorker');b=s.index('    @Volatile private var started',a)

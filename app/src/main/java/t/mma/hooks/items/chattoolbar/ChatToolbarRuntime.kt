@@ -529,7 +529,8 @@ class ChatToolbarRuntime(
             ?.takeIf(::isInitAppGridMethod)
             ?.let { return it }
         val candidates = runCatching {
-            featureContext.dexKitBridge().findMethod(
+            featureContext.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         declaredClass(APP_PANEL_CLASS)
@@ -539,6 +540,8 @@ class ChatToolbarRuntime(
             ).mapNotNull { data ->
                 runCatching { data.getMethodInstance(featureContext.hostClassLoader()) }.getOrNull()
             }.filter(::isInitAppGridMethod).distinctBy { it.toGenericString() }
+
+            }
         }.getOrElse {
             logger("定位微信工具面板初始化方法失败", it)
             emptyList()
@@ -559,7 +562,8 @@ class ChatToolbarRuntime(
             ?.takeIf(::isPanelMeasureMethod)
             ?.let { return it }
         val candidates = runCatching {
-            featureContext.dexKitBridge().findMethod(
+            featureContext.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
                 FindMethod().apply {
                     searchPackages(CHAT_PACKAGE)
                     matcher(MethodMatcher().apply {
@@ -572,6 +576,8 @@ class ChatToolbarRuntime(
             ).mapNotNull { data ->
                 runCatching { data.getMethodInstance(featureContext.hostClassLoader()) }.getOrNull()
             }.filter(::isPanelMeasureMethod).distinctBy { it.toGenericString() }
+
+            }
         }.getOrElse {
             logger("定位微信工具面板测量方法失败", it)
             emptyList()

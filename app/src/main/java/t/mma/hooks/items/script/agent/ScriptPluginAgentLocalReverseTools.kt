@@ -11,6 +11,7 @@ import t.mma.hooks.core.DexInstallScheduler
 import t.mma.preferences.HchatStorage
 import org.json.JSONArray
 import org.json.JSONObject
+import t.mma.dexkit.DexKitBridgeManager
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.FindClass
 import org.luckypray.dexkit.query.FindMethod
@@ -76,7 +77,7 @@ object ScriptPluginAgentLocalReverseTools {
     }
     private var externalIdleTicket: Any? = null
     private var externalIdleFuture: ScheduledFuture<*>? = null
-    // Called with shared Dex gate -> targetLock; no native result escapes a tool call.
+    // Called with targetLock. External native close is serialized by Binding.close().
     private fun armExternalIdleClose() {
         externalIdleFuture?.cancel(false)
         externalIdleFuture = null
@@ -85,7 +86,7 @@ object ScriptPluginAgentLocalReverseTools {
         val ticket = Any()
         externalIdleTicket = ticket
         externalIdleFuture = idleCloser.schedule({
-            DexInstallScheduler.queryDexKit {
+
                 synchronized(targetLock) {
                     if (externalIdleTicket === ticket && activeExternalBinding === target) {
                         externalIdleTicket = null
@@ -94,13 +95,13 @@ object ScriptPluginAgentLocalReverseTools {
                         target.close()
                     }
                 }
-            }
+
         }, EXTERNAL_IDLE_SECONDS, TimeUnit.SECONDS)
     }
 
     @JvmStatic
     fun install(holder: DexBridgeHolder, context: Context) {
-        DexInstallScheduler.queryDexKit {
+
             synchronized(targetLock) {
                 activeExternalBinding?.close()
                 activeExternalBinding = null
@@ -111,7 +112,7 @@ object ScriptPluginAgentLocalReverseTools {
                 targetSessions[host.sessionId] = TargetSession.fromBinding(host, System.currentTimeMillis())
                 loadPersistedTargets(host)
             }
-        }
+
     }
 
     @JvmStatic
@@ -434,11 +435,11 @@ object ScriptPluginAgentLocalReverseTools {
         if (normalizedName !in toolNames) return error("未知的内置逆向工具: $name")
         return runCatching {
             cancellation?.throwIfCancelled()
-            // Lock order matches ModuleEntry initialization: shared Dex gate, then target lock.
-            DexInstallScheduler.queryDexKit {
+            // Target lock owns APK resources. Native queries take their short gate inside this lock.
+
                 synchronized(targetLock) {
                     val current = binding.get()
-                        ?: return@queryDexKit error("内置逆向工具尚未绑定到微信运行时")
+                        ?: return@synchronized error("内置逆向工具尚未绑定到微信运行时")
                     try {
                         onProgress?.invoke(progressLabel(normalizedName))
                         val result = when (normalizedName) {
@@ -477,7 +478,7 @@ object ScriptPluginAgentLocalReverseTools {
                         armExternalIdleClose()
                     }
                 }
-            }
+
         }.getOrElse {
             if (cancellation?.isCancellation(it) == true) throw it
             error("内置逆向工具执行失败: ${it.message ?: it.javaClass.simpleName}")
@@ -614,7 +615,7 @@ object ScriptPluginAgentLocalReverseTools {
         }
         val session = targetSessions[target.sessionId] ?: TargetSession.fromBinding(target, System.currentTimeMillis())
         return targetView(host, session).apply {
-            put("dexCount", target.dex.getDexNum())
+            put("dexCount", target.withDex { target.dex.getDexNum() })
             put("message", if (target.kind == TARGET_KIND_HOST) {
                 "当前运行微信已绑定；省略 session_id 时默认查询此目标"
             } else {
@@ -761,14 +762,15 @@ object ScriptPluginAgentLocalReverseTools {
         if (!file.isFile || file.length() != session.fileLength || file.lastModified() != session.lastModified) {
             throw IllegalStateException("目标 APK 已移动或发生变化，请使用 open_target_session(input) 重新打开")
         }
-        activeExternalBinding?.takeIf { it.sessionId == sessionId && it.dex.isValid }?.let { return it }
+        activeExternalBinding?.takeIf { it.sessionId == sessionId && it.withDex { it.dex.isValid } }?.let { return it }
         activeExternalBinding?.close()
         activeExternalBinding = null
+        return DexInstallScheduler.queryDexKit {
         val dex = DexKitBridge.create(file.path)
         try {
             check(dex.isValid) { "DexKit 无法打开目标 APK: ${file.name}" }
             dex.setThreadNum(2)
-            return Binding.external(host.context, dex, session).also { activeExternalBinding = it }
+            Binding.external(host.context, dex, session).also { activeExternalBinding = it }
         } catch (error: Throwable) {
             runCatching { dex.close() }.onFailure { error.addSuppressed(it) }
             throw error
@@ -823,6 +825,14 @@ object ScriptPluginAgentLocalReverseTools {
         args: JSONObject,
         cancellation: ScriptPluginAgentCancellation?
     ): String {
+        val detached = binding.withDex { findClassesLocked(binding, args, cancellation) }
+        return enrichSourceEntries(binding, detached, cancellation)
+    }
+    private fun findClassesLocked(
+        binding: Binding,
+        args: JSONObject,
+        cancellation: ScriptPluginAgentCancellation?
+    ): String {
         val all = strings(args, "contains_all_strings")
         val any = strings(args, "contains_any_strings")
         if (all.isEmpty() && any.isEmpty()) return error("至少提供 contains_all_strings 或 contains_any_strings")
@@ -839,6 +849,14 @@ object ScriptPluginAgentLocalReverseTools {
     }
 
     private fun findMethodsUsingStrings(
+        binding: Binding,
+        args: JSONObject,
+        cancellation: ScriptPluginAgentCancellation?
+    ): String {
+        val detached = binding.withDex { findMethodsUsingStringsLocked(binding, args, cancellation) }
+        return enrichSourceEntries(binding, detached, cancellation)
+    }
+    private fun findMethodsUsingStringsLocked(
         binding: Binding,
         args: JSONObject,
         cancellation: ScriptPluginAgentCancellation?
@@ -863,6 +881,14 @@ object ScriptPluginAgentLocalReverseTools {
         args: JSONObject,
         cancellation: ScriptPluginAgentCancellation?
     ): String {
+        val detached = binding.withDex { findMethodsUsingResourceLocked(binding, args, cancellation) }
+        return enrichSourceEntries(binding, detached, cancellation)
+    }
+    private fun findMethodsUsingResourceLocked(
+        binding: Binding,
+        args: JSONObject,
+        cancellation: ScriptPluginAgentCancellation?
+    ): String {
         val resourceId = parseResourceId(args.optString("resource_id", ""))
             ?: return error("find_methods_using_resource 需要有效的 resource_id")
         val candidates = binding.dex.findMethod(
@@ -872,6 +898,14 @@ object ScriptPluginAgentLocalReverseTools {
     }
 
     private fun findMethods(
+        binding: Binding,
+        args: JSONObject,
+        cancellation: ScriptPluginAgentCancellation?
+    ): String {
+        val detached = binding.withDex { findMethodsLocked(binding, args, cancellation) }
+        return enrichSourceEntries(binding, detached, cancellation)
+    }
+    private fun findMethodsLocked(
         binding: Binding,
         args: JSONObject,
         cancellation: ScriptPluginAgentCancellation?
@@ -904,6 +938,14 @@ object ScriptPluginAgentLocalReverseTools {
         args: JSONObject,
         cancellation: ScriptPluginAgentCancellation?
     ): String {
+        val detached = binding.withDex { inspectMethodLocked(binding, args, cancellation) }
+        return enrichSourceEntries(binding, detached, cancellation)
+    }
+    private fun inspectMethodLocked(
+        binding: Binding,
+        args: JSONObject,
+        cancellation: ScriptPluginAgentCancellation?
+    ): String {
         val descriptor = args.optString("descriptor", "").trim()
         if (descriptor.isBlank()) return error("inspect_method 需要完整 descriptor")
         val method = runCatching { binding.dex.getMethodData(descriptor) }.getOrNull()
@@ -912,8 +954,7 @@ object ScriptPluginAgentLocalReverseTools {
         require(include.all { it in METHOD_INSPECT_SECTIONS }) { "inspect_method include 包含不支持的值" }
         val sections = include.ifEmpty { METHOD_INSPECT_SECTIONS.toSet() }
         val brief = args.optBoolean("brief", false)
-        val classDescriptor = method.descriptor.substringBefore("->")
-        val sourceEntry = binding.smaliExporter.locateClassEntries(listOf(classDescriptor), cancellation)[classDescriptor]
+        val sourceEntry: String? = null
         return methodView(method).apply {
             put("sourcePath", binding.apkPath)
             put("sourceEntry", sourceEntry ?: JSONObject.NULL)
@@ -951,6 +992,14 @@ object ScriptPluginAgentLocalReverseTools {
         args: JSONObject,
         cancellation: ScriptPluginAgentCancellation?
     ): String {
+        val detached = binding.withDex { inspectClassLocked(binding, args, cancellation) }
+        return enrichSourceEntries(binding, detached, cancellation)
+    }
+    private fun inspectClassLocked(
+        binding: Binding,
+        args: JSONObject,
+        cancellation: ScriptPluginAgentCancellation?
+    ): String {
         val value = args.optString("descriptor", args.optString("class_name", "")).trim()
         if (value.isBlank()) return error("inspect_class 需要 descriptor 或 class_name")
         val clazz = runCatching { binding.dex.getClassData(value) }.getOrNull()
@@ -960,7 +1009,7 @@ object ScriptPluginAgentLocalReverseTools {
         require(include.all { it in CLASS_INSPECT_SECTIONS }) { "inspect_class include 包含不支持的值" }
         val sections = include.ifEmpty { setOf("fields", "methods") }
         val brief = args.optBoolean("brief", false)
-        val sourceEntry = binding.smaliExporter.locateClassEntries(listOf(clazz.descriptor), cancellation)[clazz.descriptor]
+        val sourceEntry: String? = null
         return classView(clazz).apply {
             put("sourcePath", binding.apkPath)
             put("sourceEntry", sourceEntry ?: JSONObject.NULL)
@@ -1450,11 +1499,7 @@ object ScriptPluginAgentLocalReverseTools {
             CLASS_SEARCH_DEFAULT_FIELDS
         )
         val page = candidates.drop(offset(args)).take(limit(args))
-        val sourceEntries = if ("sourceEntry" in fields) {
-            binding.smaliExporter.locateClassEntries(page.map { it.descriptor }, cancellation)
-        } else {
-            emptyMap()
-        }
+        val sourceEntries = emptyMap<String, String>()
         val items = page.map { value ->
             JSONObject().apply {
                 putProjected(fields, "className", value.name)
@@ -1483,14 +1528,7 @@ object ScriptPluginAgentLocalReverseTools {
             METHOD_SEARCH_DEFAULT_FIELDS
         )
         val page = candidates.drop(offset(args)).take(limit(args))
-        val sourceEntries = if ("sourceEntry" in fields) {
-            binding.smaliExporter.locateClassEntries(
-                page.map { it.descriptor.substringBefore("->") },
-                cancellation
-            )
-        } else {
-            emptyMap()
-        }
+        val sourceEntries = emptyMap<String, String>()
         val items = page.map { value ->
             JSONObject().apply {
                 putProjected(fields, "className", value.className)
@@ -1512,6 +1550,22 @@ object ScriptPluginAgentLocalReverseTools {
         return result(items, candidates.size, args)
     }
 
+    /** Enrich only detached JSON; APK IO and cancellation never hold a native generation. */
+    private fun enrichSourceEntries(binding: Binding, text: String,
+                                    cancellation: ScriptPluginAgentCancellation?): String {
+        val json = JSONObject(text)
+        if (json.has("error")) return text
+        val array = json.optJSONArray("items")
+        val values = if (array == null) listOf(json) else (0 until array.length()).map { array.getJSONObject(it) }
+        val requested = values.filter { it.has("sourceEntry") }
+        if (requested.isEmpty()) return text
+        val descriptors = requested.map { it.optString("descriptor").substringBefore("->") }.filter { it.isNotBlank() }
+        val entries = binding.smaliExporter.locateClassEntries(descriptors, cancellation)
+        requested.forEach { value ->
+            value.put("sourceEntry", entries[value.optString("descriptor").substringBefore("->")] ?: JSONObject.NULL)
+        }
+        return json.toString()
+    }
     private fun projectionFields(
         args: JSONObject,
         allowed: List<String>,
@@ -1637,13 +1691,28 @@ object ScriptPluginAgentLocalReverseTools {
 
     private class Binding private constructor(
         val context: Context,
-        val dex: DexKitBridge,
+        private val externalDex: DexKitBridge?,
+        private val manager: DexKitBridgeManager?,
         val apkPath: String,
         val sessionId: String,
         val kind: String,
         val classLoaderDescription: String,
         private val ownsDex: Boolean
     ) : AutoCloseable {
+        private val queryBridge = ThreadLocal<DexKitBridge>()
+        val dex: DexKitBridge get() = queryBridge.get() ?: externalDex
+            ?: error("宿主 DexKit 只能在 withDex 查询中读取")
+        fun <T> withDex(action: () -> T): T {
+            val controlled = manager
+            if (controlled == null) return DexInstallScheduler.queryDexKit(action)
+            return controlled.withCurrentBridge { bridge ->
+                val previous = queryBridge.get()
+                queryBridge.set(bridge)
+                try { action() } finally {
+                    if (previous == null) queryBridge.remove() else queryBridge.set(previous)
+                }
+            }
+        }
         val smaliExporter = ScriptPluginAgentSmaliExporter(
             apkPath = apkPath,
             cacheRoot = File(context.cacheDir, "Hchat_agent_reverse")
@@ -1673,7 +1742,7 @@ object ScriptPluginAgentLocalReverseTools {
             if (resourceModuleLazy.isInitialized()) {
                 runCatching { resourceModuleLazy.value.close() }
             }
-            if (ownsDex) runCatching { dex.close() }
+            if (ownsDex) DexInstallScheduler.queryDexKit { runCatching { externalDex?.close() } }
         }
 
         companion object {
@@ -1681,7 +1750,8 @@ object ScriptPluginAgentLocalReverseTools {
                 val file = runCatching { File(holder.apkPath).canonicalFile }.getOrDefault(File(holder.apkPath))
                 return Binding(
                     context = context,
-                    dex = holder.dexKitBridge,
+                    externalDex = if (holder.manager == null) holder.dexKitBridge else null,
+                    manager = holder.manager,
                     apkPath = file.path,
                     sessionId = targetId(file),
                     kind = TARGET_KIND_HOST,
@@ -1693,7 +1763,8 @@ object ScriptPluginAgentLocalReverseTools {
             fun external(context: Context, dex: DexKitBridge, session: TargetSession): Binding {
                 return Binding(
                     context = context,
-                    dex = dex,
+                    externalDex = dex,
+                    manager = null,
                     apkPath = session.apkPath,
                     sessionId = session.sessionId,
                     kind = session.kind,

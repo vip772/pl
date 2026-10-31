@@ -79,7 +79,7 @@ public class WechatApiFeature implements Feature {
         WeChatCurrentActivityApi currentActivityApi = new WeChatCurrentActivityApi(this::log);
         WeChatMediaApi mediaApi = new WeChatMediaApi(
                 context.hostContext(), context.dexFinder(), context.hostClassLoader(),
-                context.dexKitBridge(), currentActivityApi, this::log);
+                context.dexKitManager(), currentActivityApi, this::log);
         WeChatActivityStartApi activityStartApi = new WeChatActivityStartApi(this::log);
         WeChatMessageChangeApi messageChangeApi = new WeChatMessageChangeApi(
                 databaseListenerApi, messageStoreApi, accountApi, this::log);
@@ -105,7 +105,7 @@ public class WechatApiFeature implements Feature {
                 context.dexFinder(), dispatcher, this::log);
         WeChatSnsApi snsApi = new WeChatSnsApi(
                 context.hostContext(), context.dexFinder(), context.hostClassLoader(),
-                context.dexKitBridge(), networkApi, accountApi, contactApi, context, this::log);
+                context.dexKitManager(), networkApi, accountApi, contactApi, context, this::log);
         // 网络队列 Hook 延后到 wechat_api:warmup，避免在微信启动网络状态未就绪时扫描并挂钩候选类。
         messageEventApi.installAddMsgHook();
         installApiHook("databaseChanges", databaseListenerApi::install);

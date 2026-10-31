@@ -8,7 +8,7 @@ import t.mma.dexkit.DexFinder
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.ui.WeChatCurrentActivityApi
 import t.mma.utils.KavaReflector
-import org.luckypray.dexkit.DexKitBridge
+import t.mma.dexkit.DexKitBridgeManager
 import java.io.File
 import java.lang.reflect.Method
 import java.util.LinkedList
@@ -21,7 +21,7 @@ class WeChatFavoriteApi(
     private val hostContext: Context,
     private val dexFinder: DexFinder,
     private val hostClassLoader: ClassLoader,
-    private val dexKitBridge: DexKitBridge?,
+    private val dexKitManager: DexKitBridgeManager?,
     private val currentActivityApi: WeChatCurrentActivityApi,
     private val logger: Logger?
 ) {
@@ -230,7 +230,7 @@ class WeChatFavoriteApi(
         return FavoriteVoiceResolver.resolvePreviewPath(
             hostContext = hostContext,
             classLoader = hostClassLoader,
-            dexKitBridge = dexKitBridge,
+            dexKitManager = dexKitManager,
             favorite = favorite,
             logger = ::logFavoriteVoice
         )
@@ -268,7 +268,7 @@ class WeChatFavoriteApi(
         val downloadStarted = FavoriteVoiceResolver.requestDownload(
             hostContext = hostContext,
             classLoader = hostClassLoader,
-            dexKitBridge = dexKitBridge,
+            dexKitManager = dexKitManager,
             favorite = favorite,
             logger = ::logFavoriteVoice
         )
@@ -301,7 +301,7 @@ class WeChatFavoriteApi(
         return FavoriteVoiceResolver.resolve(
             hostContext = hostContext,
             classLoader = hostClassLoader,
-            dexKitBridge = dexKitBridge,
+            dexKitManager = dexKitManager,
             favorite = favorite,
             logger = ::logFavoriteVoice
         )

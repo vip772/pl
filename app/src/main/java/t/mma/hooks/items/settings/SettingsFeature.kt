@@ -35,8 +35,8 @@ class SettingsFeature : Feature {
 
     private fun installSettingsHook(context: FeatureContext) {
         try {
-            val settingsDexFinder = SettingsDexFinder(
-                context.dexKitBridge(),
+            val settingsDexFinder = SettingsDexFinder.managed(
+                context.dexKitManager(),
                 context.hostClassLoader(),
                 context.hostContext()
             )

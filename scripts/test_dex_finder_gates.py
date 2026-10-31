@@ -12,7 +12,7 @@ with tempfile.TemporaryDirectory() as td:
  subprocess.run(['javac','-cp',str(sdk),'-d',str(classes),*map(str,p.glob('*.java'))],check=True,timeout=20)
  cp=':'.join(map(str,[classes,std,dex,sdk,kava,libs/"kotlinx-coroutines-core-jvm-1.8.0.jar"]))
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-jvm-target','17','-nowarn','-no-stdlib','-no-reflect','-classpath',cp,'-d',str(classes),str(base/'utils/KavaReflector.kt'),str(base/'hooks/core/DexInstallScheduler.kt'),str(base/'hooks/api/model/WeChatVersionInfo.kt')],check=True,timeout=45)
- subprocess.run(['javac','-cp',cp,'-d',str(classes),str(base/'hooks/api/runtime/WeChatVersionApi.java'),str(base/'dexkit/DexFinder.java'),str(base/'dexkit/CacheSnapshotEditor.java'),str(base/'dexkit/SettingsDexFinder.java')],check=True,timeout=30)
+ subprocess.run(['javac','-cp',cp,'-d',str(classes),str(base/'hooks/api/runtime/WeChatVersionApi.java'),str(base/'dexkit/DexKitBridgeManager.java'),str(base/'dexkit/DexFinder.java'),str(base/'dexkit/CacheSnapshotEditor.java'),str(base/'dexkit/SettingsDexFinder.java')],check=True,timeout=30)
  (p/'Hook.kt').write_text('package de.robv.android.xposed\nopen class XC_MethodHook{class MethodHookParam{var result:Any?=null;var args=arrayOf<Any>();var thisObject:Any?=null};open fun afterHookedMethod(p:MethodHookParam){}}')
  (p/'Registry.kt').write_text('package t.mma.hooks.core\nobject HookRegistry{fun get()=this;fun hook(m:java.lang.reflect.Member,c:de.robv.android.xposed.XC_MethodHook){}}')
  (p/'Identity.kt').write_text('package t.mma.hooks.api.sns\nobject SnsLocalPostIdentity{fun isLocalOnly(c:android.content.Context,id:Any?)=false}')
@@ -24,14 +24,14 @@ for name in ['DexFinder.java','SettingsDexFinder.java']:
  s=(base/'dexkit'/name).read_text()
  for m in re.finditer(r'public (?:synchronized )?void (resolve\w+)\(([^)]*)\) \{([^}]+)\}',s):
   if name=='SettingsDexFinder.java' and not m[2]:assert 'resolveAll(true)' in m[3]
-  else:assert 'DexInstallScheduler.runDexKitTask(' in m[3],m[1]
+  else:assert 'runWithBridge(' in m[3],m[1]
  assert not re.search(r'public synchronized void resolve',s)
 print('PASS complete production DexFinder/SettingsDexFinder SDK and DexKit ABI compile; all public locator entry gates; shared-gate-before-finder-monitor order')
 interaction=(base/'hooks/api/sns/SnsInteractionLocator.kt').read_text()
 for name in ['nativeLikeMethod','nativeCommentMethod','nativeCommentGuardMethods','timelineRefreshConstructor']:
  assert f'DexInstallScheduler.queryDexKit {{ {name}Locked() }}' in interaction
 live=(base/'hooks/api/sns/SnsLivePhotoUploadLocator.kt').read_text()
-assert live.index('DexInstallScheduler.queryDexKit {') < live.index('private fun locateLocked') < live.index('methodData.usingFields')
+assert live.index('dexKitManager.withCurrentBridge {') < live.index('private fun locateLocked') < live.index('methodData.usingFields')
 print('PASS production SNS locators and real DexMethodCache compile; query/usingFields consumption scoped before detached result return')
 
 for file in ['SingleMessageMenuLocator.kt','MultiSelectMessageMenuLocator.kt']:
@@ -40,11 +40,22 @@ for file in ['SingleMessageMenuLocator.kt','MultiSelectMessageMenuLocator.kt']:
 print('PASS production single/multi-select message menu locator SDK/DexKit compile')
 
 voice=(base/'hooks/api/media/FavoriteVoiceResolver.kt').read_text()
-assert 'DexInstallScheduler.queryDexKit { favoriteDownloadMethodLocked(' in voice
-assert 'DexInstallScheduler.queryDexKit { locateFavoriteDataPathMethodsLocked(' in voice
+assert 'favoriteDownloadMethodLocked(hostContext, classLoader, bridge,' in voice
+assert 'locateFavoriteDataPathMethodsLocked(bridge,' in voice
 print('PASS complete favorite menu/voice resolver compile; lazy invokes consumed within query gate')
 
 for relative in ['sns/WeChatSnsPostObserver.kt','contact/WeContactHeaderApi.kt']:
  source=(base/'hooks/api'/relative).read_text()
  assert 'DexInstallScheduler.queryDexKit { installLocked(' in source
 print('PASS shared post observer and contact header complete production SDK compile; gate precedes install monitor')
+
+for name in ['DexFinder.java','SettingsDexFinder.java']:
+ source=(base/'dexkit'/name).read_text()
+ assert 'dexKit.find' not in source
+ assert 'manager.withCurrentBridge(bridge ->' in source
+ assert 'queryBridge.remove()' in source and 'queryBridge.set(previous)' in source
+favorite=(base/'hooks/api/media/FavoriteVoiceResolver.kt').read_text()
+assert favorite.count('dexKitManager.withCurrentBridge {')==2
+assert 'DexKitBridge?' not in favorite[:favorite.index('private fun favoriteDownloadMethodLocked')]
+assert 'withCurrentBridge' not in favorite[favorite.index('suspend fun requestDownloadAwait'):favorite.index('private fun favoriteDownloadMethod(')]
+print('PASS managed locator ownership, nested-thread restoration, favorite download awaits outside native query scope')

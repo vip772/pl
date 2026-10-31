@@ -96,7 +96,8 @@ internal object SnsForwardNativeMediaLocator {
             ?.takeIf(validator)
             ?.let { return it }
         val method = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply { usingStrings(anchors) })
                 }
@@ -105,6 +106,8 @@ internal object SnsForwardNativeMediaLocator {
                     runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                 }
                 .firstOrNull(validator)
+
+            }
         }.onFailure {
             logger("定位朋友圈原生媒体方法失败: ${anchors.firstOrNull().orEmpty()}", it)
         }.getOrNull()

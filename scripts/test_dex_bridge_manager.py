@@ -16,11 +16,11 @@ with tempfile.TemporaryDirectory() as td:
     classes.mkdir()
     (p / 'DexKitBridge.java').write_text(
         'package org.luckypray.dexkit; '
-        'public class DexKitBridge { public int closes; public synchronized void close(){closes++;} }\n'
+        'public class DexKitBridge { public volatile int closes; public volatile boolean failClose; public synchronized void close(){closes++;if(failClose)throw new IllegalStateException("close failure");} }\n'
     )
     (p / 'Log.kt').write_text(
         'package t.mma.utils\n'
-        'object HLog { fun d(s:String){}; fun i(s:String){}; fun w(s:String){}; '
+        'object HLog { @JvmStatic fun d(s:String){}; @JvmStatic fun i(s:String){}; @JvmStatic fun w(s:String){}; '
         'fun e(s:String,t:Throwable?=null){} }\n'
     )
     (p / 'Handler.kt').write_text(
@@ -74,6 +74,51 @@ public class Test {
     try { manager.withCurrentBridge(new java.util.function.Function<DexKitBridge, Integer>() { public Integer apply(DexKitBridge bridge){ return 1; } }); }
     catch (IllegalStateException expected) { rejected = true; }
     if (!rejected) throw new AssertionError("closed current accepted query");
+    // Configure opt-in rebuild, race many concurrent cache misses, and check query/close exclusion.
+    java.util.concurrent.atomic.AtomicInteger creates = new java.util.concurrent.atomic.AtomicInteger();
+    java.util.concurrent.atomic.AtomicBoolean failCreate = new java.util.concurrent.atomic.AtomicBoolean(true);
+    manager.enableIdleRebuild(() -> {
+      if(failCreate.getAndSet(false)) throw new IllegalStateException("create failure");
+      creates.incrementAndGet(); return new DexKitBridge();
+    }, Test.class.getClassLoader(), "rebuilt.apk", 80L);
+    try { manager.withCurrentBridge(b -> 1); throw new AssertionError("create failure missing"); }
+    catch(IllegalStateException expected) {}
+    java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(8);
+    java.util.List<java.util.concurrent.Future<Long>> jobs = new java.util.ArrayList<>();
+    for(int i=0;i<16;i++) jobs.add(pool.submit(() -> manager.withCurrentBridge(b -> {
+      if(b.closes!=0) throw new AssertionError("closed bridge in query");
+      return manager.currentGenerationId();
+    })));
+    long newGeneration=jobs.get(0).get(3, java.util.concurrent.TimeUnit.SECONDS);
+    for(java.util.concurrent.Future<Long> job:jobs) if(job.get(3,java.util.concurrent.TimeUnit.SECONDS)!=newGeneration) throw new AssertionError("concurrent generation");
+    if(creates.get()!=1) throw new AssertionError("duplicate create");
+    manager.withCurrentBridge(b -> {
+      if(manager.currentActiveQueryCount()!=1 || manager.closeIfIdle()) throw new AssertionError("active query closed");
+      try {Thread.sleep(130);}catch(InterruptedException e){throw new RuntimeException(e);}
+      if(b.closes!=0) throw new AssertionError("idle timer closed active query");
+      return null;
+    });
+    long deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+    while(manager.currentGenerationId()!=0 && System.nanoTime()<deadline) Thread.sleep(10);
+    if(manager.currentGenerationId()!=0) throw new AssertionError("idle timer did not close");
+    DexKitBridge raw=manager.rawCompatibilityBridge("escaped-old-script");
+    Thread.sleep(160);
+    if(raw.closes!=0 || manager.closeIfIdle() || !manager.hasRawCompatibilityLease()) throw new AssertionError("raw escape not pinned");
+    if(manager.rawCompatibilityBridge("again")!=raw || manager.currentLeaseCount()!=1) throw new AssertionError("duplicate raw pin");
+    DexKitBridge failure=new DexKitBridge(); failure.failClose=true;
+    manager.publish(failure, null, "close-failure.apk");
+    if(manager.closeIfIdle() || manager.getLastCloseFailure()==null) throw new AssertionError("close failure not reported");
+    if(manager.withCurrentBridge(b -> b)==failure) throw new AssertionError("reuse partially closed native object");
+    try{manager.withCurrentBridge(b -> {throw new IllegalStateException("query failure");});}catch(IllegalStateException expected){}
+    if(manager.currentActiveQueryCount()!=0) throw new AssertionError("exception leaked active count");
+    DexKitBridgeManager.Lease normal=manager.acquire("ordinary", false);
+    Thread.sleep(160); if(manager.currentGenerationId()==0)throw new AssertionError("normal lease ignored");
+    normal.close();normal.close();
+    deadline=System.nanoTime()+java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+    while(manager.currentGenerationId()!=0 && System.nanoTime()<deadline)Thread.sleep(10);
+    if(manager.currentGenerationId()!=0)throw new AssertionError("release did not re-arm idle");
+    pool.shutdownNow();
+    System.out.println("PASS idle rebuild: concurrent single creation, create/query/close failure recovery, active query exclusion, automatic idle close, normal lease release and raw process pin");
     System.out.println("PASS DexKit manager: generation reuse, raw compatibility lease, query accounting, retired/current idle close, closed query rejection");
   }
 }

@@ -1,4 +1,14 @@
-# Hchat 全功能资源所有权清单（dev 当前核查）
+# Hchat 全功能资源所有权清单（持续核查）
+
+## 2026-10-31 接续批次：以本节覆盖下文历史状态
+- DexFinder / SettingsDexFinder 内部入口改为 managed 工厂；旧构造器兼容保留。内部查询只在线程局部保护期间持有 bridge，并在 finally 恢复嵌套线程状态。
+- FeatureContext、内部 holder、收藏媒体 API、朋友圈 API、Agent 宿主 Binding 不再持有永久原始宿主 bridge。查询外只保留反射对象、字符串或 JSON；下载等待、文件物化和 Agent APK sourceEntry 索引在 native 查询外。
+- ModuleEntry 移除原始 bridge Map；早期安装局部变量只在共享门内同步消费。入口显式接入 30 秒一次性闲置定时，查询/关闭/创建共用串行门，无滚动路径轮询。创建失败可重试，关闭失败隔离旧对象，日志报告代际及异常。
+- 原始脚本 globals 仍按旧约定注入：创建解释器或调用 bridge()/holder()/FeatureContext 原始接口即按进程固定该代际。无法证明脚本任意线程/全局引用已消失，因此不在脚本卸载时冒险释放 raw pin；未创建旧解释器、仅使用新查询 API 的运行时可回收。
+- 20 项集中回归：17 项首次通过，3 项因查询门签名/日志依赖夹具过期失败，已修正并单独重跑通过。证据分别为整文件 SDK/真实 ABI 编译、表达式 ABI 编译和 JVM 行为模型，不是实机验证；完整 Android/R8 编译以对应提交 Actions 为准。
+- **尚未完成**：全功能热启停逐项闭环、自动回复 object 线程/计时器/音频网络链、Monet 进行中导出所有权等仍需实施；本批不是最终版本或最终 APK。
+
+## 历史审计记录（部分“尚未回收”等描述已由上节更新）
 
 核查基线：`dcf9448`，工作区干净；按当前功能源码、`BaseFeature` / `FeatureResourceScope`、`FeatureManager`、实际资源创建和清理入口核查。该清单覆盖功能私有线程/Handler/订阅/Hook/延迟任务/缓存及共用资源归属；不是 Android 运行时堆快照或所有微信版本的设备验证。
 

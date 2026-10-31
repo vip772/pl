@@ -4,6 +4,7 @@ import t.mma.hooks.core.DexInstallScheduler
 import android.content.Context
 import t.mma.dexkit.DexMethodCache
 import t.mma.utils.KavaReflector
+import t.mma.dexkit.DexKitBridgeManager
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
@@ -29,11 +30,11 @@ internal object SnsLivePhotoUploadLocator {
     fun locate(
         context: Context,
         classLoader: ClassLoader,
-        dexKitBridge: DexKitBridge,
+        dexKitManager: DexKitBridgeManager,
         helperClass: Class<*>?,
         logger: (String) -> Unit
-    ): SnsLivePhotoUploadRuntime? = DexInstallScheduler.queryDexKit {
-        locateLocked(context, classLoader, dexKitBridge, helperClass, logger)
+    ): SnsLivePhotoUploadRuntime? = dexKitManager.withCurrentBridge { bridge ->
+        locateLocked(context, classLoader, bridge, helperClass, logger)
     }
     private fun locateLocked(
         context: Context,

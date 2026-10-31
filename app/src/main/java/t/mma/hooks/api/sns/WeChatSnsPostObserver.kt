@@ -6,7 +6,7 @@ import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.HookRegistry
 import t.mma.utils.KavaReflector
-import org.luckypray.dexkit.DexKitBridge
+import t.mma.dexkit.DexKitBridgeManager
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Method
@@ -16,7 +16,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 class WeChatSnsPostObserver(
     private val context: Context,
     private val classLoader: ClassLoader,
-    private val dexKitBridge: DexKitBridge?,
+    private val dexKitManager: DexKitBridgeManager?,
     private val logger: (String) -> Unit
 ) {
     fun interface Listener {
@@ -88,9 +88,10 @@ class WeChatSnsPostObserver(
     }
 
     private fun locatePostStoreMethod(): Method? {
-        val bridge = dexKitBridge ?: return null
+        val manager = dexKitManager ?: return null
         val methods = runCatching {
-            bridge.findMethod(
+            manager.withCurrentBridge { nativeBridge ->
+            nativeBridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         usingStrings(
@@ -105,6 +106,8 @@ class WeChatSnsPostObserver(
                 runCatching { data.getMethodInstance(classLoader) }.getOrNull()
             }.filter(::isPostStoreMethod)
                 .distinctBy { it.toGenericString() }
+
+            }
         }.onFailure {
             logger("定位朋友圈入库方法失败: ${it.message}")
         }.getOrDefault(emptyList())

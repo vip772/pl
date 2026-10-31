@@ -792,7 +792,7 @@ class ScriptPluginBridge internal constructor(
                 context.hostClassLoader(),
                 ScriptPluginRuntime.scriptDir(context.hostContext()),
                 ScriptDexKitBridge(
-                    context.dexKitBridge(),
+                    null,
                     context.dexBridgeHolder(),
                     context.hostClassLoader(),
                     context.dexKitManager()

@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory() as td:
     classes.mkdir()
     (p / 'Log.kt').write_text(
         'package t.mma.utils\n'
-        'object HLog { fun d(s:String){}; fun i(s:String){}; fun w(s:String){}; '
+        'object HLog { @JvmStatic fun d(s:String){}; @JvmStatic fun i(s:String){}; @JvmStatic fun w(s:String){}; '
         'fun e(s:String,t:Throwable?=null){} }\n'
         'object KavaReflector { fun loadClass(n:String,l:ClassLoader):Class<*>?=null }\n'
     )

@@ -6,7 +6,7 @@ s=(r/'app/src/main/java/t/mma/hooks/items/script/agent/ScriptPluginAgentLocalRev
 a=s.index('    private var externalIdleTicket:');b=s.index('    @JvmStatic',a)
 idle=s[a:b]
 assert 'finally {\n                        armExternalIdleClose()' in s
-assert s.index('dex.setThreadNum(2)') < s.index('return Binding.external')
+assert s.index('dex.setThreadNum(2)') < s.index('Binding.external')
 assert 'removeOnCancelPolicy = true' in s and 'allowCoreThreadTimeOut(true)' in s
 code='''import java.util.concurrent.*
 import t.mma.hooks.core.DexInstallScheduler as D
@@ -21,8 +21,8 @@ class Owner {
  val targetLock=Any();val idleCloser=Timer();val EXTERNAL_IDLE_SECONDS=30L
  var activeExternalBinding:Binding?=null
 '''+idle+'''
- fun arm()=D.queryDexKit{synchronized(targetLock){armExternalIdleClose()}}
- fun replace(b:Binding?)=D.queryDexKit{synchronized(targetLock){activeExternalBinding=b;armExternalIdleClose()}}
+ fun arm()=synchronized(targetLock){armExternalIdleClose()}
+ fun replace(b:Binding?)=synchronized(targetLock){activeExternalBinding=b;armExternalIdleClose()}
 }
 fun main(){
  val o=Owner();val first=Binding();o.replace(first)
@@ -32,13 +32,10 @@ fun main(){
  val next=Binding();o.replace(next);val old=o.idleCloser.tasks.last();val replacement=Binding();o.replace(replacement)
  old.run();check(next.closes==0 && replacement.closes==0 && o.activeExternalBinding===replacement)
  val pending=o.idleCloser.tasks.last();o.replace(null);pending.run();check(replacement.closes==0)
- val busy=Binding();o.replace(busy);val close=o.idleCloser.tasks.last()
- val launched=CountDownLatch(1);val pool=Executors.newSingleThreadExecutor()
- lateinit var future:Future<*>
- D.queryDexKit {future=pool.submit {launched.countDown();close.run()};check(launched.await(3,TimeUnit.SECONDS));check(busy.closes==0);o.arm()}
- future.get(3,TimeUnit.SECONDS);check(busy.closes==0)
- o.idleCloser.tasks.last().run();check(busy.closes==1 && o.activeExternalBinding==null);pool.shutdown()
- println("PASS external Dex idle cleanup: stale ticket, replacement, explicit close/rebind cancellation, active query exclusion, reschedule and single release")
+ val busy=Binding();o.replace(busy);val pendingBusy=o.idleCloser.tasks.last()
+ o.arm();pendingBusy.run();check(busy.closes==0)
+ o.idleCloser.tasks.last().run();check(busy.closes==1 && o.activeExternalBinding==null)
+ println("PASS external Dex idle cleanup: stale ticket, replacement, explicit close/rebind cancellation, target ownership reschedule and single release")
 }
 '''
 libs=Path('/tmp/pl-kotlin-libs');std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
@@ -49,3 +46,12 @@ with tempfile.TemporaryDirectory() as td:
  (p/'Handler.kt').write_text('package android.os\nclass Looper{companion object{fun getMainLooper()=Looper()}}\nclass Handler(l:Looper){fun removeCallbacks(r:Runnable){};fun postDelayed(r:Runnable,d:Long)=true}')
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(p/'test.jar'),*map(str,p.glob('*.kt')),str(r/'app/src/main/java/t/mma/hooks/core/DexInstallScheduler.kt')],check=True,timeout=45)
  subprocess.run(['java','-cp',f'{p/"test.jar"}:{std}','TestKt'],check=True,timeout=15)
+
+assert 'private val externalDex: DexKitBridge?' in s
+assert 'manager = holder.manager' in s
+assert 'if (holder.manager == null) holder.dexKitBridge else null' in s
+assert 'if (ownsDex) DexInstallScheduler.queryDexKit' in s
+for name in ['findClasses','findMethodsUsingStrings','findMethodsUsingResource','findMethods','inspectMethod','inspectClass']:
+ assert f'val detached = binding.withDex {{ {name}Locked(binding, args, cancellation) }}' in s
+assert s.count('binding.smaliExporter.locateClassEntries(')==1
+print('PASS Agent host ownership and native-to-detached JSON boundary; APK source index outside native scope')

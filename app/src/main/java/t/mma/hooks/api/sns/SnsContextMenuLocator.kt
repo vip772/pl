@@ -126,11 +126,14 @@ internal object SnsContextMenuLocator {
         logger: (String, Throwable?) -> Unit
     ): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply { matcher(methodMatcher) })
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(FindMethod().apply { matcher(methodMatcher) })
                 .mapNotNull { data ->
                     runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                 }
                 .distinctBy { it.toGenericString() }
+
+            }
         }.onFailure { logger(error, it) }.getOrDefault(emptyList())
     }
 

@@ -677,7 +677,7 @@ object CustomNotificationRuntime {
     private fun findNotificationItemClass(context: FeatureContext): Class<*>? {
         KavaReflector.loadClass(NOTIFICATION_ITEM, context.hostClassLoader())?.let { return it }
         val names = runCatching {
-            context.dexBridgeHolder().findClassesByStrings("id: ", "userName: ", "unreadCount:")
+            t.mma.hooks.core.DexKitQueryApi.findClassesByStrings(context.dexKitManager(), context.hostClassLoader(), "id: ", "userName: ", "unreadCount:").map { it.name }
         }.getOrDefault(emptyList())
         for (name in names) {
             if (name == NOTIFICATION_ITEM ||

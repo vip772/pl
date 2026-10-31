@@ -73,7 +73,8 @@ object WeContactHeaderApi {
         DexMethodCache.load(prefs, runtimeKey, context.hostClassLoader(), CACHE_METHOD)
             ?.takeIf(::isBindMethod)?.let { return it }
         val found = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         declaredClass(HEADER_CLASS)
@@ -85,6 +86,8 @@ object WeContactHeaderApi {
             ).asSequence()
                 .mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .firstOrNull(::isBindMethod)
+
+            }
         }.onFailure { HLog.e("[$TAG] DexKit 定位资料页头部绑定方法失败", it) }.getOrNull()
         if (found == null) DexMethodCache.clear(prefs, runtimeKey, CACHE_METHOD)
         else DexMethodCache.save(prefs, runtimeKey, CACHE_METHOD, found)

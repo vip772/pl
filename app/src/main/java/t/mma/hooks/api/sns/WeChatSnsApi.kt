@@ -14,7 +14,7 @@ import t.mma.hooks.api.model.WeChatSnsPrepareResult
 import t.mma.hooks.api.net.WeChatNetworkApi
 import t.mma.hooks.core.FeatureContext
 import t.mma.utils.KavaReflector
-import org.luckypray.dexkit.DexKitBridge
+import t.mma.dexkit.DexKitBridgeManager
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
@@ -36,7 +36,7 @@ class WeChatSnsApi(
     private val hostContext: Context?,
     private val dexFinder: DexFinder?,
     private val classLoader: ClassLoader?,
-    private val dexKitBridge: DexKitBridge?,
+    private val dexKitManager: DexKitBridgeManager?,
     private val networkApi: WeChatNetworkApi?,
     private val accountApi: WeChatAccountApi?,
     private val contactApi: WeChatContactApi?,
@@ -53,18 +53,18 @@ class WeChatSnsApi(
     private val interactionLocator: SnsInteractionLocator? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         val context = hostContext ?: return@lazy null
         val loader = classLoader ?: return@lazy null
-        SnsInteractionLocator(context, loader, dexKitBridge, ::log)
+        SnsInteractionLocator(context, loader, dexKitManager, ::log)
     }
     private val postObserver: WeChatSnsPostObserver? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         val context = hostContext ?: return@lazy null
         val loader = classLoader ?: return@lazy null
-        WeChatSnsPostObserver(context, loader, dexKitBridge, ::log)
+        WeChatSnsPostObserver(context, loader, dexKitManager, ::log)
     }
     private val cachedPostStorage: SnsCachedPostStorage? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         val context = hostContext ?: return@lazy null
         val loader = classLoader ?: return@lazy null
-        val bridge = dexKitBridge ?: return@lazy null
-        SnsCachedPostStorage(context, loader, bridge, ::log)
+        val manager = dexKitManager ?: return@lazy null
+        SnsCachedPostStorage(context, loader, manager, ::log)
     }
     private val contentResolver: SnsForwardContentResolver? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         val context = featureContext ?: return@lazy null
@@ -999,12 +999,12 @@ class WeChatSnsApi(
         livePhotoUploadRuntime?.let { return it }
         val context = hostContext ?: return null
         val finder = dexFinder ?: return null
-        val bridge = dexKitBridge ?: return null
+        val manager = dexKitManager ?: return null
         runCatching { finder.resolveSnsUploadApi() }
         val located = SnsLivePhotoUploadLocator.locate(
             context = context,
             classLoader = classLoader ?: return null,
-            dexKitBridge = bridge,
+            dexKitManager = manager,
             helperClass = finder.snsUploadPackHelperClass,
             logger = ::log
         ) ?: return null

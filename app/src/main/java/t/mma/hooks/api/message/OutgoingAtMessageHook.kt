@@ -29,8 +29,10 @@ object OutgoingAtMessageHook {
         val key = DexMethodCache.runtimeKey(context.hostContext(), loader)
         DexMethodCache.load(prefs, key, loader, "insert")?.let { return it }
         val query = FindMethod().apply { matcher(MethodMatcher().apply { usingStrings(listOf("MsgInfo processAddMsg insert db error")) }) }
-        val entry = context.dexKitBridge().findMethod(query).map { it.getMethodInstance(loader) }.singleOrNull {
+        val entry = context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(query).map { it.getMethodInstance(loader) }.singleOrNull {
             it.returnType == java.lang.Long.TYPE && it.parameterTypes.size == 1 && !R.isStatic(it)
+        }
         } ?: error("消息入库直接字符串入口不唯一")
         val message = entry.parameterTypes[0]
         val method = R.findMethodRecursive(entry.declaringClass, "Bb", message, Boolean::class.javaPrimitiveType!!)
