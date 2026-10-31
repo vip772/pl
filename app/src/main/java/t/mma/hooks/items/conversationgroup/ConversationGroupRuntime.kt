@@ -23,6 +23,9 @@ import android.widget.Toast
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.api.contact.WeChatChatroomChangeApi
+import t.mma.hooks.api.contact.WeChatContactChangeApi
+import t.mma.hooks.api.conversation.WeChatConversationChangeApi
 import t.mma.hooks.core.ConversationMenuExtensionRegistry
 import t.mma.hooks.core.ConversationMenuExtensionTarget
 import t.mma.hooks.core.FeatureContext
@@ -124,7 +127,8 @@ object ConversationGroupRuntime {
     private val shareRecentErrorLogAt = AtomicLong(0L)
     private val automaticAvatarSources = ConcurrentHashMap<String, String>()
     @Volatile private var effectiveConversationSnapshot: EffectiveConversationSnapshot? = null
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
+    private var executor = newExecutor()
+    private fun newExecutor() = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "Hchat-ConversationGroup").apply { isDaemon = true }
     }
     private val parentRestoreFailures = ConcurrentHashMap.newKeySet<String>()
@@ -133,9 +137,18 @@ object ConversationGroupRuntime {
     @Volatile private var parentUpdateMethod: Method? = null
     @Volatile private var nativeGroupRefreshMethod: Method? = null
     @Volatile private var conversationStorage: Any? = null
-
+    private var runtimePreferences: SharedPreferences? = null
+    private var conversationSubscription: WeChatConversationChangeApi.Subscription? = null
+    private var contactSubscription: WeChatContactChangeApi.Subscription? = null
+    private var chatroomSubscription: WeChatChatroomChangeApi.Subscription? = null
+    private val ownedHooks = Collections.synchronizedList(ArrayList<XC_MethodHook.Unhook>())
     @JvmStatic
     fun install(context: FeatureContext): Boolean {
+        if (!active.get()) {
+            active.set(true)
+            initialized.set(false)
+            executor = newExecutor()
+        }
         val query = locateQueryMethod(context) ?: return false
         val shareRecentAdapterReset = locateShareRecentAdapterResetMethod(context) ?: return false
         val shareRecentForwardQuery = locateShareRecentForwardQueryMethod(context) ?: return false
@@ -361,9 +374,26 @@ object ConversationGroupRuntime {
     }
 
     @JvmStatic
+    @Synchronized
     fun destroy() {
-        active.set(false)
+        if (!active.compareAndSet(true, false)) return
         syncRequested.set(false)
+        preferenceListener?.let { listener ->
+            runCatching {
+                runtimePreferences?.unregisterOnSharedPreferenceChangeListener(listener)
+            }
+        }
+        preferenceListener = null
+        conversationSubscription?.unsubscribe(); conversationSubscription = null
+        contactSubscription?.unsubscribe(); contactSubscription = null
+        chatroomSubscription?.unsubscribe(); chatroomSubscription = null
+        main.removeCallbacksAndMessages(null)
+        ownedHooks.toList().forEach { handle -> runCatching { HookRegistry.get().unhook(handle) } }
+        ownedHooks.clear(); hookedMethods.clear()
+        executor.shutdownNow()
+        menuBindings.clear(); nativeGroupMenuBindings.clear(); nativeGroupAdapterParents.clear()
+        nativeGroupLongClickListeners.clear(); automaticAvatarSources.clear()
+        effectiveConversationSnapshot = null; conversationStorage = null; runtimePreferences = null
     }
 
     @JvmStatic
@@ -394,6 +424,7 @@ object ConversationGroupRuntime {
     private fun initializeRuntime(context: FeatureContext) {
         if (!initialized.compareAndSet(false, true)) return
         val prefs = HchatStorage.preferences(context.hostContext(), ConversationGroupStore.PREFS_NAME)
+        runtimePreferences = prefs
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == ConversationGroupStore.KEY_ENABLE || key == ConversationGroupStore.KEY_DATA) {
                 syncAsync(context.hostContext())
@@ -401,7 +432,8 @@ object ConversationGroupRuntime {
         }
         preferenceListener = listener
         prefs.registerOnSharedPreferenceChangeListener(listener)
-        WeChatApis.conversationChanges()?.subscribe { change ->
+        conversationSubscription = WeChatApis.conversationChanges()?.subscribe { change ->
+            if (!active.get()) return@subscribe
             val groups = ConversationGroupStore.load(context.hostContext())
             val affectedTalkers = change?.affectedUsernames()?.toList().orEmpty()
                 .filterNot(::isVirtualTalker)
@@ -419,7 +451,8 @@ object ConversationGroupRuntime {
                 syncAsync(context.hostContext())
             }
         }
-        WeChatApis.contactChanges()?.subscribe { change ->
+        contactSubscription = WeChatApis.contactChanges()?.subscribe { change ->
+            if (!active.get()) return@subscribe
             val groups = ConversationGroupStore.load(context.hostContext())
             val databaseChange = change?.databaseChange
             val talker = change?.wxId().orEmpty().ifBlank {
@@ -435,7 +468,8 @@ object ConversationGroupRuntime {
                 syncAsync(context.hostContext())
             }
         }
-        WeChatApis.chatroomChanges()?.subscribe {
+        chatroomSubscription = WeChatApis.chatroomChanges()?.subscribe {
+            if (!active.get()) return@subscribe
             val groups = ConversationGroupStore.load(context.hostContext())
             if (groups.any {
                     it.automaticGroupingEnabled ||
@@ -2569,7 +2603,8 @@ object ConversationGroupRuntime {
     private fun hook(method: Method, callback: XC_MethodHook): Boolean {
         if (!hookedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(method, callback)
+            val handle = HookRegistry.get().hook(method, callback)
+            ownedHooks.add(handle)
             true
         }.getOrElse {
             hookedMethods.remove(method)

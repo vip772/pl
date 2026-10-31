@@ -53,7 +53,29 @@ class MemberTitleRenderer(
     @Synchronized
     private fun installLocked(): Boolean {
         if (!active.get()) return false
-        return installUsernameBindHook()
+        val installed = installUsernameBindHook()
+        if (installed) restoreVisibleBindings()
+        return installed
+    }
+
+    /** Restore only weakly tracked rows from the currently visible room after a feature restart. */
+    private fun restoreVisibleBindings() {
+        if (!active.get() || !store.isEnabled()) return
+        val roomId = currentRoomId()
+        if (!isRoom(roomId)) return
+        WeChatApis.tasks()?.runOnMain {
+            if (!active.get() || !store.isEnabled() || currentRoomId() != roomId) return@runOnMain
+            val snapshot = synchronized(visibleBindings) {
+                visibleBindings.entries.map { it.key to it.value }
+            }
+            snapshot.forEach { (view, target) ->
+                if (!view.isAttachedToWindow) {
+                    synchronized(visibleBindings) { visibleBindings.remove(view, target) }
+                } else if (view.isShown && target.roomId == roomId && active.get()) {
+                    applyTitle(view, target.roomId, target.sender)
+                }
+            }
+        }
     }
 
     fun refreshRoom(roomId: String) {
@@ -133,11 +155,13 @@ class MemberTitleRenderer(
         if (!active.get() || !MemberTitleStore.isValidMemberId(sender) || !isRoom(roomId)) return false
         val target = Target(roomId, sender)
         boundViews[tv] = target
+        synchronized(visibleBindings) { visibleBindings[tv] = target }
         val chatrooms = WeChatApis.contact().chatrooms()
         val role = chatrooms?.getMemberRole(roomId, sender) ?: WeChatChatroomApi.ROLE_MEMBER
         val customTitle = store.customTitle(roomId, sender)
         val title = customTitle.ifEmpty { store.roleTitle(role) }
         if (title.isEmpty() || (role == WeChatChatroomApi.ROLE_MEMBER && customTitle.isEmpty() && !store.showMemberEnabled())) {
+            synchronized(visibleBindings) { visibleBindings.remove(tv, target) }
             removeTitleOnly(tv)
             return false
         }
@@ -183,6 +207,7 @@ class MemberTitleRenderer(
 
     private fun clearBoundTitle(tv: TextView) {
         boundViews.remove(tv)
+        synchronized(visibleBindings) { visibleBindings.remove(tv) }
         removeTitleOnly(tv)
     }
 
@@ -447,6 +472,9 @@ class MemberTitleRenderer(
 
     companion object {
         private const val OLD_BADGE_OBJECT = "\uFFFC"
+        // Weak keys keep only the last known room/member identity for visible rows across
+        // feature generations; this enables re-enable restoration without scanning adapters.
+        private val visibleBindings = Collections.synchronizedMap(WeakHashMap<TextView, Target>())
     }
 }
 

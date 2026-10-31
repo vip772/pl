@@ -130,7 +130,11 @@ BaseFeature 事件订阅包装现绑定订阅时的资源作用域，作用域�
 平板模式、屏蔽热更新的公开 install 入口现自行进入共享 Dex 门，屏蔽热更新内部 monitor 在共享门内；Monet 证据采集也自行持有门直到 callers/invokes/usingFields 转换为独立数据完成。定位条件、缓存、Hook 行为保持原实现。test_early_dex_gates.py 编译三个完整生产文件及生产缓存/调度器/Monet 模型，依赖真实 Android SDK 和 DexKit ABI，通过；test_dex_query_consumers.py 的入口约束和并发测试通过。
 Agent 外部 APK 在最后一次工具执行结束 30 秒后释放独占 Binding，包括已初始化的资源解析模块和 Dex native 实例；回收在后台取得共享门→targetLock，查询进行中不关闭。每次执行（含失败、取消）重新登记票据，迟到旧票据和旧目标身份均不能关闭新目标；重绑会取消票据。只卸载解析实例，已登记目标会话和 APK 文件保留；下次查询沿原 resolveTarget 校验文件后重建。外部实例发布前设置 native 线程数为 2，初始化失败关闭未发布实例。定时执行器取消后移除任务，闲置核心线程可退出，不在主线程执行 native close。
 test_agent_external_idle.py 提取生产回收方法并结合生产共享门，验证旧票据、目标替换、关闭/重绑取消、活动查询排斥、重调度和只释放一次；test_resource_schedulers.py 通过。该 fixture 不包含真实 native close/重建，整文件编译和 R8 仍以对应 Actions 为准。宿主共享 DexKit 未启用闲置关闭，脚本原始对象兼容保活契约和全持有链迁移仍待完成。
-累计构建证据：7992896 对应 Actions 41057094593、3c05219 对应 Actions 41057865324 均已 completed/success；包括群员头衔完整源码编译。本轮新增修改需等待新的 Actions，不将前一提交成功扩大到当前修改。手机昵称布局、实际查询重建和真实发送仍未验证。
+累计构建证据：7992896 对应 Actions 41057094593、3c05219 对应 Actions 41057865324 均已 completed/success；包括群员头衔完整源码编译。本轮新增修改需等待新的 Actions，不将前一提交成功扩大到当前修改。手机昵称布局、实际查询重建和真实发送仍未验证。群员头衔可见行恢复的源码与定向测试已在本轮完成，仍不等于手机验收。
+
+## 接续：聊天分组运行时销毁链
+逐项审计 `ConversationGroupRuntime` 后确认其执行器、偏好监听、conversation/contact/chatroom 三类订阅及独占 Hook 集合此前没有完整销毁链。现保存三类订阅和运行时偏好对象；destroy 幂等关闭 active 门，取消订阅和偏好监听，移除主线程回调，解除本运行时登记的 Hook，清空绑定/索引/缓存并 shutdown 独占执行器；下一次 install 在需要时创建新执行器。异步回调增加 active 检查，避免关闭后继续触发同步。
+本轮仅完成源码根因修复和现有分组/父级恢复定向测试；未运行本地 Gradle，需等待本次提交对应 Actions 的完整编译/R8，并在手机上验证聊天分组关闭重开、首页/原生折叠分组、置顶/隐藏/已读和资源回收。
 
 ## 接续：自动缓存独占运行时
 AutoCacheFeature 每轮安装创建 AutoCacheRuntime，创建后先登记关闭再启动；运行时独占工作队列、待处理集合、原生入口和 Installation，订阅使用创建代际登记器。关闭幂等，撤销等待/重试安装，取消延迟任务、清理集合并释放原生入口引用；新安装创建新队列，旧回调只访问旧运行时。安装中关闭后不发布新原生入口、不继续订阅；迟到订阅由原作用域立即解除。工作任务入队与关闭并发的拒绝显式清理标记，关闭后在途下载结果不再回填 lastSubmitted。已经进入微信原生调用的操作不保证撤销，用户开关暂仍保持原有回调过滤语义，未宣称完整热启停。
@@ -145,6 +149,10 @@ Agent 工具执行的宿主 Binding 读取已移入共享门和 targetLock 内�
 ## 接续：语音播报回调代际与订阅去重
 文字转语音播报消息与音量键回调固定创建时的 TextSpeechRuntime，不再通过可变 runtime 字段查找新实例。每轮安装捕获 subscriptionRegistrar，重复 DexReady 通过原子状态避免重复消息订阅，订阅异常重置以允许重试；关闭过程中迟到订阅立即交回原作用域释放。test_text_speech_feature.py 编译完整生产功能入口并验证重复 readiness、订阅失败恢复、跨代旧消息/按键隔离及订阅中关闭；test_text_speech_shutdown.py 验证主后台关闭，均通过。当时尚未接通语音播报主开关；后续已完成，见本文件最新语音接续段。真实 TTS/手机仍待验证。
 累计 9437a6f 的 Actions 41062098925 与最新 f7485f2 的 Actions 41064186034 均已成功；后者覆盖语音播报主开关完整 APK/R8 和发布构建。
+
+## 接续：群员头衔关闭重开后的可见行恢复
+群员头衔渲染器现在为已成功绑定的 TextView 额外保留静态弱键映射，仅记录 room/member 绑定，不持有 Adapter、Activity 或其它页面强引用。关闭时仍按本代 boundViews 清理装饰；重新安装成功后只在主线程检查仍 attached、shown 且 roomId 与当前聊天一致的行，再调用现有 `applyTitle` 恢复，不扫描 Adapter、不强刷列表，也不会恢复其它群聊或不可见/已脱离窗口的行。
+`test_member_title_lifecycle.py` 新增跨代可见行模型：验证关闭后旧延迟任务不回填、恢复只作用于当前群聊可见行并移除已脱离窗口的记录；原有 Hook/缓存/重复销毁/异常隔离断言继续通过。该测试仍不能替代微信真实 RecyclerView 复用、昵称布局和设备关闭重开。
 
 ## 接续：语音播报主开关与独占运行时重建
 文字转语音播报现由主开关创建/释放独占 TextSpeechRuntime、音量键 Hook 和消息订阅。关闭按运行时作用域逆序解除 Hook、订阅并调用幂等 TTS shutdown；再次开启创建新实例。DexReady 安装闭包固定该代实例，重复 ready 不重复订阅，订阅异常可重试，销毁后的旧偏好监听快照被 active 拦截。运行时自身偏好监听也先检查 destroyed。test_text_speech_feature.py 现编译完整生产 Feature 和资源作用域，20 轮主开关、旧代回调、订阅失败恢复、重复 ready、关闭/重开和销毁后迟到监听通过；test_text_speech_shutdown.py 原主/后台关闭测试通过。真实 TTS 引擎、音量键设备行为和手机仍待验证；不保证撤销已经交给语音服务的播放。

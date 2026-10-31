@@ -1,6 +1,6 @@
 # Hchat 全功能资源所有权清单（dev 当前核查）
 
-核查基线：`e94c8e0`，工作区干净；按当前功能源码、`BaseFeature` / `FeatureResourceScope`、`FeatureManager`、实际资源创建和清理入口核查。该清单覆盖功能私有线程/Handler/订阅/Hook/延迟任务/缓存及共用资源归属；不是 Android 运行时堆快照或所有微信版本的设备验证。
+核查基线：`dcf9448`，工作区干净；按当前功能源码、`BaseFeature` / `FeatureResourceScope`、`FeatureManager`、实际资源创建和清理入口核查。该清单覆盖功能私有线程/Handler/订阅/Hook/延迟任务/缓存及共用资源归属；不是 Android 运行时堆快照或所有微信版本的设备验证。
 
 ## 已完整接入或已有明确清理所有者
 
@@ -31,12 +31,18 @@
 | Handler / 延迟任务 | 一些 Runtime destroy 会 remove callback 或身份校验；不可只看发起点，要沿持有的 Runnable / Activity 链核查 | 部分接入；逐功能追踪待执行闭包是否持有 Activity、View、FeatureContext |
 | 缓存 | 若为受限 LRU/显式 destroy 已有治理；运行配置/共享索引与运行缓存须区分 | 部分有界；仍需核对进程级 Bitmap、反射 Class/Method 和 Map 的预算及持有者 |
 | 共享 Hook/API/DexKit | 发送按钮、QuickMarkRead、观察 API、WeChatSnsPostObserver、WeContactHeaderApi 等存在多消费者；宿主 DexKit 原始对象/脚本 API 仍须保活，尚无安全闲置 close | 必须保留共享所有权；宿主 DexKit 不启用自动关闭 |
-| 群员头衔显示 | 渲染器 destroy 已清理自身 Hook/缓存/弱引用和装饰；关闭重开需恢复当前可见行，不能无证据扫描/强刷 Adapter | 资源销毁有覆盖；可见行恢复仍未完成 |
+| 群员头衔显示 | 渲染器 destroy 已清理自身 Hook/缓存/弱引用和装饰；使用静态弱键只保留当前可见行的 room/member 绑定，重开时只恢复仍 attached、shown 且属于当前群聊的行，不扫描 Adapter | 源码与 JVM 定向测试已覆盖；手机昵称布局与真实关闭重开仍待验收 |
 | 手机 TTS、音频/媒体、通知、数据库与真实发送 | JVM fixture 只能验证局部状态及调度，不包含微信 native Hook、真实音频服务/网络和系统对象 | 必须设备验收；资源回收需实测，当前没有 MiB 或 native 释放量证据 |
+
+## 本轮源码审计补充
+- 群员头衔关闭重开：已完成可见行恢复，恢复范围严格限制为静态弱键记录中的 attached/shown 当前群聊行；未扫描 Adapter，未强刷列表。
+- 聊天分组运行时：审计发现其独占执行器、偏好监听、三类数据库订阅和 Hook 句柄原先未完整归属销毁路径；本轮已补齐运行时订阅保存/取消、偏好监听取消、主线程回调移除、独占 Hook 解除、执行器 shutdown、缓存/弱引用索引清空，并允许关闭后下一轮重建执行器。该项需对应 Actions 编译确认，不能由 fixture 通过替代。
+- 宿主共享 DexKit：仍存在 `ModuleEntry.DEXKIT_BRIDGES`、`FeatureContext`、定位器、Monet、Agent 与脚本原始对象多方持有，脚本文档仍承诺原始 bridge 兼容；没有证据证明可安全闲置 close，本轮继续保持宿主 bridge 保活，未做风险性 close。
 
 ## 修复后的限制与下一步
 
+
 - 本次只修复已证实的关键词通知运行时生命周期缺口；未把所有功能宣称为热启停完备。
 - 执行器任务仍可能在 `shutdownNow()` 前已经开始进入微信 API/系统服务；停止不保证撤销该操作。关闭门阻止尚未开始的后台/主线程工作。
-- 应继续逐个查找绕开 `FeatureResourceScope` 的 Hook 句柄、直接注册的消息/联系人观察、线程池/Timer/Handler、长期缓存；对明确归某一功能的普通 Runtime 优先迁移并配生产入口回归。共享 DexKit、群员可见行恢复及设备测量另行推进。
+- 应继续逐个查找绕开 `FeatureResourceScope` 的 Hook 句柄、直接注册的消息/联系人观察、线程池/Timer/Handler、长期缓存；对明确归某一功能的普通 Runtime 优先迁移并配生产入口回归。宿主共享 DexKit 仍不能自动关闭，设备测量另行推进。
 - 完整构建由本次推送对应 GitHub Actions 验证；未运行本地 Gradle。手机功能、线程终止时间、Java/native 内存变化需分别记录，fixture 通过不可替代它们。
