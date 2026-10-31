@@ -32,7 +32,7 @@ class CustomNotificationFeature : BaseFeature() {
             }, onError = { logError("通知订阅启停失败", it) })
         trackResource { owner.close() }
         owner.start()
-        subscribe(Events.DexReady::class.java) { dexReady = true; owner.refresh() }
+        subscribe(Events.DexReady::class.java) { CustomNotificationRuntime.install(context); dexReady = true; owner.refresh() }
     }
     companion object {
         const val ID = "custom_notification"

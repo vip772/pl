@@ -26,7 +26,8 @@ import java.util.concurrent.Executors
 internal class EmojiAtRuntime(private val context: FeatureContext) {
     private val prefs = EmojiAtSettings.preferences(context.hostContext())
     private val main = Handler(Looper.getMainLooper())
-    private val worker = Executors.newSingleThreadExecutor { r -> Thread(r, "Hchat-EmojiAt-Members").apply { isDaemon = true } }
+    private val worker = t.mma.hooks.core.IdleSerialExecutor.create("Hchat-EmojiAt-Members")
+    private var installation: DexInstallScheduler.Installation? = null
     private val handles = mutableListOf<XC_MethodHook.Unhook>()
     private var storageHandle: java.io.Closeable? = null
     private val pending = EmojiAtPending { SystemClock.elapsedRealtime() }
@@ -41,21 +42,24 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == EmojiAtSettings.ENABLE) {
             enabled = prefs.getBoolean(key, false)
-            if (enabled) schedule() else stop()
+            if (enabled) { generation++; schedule() } else stop()
         }
     }
     private val cleanup = object : Runnable {
-        override fun run() { if (alive) { pending.prune(); synchronized(requests) { requests.entries.removeAll { SystemClock.elapsedRealtime() - it.value.created >= 120_000 } }; main.postDelayed(this, 30_000) } }
+        override fun run() { if (alive && enabled) { pending.prune(); synchronized(requests) { requests.entries.removeAll { SystemClock.elapsedRealtime() - it.value.created >= 120_000 } }; main.postDelayed(this, 30_000) } }
     }
     fun install() {
         prefs.registerOnSharedPreferenceChangeListener(listener)
         (context.hostContext().applicationContext as? Application)?.registerActivityLifecycleCallbacks(lifecycle)
-        main.postDelayed(cleanup, 30_000)
         if (enabled) schedule()
     }
-    private fun schedule() {
+    @Synchronized private fun schedule() {
+        if (!alive || !enabled) return
+        main.removeCallbacks(cleanup)
+        main.postDelayed(cleanup, 30_000)
         val epoch = generation
-        DexInstallScheduler.schedule("emoji_at_$epoch", "表情艾特") {
+        val ticket = installation ?: DexInstallScheduler.installation("emoji_at", "表情艾特").also { installation = it }
+        ticket.schedule {
             synchronized(this) {
                 if (!alive || !enabled || epoch != generation) true
                 else if (handles.isNotEmpty()) true
@@ -211,6 +215,7 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
                     choices.complete(request)
                     if (index == 0) resume(request.targets, request.receiver, request.args, request.talker, emptyList(), request.epoch)
                     else worker.execute {
+                        if (!alive || !enabled || request.epoch != generation) return@execute
                         try {
                             val self = WeChatApis.contact().account()?.selfWxId().orEmpty()
                             val ids = WeChatApis.contact().chatrooms()?.getMemberIds(request.talker).orEmpty().ifEmpty {
@@ -218,6 +223,7 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
                             }
                             val users = EmojiAtText.users(ids, self)
                             main.post {
+                                if (!alive || !enabled || request.epoch != generation) return@post
                                 if (users.isEmpty()) notice("未取得当前账号或群成员，未发送，请重试或选择普通发送")
                                 else resume(request.targets, request.receiver, request.args, request.talker, users, request.epoch)
                             }
@@ -250,16 +256,23 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
     }
     @Synchronized private fun stop() {
         generation++
+        installation?.close(); installation = null
+        main.removeCallbacks(cleanup)
+        worker.queue.clear()
         handles.forEach { HookRegistry.get().unhook(it) }; handles.clear(); storageHandle?.close(); storageHandle = null
         targets = null; pending.clear(); requests.clear()
+        val stoppedEpoch = generation
         main.post {
-            choices.clear(); val old = shown; shown = null; old?.handle?.close()
+            choices.removeIf { it.epoch < stoppedEpoch }
+            val old = shown
+            if (old != null && old.epoch < stoppedEpoch) { shown = null; old.handle?.close() }
+            drainChoices()
         }
     }
     fun destroy() {
         alive = false; enabled = false
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
         (context.hostContext().applicationContext as? Application)?.unregisterActivityLifecycleCallbacks(lifecycle)
-        stop(); main.removeCallbacks(cleanup); worker.shutdownNow(); scope.remove()
+        stop(); main.removeCallbacks(cleanup); worker.shutdown(); scope.remove()
     }
 }

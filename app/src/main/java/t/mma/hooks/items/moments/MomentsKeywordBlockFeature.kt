@@ -34,6 +34,9 @@ import java.util.concurrent.ConcurrentHashMap
 
 class MomentsKeywordBlockFeature : BaseFeature() {
     private var runtime: MomentsKeywordBlockRuntime? = null
+    private val lifecycleMain = Handler(Looper.getMainLooper())
+    @Volatile private var featureClosed = true
+
     private val tickets = LinkedHashMap<String, DexInstallScheduler.Installation>()
 
     override fun featureId(): String = ID
@@ -45,28 +48,56 @@ class MomentsKeywordBlockFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val current = MomentsKeywordBlockRuntime(context, ::logFeatureError)
-        runtime = current
-        trackResource { current.destroy(); if (runtime === current) runtime = null }
-        trackResource { tickets.values.forEach { it.close() }; tickets.clear() }
-        current.start()
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
+        featureClosed = false
+        val keywords = HchatStorage.preferences(context.hostContext(), MomentsKeywordBlockSettings.PREFS_NAME)
+        val contacts = HchatStorage.preferences(context.hostContext(), MomentsContactFilterSettings.PREFS_NAME)
+        fun refresh() {
+            lifecycleMain.post {
+                if (featureClosed) return@post
+                val enabled = keywords.getBoolean(MomentsKeywordBlockSettings.KEY_ENABLE, MomentsKeywordBlockSettings.DEFAULT_ENABLE) ||
+                    contacts.getBoolean(MomentsContactFilterSettings.KEY_ENABLE, MomentsContactFilterSettings.DEFAULT_ENABLE)
+                if (!enabled) { stopRuntime(); return@post }
+                if (runtime != null) return@post
+                val current = MomentsKeywordBlockRuntime(context, ::logFeatureError)
+                runtime = current
+                try { current.start(); scheduleInstall() }
+                catch (error: Throwable) { stopRuntime(); logFeatureError("启动朋友圈协作过滤失败", error) }
+            }
+        }
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == MomentsKeywordBlockSettings.KEY_ENABLE || key == MomentsContactFilterSettings.KEY_ENABLE) refresh()
+        }
+        trackResource { keywords.unregisterOnSharedPreferenceChangeListener(listener) }
+        trackResource { contacts.unregisterOnSharedPreferenceChangeListener(listener) }
+        keywords.registerOnSharedPreferenceChangeListener(listener)
+        contacts.registerOnSharedPreferenceChangeListener(listener)
+        refresh()
+        subscribe(Events.DexReady::class.java) {
+            lifecycleMain.post { if (!featureClosed && runtime != null) scheduleInstall() }
+        }
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
+        featureClosed = true
+        lifecycleMain.removeCallbacksAndMessages(null)
+        if (Looper.myLooper() == Looper.getMainLooper()) stopRuntime() else lifecycleMain.post { stopRuntime() }
+    }
+    private fun stopRuntime() {
+        tickets.values.forEach { it.close() }; tickets.clear()
+        val old = runtime
         runtime = null
+        old?.destroy()
     }
 
     private fun scheduleInstall() {
+        val current = runtime ?: return
         scheduleOwned(
             "$ID:sns_query",
             "${name()}朋友圈数据库查询",
             stage = DexInstallScheduler.Stage.BRIDGE,
             priority = -100
         ) {
-            runtime?.installSnsTimelineQueryHook() == true
+            current.installSnsTimelineQueryHook() == true
         }
         scheduleOwned(
             "$ID:timeline_refresh",
@@ -74,35 +105,35 @@ class MomentsKeywordBlockFeature : BaseFeature() {
             stage = DexInstallScheduler.Stage.BRIDGE,
             priority = -90
         ) {
-            runtime?.warmupTimelineLocalRefresh() == true
+            current.warmupTimelineLocalRefresh() == true
         }
         scheduleOwned(
             "$ID:timeline_legacy",
             "${name()}旧版时间线",
             stage = DexInstallScheduler.Stage.BRIDGE
         ) {
-            runtime?.installLegacyTimelineHook() == true
+            current.installLegacyTimelineHook() == true
         }
         scheduleOwned(
             "$ID:timeline_improve",
             "${name()}新版时间线",
             stage = DexInstallScheduler.Stage.BRIDGE
         ) {
-            runtime?.installImproveTimelineHook() == true
+            current.installImproveTimelineHook() == true
         }
         scheduleOwned(
             "$ID:profile_list",
             "${name()}个人主页列表",
             stage = DexInstallScheduler.Stage.BRIDGE
         ) {
-            runtime?.installProfileListHook() == true
+            current.installProfileListHook() == true
         }
         scheduleOwned(
             "$ID:profile_switch",
             "${name()}个人主页入口",
             stage = DexInstallScheduler.Stage.BRIDGE
         ) {
-            runtime?.installProfileSwitchHook() == true
+            current.installProfileSwitchHook() == true
         }
     }
 
@@ -481,6 +512,9 @@ private class MomentsKeywordBlockRuntime(
             context.hostClassLoader()
         )?.let { locateImproveTimelineRefreshMethod(it) != null } == true
         val legacyReady = locateTimelineLocalReloadMethod() != null
+        if (improveReady || legacyReady) main.post {
+            if (!destroyed) refreshVisibleTimelineLocally()
+        }
         return improveReady || legacyReady
     }
 
@@ -491,6 +525,9 @@ private class MomentsKeywordBlockRuntime(
         main.removeCallbacksAndMessages(null)
         val restore = Runnable {
             restoreAllViews()
+            // Removed SQL filters also need a local requery; restoring view heights
+            // alone cannot bring back rows excluded from the original cursor.
+            refreshVisibleTimelineLocally()
             boundInfos.clear()
             authorDecisionCache.clear()
             improveInfoAccessors.clear()
@@ -818,6 +855,11 @@ private class MomentsKeywordBlockRuntime(
         }
     }
 
+    private fun refreshVisibleTimelineLocally() {
+        val activity = runCatching { WeChatApis.currentActivity()?.currentActivity() as? Activity }.getOrNull() ?: return
+        if (activity.isFinishing || activity.isDestroyed || !isTimelineActivity(activity)) return
+        runCatching { refreshCurrentTimeline(activity) }.onFailure { logger("过滤切换本地重载失败", it) }
+    }
     private fun refreshCurrentTimeline(activity: Activity): Boolean {
         val mvvmListClass = KavaReflector.loadClass(
             IMPROVE_MVVM_LIST_CLASS,

@@ -108,6 +108,16 @@ object CustomNotificationRuntime {
         java.util.concurrent.ThreadFactory { task -> Thread(task, name).apply { isDaemon = true } }
     ).apply { allowCoreThreadTimeOut(true) }
     private val installed = java.util.concurrent.atomic.AtomicBoolean(false)
+    // Process-shared owners: custom notifications AND block-at-all. Never release
+    // these handles when either single consumer switches off.
+    @Volatile private var nativeSoundGuardReady = false
+    private val sharedHooks = HashMap<Pair<String, java.lang.reflect.Member>, XC_MethodHook.Unhook>()
+    @Synchronized private fun sharedHook(role: String, member: java.lang.reflect.Member, callback: XC_MethodHook) {
+        val key = role to member
+        if (key in sharedHooks) return
+        sharedHooks[key] = HookRegistry.get().hook(member, callback)
+    }
+
     private val receiverRegistered = java.util.concurrent.atomic.AtomicBoolean(false)
     private val notifySeq = AtomicInteger(0)
     private val executor = newIdleExecutor("Hchat-CustomNotify")
@@ -134,10 +144,24 @@ object CustomNotificationRuntime {
     @Synchronized
     fun install(context: FeatureContext) {
         installEpochListener(context.hostContext())
-        if (installed.compareAndSet(false, true)) {
-            QuickMarkReadRuntime.install(context)
-            installNotificationHooks(context)
-            registerNotificationActionReceiver(context.hostContext())
+        t.mma.hooks.core.DexInstallScheduler.schedule("shared:custom_notification", "共享通知拦截") {
+            synchronized(this) {
+                try {
+                    QuickMarkReadRuntime.install(context)
+                    if (!installed.get()) {
+                        installNotificationHooks(context)
+                        val roles = sharedHooks.keys.mapTo(hashSetOf()) { it.first }
+                        installed.set(roles.containsAll(setOf("notify", "foreground_processor", "foreground_sound", "cleanup_processor", "cleanup_method", "mention", "payload", "marker")))
+                    }
+                    // Registration failure resets receiverRegistered; retry independently
+                    // of method hooks. Partial method installation is idempotent by role.
+                    registerNotificationActionReceiver(context.hostContext())
+                    installed.get() && receiverRegistered.get()
+                } catch (error: Throwable) {
+                    HLog.e("$TAG 共享通知安装未完成，将按调度器策略重试", error)
+                    false
+                }
+            }
         }
     }
 
@@ -201,7 +225,7 @@ object CustomNotificationRuntime {
         for (method in NotificationManager::class.java.declaredMethods) {
             val types = method.parameterTypes ?: continue
             if (method.name != "notify" || types.isEmpty() || types.last() != Notification::class.java) continue
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            sharedHook("notify", method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val notification = param.args?.lastOrNull() as? Notification ?: return
                     val hostContext = context.hostContext()
@@ -276,7 +300,7 @@ object CustomNotificationRuntime {
             HLog.e("$TAG 未定位微信前台通知提示音方法，仅免打扰规则可提前拦截")
         }
         processors.forEach { method ->
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            sharedHook("foreground_processor", method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val stack = nativeForegroundSoundBlockStack.get()
                         ?: ArrayDeque<Boolean>().also(nativeForegroundSoundBlockStack::set)
@@ -287,7 +311,7 @@ object CustomNotificationRuntime {
                     val suppressAll = rule != null && (
                         rule.mode == CustomNotificationSettings.MODE_DND || isInMuteWindow(rule)
                     )
-                    stack.addLast(soundPlayers.isNotEmpty() && rule?.sound == false)
+                    stack.addLast(nativeSoundGuardReady && rule?.sound == false)
                     if (suppressAll) param.result = null
                 }
 
@@ -299,7 +323,7 @@ object CustomNotificationRuntime {
             })
         }
         soundPlayers.forEach { method ->
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            sharedHook("foreground_sound", method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (nativeForegroundSoundBlockStack.get()?.peekLast() == true) {
                         param.result = null
@@ -307,6 +331,7 @@ object CustomNotificationRuntime {
                 }
             })
         }
+        nativeSoundGuardReady = soundPlayers.isNotEmpty()
     }
 
     private fun nativeForegroundRule(
@@ -358,7 +383,7 @@ object CustomNotificationRuntime {
             return
         }
         processors.forEach { method ->
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            sharedHook("cleanup_processor", method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val stack = nativeNotificationBuildStack.get()
                         ?: ArrayDeque<Boolean>().also(nativeNotificationBuildStack::set)
@@ -376,7 +401,7 @@ object CustomNotificationRuntime {
             })
         }
         cleanups.forEach { method ->
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            sharedHook("cleanup_method", method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (nativeNotificationBuildStack.get()?.peekLast() != true) return
                     param.result = null
@@ -411,7 +436,7 @@ object CustomNotificationRuntime {
         processors: List<Method>
     ) {
         processors.forEach { method ->
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            sharedHook("mention", method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     recordNativeMention(context.hostContext(), param.args ?: emptyArray())
                 }
@@ -560,7 +585,7 @@ object CustomNotificationRuntime {
     private fun installNativeNotificationPayloadHook(context: FeatureContext) {
         val methods = locateNativeNotificationBuilderMethods(context)
         methods.forEach { method ->
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            sharedHook("payload", method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     val notification = param.result as? Notification ?: return
                     val payload = nativePayloadFromBuilder(method, param.args ?: emptyArray()) ?: return
@@ -683,16 +708,16 @@ object CustomNotificationRuntime {
 
     private fun installNativeNotificationMarker(context: FeatureContext) {
         val clazz = findNotificationItemClass(context) ?: return
-        val constructorHooks = XposedBridge.hookAllConstructors(clazz, object : XC_MethodHook() {
+        val marker = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 markNotificationItem(param.thisObject, context.hostContext())
             }
-        })
-        constructorHooks?.forEach { HookRegistry.get().add(it) }
+        }
+        clazz.declaredConstructors.forEach { sharedHook("marker", it, marker) }
         for (method in KavaReflector.declaredMethods(clazz)) {
             val types = method.parameterTypes ?: continue
             if (types.size == 1 && Context::class.java.isAssignableFrom(types[0])) {
-                HookRegistry.get().hook(method, object : XC_MethodHook() {
+                sharedHook("marker", method, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
                         markNotificationItem(param.thisObject, context.hostContext())
                     }

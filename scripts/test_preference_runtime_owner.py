@@ -38,6 +38,10 @@ fun main(){
  multi.start();multi.refresh();check(births==1 && deaths==0)
  p2.toggle(true);check(births==2 && deaths==1)
  p2.toggle(false);check(deaths==2);multi.close()
+ val p3=Prefs();p3.enabled=true;var attempts=0;var releases=0;var saved:FeatureResourceScope?=null
+ val async=PreferenceRuntimeOwner(p3,setOf("enable"),{p3.enabled},{s->attempts++;saved=s;s.register{releases++}},{throw it})
+ async.start();saved!!.close();check(attempts==1&&releases==1)
+ async.refresh();check(attempts==2&&releases==1);async.close();check(releases==2)
  println("PASS production preference owner: disabled startup, repeated toggles, no duplicate install, partial failure cleanup/retry, stale callback rejection, cleanup despite listener removal failure")
 }
 '''

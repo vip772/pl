@@ -28,6 +28,7 @@ internal class PreferenceRuntimeOwner(
         try {
             if (!enabled()) { stopRuntime(); return }
             if (restart) stopRuntime()
+            if (resources?.isClosed() == true) resources = null
             if (resources != null) return
             val next = FeatureResourceScope(onError)
             resources = next

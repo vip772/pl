@@ -12,6 +12,7 @@ import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
 
 class MomentsFakeInteractionFeature : BaseFeature() {
+    private var installation: DexInstallScheduler.Installation? = null
     private var runtime: MomentsFakeInteractionRuntime? = null
     private var codec: MomentsFakeInteractionCodec? = null
     private var resolver: SnsForwardContentResolver? = null
@@ -29,6 +30,7 @@ class MomentsFakeInteractionFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
+        installation = DexInstallScheduler.installation("${ID}_sns_menu", name())
         val store = MomentsFakeInteractionStore(context.hostContext())
         val codec = MomentsFakeInteractionCodec(context, ::logFeatureError)
         val runtime = MomentsFakeInteractionRuntime(context, store, codec, ::logFeatureError)
@@ -138,6 +140,7 @@ class MomentsFakeInteractionFeature : BaseFeature() {
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {
+        installation?.close(); installation = null
         SnsContextMenuDispatcher.unregister(LIKE_OWNER)
         SnsContextMenuDispatcher.unregister(COMMENT_OWNER)
         SnsContextMenuDispatcher.unregister(FORWARD_OWNER)
@@ -149,11 +152,12 @@ class MomentsFakeInteractionFeature : BaseFeature() {
         runtime = null
         codec = null
         resolver = null
+        forwardRuntime?.destroy()
         forwardRuntime = null
     }
 
     private fun scheduleInstall(context: FeatureContext) {
-        DexInstallScheduler.schedule("${ID}_sns_menu", name()) {
+        installation?.schedule {
             val currentResolver = resolver ?: return@schedule false
             val storageReady = WeChatApis.snsApi()?.warmupCachedPostReadWrite() == true
             forwardRuntime?.warmup()

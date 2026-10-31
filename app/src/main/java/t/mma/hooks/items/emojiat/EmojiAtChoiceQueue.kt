@@ -19,5 +19,9 @@ internal class EmojiAtChoiceQueue<T : Any> {
         waiting.addFirst(value)
         return true
     }
+    fun removeIf(predicate: (T) -> Boolean) {
+        waiting.removeAll(predicate)
+        if (current?.let(predicate) == true) current = null
+    }
     fun clear() { waiting.clear(); current = null }
 }

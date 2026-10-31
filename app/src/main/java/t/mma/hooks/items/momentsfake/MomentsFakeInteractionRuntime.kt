@@ -62,6 +62,13 @@ internal class MomentsFakeInteractionRuntime(
     private val codec: MomentsFakeInteractionCodec,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var destroyed = false
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("释放伪互动资源失败", it) }
+    private fun ownHook(member: java.lang.reflect.Member, callback: XC_MethodHook) {
+        if (destroyed) return
+        val handle = HookRegistry.get().hook(member, callback)
+        resources.register { HookRegistry.get().unhook(handle) }
+    }
     private val prefs = HchatStorage.preferences(
         context.hostContext(),
         MomentsFakeInteractionSettings.PREFS_NAME
@@ -69,9 +76,7 @@ internal class MomentsFakeInteractionRuntime(
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
     private val guardedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val worker = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Hchat-MomentsFake").apply { isDaemon = true }
-    }
+    private val worker = t.mma.hooks.core.IdleSerialExecutor.create("Hchat-MomentsFake")
     private val suppressAutoMerge = ThreadLocal<Boolean>()
     private val persistenceLock = Any()
     private val restoreRunning = AtomicBoolean(false)
@@ -82,13 +87,14 @@ internal class MomentsFakeInteractionRuntime(
     @Volatile private var commentGuardReady = false
 
     fun installRecordHooks(): Boolean {
+        if (destroyed) return false
         val snsInfoClass = KavaReflector.loadClass(SNS_INFO_CLASS, context.hostClassLoader())
             ?: return false
         val methods = KavaReflector.declaredMethods(snsInfoClass).filter(::isRecordLoadMethod)
         val hooked = methods.count { method ->
             if (!hookedMethods.add(method)) return@count true
             runCatching {
-                HookRegistry.get().hook(
+                ownHook(
                     KavaReflector.accessible(method) ?: method,
                     object : XC_MethodHook() {
                         override fun afterHookedMethod(param: MethodHookParam) {
@@ -107,6 +113,7 @@ internal class MomentsFakeInteractionRuntime(
     }
 
     fun installInteractionGuard(): Boolean {
+        if (destroyed) return false
         val wasReady = commentGuardReady
         val methods = WeChatApis.snsApi()?.localCommentGuardMethods().orEmpty()
         if (methods.isEmpty()) {
@@ -198,7 +205,7 @@ internal class MomentsFakeInteractionRuntime(
             } finally {
                 restoreRunning.set(false)
             }
-            mainHandler.post { onComplete(restored) }
+            postUi { onComplete(restored) }
         }) {
             restoreRunning.set(false)
             return false
@@ -243,12 +250,21 @@ internal class MomentsFakeInteractionRuntime(
         }
     }
 
-    fun destroy() {
-        worker.shutdownNow()
+    @Synchronized fun destroy() {
+        if (destroyed) return
+        destroyed = true
+        baseReady = false; commentGuardReady = false
+        resources.close()
+        hookedMethods.clear(); guardedMethods.clear()
+        worker.queue.clear(); worker.shutdown()
+        mainHandler.removeCallbacksAndMessages(null)
+    }
+    @Synchronized private fun postUi(block: () -> Unit) {
+        if (!destroyed) mainHandler.post { if (!destroyed) block() }
     }
 
     private fun mergeIntoNativeInfo(nativeInfo: Any?) {
-        if (suppressAutoMerge.get() == true ||
+        if (destroyed || suppressAutoMerge.get() == true ||
             nativeInfo == null ||
             nativeInfo.javaClass.name != SNS_INFO_CLASS
         ) return
@@ -309,7 +325,7 @@ internal class MomentsFakeInteractionRuntime(
     private fun installInteractionGuard(method: Method): Boolean {
         if (!guardedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(
+            ownHook(
                 KavaReflector.accessible(method) ?: method,
                 object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
@@ -326,7 +342,7 @@ internal class MomentsFakeInteractionRuntime(
                         }
                         if (!fakeReply) return
                         param.result = null
-                        mainHandler.post {
+                        postUi {
                             Toast.makeText(
                                 context.hostContext(),
                                 "伪评论仅在本机显示，不能回复",
@@ -408,9 +424,10 @@ internal class MomentsFakeInteractionRuntime(
         )
     }
 
-    private fun submit(block: () -> Unit): Boolean {
+    @Synchronized private fun submit(block: () -> Unit): Boolean {
+        if (destroyed) return false
         return try {
-            worker.execute(Runnable(block))
+            worker.execute { if (!destroyed) block() }
             true
         } catch (_: RejectedExecutionException) {
             false
@@ -473,10 +490,10 @@ internal class MomentsFakeInteractionRuntime(
 
     internal fun refreshTimelineViews(activity: Activity, anchor: View?) {
         // A timeline refresh must never scan LauncherUI or unrelated Activities.
-        if (!isSnsActivity(activity)) return
+        if (destroyed || !isSnsActivity(activity)) return
         val decor = activity.window?.decorView ?: return
         decor.post {
-            if (activity.isFinishing || activity.isDestroyed || !isSnsActivity(activity)) return@post
+            if (destroyed || activity.isFinishing || activity.isDestroyed || !isSnsActivity(activity)) return@post
             if (!notifyNearestAdapter(anchor?.takeIf { it.rootView === decor.rootView })) notifyAdapters(decor)
             decor.requestLayout()
             decor.invalidate()

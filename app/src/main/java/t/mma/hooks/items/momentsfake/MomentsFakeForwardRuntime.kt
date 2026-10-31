@@ -69,6 +69,13 @@ internal class MomentsFakeForwardRuntime(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var destroyed = false
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("释放伪互动资源失败", it) }
+    private fun ownHook(member: java.lang.reflect.Member, callback: XC_MethodHook) {
+        if (destroyed) return
+        val handle = HookRegistry.get().hook(member, callback)
+        resources.register { HookRegistry.get().unhook(handle) }
+    }
     private val prefs = HchatStorage.preferences(context.hostContext(), MomentsFakeInteractionSettings.PREFS_NAME)
     private val cachePrefs = DexMethodCache.prefs(context.hostContext(), CACHE_PREFS)
     @Volatile private var ready = false
@@ -87,9 +94,24 @@ internal class MomentsFakeForwardRuntime(
     @Volatile private var timelineAdapterRef = WeakReference<Any>(null)
     @Volatile private var queryPredicateMethod: Method? = null
     private val loggedQueryDiagnostics = ConcurrentHashMap.newKeySet<String>()
+    private val main = Handler(Looper.getMainLooper())
+    private val reloadInstallation = DexInstallScheduler.installation("moments_fake:timeline_reload", "朋友圈本地刷新入口")
+    @Synchronized private fun postUi(block: () -> Unit) {
+        if (!destroyed) main.post { if (!destroyed) block() }
+    }
+    @Synchronized fun destroy() {
+        if (destroyed) return
+        destroyed = true; ready = false
+        reloadInstallation.close(); resources.close()
+        reloadDiagnosticSequence.incrementAndGet()
+        main.removeCallbacksAndMessages(null)
+        timelineAdapterRef.clear(); loggedQueryDiagnostics.clear()
+        recentlyClearedIds = emptySet()
+    }
     private val reloadDiagnosticSequence = AtomicLong(0L)
 
     fun warmup(): Boolean {
+        if (destroyed) return false
         ready = WeChatApis.snsApi()?.warmupCachedPostLocalWrite() == true &&
             installDeleteGuard() && installSourceTypeGuard()
         prepareTimelineReload()
@@ -101,7 +123,8 @@ internal class MomentsFakeForwardRuntime(
     }
 
     private fun prepareTimelineReload() {
-        DexInstallScheduler.schedule("moments_fake:timeline_reload", "朋友圈本地刷新入口", DexInstallScheduler.Stage.BRIDGE) {
+        reloadInstallation.schedule {
+            if (destroyed) return@schedule true
             locateTimelineLocalReloadMethod()?.let(::installTimelineAdapterTracker)
             KavaReflector.loadClass(IMPROVE_MVVM_LIST_CLASS, context.hostClassLoader())
                 ?.let { locateImproveTimelineRefreshMethod(it) }
@@ -112,13 +135,14 @@ internal class MomentsFakeForwardRuntime(
     fun isReady(): Boolean = ready
 
     fun clearAll(onComplete: (Boolean) -> Unit): Boolean {
+        if (destroyed) return false
         val ids = prefs.getStringSet(
             MomentsFakeInteractionSettings.KEY_FAKE_FORWARD_IDS,
             emptySet()
         ).orEmpty().toSet()
         if (ids.isEmpty()) {
             trace("清空伪转发: registered=0，无需清理")
-            Handler(Looper.getMainLooper()).post { onComplete(true) }
+            postUi { onComplete(true) }
             return true
         }
         Thread({
@@ -148,7 +172,7 @@ internal class MomentsFakeForwardRuntime(
                 "清空伪转发完成: removed=${ids.size - remaining.size} " +
                     "remaining=${remaining.size} prefsSaved=$saved localReloadPending=$changed"
             )
-            Handler(Looper.getMainLooper()).post {
+            postUi {
                 val reloaded = !changed || reloadCurrentTimeline()
                 trace("清空伪转发发现页本地重载=$reloaded")
                 onComplete(saved && remaining.isEmpty() && reloaded)
@@ -158,6 +182,7 @@ internal class MomentsFakeForwardRuntime(
     }
 
     fun create(target: SnsContextMenuTarget, textOverride: String?, timeMillis: Long): Boolean {
+        if (destroyed) return false
         val text = textOverride.orEmpty()
         val sourceId = target.snsId?.takeLast(6).orEmpty().ifBlank { "unknown" }
         trace(
@@ -479,7 +504,7 @@ internal class MomentsFakeForwardRuntime(
         }.onFailure { logger("朋友圈 Improve 分页诊断入口定位失败", it) }.getOrNull() ?: return false
         DexMethodCache.save(cachePrefs, runtimeKey, CACHE_IMPROVE_PAGE_QUERY, method)
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+            ownHook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     logImprovePageDiagnostic(param)
                 }
@@ -706,10 +731,10 @@ internal class MomentsFakeForwardRuntime(
     private fun scheduleReloadDiagnostics() {
         if (!debugLoggingEnabled()) return
         val sequence = reloadDiagnosticSequence.incrementAndGet()
-        val handler = Handler(Looper.getMainLooper())
+        val handler = main
         listOf(0L, 2_000L, 8_000L).forEach { delay ->
             handler.postDelayed({
-                if (reloadDiagnosticSequence.get() == sequence) {
+                if (!destroyed && reloadDiagnosticSequence.get() == sequence) {
                     logRegisteredState("reload+${delay}ms")
                 }
             }, delay)
@@ -799,7 +824,7 @@ internal class MomentsFakeForwardRuntime(
         if (timelineAdapterTrackerInstalled) return true
         if (!isTimelineLocalReloadMethod(method)) return false
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+            ownHook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val adapter = param.thisObject ?: return
                     if (method.declaringClass.isInstance(adapter)) {
@@ -827,7 +852,7 @@ internal class MomentsFakeForwardRuntime(
         ) ?: return false
         if (method.returnType != Void.TYPE || Modifier.isStatic(method.modifiers)) return false
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+            ownHook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val rawId = KavaReflector.readField(param.thisObject, "field_snsId") ?: return
                     val id = normalizeId(rawId.toString()) ?: return
@@ -891,7 +916,7 @@ internal class MomentsFakeForwardRuntime(
         }.getOrNull() ?: return false
         DexMethodCache.save(cachePrefs, runtimeKey, CACHE_DELETE_CALLBACK, method)
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+            ownHook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val id = findTaggedId(param.thisObject) ?: return
                     if (!isFakeId(id)) return
@@ -972,7 +997,7 @@ internal class MomentsFakeForwardRuntime(
         queryPredicateMethod = predicate
         if (!userQueryDiagnosticInstalled) {
             userQueryDiagnosticInstalled = runCatching {
-                HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+                ownHook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         logUserQueryDiagnostic(param)
                     }
@@ -982,7 +1007,7 @@ internal class MomentsFakeForwardRuntime(
         }
         if (!timelineQueryDiagnosticInstalled) {
             timelineQueryDiagnosticInstalled = runCatching {
-                HookRegistry.get().hook(KavaReflector.accessible(timeline) ?: timeline, object : XC_MethodHook() {
+                ownHook(KavaReflector.accessible(timeline) ?: timeline, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
                         logTimelineQueryDiagnostic(param)
                     }

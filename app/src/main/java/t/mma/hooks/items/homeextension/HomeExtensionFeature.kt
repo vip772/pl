@@ -55,6 +55,7 @@ object HomeExtensionSettings {
 
 class HomeExtensionFeature : BaseFeature() {
     private var runtime: HomeExtensionRuntime? = null
+    private var runtimeOwner: t.mma.hooks.core.PreferenceRuntimeOwner? = null
     override fun featureId() = ID
     override fun name() = "首页扩展"
     override fun isEnabled(context: FeatureContext) = true
@@ -65,11 +66,31 @@ class HomeExtensionFeature : BaseFeature() {
         ) {})
     }
     override fun onFeatureInstall(context: FeatureContext) {
-        val installed = HomeExtensionRuntime(context)
-        runtime = installed
-        installed.install()
+        val prefs = HomeExtensionSettings.preferences(context.hostContext())
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val owner = t.mma.hooks.core.PreferenceRuntimeOwner(prefs, setOf(HomeExtensionSettings.ENABLE),
+            enabled = { prefs.getBoolean(HomeExtensionSettings.ENABLE, false) },
+            create = { resources ->
+                main.post {
+                    if (!resources.isClosed()) {
+                        val installed = HomeExtensionRuntime(context)
+                        runtime = installed
+                        resources.register {
+                            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) installed.destroy()
+                            else main.post { installed.destroy() }
+                            if (runtime === installed) runtime = null
+                        }
+                        try { if (!resources.isClosed()) installed.install() }
+                        catch (error: Throwable) { resources.close(); logError("首页扩展安装失败", error) }
+                    }
+                }
+            }, onError = { logError("首页扩展启停失败", it) })
+        runtimeOwner = owner
+        owner.start()
     }
     override fun onFeatureDestroy(context: FeatureContext) {
+        runtimeOwner?.close()
+        runtimeOwner = null
         runtime?.destroy()
         runtime = null
     }

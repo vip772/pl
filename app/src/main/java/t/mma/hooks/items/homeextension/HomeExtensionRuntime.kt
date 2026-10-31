@@ -36,8 +36,11 @@ import java.util.concurrent.Executors
 internal class HomeExtensionRuntime(private val context: FeatureContext) {
     private val prefs = HomeExtensionSettings.preferences(context.hostContext())
     private val main = Handler(Looper.getMainLooper())
-    private val worker = Executors.newSingleThreadExecutor()
-    private val avatarWorker = Executors.newFixedThreadPool(3)
+    private val worker = t.mma.hooks.core.IdleSerialExecutor.create("Hchat-HomeExtension")
+    private val avatarWorker = java.util.concurrent.ThreadPoolExecutor(
+        3, 3, 30L, java.util.concurrent.TimeUnit.SECONDS, java.util.concurrent.LinkedBlockingQueue<Runnable>(),
+        java.util.concurrent.ThreadFactory { Thread(it, "Hchat-HomeAvatar").apply { isDaemon = true } }
+    ).apply { allowCoreThreadTimeOut(true) }
     // Accessed only on main; repeated requests share a single download.
     private val avatarRequests = mutableMapOf<String, MutableList<(Bitmap?) -> Unit>>()
     private val avatarDisk by lazy { java.io.File(context.hostContext().cacheDir, "hchat_contact_avatars").apply { mkdirs() } }
@@ -88,6 +91,17 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 }
             })
         }
+        attachVisibleLists()
+    }
+    // Run once per enable, not on scroll: existing lists do not receive setAdapter again.
+    private fun attachVisibleLists() {
+        val activity = WeChatApis.currentActivity()?.currentActivity() ?: return
+        if (activity.isFinishing || activity.isDestroyed) return
+        fun visit(view: View) {
+            if (view is ListView && view.javaClass.name == "com.tencent.mm.ui.conversation.ConversationListView") scheduleAttach(view)
+            if (view is android.view.ViewGroup) for (i in 0 until view.childCount) visit(view.getChildAt(i))
+        }
+        activity.window?.decorView?.let(::visit)
     }
     private val pendingAttach = java.util.Collections.newSetFromMap(WeakHashMap<ListView, Boolean>())
     private fun scheduleAttach(list: ListView) {
@@ -127,6 +141,8 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         guardedAdapters += method
     }
     fun destroy() {
+        if (Looper.myLooper() != Looper.getMainLooper()) { main.post { destroy() }; return }
+        if (destroyed) return
         destroyed = true
         changeSubscription?.unsubscribe(); changeSubscription = null
         prefs.unregisterOnSharedPreferenceChangeListener(listener)
@@ -136,12 +152,14 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         main.removeCallbacksAndMessages(null)
         sessions.toList().forEach { (list, session) -> session.dispose(); list.removeHeaderView(session.root) }
         sessions.clear()
-        worker.shutdownNow()
-        avatarWorker.shutdownNow()
+        worker.queue.clear(); worker.shutdown()
+        avatarWorker.queue.clear(); avatarWorker.shutdown()
+        pendingAttach.clear()
         avatarRequests.clear()
         avatars.evictAll()
     }
     private fun requestAvatar(url: String, callback: (Bitmap?) -> Unit) {
+        if (destroyed) return
         avatars.get(url)?.let { callback(it); return }
         avatarRequests[url]?.let { it.add(callback); return }
         avatarRequests[url] = mutableListOf(callback)
@@ -589,6 +607,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                     }
                 }
                 if (!destroyed) main.post {
+                    if (destroyed) return@post
                     loading = false
                     val currentConfig = prefs.getBoolean(HomeExtensionSettings.FAVORITES, false).toString() + prefs.getString(HomeExtensionSettings.FAVORITE_IDS, "")
                     if (currentConfig != config) { refreshContactsIfNeeded(); return@post }
