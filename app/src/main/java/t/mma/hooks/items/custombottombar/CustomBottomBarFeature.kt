@@ -51,7 +51,7 @@ import t.mma.preferences.HchatStorage
 import t.mma.ui.miuix.EmbeddedComposeOwnerInstaller
 import t.mma.ui.miuix.EmbeddedComposeRuntime
 import t.mma.utils.KavaReflector
-import org.luckypray.dexkit.DexKitBridge
+import t.mma.dexkit.DexKitBridgeManager
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.ref.WeakReference
@@ -132,13 +132,13 @@ class CustomBottomBarFeature : BaseFeature() {
 private class CustomBottomBarRuntime(
     private val hostContext: Context,
     private val hostClassLoader: ClassLoader,
-    private var dexKitProvider: (() -> DexKitBridge)?,
+    private var dexKitManager: DexKitBridgeManager?,
     private val logger: (String, Throwable?) -> Unit
 ) {
     constructor(context: FeatureContext, logger: (String, Throwable?) -> Unit) : this(
         context.hostContext(),
         context.hostClassLoader(),
-        { context.dexKitBridge() },
+        context.dexKitManager(),
         logger
     )
 
@@ -240,10 +240,11 @@ private class CustomBottomBarRuntime(
     }
 
     fun attachDexKit(context: FeatureContext) {
-        dexKitProvider = { context.dexKitBridge() }
+        dexKitManager = context.dexKitManager()
     }
 
     fun destroy() {
+        dexKitManager = null
         customPrefs.unregisterOnSharedPreferenceChangeListener(customPreferenceListener)
         floatingPrefs.unregisterOnSharedPreferenceChangeListener(floatingPreferenceListener)
         synchronized(knownViews) { knownViews.clear() }
@@ -442,9 +443,10 @@ private class CustomBottomBarRuntime(
         }
         if (!allowDexSearch) return null
 
-        val dexKit = dexKitProvider?.invoke() ?: return null
+        val manager = dexKitManager ?: return null
         val candidates = runCatching {
-            dexKit.findMethod(
+            manager.withCurrentBridge { bridge ->
+            bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -456,6 +458,7 @@ private class CustomBottomBarRuntime(
                 runCatching { data.getMethodInstance(hostClassLoader) }.getOrNull()
             }.filter(::isMainTabCreateMethod)
                 .distinctBy(Method::toGenericString)
+            }
         }.getOrElse {
             logger("定位微信底栏创建入口失败", it)
             emptyList()

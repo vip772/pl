@@ -244,3 +244,8 @@ for relative, count in {
 mass = (base / 'selectedmessages/OfficialMassSendSender.kt').read_text()
 assert mass.count('emojiRuntimeFromMethodData(') == 2
 assert 'val fieldsByClass = methodData.usingFields' in mass
+bottom = (base / 'custombottombar/CustomBottomBarFeature.kt').read_text()
+assert 'dexKitProvider' not in bottom and 'context.dexKitBridge()' not in bottom
+assert 'private var dexKitManager: DexKitBridgeManager?' in bottom
+assert 'fun destroy() {\n        dexKitManager = null' in bottom
+assert 'manager.withCurrentBridge { bridge ->' in bottom

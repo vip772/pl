@@ -40,6 +40,7 @@
 - 宿主共享 DexKit：已新增 `DexKitBridgeManager` 记录当前代际、活动查询和租约数量，并由 `ModuleEntry` 发布当前 bridge；`DexBridgeHolder` 持有显式 raw-compatibility 租约，使旧脚本/未迁移入口继续保活。管理器提供受控 `closeIfIdle` / `closeRetiredIfIdle`，但当前没有启用自动回收，仍不得宣称宿主 native close 已完成。
 
 ## 修复后的限制与下一步
+- 自定义底栏移除捕获 FeatureContext 的原始 bridge provider，改为直接持有管理器，destroy 清空该引用；唯一 Dex 查询与反射转换在活动查询区间完成。早期无 bridge 的缓存/反射路径保留；此批源码所有权检查通过，整文件编译待 Actions。
 - 语音转发与原生群发各 3 处直接查询进入管理器保护，群发 `invokes` 和表情 `usingFields` 的同步解析保留在区间内。此批只有源码边界检查及既有消费者契约，完整编译待 Actions；收藏语音共享解析器仍接收原始 bridge，下载等待不应整体放入查询锁，后续需分离其定位与业务执行。
 - 朋友圈本地转发追加 7 个定位区间，累计 78 个内联表达式通过真实 ABI 检查。所有改动限于定位查询，未执行转发、删除或发布操作；完整页面与数据库行为仍待统一设备验收。
 - Hchat 扩展功能全部 7 处直接查询纳入代际保护，转换辅助函数只在查询内消费 Data；累计 71 个内联表达式通过真实 ABI 编译，类加载、包名限制和缓存策略保持原有语义。
