@@ -111,7 +111,7 @@ class OfficialMassSendSender(
             batches.addLast(batch)
             if (activeBatch == null) startNextBatch()
         }
-        return SelectedMessageSendHandle { cancel(batch.id) }
+        return SelectedMessageSendHandle { cancel(batch.id) }.withStopPending { stopPending(batch.id) }
     }
 
     fun isAvailable(): Boolean = runtime != null && callbackHookInstalled
@@ -217,6 +217,7 @@ class OfficialMassSendSender(
 
     private fun sendCurrent(batch: SendBatch) {
         if (activeBatch !== batch) return
+        if (batch.stopRequested) { finishStopped(batch); return }
         if (batch.index >= batch.jobs.size) {
             val success = batch.success
             val total = batch.total
@@ -303,6 +304,7 @@ class OfficialMassSendSender(
         val job = batch.jobs.getOrNull(batch.index)
         if (success && job != null) batch.success += job.targets.size
         batch.index++
+        if (batch.stopRequested) { finishStopped(batch); return }
         val next = batch.jobs.getOrNull(batch.index)
         if (job == null || next == null) {
             main.post { sendCurrent(batch) }
@@ -316,6 +318,34 @@ class OfficialMassSendSender(
         main.postDelayed({ sendCurrent(batch) }, maxOf(NEXT_SEND_DELAY_MS, configuredDelay))
     }
 
+    private fun stopPending(batchId: String) {
+        main.post {
+            val active = activeBatch
+            if (active?.id == batchId) {
+                active.stopRequested = true
+                if (activeScene == null) finishStopped(active)
+            } else {
+                val iterator = batches.iterator()
+                while (iterator.hasNext()) {
+                    val pending = iterator.next()
+                    if (pending.id != batchId) continue
+                    iterator.remove()
+                    pending.onComplete?.invoke(0, pending.total, true)
+                    break
+                }
+            }
+        }
+    }
+    private fun finishStopped(batch: SendBatch) {
+        if (activeBatch !== batch) return
+        timeoutRunnable?.let(main::removeCallbacks)
+        timeoutRunnable = null
+        activeBatch = null
+        activeScene = null
+        activeInfo = null
+        batch.onComplete?.invoke(batch.success, batch.total, true)
+        startNextBatch()
+    }
     private fun cancel(batchId: String) {
         main.post {
             val active = activeBatch
@@ -894,6 +924,7 @@ class OfficialMassSendSender(
         val onComplete: ((Int, Int, Boolean) -> Unit)?,
         val targetBatchDelayMillis: Long,
         val itemDelayMillis: Long,
+        var stopRequested: Boolean = false,
         var index: Int = 0,
         var success: Int = 0
     )

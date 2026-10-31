@@ -86,7 +86,7 @@ class SelectedMessageModuleSender(
             batches.addLast(batch)
             if (activeBatch == null) startNextBatch()
         }
-        return SelectedMessageSendHandle { cancel(batch.id) }
+        return SelectedMessageSendHandle { cancel(batch.id) }.withStopPending { stopPending(batch.id) }
     }
 
     fun handleRetransmitDone(activity: Activity): Boolean {
@@ -117,6 +117,7 @@ class SelectedMessageModuleSender(
 
     private fun sendCurrent(batch: SendBatch) {
         if (activeBatch !== batch) return
+        if (batch.stopRequested) { finishStopped(batch); return }
         if (batch.index >= batch.snapshots.size) {
             val callback = batch.onComplete
             val success = batch.success
@@ -278,6 +279,7 @@ class SelectedMessageModuleSender(
     }
 
     private fun completeCurrentMessage(batch: SendBatch) {
+        if (batch.stopRequested) { finishStopped(batch); return }
         activeToken = ""
         activeRetransmitTargets = emptyList()
         timeoutRunnable?.let(main::removeCallbacks)
@@ -294,6 +296,7 @@ class SelectedMessageModuleSender(
     }
 
     private fun advanceTargets(batch: SendBatch, count: Int, delayMillis: Long) {
+        if (batch.stopRequested) { finishStopped(batch); return }
         activeToken = ""
         activeRetransmitTargets = emptyList()
         timeoutRunnable?.let(main::removeCallbacks)
@@ -306,6 +309,34 @@ class SelectedMessageModuleSender(
         }
     }
 
+    private fun stopPending(batchId: String) {
+        main.post {
+            val active = activeBatch
+            if (active?.id == batchId) {
+                active.stopRequested = true
+                if (activeToken.isEmpty()) finishStopped(active)
+            } else {
+                val iterator = batches.iterator()
+                while (iterator.hasNext()) {
+                    val pending = iterator.next()
+                    if (pending.id != batchId) continue
+                    iterator.remove()
+                    pending.onComplete?.invoke(0, pending.snapshots.size * pending.targets.size, true)
+                    break
+                }
+            }
+        }
+    }
+    private fun finishStopped(batch: SendBatch) {
+        if (activeBatch !== batch) return
+        timeoutRunnable?.let(main::removeCallbacks)
+        timeoutRunnable = null
+        activeBatch = null
+        activeToken = ""
+        activeRetransmitTargets = emptyList()
+        batch.onComplete?.invoke(batch.success, batch.total, true)
+        startNextBatch()
+    }
     private fun cancel(batchId: String) {
         main.post {
             val active = activeBatch
@@ -359,6 +390,7 @@ class SelectedMessageModuleSender(
         val snapshots: List<SelectedMessageSnapshot>,
         val targets: List<String>,
         val onComplete: ((Int, Int, Boolean) -> Unit)?,
+        var stopRequested: Boolean = false,
         var index: Int = 0,
         var targetIndex: Int = 0,
         var success: Int = 0,

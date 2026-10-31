@@ -23,6 +23,8 @@ import t.mma.hooks.api.message.MultiSelectMessageUi
 import t.mma.hooks.api.message.SingleMessageMenuLocator
 import t.mma.hooks.api.model.WeChatMessage
 import t.mma.hooks.api.model.WeChatMessageTypes
+import t.mma.hooks.core.FeatureResourceScope
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
@@ -61,34 +63,34 @@ class MessageForwardFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val snsResolver = SnsForwardContentResolver(context, ::logFeatureError)
-        hooker = MessageForwardHooker(context, snsResolver, ::logFeatureError)
-        snsHooker = SnsForwardMenuHooker(
-            context = context,
-            resolver = snsResolver,
-            onForward = { activity, snapshot -> hooker?.showSnsActions(activity, snapshot) },
-            logger = ::logFeatureError
-        )
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
+        val prefs = HchatStorage.preferences(context.hostContext(), MessageForwardSettings.PREFS_NAME)
+        val keys = setOf(MessageForwardSettings.KEY_ENABLE, MessageForwardSettings.KEY_MULTI_MOMENTS_ENABLE,
+            MessageForwardSettings.KEY_FAVORITE_FORWARD_ENABLE, MessageForwardSettings.KEY_SNS_FORWARD_ENABLE)
+        var schedule: (() -> Unit)? = null
+        val owner = PreferenceRuntimeOwner(prefs, keys,
+            enabled = { keys.any { prefs.getBoolean(it, MessageForwardSettings.DEFAULT_ENABLE) } },
+            create = { resources ->
+                val resolver = SnsForwardContentResolver(context, ::logFeatureError)
+                val current = MessageForwardHooker(context, resolver, ::logFeatureError)
+                hooker = current
+                resources.register { current.destroy(); if (hooker === current) hooker = null }
+                val sns = SnsForwardMenuHooker(context, resolver,
+                    { activity, snapshot -> current.showSnsActions(activity, snapshot) }, ::logFeatureError)
+                snsHooker = sns
+                resources.register { sns.destroy(); if (snsHooker === sns) snsHooker = null }
+                val ticket = DexInstallScheduler.installation(ID, name())
+                val snsTicket = DexInstallScheduler.installation("${ID}_sns", "朋友圈转发")
+                resources.register { ticket.close(); snsTicket.close(); schedule = null }
+                schedule = {
+                    ticket.schedule { current.install() }
+                    snsTicket.schedule { if (resources.isClosed()) false else sns.install() }
+                }
+                schedule?.invoke()
+            }, onError = { logFeatureError("转发资源启停失败", it) }, restartOnChange = true)
+        trackResource { owner.close() }
+        owner.start()
+        subscribe(Events.DexReady::class.java) { owner.refresh(); schedule?.invoke() }
     }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        hooker?.destroy()
-        hooker = null
-        snsHooker?.destroy()
-        snsHooker = null
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            hooker?.install() == true
-        }
-        DexInstallScheduler.schedule("${ID}_sns", "朋友圈转发") {
-            snsHooker?.install() == true
-        }
-    }
-
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -103,6 +105,11 @@ private class MessageForwardHooker(
     private val snsResolver: SnsForwardContentResolver,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var closed = false
+    private val resources = FeatureResourceScope { logger("释放转发资源失败", it) }
+    private val pendingPreparations = ConcurrentHashMap.newKeySet<AtomicBoolean>()
+    private val loadingDialogs = ConcurrentHashMap.newKeySet<VoiceForwardMiuixDialog.DialogHandle>()
+    private val activeSends = ConcurrentHashMap.newKeySet<SelectedMessageSendHandle>()
     private val main = Handler(Looper.getMainLooper())
     private val prefs = HchatStorage.preferences(context.hostContext(), MessageForwardSettings.PREFS_NAME)
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
@@ -121,6 +128,7 @@ private class MessageForwardHooker(
 
     @Synchronized
     fun install(): Boolean {
+        if (closed) return false
         chatLivePhotoResolver.warmup()
         val createMethods = SingleMessageMenuLocator.menuCreateMethods(context, logger)
         val clickMethods = SingleMessageMenuLocator.menuClickMethods(context, logger)
@@ -190,21 +198,39 @@ private class MessageForwardHooker(
             favoriteCreateHooked > 0 && favoriteClickHooked > 0
     }
 
+    @Synchronized
     fun destroy() {
+        if (closed) return
+        closed = true
+        pendingPreparations.forEach { it.set(true) }
+        pendingPreparations.clear()
+        activeSends.forEach { runCatching { it.stopPending() } }
+        activeSends.clear()
+        resources.close()
+        hookedMethods.clear()
+        main.removeCallbacksAndMessages(null)
+        val dialogs = loadingDialogs.toList()
+        loadingDialogs.clear()
+        main.post { dialogs.forEach { runCatching { it.close() } } }
         bindingsByItem.clear()
         bindingsByGroup.clear()
         favoriteBindingsByItem.clear()
         pendingFavoriteLocalId = 0L
         lastFavoriteHandledItem = null
         lastFavoriteHandledAt = 0L
-        executor.shutdownNow()
+        executor.shutdown()
     }
 
+    @Synchronized private fun submitPreparation(action: () -> Unit) {
+        if (!closed) executor.execute(action)
+    }
     private fun hook(method: Method, callback: XC_MethodHook): Boolean {
+        if (closed) return false
         if (Modifier.isAbstract(method.modifiers) || method.declaringClass.isInterface) return false
         if (!hookedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            val handle = HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            resources.register { HookRegistry.get().unhook(handle) }
             true
         }.getOrElse {
             hookedMethods.remove(method)
@@ -375,6 +401,7 @@ private class MessageForwardHooker(
         )
     }
 
+    @Synchronized
     private fun sendContentItems(
         activity: Activity,
         items: List<ScheduledTaskContentItem>,
@@ -382,6 +409,7 @@ private class MessageForwardHooker(
         channel: Int,
         title: String
     ) {
+        if (closed) return
         SelectedMessagesRuntimeCoordinator.validationError(channel, items)?.let {
             toast(activity, it)
             return
@@ -398,11 +426,12 @@ private class MessageForwardHooker(
         } else {
             VoiceForwardMiuixDialog.showLoading(
                 activity = activity,
-                onDismiss = { if (!finishing.get()) handle?.cancel() },
+                onDismiss = { if (!closed && !finishing.get()) handle?.cancel() },
                 title = title,
                 message = "正在发送..."
             )
         }
+        progress?.let { loadingDialogs.add(it) }
         handle = SelectedMessagesRuntimeCoordinator.enqueueScheduledItems(
             channel = channel,
             items = items,
@@ -410,7 +439,11 @@ private class MessageForwardHooker(
             targetIntervalSeconds = 0,
             itemIntervalSeconds = 0
         ) { success, total, canceled ->
+            finishing.set(true)
+            handle?.let { activeSends.remove(it) }
+            progress?.let { loadingDialogs.remove(it) }
             main.post {
+                if (closed) { progress?.close(); return@post }
                 finishing.set(true)
                 progress?.close()
                 val message = when {
@@ -421,7 +454,9 @@ private class MessageForwardHooker(
                 toast(activity, message)
             }
         }
+        handle?.let { if (!finishing.get()) activeSends.add(it) }
         if (handle == null) {
+            progress?.let { loadingDialogs.remove(it) }
             finishing.set(true)
             progress?.close()
             toast(activity, "$title 启动失败")
@@ -580,7 +615,9 @@ private class MessageForwardHooker(
         title: String,
         onLoaded: (FavoriteShareData) -> Unit
     ) {
+        if (closed) return
         val canceled = AtomicBoolean(false)
+        pendingPreparations.add(canceled)
         val closingForTransition = AtomicBoolean(false)
         val loading = VoiceForwardMiuixDialog.showLoading(
             activity = activity,
@@ -590,7 +627,9 @@ private class MessageForwardHooker(
             title = title,
             message = "正在读取收藏..."
         )
-        executor.execute {
+        loadingDialogs.add(loading)
+        submitPreparation {
+            if (closed) { pendingPreparations.remove(canceled); return@submitPreparation }
             val result = runCatching {
                 val favoriteApi = WeChatApis.media()?.favorites()
                     ?: throw IllegalStateException("收藏接口不可用")
@@ -608,13 +647,16 @@ private class MessageForwardHooker(
                 }
                 FavoriteShareData(item.type, text, path)
             }
+            pendingPreparations.remove(canceled)
             main.post {
+                if (closed) { loadingDialogs.remove(loading); loading.close(); return@post }
                 if (canceled.get()) return@post
                 closingForTransition.set(true)
+                loadingDialogs.remove(loading)
                 loading.close()
                 val decor = activity.window?.decorView ?: return@post
                 decor.postOnAnimation {
-                    if (canceled.get() || activity.isFinishing || activity.isDestroyed) {
+                    if (closed || canceled.get() || activity.isFinishing || activity.isDestroyed) {
                         return@postOnAnimation
                     }
                     result.onSuccess(onLoaded).onFailure {
@@ -627,6 +669,7 @@ private class MessageForwardHooker(
     }
 
     fun showSnsActions(activity: Activity, snapshot: SnsForwardSnapshot) {
+        if (closed) return
         VoiceForwardMiuixDialog.showChoices(
             activity = activity,
             title = SNS_FORWARD_MENU_TITLE,
@@ -731,7 +774,9 @@ private class MessageForwardHooker(
         title: String,
         onPrepared: (PreparedSnsForward) -> Unit
     ) {
+        if (closed) return
         val canceled = AtomicBoolean(false)
+        pendingPreparations.add(canceled)
         val closingForTransition = AtomicBoolean(false)
         val loading = VoiceForwardMiuixDialog.showLoading(
             activity = activity,
@@ -745,15 +790,20 @@ private class MessageForwardHooker(
                 "正在读取朋友圈..."
             }
         )
-        executor.execute {
+        loadingDialogs.add(loading)
+        submitPreparation {
+            if (closed) { pendingPreparations.remove(canceled); return@submitPreparation }
             val result = runCatching { snsResolver.prepare(snapshot, canceled) }
+            pendingPreparations.remove(canceled)
             main.post {
+                if (closed) { loadingDialogs.remove(loading); loading.close(); return@post }
                 if (canceled.get()) return@post
                 closingForTransition.set(true)
+                loadingDialogs.remove(loading)
                 loading.close()
                 val decor = activity.window?.decorView ?: return@post
                 decor.postOnAnimation {
-                    if (canceled.get() || activity.isFinishing || activity.isDestroyed) {
+                    if (closed || canceled.get() || activity.isFinishing || activity.isDestroyed) {
                         return@postOnAnimation
                     }
                     result.onSuccess(onPrepared).onFailure {
@@ -1119,6 +1169,7 @@ private class MessageForwardHooker(
                 } else {
                     SelectedMessagesRuntimeCoordinator.CHANNEL_MODULE
                 }
+                if (closed) return@showChoices
                 val snapshots = listOf(snapshot)
                 SelectedMessagesRuntimeCoordinator.snapshotValidationError(channel, snapshots)?.let {
                     toast(activity, it)
@@ -1199,6 +1250,7 @@ private class MessageForwardHooker(
         }
     }
 
+    @Synchronized
     private fun sendSnapshots(
         activity: Activity,
         snapshot: SelectedMessageSnapshot,
@@ -1206,6 +1258,7 @@ private class MessageForwardHooker(
         channel: Int,
         title: String
     ) {
+        if (closed) return
         val snapshots = listOf(snapshot)
         SelectedMessagesRuntimeCoordinator.snapshotValidationError(channel, snapshots)?.let {
             toast(activity, it)
@@ -1223,17 +1276,22 @@ private class MessageForwardHooker(
         } else {
             VoiceForwardMiuixDialog.showLoading(
                 activity = activity,
-                onDismiss = { if (!finishing.get()) handle?.cancel() },
+                onDismiss = { if (!closed && !finishing.get()) handle?.cancel() },
                 title = title,
                 message = "正在发送..."
             )
         }
+        progress?.let { loadingDialogs.add(it) }
         handle = SelectedMessagesRuntimeCoordinator.enqueueScheduledSnapshots(
             channel,
             snapshots,
             targets
         ) { success, total, canceled ->
+            finishing.set(true)
+            handle?.let { activeSends.remove(it) }
+            progress?.let { loadingDialogs.remove(it) }
             main.post {
+                if (closed) { progress?.close(); return@post }
                 finishing.set(true)
                 progress?.close()
                 val message = when {
@@ -1244,7 +1302,9 @@ private class MessageForwardHooker(
                 toast(activity, message)
             }
         }
+        handle?.let { if (!finishing.get()) activeSends.add(it) }
         if (handle == null) {
+            progress?.let { loadingDialogs.remove(it) }
             finishing.set(true)
             progress?.close()
             toast(activity, "$title 启动失败")
@@ -1289,7 +1349,9 @@ private class MessageForwardHooker(
             deliver(it)
             return
         }
+        if (closed) return
         val canceled = AtomicBoolean(false)
+        pendingPreparations.add(canceled)
         val closingForTransition = AtomicBoolean(false)
         val loading = VoiceForwardMiuixDialog.showLoading(
             activity = activity,
@@ -1299,15 +1361,20 @@ private class MessageForwardHooker(
             title = title,
             message = "正在载入联系人..."
         )
-        executor.execute {
+        loadingDialogs.add(loading)
+        submitPreparation {
+            if (closed) { pendingPreparations.remove(canceled); return@submitPreparation }
             val result = runCatching { SelectedMessageContactRepository.load(friendsOnly) }
+            pendingPreparations.remove(canceled)
             main.post {
+                if (closed) { loadingDialogs.remove(loading); loading.close(); return@post }
                 if (canceled.get()) return@post
                 closingForTransition.set(true)
+                loadingDialogs.remove(loading)
                 loading.close()
                 val decor = activity.window?.decorView ?: return@post
                 decor.postOnAnimation {
-                    if (canceled.get() || activity.isFinishing || activity.isDestroyed) {
+                    if (closed || canceled.get() || activity.isFinishing || activity.isDestroyed) {
                         return@postOnAnimation
                     }
                     result.onSuccess(deliver).onFailure {
@@ -1522,14 +1589,16 @@ private class MessageForwardHooker(
 
     private fun toast(activity: Activity?, message: String) {
         val target = activity?.takeUnless { it.isFinishing } ?: currentActivity() ?: return
-        main.post { Toast.makeText(target, message, Toast.LENGTH_SHORT).show() }
+        main.post { if (!closed) Toast.makeText(target, message, Toast.LENGTH_SHORT).show() }
     }
 
     private fun singleForwardEnabled(): Boolean {
+        if (closed) return false
         return prefs.getBoolean(MessageForwardSettings.KEY_ENABLE, MessageForwardSettings.DEFAULT_ENABLE)
     }
 
     private fun multiMomentsEnabled(): Boolean {
+        if (closed) return false
         return prefs.getBoolean(
             MessageForwardSettings.KEY_MULTI_MOMENTS_ENABLE,
             MessageForwardSettings.DEFAULT_ENABLE
@@ -1537,6 +1606,7 @@ private class MessageForwardHooker(
     }
 
     private fun favoriteForwardEnabled(): Boolean {
+        if (closed) return false
         return prefs.getBoolean(
             MessageForwardSettings.KEY_FAVORITE_FORWARD_ENABLE,
             MessageForwardSettings.DEFAULT_ENABLE

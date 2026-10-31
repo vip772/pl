@@ -11,6 +11,7 @@ internal class SnsForwardMenuHooker(
     private val onForward: (android.app.Activity, t.mma.hooks.api.sns.SnsForwardSnapshot) -> Unit,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var closed = false
     private val prefs = HchatStorage.preferences(context.hostContext(), MessageForwardSettings.PREFS_NAME)
 
     init {
@@ -22,20 +23,23 @@ internal class SnsForwardMenuHooker(
                 order = 10,
                 iconName = "icons_filled_share",
                 isEnabled = ::isEnabled,
-                onClick = { activity, target -> onForward(activity, target.snapshot) }
+                onClick = { activity, target -> if (!closed) onForward(activity, target.snapshot) }
             )
         )
     }
 
     fun install(): Boolean {
+        if (closed) return false
         return SnsContextMenuDispatcher.install(context, resolver, logger)
     }
 
     fun destroy() {
+        closed = true
         SnsContextMenuDispatcher.unregister(OWNER)
     }
 
     private fun isEnabled(): Boolean {
+        if (closed) return false
         return prefs.getBoolean(
             MessageForwardSettings.KEY_SNS_FORWARD_ENABLE,
             MessageForwardSettings.DEFAULT_ENABLE
