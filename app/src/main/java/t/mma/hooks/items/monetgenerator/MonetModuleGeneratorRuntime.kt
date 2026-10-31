@@ -26,12 +26,32 @@ object MonetModuleGeneratorRuntime {
     private const val WECHAT_PACKAGE = "com.tencent.mm"
     private val mainHandler = Handler(Looper.getMainLooper())
     private val running = AtomicBoolean(false)
+    private class ExportSession(val binding: Binding,
+        @Volatile var event: ((MonetGenerationEvent) -> Unit)?,
+        @Volatile var complete: ((Result<ExportResult>) -> Unit)?) {
+        @Volatile var cancelled = false
+        fun cancel() { cancelled = true; event = null; complete = null }
+    }
+    @Volatile private var session: ExportSession? = null
+    private fun checkActive(value: ExportSession) {
+        if (value.cancelled || binding !== value.binding) throw java.util.concurrent.CancellationException("导出所有者已退出")
+    }
+    private fun postEvent(value: ExportSession, event: MonetGenerationEvent) {
+        mainHandler.postAtTime({ if (!value.cancelled && binding === value.binding) value.event?.invoke(event) }, value, SystemClock.uptimeMillis())
+    }
+    private fun postComplete(value: ExportSession, result: Result<ExportResult>) {
+        mainHandler.postAtTime({
+            try { if (!value.cancelled && binding === value.binding) value.complete?.invoke(result) }
+            finally { value.event = null; value.complete = null }
+        }, value, SystemClock.uptimeMillis())
+    }
 
     @Volatile
     private var binding: Binding? = null
 
     @Synchronized
     fun attach(context: FeatureContext) {
+        session?.let { it.cancel(); mainHandler.removeCallbacksAndMessages(it) }
         binding = Binding(
             context.hostContext().applicationContext ?: context.hostContext(),
             context.dexKitManager(),
@@ -42,7 +62,12 @@ object MonetModuleGeneratorRuntime {
     @Synchronized
     fun detach(context: FeatureContext) {
         val current = binding ?: return
-        if (current.owner.get() === context) binding = null
+        if (current.owner.get() === context) {
+            binding = null
+            session?.takeIf { it.binding === current }?.let {
+                it.cancel(); mainHandler.removeCallbacksAndMessages(it)
+            }
+        }
     }
 
     fun isRunning(): Boolean = running.get()
@@ -58,6 +83,7 @@ object MonetModuleGeneratorRuntime {
         return if (suffix.isBlank()) "Hchat_Monet_WeChat.zip" else "Hchat_Monet_WeChat_$suffix.zip"
     }
 
+    @Synchronized
     internal fun generate(
         output: MonetModuleDocumentBridge.ExportTarget,
         options: MonetGenerationOptions,
@@ -75,12 +101,15 @@ object MonetModuleGeneratorRuntime {
         }
         if (!running.compareAndSet(false, true)) return false
 
-        Thread({
+        val export = ExportSession(current, onEvent, onComplete)
+        session = export
+        val worker = Thread({
             val sessionDir = File(
                 current.hostContext.cacheDir,
                 "Hchat/monet_generator/session_${SystemClock.elapsedRealtime()}"
             )
             try {
+                checkActive(export)
                 require(sessionDir.mkdirs() || sessionDir.isDirectory) { "无法创建生成缓存目录" }
                 val packageInfo = current.hostContext.packageManager.getPackageInfo(WECHAT_PACKAGE, 0)
                 val applicationInfo = current.hostContext.applicationInfo
@@ -102,6 +131,7 @@ object MonetModuleGeneratorRuntime {
                     versionName = packageInfo.versionName.orEmpty().ifBlank { "unknown" },
                     sdkInt = Build.VERSION.SDK_INT,
                     dexEvidenceProvider = { candidates ->
+                        checkActive(export)
                         collectDexEvidence(current.manager, candidates)
                     },
                     options = options,
@@ -109,12 +139,16 @@ object MonetModuleGeneratorRuntime {
                     outputZip = temporaryZip
                 )
                 val result = MonetModuleGenerator.generate(request, MonetGenerationListener { event ->
+                    checkActive(export)
                     logEvent(event)
-                    mainHandler.post { onEvent(event) }
+                    postEvent(export, event)
                 })
                 require(result.outputZip.isFile && result.outputZip.length() > 0L) {
                     "生成结果为空"
                 }
+                checkActive(export)
+                // Once user-document copy begins, finish the copy to avoid a truncated ZIP.
+                // Detach suppresses callbacks; it never interrupts the already-open document.
                 current.hostContext.contentResolver.openOutputStream(output.uri, "w")?.use { target ->
                     result.outputZip.inputStream().buffered().use { source -> source.copyTo(target) }
                 } ?: error("无法写入所选输出文件")
@@ -123,17 +157,22 @@ object MonetModuleGeneratorRuntime {
                     resourceCount = result.resourceCount,
                     overlayCount = result.overlayCount
                 )
-                mainHandler.post { onComplete(Result.success(exported)) }
+                postComplete(export, Result.success(exported))
             } catch (error: Throwable) {
-                HLog.e("$TAG 生成失败: ${error.message}", error)
-                mainHandler.post { onComplete(Result.failure(error)) }
+                if (error !is java.util.concurrent.CancellationException) HLog.e("$TAG 生成失败: ${error.message}", error)
+                postComplete(export, Result.failure(error))
             } finally {
-                running.set(false)
                 runCatching { sessionDir.deleteRecursively() }
+                synchronized(this) {
+                    if (session === export) session = null
+                    running.set(false)
+                }
             }
-        }, "Hchat-MonetGenerator").apply {
-            isDaemon = true
-            start()
+        }, "Hchat-MonetGenerator").apply { isDaemon = true }
+        try { worker.start() } catch (error: Throwable) {
+            session = null; running.set(false)
+            postComplete(export, Result.failure(error))
+            return false
         }
         return true
     }
