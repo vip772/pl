@@ -463,7 +463,8 @@ object QuickMarkReadRuntime {
 
     private fun findNativeMarkReadMethods(context: FeatureContext): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -472,6 +473,7 @@ object QuickMarkReadRuntime {
                     )
                 }
             ).mapNotNull { it.getMethodInstance(context.hostClassLoader()) }
+            }
         }.getOrElse {
             HLog.e("$TAG DexKit 定位原生已读入口失败: ${it.message}", it)
             emptyList()

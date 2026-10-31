@@ -277,7 +277,8 @@ private class RoundAvatarRuntime(
 
     private fun findMethodsByStrings(vararg strings: String): List<Member> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply { usingEqStrings(*strings) })
                 }
@@ -289,6 +290,7 @@ private class RoundAvatarRuntime(
                         data.getMethodInstance(context.hostClassLoader())
                     }
                 }.getOrNull()
+            }
             }
         }.getOrElse {
             HLog.e("$TAG 定位头像入口异常: ${it.message}", it)

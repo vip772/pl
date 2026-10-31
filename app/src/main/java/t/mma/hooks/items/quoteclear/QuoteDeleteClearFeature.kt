@@ -317,7 +317,8 @@ private class QuoteDeleteClearRuntime(
                 return supportOnKeyMethod
             }
         val located = try {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 org.luckypray.dexkit.query.FindMethod().apply {
                     matcher(org.luckypray.dexkit.query.matchers.MethodMatcher().apply {
                         name("onKey")
@@ -327,6 +328,7 @@ private class QuoteDeleteClearRuntime(
             ).firstNotNullOfOrNull { data ->
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                     ?.takeIf { method -> isSupportOnKeyCandidate(method) }
+            }
             }
         } catch (e: Throwable) {
             logger("删除键清引用定位按键入口异常", e)
@@ -342,7 +344,8 @@ private class QuoteDeleteClearRuntime(
     }
 
     private fun locateQuoteClearMethodByStrings(vararg strings: String): Method? {
-        return context.dexKitBridge().findMethod(
+        return context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
             org.luckypray.dexkit.query.FindMethod().apply {
                 matcher(org.luckypray.dexkit.query.matchers.MethodMatcher().apply {
                     declaredClass(CHAT_FOOTER)
@@ -354,6 +357,7 @@ private class QuoteDeleteClearRuntime(
         ).firstNotNullOfOrNull { data ->
             runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                 ?.takeIf { method -> isQuoteClearCandidate(method) }
+        }
         }
     }
 

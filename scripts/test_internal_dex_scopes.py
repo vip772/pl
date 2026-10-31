@@ -16,6 +16,9 @@ files = [
     'typingreport/TypingReportBlockFeature.kt',
     'transparentavatar/UploadTransparentAvatarFeature.kt',
     'quickcontactedit/SnsAvatarMenuLocator.kt',
+    'quickread/QuickMarkReadRuntime.kt',
+    'roundavatar/RoundAvatarFeature.kt',
+    'quoteclear/QuoteDeleteClearFeature.kt',
 ]
 total = 0
 scopes = []
@@ -73,12 +76,15 @@ object R {fun loadClass(n:String,l:ClassLoader):Class<*>? = null}
 fun isLaunchConstructor(c: Constructor<*>) = true
 fun isPrivateOpenUrlMethod(m: Method) = true
 fun isSendTypingMethod(m: Method) = true
+fun isSupportOnKeyCandidate(m: Method) = true
+fun isQuoteClearCandidate(m: Method) = true
 '''
     names = set(re.findall(r'\b[A-Z][A-Z_]+\b', '\n'.join(scopes))) - {'R', 'ERR'}
     prelude += '\n'.join(f'const val {name} = "anchor"' for name in sorted(names))
     types = ['List<Constructor<*>>', 'List<Method>', 'List<Method>', 'List<Member>',
              'List<Method>', 'List<Method>', 'List<Class<*>>', 'List<Method>', 'List<Class<*>>',
-             'List<Method>', 'List<String>', 'List<Method>']
+             'List<Method>', 'List<String>', 'List<Method>',
+             'List<Method>', 'List<Member>', 'Method?', 'Method?']
     assert len(types) == len(scopes)
     body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))
