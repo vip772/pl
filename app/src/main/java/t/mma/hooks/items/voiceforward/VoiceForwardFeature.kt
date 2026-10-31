@@ -25,6 +25,8 @@ import t.mma.hooks.api.message.MultiSelectMessageMenuLocator
 import t.mma.hooks.api.message.MultiSelectMessageResolver
 import t.mma.hooks.api.message.MultiSelectMessageUi
 import t.mma.hooks.api.model.WeChatContact
+import t.mma.hooks.core.PreferenceRuntimeOwner
+import t.mma.hooks.core.FeatureResourceScope
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
@@ -68,24 +70,32 @@ class VoiceForwardFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        hooker = VoiceForwardHooker(context, ::logFeatureError)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) {
-            scheduleInstall()
-        }
+        val prefs = HchatStorage.preferences(context.hostContext(), VoiceForwardSettings.PREFS_NAME)
+        val legacyKeys = setOf(VoiceForwardSettings.KEY_CHAT_FORWARD_ENABLE, VoiceForwardSettings.KEY_CHAT_SAVE_ENABLE,
+            VoiceForwardSettings.KEY_CHAT_MULTI_FORWARD_ENABLE, VoiceForwardSettings.KEY_FAVORITE_FORWARD_ENABLE,
+            VoiceForwardSettings.KEY_FAVORITE_SAVE_ENABLE)
+        val keys = legacyKeys + setOf(VoiceForwardSettings.KEY_ENABLE, VoiceForwardSettings.KEY_CHAT_MULTI_MERGE_ENABLE)
+        var schedule: (() -> Unit)? = null
+        val owner = PreferenceRuntimeOwner(prefs, keys, enabled = {
+            val legacy = prefs.getBoolean(VoiceForwardSettings.KEY_ENABLE, VoiceForwardSettings.DEFAULT_ENABLE)
+            legacyKeys.any { prefs.getBoolean(it, legacy) } || prefs.getBoolean(VoiceForwardSettings.KEY_CHAT_MULTI_MERGE_ENABLE, false)
+        }, create = { resources ->
+            val current = VoiceForwardHooker(context, ::logFeatureError)
+            hooker = current
+            resources.register { current.shutdown(); if (hooker === current) hooker = null }
+            val ticket = DexInstallScheduler.installation(ID, name())
+            resources.register { ticket.close(); schedule = null }
+            schedule = { ticket.schedule { current.install() } }
+            schedule?.invoke()
+        }, onError = { logFeatureError("语音转发启停失败", it) }, restartOnChange = true)
+        trackResource { owner.close() }
+        owner.start()
+        subscribe(Events.DexReady::class.java) { owner.refresh(); schedule?.invoke() }
     }
-
     override fun onFeatureDestroy(context: FeatureContext) {
         hooker?.shutdown()
         hooker = null
     }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            hooker?.install() == true
-        }
-    }
-
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -99,6 +109,10 @@ private class VoiceForwardHooker(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var closed = false
+    private val stopSignal = java.util.concurrent.CountDownLatch(1)
+    private val hookResources = FeatureResourceScope { logger("释放语音转发 Hook 失败", it) }
+    private val main = Handler(Looper.getMainLooper())
     private val prefs = HchatStorage.preferences(context.hostContext(), VoiceForwardSettings.PREFS_NAME)
     private val messageForwardPrefs = HchatStorage.preferences(
         context.hostContext(),
@@ -135,7 +149,9 @@ private class VoiceForwardHooker(
     private var lastFavoriteVoiceSource: VoiceSource? = null
     private val silkCodec by lazy(LazyThreadSafetyMode.SYNCHRONIZED) { SilkCodec() }
 
+    @Synchronized
     fun install(): Boolean {
+        if (closed) return false
         val clickMethods = locateClickMethods()
         if (clickMethods.isEmpty()) {
             logger("转发语音定位菜单点击方法失败", null)
@@ -544,9 +560,11 @@ private class VoiceForwardHooker(
     }
 
     private fun hookMethod(method: Method, callback: XC_MethodHook): Boolean {
+        if (closed) return false
         if (!hookedMethods.add(method)) return true
         return try {
-            HookRegistry.get().hook(method, callback)
+            val handle = HookRegistry.get().hook(method, callback)
+            hookResources.register { HookRegistry.get().unhook(handle) }
             true
         } catch (e: Throwable) {
             hookedMethods.remove(method)
@@ -1061,6 +1079,7 @@ private class VoiceForwardHooker(
     }
 
     private fun isEnabled(): Boolean {
+        if (closed) return false
         return chatForwardEnabled() ||
             chatSaveEnabled() ||
             chatMultiForwardEnabled() ||
@@ -1105,7 +1124,7 @@ private class VoiceForwardHooker(
     }
 
     private fun chatMultiMergeEnabled(): Boolean {
-        return prefs.getBoolean(VoiceForwardSettings.KEY_CHAT_MULTI_MERGE_ENABLE, false)
+        return !closed && prefs.getBoolean(VoiceForwardSettings.KEY_CHAT_MULTI_MERGE_ENABLE, false)
     }
 
     private fun messageForwardMenuEnabled(): Boolean {
@@ -1116,6 +1135,7 @@ private class VoiceForwardHooker(
     }
 
     private fun voiceSwitchEnabled(key: String): Boolean {
+        if (closed) return false
         val legacyDefault = prefs.getBoolean(VoiceForwardSettings.KEY_ENABLE, VoiceForwardSettings.DEFAULT_ENABLE)
         return prefs.getBoolean(key, legacyDefault)
     }
@@ -1588,10 +1608,10 @@ private class VoiceForwardHooker(
             showLoadedContactPicker(activity, source, cached.contacts)
             return
         }
-        val main = Handler(Looper.getMainLooper())
         Thread({
-            val result = runCatching { loadContacts().also { recentContactsCache = CachedContacts(it, System.currentTimeMillis()) } }
+            val result = runCatching { loadContacts().also { if (!closed) recentContactsCache = CachedContacts(it, System.currentTimeMillis()) } }
             main.post {
+                if (closed) return@post
                 if (activity.isFinishing) {
                     seenDialogs.remove(activity)
                     return@post
@@ -1645,10 +1665,10 @@ private class VoiceForwardHooker(
             showLoadedContactPicker(activity, sources, cached.contacts, exitTarget, onTargetsSelected)
             return
         }
-        val main = Handler(Looper.getMainLooper())
         Thread({
-            val result = runCatching { loadContacts().also { recentContactsCache = CachedContacts(it, System.currentTimeMillis()) } }
+            val result = runCatching { loadContacts().also { if (!closed) recentContactsCache = CachedContacts(it, System.currentTimeMillis()) } }
             main.post {
+                if (closed) return@post
                 if (activity.isFinishing) {
                     cleanupTemporarySources(sources)
                     seenDialogs.remove(activity)
@@ -1708,14 +1728,15 @@ private class VoiceForwardHooker(
         )
     }
 
+    @Synchronized
     private fun sendVoiceToTargets(
         activity: Activity,
         source: VoiceSource,
         targets: List<VoiceForwardMiuixDialog.ContactItem>
     ) {
-        if (targets.isEmpty()) return
-        val main = Handler(Looper.getMainLooper())
+        if (closed || targets.isEmpty()) return
         forwardExecutor.execute {
+            if (closed) return@execute
             var success = 0
             targets.forEachIndexed { index, target ->
                 if (sendVoiceForForward(source, target.id)) {
@@ -1724,6 +1745,7 @@ private class VoiceForwardHooker(
                 if (index < targets.lastIndex && !waitBetweenForwards()) return@execute
             }
             main.post {
+                if (closed) return@post
                 if (!activity.isFinishing) {
                     val message = if (targets.size == 1) {
                         if (success == 1) "语音转发成功" else "语音转发失败"
@@ -1736,19 +1758,20 @@ private class VoiceForwardHooker(
         }
     }
 
+    @Synchronized
     private fun sendVoicesToTargets(
         activity: Activity,
         sources: List<VoiceSource>,
         targets: List<VoiceForwardMiuixDialog.ContactItem>
     ) {
         if (sources.isEmpty()) return
-        if (targets.isEmpty()) {
+        if (closed || targets.isEmpty()) {
             cleanupTemporarySources(sources)
             return
         }
-        val main = Handler(Looper.getMainLooper())
         forwardExecutor.execute {
             try {
+                if (closed) return@execute
                 var success = 0
                 val total = targets.size * sources.size
                 var sentCount = 0
@@ -1762,6 +1785,7 @@ private class VoiceForwardHooker(
                     }
                 }
                 main.post {
+                if (closed) return@post
                     if (!activity.isFinishing) {
                         toast(activity, "语音转发完成: $success/$total")
                     }
@@ -1788,6 +1812,7 @@ private class VoiceForwardHooker(
     }
 
     private fun sendVoiceForForward(source: VoiceSource, targetId: String): Boolean {
+        if (closed || !isEnabled()) return false
         val voiceApi = WeChatApis.media()?.voices() ?: return false
         if (!voiceApi.canSendSilently() || !File(source.path).isFile) return false
         return runCatching {
@@ -1800,15 +1825,22 @@ private class VoiceForwardHooker(
 
     private fun waitBetweenForwards(): Boolean {
         return try {
-            TimeUnit.MILLISECONDS.sleep(ForwardSendPolicy.MIN_SEND_INTERVAL_MS)
-            true
+            !stopSignal.await(ForwardSendPolicy.MIN_SEND_INTERVAL_MS, TimeUnit.MILLISECONDS)
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
             false
         }
     }
 
+    @Synchronized
     fun shutdown() {
+        if (closed) return
+        closed = true
+        stopSignal.countDown()
+        hookResources.close()
+        hookedMethods.clear()
+        main.removeCallbacksAndMessages(null)
+        recentContactsCache = null
         favoriteBindingsByMenuItem.clear()
         favoriteItemsByOwner.clear()
         favoriteItemsByActivity.clear()
@@ -1818,7 +1850,8 @@ private class VoiceForwardHooker(
         favoriteFilterClasses.clear()
         lastFavoriteItem = null
         lastFavoriteVoiceSource = null
-        forwardExecutor.shutdownNow()
+        // Queued multi-send jobs still run their finally blocks to delete temporary sources.
+        forwardExecutor.shutdown()
     }
 
     private fun saveVoice(activity: Activity, source: VoiceSource) {
@@ -2075,7 +2108,8 @@ private class VoiceForwardHooker(
     private fun toast(activity: Activity?, text: String) {
         val target = activity ?: WeChatApis.currentActivity()?.currentActivity()
         if (target == null) return
-        Handler(Looper.getMainLooper()).post {
+        main.post {
+            if (closed) return@post
             Toast.makeText(target, text, Toast.LENGTH_SHORT).show()
         }
     }

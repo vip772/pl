@@ -23,12 +23,14 @@ internal class CustomMassSendModuleSender(
     private val context: Context,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var closed = false
     private val main = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "Hchat-CustomMassSend").apply { isDaemon = true }
     }
     private val operations = ConcurrentHashMap<String, SendOperation>()
 
+    @Synchronized
     fun enqueue(
         items: List<ScheduledTaskContentItem>,
         targetIds: List<String>,
@@ -36,6 +38,7 @@ internal class CustomMassSendModuleSender(
         itemIntervalSeconds: Int,
         onComplete: ((success: Int, total: Int, canceled: Boolean) -> Unit)? = null
     ): SelectedMessageSendHandle? {
+        if (closed) return null
         val contents = normalizeItems(items)
         val targets = targetIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         if (contents.isEmpty() || targets.isEmpty()) {
@@ -47,6 +50,7 @@ internal class CustomMassSendModuleSender(
         val operation = SendOperation(UUID.randomUUID().toString())
         operations[operation.id] = operation
         executor.execute {
+            if (closed || operation.canceled.get()) { operations.remove(operation.id); return@execute }
             val messageApi = WeChatApis.message().sender() ?: WeChatApis.messages()
             val mediaApi = WeChatApis.media()
             var success = 0
@@ -68,16 +72,22 @@ internal class CustomMassSendModuleSender(
             }
             operations.remove(operation.id)
             main.post {
+                if (closed) return@post
                 onComplete?.invoke(success, contents.size * targets.size, operation.canceled.get())
             }
         }
         return SelectedMessageSendHandle { cancel(operation.id) }
     }
 
+    @Synchronized
     fun shutdown() {
+        if (closed) return
+        closed = true
+        main.removeCallbacksAndMessages(null)
         operations.values.forEach { cancel(it) }
         operations.clear()
-        executor.shutdownNow()
+        // Cancellation signals wake pacing waits; never interrupt an in-flight host send.
+        executor.shutdown()
     }
 
     private fun sendToTalker(
