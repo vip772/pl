@@ -440,7 +440,8 @@ private class SwipeQuoteAdapter(
             .distinctBy { it.toGenericString() }
         if (cached.isNotEmpty()) return cached
         val methods = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 org.luckypray.dexkit.query.FindMethod().apply {
                     matcher(org.luckypray.dexkit.query.matchers.MethodMatcher().apply {
                         declaredClass(MSG_RETRANSMIT_UI)
@@ -451,6 +452,7 @@ private class SwipeQuoteAdapter(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter { isRetransmitDoneCandidate(it) }
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrDefault(emptyList())
         if (methods.isNotEmpty()) {
             DexMethodCache.saveList(methodCachePrefs, methodCacheKey, "retransmit_done", methods)
@@ -1005,7 +1007,8 @@ private class SwipeQuoteAdapter(
 
     private fun findMethodsByStrings(vararg strings: String): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 org.luckypray.dexkit.query.FindMethod().apply {
                     matcher(org.luckypray.dexkit.query.matchers.MethodMatcher().apply {
                         usingStrings(strings.toList())
@@ -1013,6 +1016,7 @@ private class SwipeQuoteAdapter(
                 }
             ).mapNotNull { data ->
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+            }
             }
         }.getOrElse {
             logger("左滑引用定位方法失败", it)
@@ -1448,7 +1452,8 @@ private class SwipeQuoteAdapter(
                 return dexQuoteMethod
             }
         val located = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 org.luckypray.dexkit.query.FindMethod().apply {
                     matcher(org.luckypray.dexkit.query.matchers.MethodMatcher().apply {
                         usingStrings(listOf("invalid quote msg id"))
@@ -1457,6 +1462,7 @@ private class SwipeQuoteAdapter(
             ).firstNotNullOfOrNull { data ->
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                     ?.takeIf { method -> isNewQuoteCandidate(method) }
+            }
             }
         }.getOrNull()
         if (located != null) {

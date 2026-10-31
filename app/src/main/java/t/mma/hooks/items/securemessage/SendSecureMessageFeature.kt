@@ -440,18 +440,20 @@ class SendSecureMessageFeature : BaseFeature() {
         .orEmpty()
 
     private fun findMethods(context: FeatureContext, anchor: String): List<Method> = runCatching {
-        val exact = context.dexKitBridge().findMethod(FindMethod().apply {
+        context.dexKitManager().withCurrentBridge { bridge ->
+        val exact = bridge.findMethod(FindMethod().apply {
             matcher(MethodMatcher().apply { usingEqStrings(anchor) })
         })
         val candidates = if (exact.isNotEmpty()) exact else {
             runCatching {
-                context.dexKitBridge().findMethod(FindMethod().apply {
+                bridge.findMethod(FindMethod().apply {
                     matcher(MethodMatcher().apply { usingStrings(anchor) })
                 })
             }.getOrDefault(emptyList())
         }
         candidates.mapNotNull { data -> runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
             .distinctBy { it.toGenericString() }
+        }
     }.getOrElse {
         logError("安全消息方法定位失败", it)
         emptyList()

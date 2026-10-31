@@ -45,6 +45,9 @@ files = [
     'payment/transfer/TransferReceiveAccountStore.kt',
     'messageforward/ChatLivePhotoResolver.kt',
     'forwardlimit/RemoveForwardLimitFeature.kt',
+    'securemessage/AntiSecureMessageFeature.kt',
+    'securemessage/SendSecureMessageFeature.kt',
+    'swipequote/SwipeQuoteFeature.kt',
 ]
 total = 0
 scopes = []
@@ -110,6 +113,8 @@ fun isRetransmitDoneMethod(m:Method) = true
 fun isAccountParser(m:Method) = true
 fun isLimitMethod(m:Method) = true
 fun isUicConfigMethod(m:Method) = true
+fun isRetransmitDoneCandidate(m:Method) = true
+fun isNewQuoteCandidate(m:Method) = true
 class Context {
  fun dexKitManager() = DexKitBridgeManager()
  fun hostClassLoader() = ClassLoader.getSystemClassLoader()
@@ -161,8 +166,9 @@ fun isRecorderDurationMethod(m: Method) = true
     types += ['List<Method>', 'List<Method>', 'List<Method>', 'Method?', 'List<Method>', 'List<Method>', 'List<Method>']
     types += ['List<Method>', 'List<Method>', 'List<Method>', 'Method?', 'ChatLivePhotoMethods?']
     types += ['List<Method>', 'List<Method>']
+    types += ['List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'Method?']
     assert len(types) == len(scopes)
-    body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
+    body = '\n'.join(f'fun query{i}(): {t} {{ val strings = {"listOf" if i == 54 else "arrayOf"}("anchor"); val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))
     (p / 'Scopes.kt').write_text(prelude + '\n' + body)
     subprocess.run(compiler + ['-classpath', f'{classes}:{std}:{dex}', '-d', str(p / 'scopes.jar'),
