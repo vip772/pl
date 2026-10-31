@@ -13,6 +13,7 @@ import de.robv.android.xposed.XposedHelpers
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
+import t.mma.dexkit.DexKitBridgeManager
 import t.mma.preferences.HchatStorage
 import t.mma.ui.miuix.VoiceForwardMiuixDialog
 import t.mma.ui.miuix.ScriptFloatingGlassBarHost
