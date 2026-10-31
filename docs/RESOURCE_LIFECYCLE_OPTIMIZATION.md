@@ -131,8 +131,13 @@ BaseFeature 事件订阅包装现绑定订阅时的资源作用域，作用域�
 Agent 外部 APK 在最后一次工具执行结束 30 秒后释放独占 Binding，包括已初始化的资源解析模块和 Dex native 实例；回收在后台取得共享门→targetLock，查询进行中不关闭。每次执行（含失败、取消）重新登记票据，迟到旧票据和旧目标身份均不能关闭新目标；重绑会取消票据。只卸载解析实例，已登记目标会话和 APK 文件保留；下次查询沿原 resolveTarget 校验文件后重建。外部实例发布前设置 native 线程数为 2，初始化失败关闭未发布实例。定时执行器取消后移除任务，闲置核心线程可退出，不在主线程执行 native close。
 test_agent_external_idle.py 提取生产回收方法并结合生产共享门，验证旧票据、目标替换、关闭/重绑取消、活动查询排斥、重调度和只释放一次；test_resource_schedulers.py 通过。该 fixture 不包含真实 native close/重建，整文件编译和 R8 仍以对应 Actions 为准。宿主共享 DexKit 未启用闲置关闭，脚本原始对象兼容保活契约和全持有链迁移仍待完成。
 累计构建证据：7992896 对应 Actions 41057094593、3c05219 对应 Actions 41057865324 均已 completed/success；包括群员头衔完整源码编译。本轮新增修改需等待新的 Actions，不将前一提交成功扩大到当前修改。手机昵称布局、实际查询重建和真实发送仍未验证。群员头衔可见行恢复的源码与定向测试已在本轮完成，仍不等于手机验收。
+## 接续：DexKit 租约与代际管理基础
+本轮新增 `DexKitBridgeManager`，在共享宿主 bridge 发布时分配代际编号，记录活动查询、普通租约和 raw-compatibility 租约。`ModuleEntry` 发布当前 bridge，并由 `DexBridgeHolder` 持有一份兼容租约；因此旧脚本公开的原始 `bridge()` / `holder()` 以及尚未迁移的内部入口仍阻止 native 闲置关闭，兼容行为没有被破坏。
+
+管理器提供 `query(Lease, Callable)` 和无持久租约的 `queryCurrent(Callable)`，并提供 `closeIfIdle()` / `closeRetiredIfIdle()` 作为后续第 8 步的受控开关。当前没有自动调用关闭方法，也没有把管理器对象当成 native 回收完成。新增 `test_dex_bridge_manager.py` 使用替身 bridge 验证代际复用、raw 租约阻止关闭、查询计数、旧代/当前代空闲关闭和关闭后拒绝查询；未运行 Gradle、未加载真实 native、未开启宿主回收。
 
 ## 接续：聊天分组运行时销毁链
+
 逐项审计 `ConversationGroupRuntime` 后确认其执行器、偏好监听、conversation/contact/chatroom 三类订阅及独占 Hook 集合此前没有完整销毁链。现保存三类订阅和运行时偏好对象；destroy 幂等关闭 active 门，取消订阅和偏好监听，移除主线程回调，解除本运行时登记的 Hook，清空绑定/索引/缓存并 shutdown 独占执行器；下一次 install 在需要时创建新执行器。异步回调增加 active 检查，避免关闭后继续触发同步。
 本轮仅完成源码根因修复和现有分组/父级恢复定向测试；未运行本地 Gradle，需等待本次提交对应 Actions 的完整编译/R8，并在手机上验证聊天分组关闭重开、首页/原生折叠分组、置顶/隐藏/已读和资源回收。
 

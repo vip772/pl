@@ -22,13 +22,33 @@ public final class DexBridgeHolder {
     private final DexFinder dexFinder;
     private final ClassLoader hostClassLoader;
     private final String apkPath;
+    private final DexKitBridgeManager.Lease compatibilityLease;
 
     public DexBridgeHolder(DexKitBridge dexKitBridge, DexFinder dexFinder,
                            ClassLoader hostClassLoader, String apkPath) {
+        this(dexKitBridge, dexFinder, hostClassLoader, apkPath, null);
+    }
+
+    /**
+     * 创建带兼容租约的共享持有者。旧脚本和未迁移的内部入口通过该租约保持
+     * 宿主 bridge 保活；租约本身不改变原有 bridge/holder 接口。
+     */
+    public DexBridgeHolder(DexKitBridge dexKitBridge, DexFinder dexFinder,
+                           ClassLoader hostClassLoader, String apkPath,
+                           DexKitBridgeManager.Lease compatibilityLease) {
         this.dexKitBridge = dexKitBridge;
         this.dexFinder = dexFinder;
         this.hostClassLoader = hostClassLoader;
         this.apkPath = apkPath;
+        this.compatibilityLease = compatibilityLease;
+    }
+
+    public long getGenerationId() {
+        return compatibilityLease == null ? 0L : compatibilityLease.getGenerationId();
+    }
+
+    public boolean hasCompatibilityLease() {
+        return compatibilityLease != null && !compatibilityLease.isClosed();
     }
 
     public DexKitBridge getDexKitBridge() {

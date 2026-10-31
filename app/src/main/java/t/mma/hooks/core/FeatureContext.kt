@@ -4,6 +4,7 @@ import android.content.Context
 import de.robv.android.xposed.callbacks.XC_LoadPackage
 import t.mma.dexkit.DexBridgeHolder
 import t.mma.dexkit.DexFinder
+import t.mma.dexkit.DexKitBridgeManager
 import t.mma.event.EventBus
 import t.mma.preferences.ConfigStore
 import t.mma.ui.UIRegistry
@@ -22,7 +23,8 @@ class FeatureContext(
     private val eventBus: EventBus,
     private val configStore: ConfigStore,
     private val dexBridgeHolder: DexBridgeHolder,
-    private val uiRegistry: UIRegistry
+    private val uiRegistry: UIRegistry,
+    private val dexKitManager: DexKitBridgeManager
 ) {
     fun hostContext(): Context = hostContext
 
@@ -41,6 +43,7 @@ class FeatureContext(
     fun configStore(): ConfigStore = configStore
 
     fun dexBridgeHolder(): DexBridgeHolder = dexBridgeHolder
-
+    /** 生命周期治理入口；默认仅提供管理器，不启用宿主 bridge 自动回收。 */
+    fun dexKitManager(): DexKitBridgeManager = dexKitManager
     fun uiRegistry(): UIRegistry = uiRegistry
 }

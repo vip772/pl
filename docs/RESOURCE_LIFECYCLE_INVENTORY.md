@@ -37,7 +37,7 @@
 ## 本轮源码审计补充
 - 群员头衔关闭重开：已完成可见行恢复，恢复范围严格限制为静态弱键记录中的 attached/shown 当前群聊行；未扫描 Adapter，未强刷列表。
 - 聊天分组运行时：审计发现其独占执行器、偏好监听、三类数据库订阅和 Hook 句柄原先未完整归属销毁路径；本轮已补齐运行时订阅保存/取消、偏好监听取消、主线程回调移除、独占 Hook 解除、执行器 shutdown、缓存/弱引用索引清空，并允许关闭后下一轮重建执行器。该项需对应 Actions 编译确认，不能由 fixture 通过替代。
-- 宿主共享 DexKit：仍存在 `ModuleEntry.DEXKIT_BRIDGES`、`FeatureContext`、定位器、Monet、Agent 与脚本原始对象多方持有，脚本文档仍承诺原始 bridge 兼容；没有证据证明可安全闲置 close，本轮继续保持宿主 bridge 保活，未做风险性 close。
+- 宿主共享 DexKit：已新增 `DexKitBridgeManager` 记录当前代际、活动查询和租约数量，并由 `ModuleEntry` 发布当前 bridge；`DexBridgeHolder` 持有显式 raw-compatibility 租约，使旧脚本/未迁移入口继续保活。管理器提供受控 `closeIfIdle` / `closeRetiredIfIdle`，但当前没有启用自动回收，仍不得宣称宿主 native close 已完成。
 
 ## 修复后的限制与下一步
 

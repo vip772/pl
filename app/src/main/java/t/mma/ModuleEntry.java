@@ -26,6 +26,7 @@ import t.mma.loader.utils.NativeLibraryLoader;
 import t.mma.preferences.ConfigStore;
 import t.mma.preferences.TermsGate;
 import t.mma.dexkit.DexBridgeHolder;
+import t.mma.dexkit.DexKitBridgeManager;
 import t.mma.event.EventBus;
 import t.mma.ui.UIRegistry;
 
@@ -57,6 +58,7 @@ public class ModuleEntry implements IXposedHookLoadPackage {
     private static final String WECHAT_PKG = "com.tencent.mm";
     private static final Object DEXKIT_CREATE_LOCK = new Object();
     private static final Map<String, DexKitBridge> DEXKIT_BRIDGES = new ConcurrentHashMap<>();
+    private static final DexKitBridgeManager DEXKIT_MANAGER = new DexKitBridgeManager();
 
     // 全局基础设施实例（模块生命周期内单例）
     private final EventBus eventBus = EventBus.get();
@@ -442,8 +444,11 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                         message -> XposedBridge.log("[Hchat:WechatApi] " + message));
 
                 // 4. 创建共享 DexKit 服务
+                DEXKIT_MANAGER.publish(dexKit, hostClassLoader, apkPath);
+                DexKitBridgeManager.Lease dexKitCompatibilityLease =
+                        DEXKIT_MANAGER.acquire("host-runtime-compatibility", true);
                 DexBridgeHolder dexBridgeHolder = new DexBridgeHolder(
-                        dexKit, finder, hostClassLoader, apkPath);
+                        dexKit, finder, hostClassLoader, apkPath, dexKitCompatibilityLease);
                 ScriptPluginAgentLocalReverseTools.install(dexBridgeHolder, hostContext);
 
                 // 5. 创建统一上下文
@@ -457,7 +462,8 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                         eventBus,
                         configStore,
                         dexBridgeHolder,
-                        uiRegistry
+                        uiRegistry,
+                        DEXKIT_MANAGER
                 );
 
                 // 6. 注册并安装所有功能模块

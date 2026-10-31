@@ -8,6 +8,7 @@ dex = Path('/tmp/pl-dexkit.jar')
 compiler = ['java', '-Xmx256m', '-cp', ':'.join(map(str, libs.glob('*.jar'))),
             'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-nowarn', '-no-stdlib', '-no-reflect']
 core = r / 'app/src/main/java/t/mma/hooks/core/DexInstallScheduler.kt'
+manager = r / 'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java'
 holder = r / 'app/src/main/java/t/mma/dexkit/DexBridgeHolder.java'
 script = r / 'app/src/main/java/t/mma/hooks/items/script/ScriptDexKitBridge.kt'
 with tempfile.TemporaryDirectory() as td:
@@ -24,7 +25,7 @@ class Handler(l:Looper){fun removeCallbacks(r:Runnable){};fun postDelayed(r:Runn
  cp = f'{classes}:{std}:{dex}'
  subprocess.run(compiler+['-classpath',cp,'-d',str(classes),str(core),str(p/'Log.kt'),str(p/'Handler.kt')],check=True,timeout=45)
  (p/'DexFinder.java').write_text('package t.mma.dexkit; public class DexFinder {}')
- subprocess.run(['javac','-cp',cp,'-d',str(classes),str(p/'DexFinder.java'),str(holder)],check=True,timeout=20)
+ subprocess.run(['javac','-cp',cp,'-d',str(classes),str(p/'DexFinder.java'),str(manager),str(holder)],check=True,timeout=20)
  (p/'Test.kt').write_text('''package t.mma.hooks.items.script
 import t.mma.hooks.core.DexInstallScheduler as D
 import java.util.concurrent.*

@@ -41,7 +41,8 @@ class ScriptPluginBridge internal constructor(
     val hostContext: Context,
     val classLoader: ClassLoader,
     val scriptDir: File,
-    val dexKit: ScriptDexKitBridge? = null
+    val dexKit: ScriptDexKitBridge? = null,
+    val dexKitManager: DexKitBridgeManager? = null
 ) {
     val apis: Class<WeChatApis> = WeChatApis::class.java
     private val pluginHooks = ConcurrentHashMap<String, CopyOnWriteArrayList<XC_MethodHook.Unhook>>()
@@ -793,7 +794,8 @@ class ScriptPluginBridge internal constructor(
                     context.dexKitBridge(),
                     context.dexBridgeHolder(),
                     context.hostClassLoader()
-                )
+                ),
+                context.dexKitManager()
             )
         }
     }
