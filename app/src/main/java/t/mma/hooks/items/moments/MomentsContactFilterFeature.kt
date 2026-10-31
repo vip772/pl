@@ -16,12 +16,13 @@ import java.util.Collections
 import java.util.WeakHashMap
 
 class MomentsContactFilterFeature : BaseFeature() {
+    @Volatile private var closed = true
     private val main = Handler(Looper.getMainLooper())
     private val timelineActivities = Collections.synchronizedMap(WeakHashMap<Activity, Unit>())
     private val installedMenus = Collections.synchronizedMap(WeakHashMap<Activity, Boolean>())
     private var preferences: SharedPreferences? = null
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
-        if (key == MomentsContactFilterSettings.KEY_ENABLE) {
+        if (!closed && key == MomentsContactFilterSettings.KEY_ENABLE) {
             refreshFilterMenus(
                 prefs.getBoolean(
                     MomentsContactFilterSettings.KEY_ENABLE,
@@ -40,6 +41,7 @@ class MomentsContactFilterFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
+        closed = false
         preferences = HchatStorage.preferences(
             context.hostContext(),
             MomentsContactFilterSettings.PREFS_NAME
@@ -53,13 +55,19 @@ class MomentsContactFilterFeature : BaseFeature() {
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {
-        preferences?.unregisterOnSharedPreferenceChangeListener(preferenceListener)
+        closed = true
+        runCatching { preferences?.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
+            .onFailure { logError("注销朋友圈过滤监听失败", it) }
         preferences = null
         main.removeCallbacksAndMessages(null)
-        timelineActivities.clear()
-        installedMenus.clear()
+        val cleanup = Runnable {
+            val activities = synchronized(installedMenus) { installedMenus.keys.toList() }
+            activities.forEach { activity -> runCatching { removeFilterMenu(activity) } }
+            timelineActivities.clear()
+            installedMenus.clear()
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) cleanup.run() else main.post(cleanup)
     }
-
     private fun installTimelineMenuHook(context: FeatureContext, className: String): Boolean {
         val activityClass = KavaReflector.loadClass(className, context.hostClassLoader()) ?: return false
         val onCreate = KavaReflector.findDeclaredMethod(
@@ -68,11 +76,13 @@ class MomentsContactFilterFeature : BaseFeature() {
             Bundle::class.java
         ) ?: return false
         return runCatching {
-            HookRegistry.get().hook(onCreate, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(onCreate, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (closed) return
                     bindFilterMenu(param.thisObject as? Activity ?: return)
                 }
             })
+            trackResource { HookRegistry.get().unhook(handle) }
             true
         }.getOrElse {
             logError("朋友圈过滤快捷入口安装失败: $className", it)
@@ -87,6 +97,7 @@ class MomentsContactFilterFeature : BaseFeature() {
 
     private fun refreshFilterMenus(enabled: Boolean) {
         val update = Runnable {
+            if (closed) return@Runnable
             val activities = synchronized(timelineActivities) {
                 timelineActivities.keys.toList()
             }
@@ -128,6 +139,7 @@ class MomentsContactFilterFeature : BaseFeature() {
             MenuItem.OnMenuItemClickListener::class.java
         )
         val listener = MenuItem.OnMenuItemClickListener {
+            if (closed) return@OnMenuItemClickListener false
             MomentsContactFilterQuickDialog.show(activity)
             true
         }

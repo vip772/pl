@@ -15,6 +15,7 @@ import t.mma.dexkit.DexMethodCache
 import t.mma.event.Events
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.runtime.WeChatVersionApi
+import t.mma.hooks.core.FeatureResourceScope
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
@@ -33,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 class MomentsKeywordBlockFeature : BaseFeature() {
     private var runtime: MomentsKeywordBlockRuntime? = null
+    private val tickets = LinkedHashMap<String, DexInstallScheduler.Installation>()
 
     override fun featureId(): String = ID
 
@@ -43,7 +45,11 @@ class MomentsKeywordBlockFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = MomentsKeywordBlockRuntime(context, ::logFeatureError)
+        val current = MomentsKeywordBlockRuntime(context, ::logFeatureError)
+        runtime = current
+        trackResource { current.destroy(); if (runtime === current) runtime = null }
+        trackResource { tickets.values.forEach { it.close() }; tickets.clear() }
+        current.start()
         scheduleInstall()
         subscribe(Events.DexReady::class.java) { scheduleInstall() }
     }
@@ -54,7 +60,7 @@ class MomentsKeywordBlockFeature : BaseFeature() {
     }
 
     private fun scheduleInstall() {
-        DexInstallScheduler.schedule(
+        scheduleOwned(
             "$ID:sns_query",
             "${name()}朋友圈数据库查询",
             stage = DexInstallScheduler.Stage.BRIDGE,
@@ -62,7 +68,7 @@ class MomentsKeywordBlockFeature : BaseFeature() {
         ) {
             runtime?.installSnsTimelineQueryHook() == true
         }
-        DexInstallScheduler.schedule(
+        scheduleOwned(
             "$ID:timeline_refresh",
             "${name()}朋友圈本地刷新",
             stage = DexInstallScheduler.Stage.BRIDGE,
@@ -70,28 +76,28 @@ class MomentsKeywordBlockFeature : BaseFeature() {
         ) {
             runtime?.warmupTimelineLocalRefresh() == true
         }
-        DexInstallScheduler.schedule(
+        scheduleOwned(
             "$ID:timeline_legacy",
             "${name()}旧版时间线",
             stage = DexInstallScheduler.Stage.BRIDGE
         ) {
             runtime?.installLegacyTimelineHook() == true
         }
-        DexInstallScheduler.schedule(
+        scheduleOwned(
             "$ID:timeline_improve",
             "${name()}新版时间线",
             stage = DexInstallScheduler.Stage.BRIDGE
         ) {
             runtime?.installImproveTimelineHook() == true
         }
-        DexInstallScheduler.schedule(
+        scheduleOwned(
             "$ID:profile_list",
             "${name()}个人主页列表",
             stage = DexInstallScheduler.Stage.BRIDGE
         ) {
             runtime?.installProfileListHook() == true
         }
-        DexInstallScheduler.schedule(
+        scheduleOwned(
             "$ID:profile_switch",
             "${name()}个人主页入口",
             stage = DexInstallScheduler.Stage.BRIDGE
@@ -100,6 +106,11 @@ class MomentsKeywordBlockFeature : BaseFeature() {
         }
     }
 
+    private fun scheduleOwned(key: String, label: String, stage: DexInstallScheduler.Stage,
+                              priority: Int = 0, installer: () -> Boolean) {
+        val ticket = tickets.getOrPut(key) { DexInstallScheduler.installation(key, label, stage, priority) }
+        ticket.schedule(installer)
+    }
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -120,6 +131,15 @@ private class MomentsKeywordBlockRuntime(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var destroyed = false
+    private var started = false
+    private val resources = FeatureResourceScope { logger("释放朋友圈过滤资源失败", it) }
+    private fun hookOwned(member: java.lang.reflect.Member, callback: XC_MethodHook): XC_MethodHook.Unhook {
+        check(!destroyed) { "过滤运行时已关闭" }
+        val handle = HookRegistry.get().hook(member, callback)
+        resources.register { HookRegistry.get().unhook(handle) }
+        return handle
+    }
     private data class HiddenViewState(
         val visibility: Int,
         val height: Int?
@@ -178,6 +198,7 @@ private class MomentsKeywordBlockRuntime(
     }
     private val reapplyRunnable = Runnable(::reapplyBoundViews)
     private val refreshTimelineRunnable = Runnable {
+        if (destroyed) return@Runnable
         val activity = runCatching {
             WeChatApis.currentActivity()?.currentActivity() as? Activity
         }.getOrNull() ?: return@Runnable
@@ -186,6 +207,7 @@ private class MomentsKeywordBlockRuntime(
             .onFailure { logger("朋友圈过滤触发原生刷新失败", it) }
     }
     private val selfResolveRunnable = Runnable {
+        if (destroyed) return@Runnable
         nextSelfResolveAt = 0L
         val snapshot = filterSnapshot
         if (snapshot.contactEnabled && snapshot.contactTargets.isNotEmpty()) {
@@ -193,8 +215,8 @@ private class MomentsKeywordBlockRuntime(
         }
     }
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == MomentsKeywordBlockSettings.KEY_ENABLE ||
-            key == MomentsKeywordBlockSettings.KEY_KEYWORDS
+        if (!destroyed && (key == MomentsKeywordBlockSettings.KEY_ENABLE ||
+            key == MomentsKeywordBlockSettings.KEY_KEYWORDS)
         ) {
             refreshFilterSnapshot()
             main.removeCallbacks(reapplyRunnable)
@@ -202,9 +224,9 @@ private class MomentsKeywordBlockRuntime(
         }
     }
     private val contactFilterPreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == MomentsContactFilterSettings.KEY_ENABLE ||
+        if (!destroyed && (key == MomentsContactFilterSettings.KEY_ENABLE ||
             key == MomentsContactFilterSettings.KEY_MODE ||
-            key == MomentsContactFilterSettings.KEY_TARGETS
+            key == MomentsContactFilterSettings.KEY_TARGETS)
         ) {
             refreshFilterSnapshot()
             main.removeCallbacks(reapplyRunnable)
@@ -238,7 +260,7 @@ private class MomentsKeywordBlockRuntime(
     @Volatile
     private var filterSnapshot = readFilterSnapshot(0L)
 
-    private val querySubscription = WeChatApis.databaseChanges()?.subscribeQuery(::rewriteTimelineQuery)
+
 
     @Volatile
     private var cachedSelfWxId: String = ""
@@ -246,11 +268,16 @@ private class MomentsKeywordBlockRuntime(
     @Volatile
     private var nextSelfResolveAt: Long = 0L
 
-    init {
+    @Synchronized fun start() {
+        if (destroyed || started) return
+        started = true
+        resources.register { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
+        resources.register { contactFilterPrefs.unregisterOnSharedPreferenceChangeListener(contactFilterPreferenceListener) }
         contactFilterPrefs.registerOnSharedPreferenceChangeListener(contactFilterPreferenceListener)
+        val subscription = WeChatApis.databaseChanges()?.subscribeQuery(::rewriteTimelineQuery)
+        if (subscription != null) resources.register { subscription.unsubscribe() }
     }
-
     /**
      * 朋友圈使用的 SnsSqliteDB 查询方法名会随微信版本混淆，且不一定继续经过公共
      * rawQuery 名称入口。直接在这个稳定签名的存储层方法前改写 SQL，避免先加载再逐条
@@ -258,11 +285,13 @@ private class MomentsKeywordBlockRuntime(
      */
     @Synchronized
     fun installSnsTimelineQueryHook(): Boolean {
+        if (destroyed) return false
         if (snsTimelineQueryHookInstalled) return true
         val method = locateSnsTimelineQueryMethod() ?: return false
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+            hookOwned(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val sql = param.args.getOrNull(0) as? String ?: return
                     val rewritten = rewriteTimelineQuery(sql)
                     if (rewritten != sql) param.args[0] = rewritten
@@ -278,6 +307,7 @@ private class MomentsKeywordBlockRuntime(
 
     @Synchronized
     fun installLegacyTimelineHook(): Boolean {
+        if (destroyed) return false
         if (legacyTimelineHookInstalled) return true
         val method = locateLegacyTimelineCreateViewMethod()
         if (method == null) {
@@ -285,8 +315,9 @@ private class MomentsKeywordBlockRuntime(
             return true
         }
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+            hookOwned(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val view = param.args.getOrNull(3) as? View
                     if (!filterSnapshot.isActive(filterByAuthor = true)) {
                         view?.let(::clearViewBinding)
@@ -303,6 +334,7 @@ private class MomentsKeywordBlockRuntime(
                 }
 
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val view = param.result as? View ?: return
                     if (!filterSnapshot.isActive(filterByAuthor = true)) {
                         clearViewBinding(view)
@@ -325,11 +357,13 @@ private class MomentsKeywordBlockRuntime(
 
     @Synchronized
     fun installImproveTimelineHook(): Boolean {
+        if (destroyed) return false
         if (improveTimelineHookInstalled) return true
         val method = locateImproveTimelineBindMethod() ?: return false
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+            hookOwned(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val view = param.thisObject as? View
                     if (!filterSnapshot.isActive(filterByAuthor = true)) {
                         view?.let(::clearViewBinding)
@@ -346,6 +380,7 @@ private class MomentsKeywordBlockRuntime(
                 }
 
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val view = param.thisObject as? View ?: return
                     if (!filterSnapshot.isActive(filterByAuthor = true)) {
                         clearViewBinding(view)
@@ -370,11 +405,13 @@ private class MomentsKeywordBlockRuntime(
 
     @Synchronized
     fun installProfileListHook(): Boolean {
+        if (destroyed) return false
         if (profileListHookInstalled) return true
         val method = locateProfileListBindMethod() ?: return false
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+            hookOwned(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val view = param.args.getOrNull(1) as? View
                     if (!filterSnapshot.isActive(filterByAuthor = false)) {
                         view?.let(::clearViewBinding)
@@ -391,6 +428,7 @@ private class MomentsKeywordBlockRuntime(
                 }
 
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val view = param.result as? View ?: return
                     if (!filterSnapshot.isActive(filterByAuthor = false)) {
                         clearViewBinding(view)
@@ -413,6 +451,7 @@ private class MomentsKeywordBlockRuntime(
 
     @Synchronized
     fun installProfileSwitchHook(): Boolean {
+        if (destroyed) return false
         if (profileSwitchHookInstalled) return true
         if (!requiresFlutterProfileSwitch()) {
             profileSwitchHookInstalled = true
@@ -420,8 +459,9 @@ private class MomentsKeywordBlockRuntime(
         }
         val method = locateFlutterProfileSwitchMethod() ?: return false
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+            hookOwned(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     if (activeKeywords().isNotEmpty()) param.result = false
                 }
             })
@@ -435,6 +475,7 @@ private class MomentsKeywordBlockRuntime(
 
     @Synchronized
     fun warmupTimelineLocalRefresh(): Boolean {
+        if (destroyed) return false
         val improveReady = KavaReflector.loadClass(
             IMPROVE_MVVM_LIST_CLASS,
             context.hostClassLoader()
@@ -443,22 +484,23 @@ private class MomentsKeywordBlockRuntime(
         return improveReady || legacyReady
     }
 
-    fun destroy() {
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        contactFilterPrefs.unregisterOnSharedPreferenceChangeListener(contactFilterPreferenceListener)
-        querySubscription?.unsubscribe()
-        main.removeCallbacks(reapplyRunnable)
-        main.removeCallbacks(selfResolveRunnable)
-        main.removeCallbacks(refreshTimelineRunnable)
-        restoreAllViews()
-        boundInfos.clear()
-        authorDecisionCache.clear()
-        improveInfoAccessors.clear()
-        missingImproveInfoAccessors.clear()
-        userNameAccessors.clear()
+    @Synchronized fun destroy() {
+        if (destroyed) return
+        destroyed = true
+        resources.close()
+        main.removeCallbacksAndMessages(null)
+        val restore = Runnable {
+            restoreAllViews()
+            boundInfos.clear()
+            authorDecisionCache.clear()
+            improveInfoAccessors.clear()
+            missingImproveInfoAccessors.clear()
+            userNameAccessors.clear()
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) restore.run() else main.post(restore)
     }
-
     private fun prepareViewBinding(view: View, info: Any, filterByAuthor: Boolean) {
+        if (destroyed) return
         val bound = boundInfos[view]
         val snapshot = filterSnapshot
         if (bound != null &&
@@ -480,6 +522,7 @@ private class MomentsKeywordBlockRuntime(
     }
 
     private fun bindView(view: View, info: Any, filterByAuthor: Boolean) {
+        if (destroyed) return
         val snapshot = filterSnapshot
         if (!snapshot.isActive(filterByAuthor) || !isSnsInfo(info)) {
             clearViewBinding(view)
@@ -549,6 +592,7 @@ private class MomentsKeywordBlockRuntime(
     }
 
     private fun rewriteTimelineQuery(sql: String): String {
+        if (destroyed) return sql
         val snapshot = filterSnapshot
         if (!snapshot.contactEnabled ||
             snapshot.contactTargets.isEmpty()
@@ -580,6 +624,7 @@ private class MomentsKeywordBlockRuntime(
     }
 
     private fun selfWxId(): String {
+        if (destroyed) return ""
         cachedSelfWxId.takeIf { it.isNotBlank() }?.let { return it }
         val now = SystemClock.elapsedRealtime()
         if (now < nextSelfResolveAt) return ""
@@ -762,6 +807,7 @@ private class MomentsKeywordBlockRuntime(
     }
 
     private fun reapplyBoundViews() {
+        if (destroyed) return
         val snapshot = filterSnapshot
         val bindings = synchronized(boundInfos) { boundInfos.entries.map { it.key to it.value } }
         bindings.forEach { (view, bound) ->
