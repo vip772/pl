@@ -69,16 +69,18 @@ class BeforeTransferNameQuery(
 
         if (sceneClass == null) {
             val matches = runCatching {
-                context.dexKitBridge().findClass(
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findClass(
                     org.luckypray.dexkit.query.FindClass().apply {
                         matcher(org.luckypray.dexkit.query.matchers.ClassMatcher().apply {
                             usingStrings(listOf("/cgi-bin/mmpay-bin/beforetransfer"))
                         })
                     }
-                )
+                    ).map { it.name }
+                }
             }.getOrDefault(emptyList())
-            for (data in matches) {
-                val clazz = KavaReflector.loadClass(data.name, context.hostClassLoader())
+            for (name in matches) {
+                val clazz = KavaReflector.loadClass(name, context.hostClassLoader())
                 if (selectSceneClass(clazz)) break
             }
         }

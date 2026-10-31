@@ -29,7 +29,8 @@ internal object ConversationMenuLocator {
             ?.let { return it }
 
         val create = runCatching {
-            val longClick = context.dexKitBridge().findMethod(
+            val longClick = context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -50,7 +51,7 @@ internal object ConversationMenuLocator {
                     runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                 }
                 .firstOrNull(::isLongClickMethod)
-                ?: return@runCatching null
+            } ?: return@runCatching null
             KavaReflector.findDeclaredMethod(
                 longClick.declaringClass,
                 "onCreateContextMenu",

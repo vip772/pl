@@ -19,6 +19,9 @@ files = [
     'quickread/QuickMarkReadRuntime.kt',
     'roundavatar/RoundAvatarFeature.kt',
     'quoteclear/QuoteDeleteClearFeature.kt',
+    'quickcontactedit/ConversationMenuLocator.kt',
+    'shortvideo/FinderFeedDetailResolver.kt',
+    'realtail/BeforeTransferNameQuery.kt',
 ]
 total = 0
 scopes = []
@@ -62,6 +65,7 @@ import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.FindClass
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import org.luckypray.dexkit.query.matchers.ClassMatcher
+import org.luckypray.dexkit.query.enums.StringMatchType
 import t.mma.dexkit.DexKitBridgeManager
 class Context {
  fun dexKitManager() = DexKitBridgeManager()
@@ -78,13 +82,16 @@ fun isPrivateOpenUrlMethod(m: Method) = true
 fun isSendTypingMethod(m: Method) = true
 fun isSupportOnKeyCandidate(m: Method) = true
 fun isQuoteClearCandidate(m: Method) = true
+fun isLongClickMethod(m: Method) = true
+fun isRequestConstructor(c: Constructor<*>) = true
 '''
     names = set(re.findall(r'\b[A-Z][A-Z_]+\b', '\n'.join(scopes))) - {'R', 'ERR'}
     prelude += '\n'.join(f'const val {name} = "anchor"' for name in sorted(names))
     types = ['List<Constructor<*>>', 'List<Method>', 'List<Method>', 'List<Member>',
              'List<Method>', 'List<Method>', 'List<Class<*>>', 'List<Method>', 'List<Class<*>>',
              'List<Method>', 'List<String>', 'List<Method>',
-             'List<Method>', 'List<Member>', 'Method?', 'Method?']
+             'List<Method>', 'List<Member>', 'Method?', 'Method?',
+             'Method?', 'List<Constructor<*>>', 'List<String>']
     assert len(types) == len(scopes)
     body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))

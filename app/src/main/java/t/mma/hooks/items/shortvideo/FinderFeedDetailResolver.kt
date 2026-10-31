@@ -143,7 +143,8 @@ internal class FinderFeedDetailResolver private constructor(
 
         private fun locateRequestConstructor(context: FeatureContext): Constructor<*>? {
             val candidates = runCatching {
-                context.dexKitBridge().findMethod(
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findMethod(
                     FindMethod().apply {
                         matcher(MethodMatcher().apply { usingEqStrings(CGI_URI) })
                     }
@@ -152,6 +153,7 @@ internal class FinderFeedDetailResolver private constructor(
                     runCatching { data.getConstructorInstance(context.hostClassLoader()) }.getOrNull()
                 }.filter(::isRequestConstructor)
                     .distinctBy { it.toGenericString() }
+                }
             }.onFailure {
                 HLog.e("$TAG DexKit定位视频号详情请求失败: ${it.message}", it)
             }.getOrDefault(emptyList())
