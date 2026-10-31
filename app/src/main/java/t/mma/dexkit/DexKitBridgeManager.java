@@ -5,6 +5,7 @@ import t.mma.hooks.core.DexInstallScheduler;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.function.Function;
 
 /**
  * 共享宿主 DexKit 的代际与租约登记器。
@@ -49,6 +50,18 @@ public final class DexKitBridgeManager {
         return generation == null ? 0L : generation.id;
     }
 
+    /** 在当前代的活动查询计数保护下执行回调，不向外暴露 DexKit Data。 */
+    public <T> T withCurrentBridge(Function<DexKitBridge, T> action) {
+        if (action == null) throw new IllegalArgumentException("action == null");
+        try {
+            return queryCurrentBridge(action);
+        } catch (RuntimeException error) {
+            throw error;
+        } catch (Exception error) {
+            throw new IllegalStateException("DexKit 查询失败", error);
+        }
+    }
+
     /**
      * 登记持久租约。rawCompatibility=true 表示调用方可能保留原始 bridge/holder，
      * 该租约释放前不能安全关闭 native bridge。
@@ -79,6 +92,24 @@ public final class DexKitBridgeManager {
     /** 无持久租约的短查询入口，供只返回脱离 native 数据的新 API 使用。 */
     public <T> T queryCurrent(java.util.concurrent.Callable<T> task) throws Exception {
         if (task == null) throw new IllegalArgumentException("task == null");
+        try {
+            return queryCurrentBridge(bridge -> {
+                try {
+                    return task.call();
+                } catch (Exception error) {
+                    throw new QueryException(error);
+                }
+            });
+        } catch (QueryException error) {
+            throw (Exception) error.getCause();
+        }
+    }
+
+    /**
+     * 捕获同一代的 bridge 后执行短查询，避免发布新代际时把回调切换到错误 bridge。
+     */
+    public <T> T queryCurrentBridge(java.util.function.Function<DexKitBridge, T> task) throws Exception {
+        if (task == null) throw new IllegalArgumentException("task == null");
         State state;
         synchronized (lock) {
             state = current;
@@ -88,7 +119,7 @@ public final class DexKitBridgeManager {
             state.activeQueryCount++;
         }
         try {
-            return DexInstallScheduler.queryDexKitTask(() -> task.call());
+            return DexInstallScheduler.queryDexKitTask(() -> task.apply(state.bridge));
         } finally {
             leave(state);
         }
@@ -183,6 +214,12 @@ public final class DexKitBridgeManager {
             return true;
         } catch (Throwable ignored) {
             return false;
+        }
+    }
+
+    private static final class QueryException extends RuntimeException {
+        private QueryException(Exception cause) {
+            super(cause);
         }
     }
 

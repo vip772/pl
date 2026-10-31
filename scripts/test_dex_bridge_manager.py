@@ -71,7 +71,7 @@ public class Test {
     lease.close();
     if (!manager.closeIfIdle()) throw new AssertionError("idle current close");
     if (third.closes != 1) throw new AssertionError("current close");
-    try { manager.queryCurrent(new Callable<Integer>() { public Integer call(){ return 1; } }); }
+    try { manager.withCurrentBridge(new java.util.function.Function<DexKitBridge, Integer>() { public Integer apply(DexKitBridge bridge){ return 1; } }); }
     catch (IllegalStateException expected) { rejected = true; }
     if (!rejected) throw new AssertionError("closed current accepted query");
     System.out.println("PASS DexKit manager: generation reuse, raw compatibility lease, query accounting, retired/current idle close, closed query rejection");

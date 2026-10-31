@@ -2,7 +2,9 @@ package t.mma.hooks.items.script
 import t.mma.utils.HLog
 
 import t.mma.hooks.core.DexInstallScheduler
+import t.mma.hooks.core.DexKitQueryApi
 import t.mma.dexkit.DexBridgeHolder
+import t.mma.dexkit.DexKitBridgeManager
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.DexKitBridge
 import org.luckypray.dexkit.query.FindClass
@@ -16,7 +18,8 @@ import java.util.ArrayList
 class ScriptDexKitBridge internal constructor(
     private val dexKitBridge: DexKitBridge?,
     private val dexBridgeHolder: DexBridgeHolder?,
-    private val classLoader: ClassLoader
+    private val classLoader: ClassLoader,
+    private val manager: DexKitBridgeManager? = null
 ) {
     fun bridge(): DexKitBridge? = dexKitBridge
 
@@ -26,6 +29,11 @@ class ScriptDexKitBridge internal constructor(
         val strings = usingStrings?.filter { it.isNotBlank() }.orEmpty()
         if (strings.isEmpty()) return emptyList()
         return runCatching {
+            manager?.let { controlled ->
+                return@runCatching DexKitQueryApi.findClassesByStrings(
+                    controlled, classLoader, *strings.toTypedArray()
+                )
+            }
             DexInstallScheduler.queryDexKit {
                 val bridge = dexKitBridge ?: return@queryDexKit emptyList()
                 val out = linkedSetOf<Class<*>>()
@@ -55,6 +63,11 @@ class ScriptDexKitBridge internal constructor(
         val strings = usingStrings?.filter { it.isNotBlank() }.orEmpty()
         if (strings.isEmpty()) return emptyList()
         return runCatching {
+            manager?.let { controlled ->
+                return@runCatching DexKitQueryApi.findMembersByStrings(
+                    controlled, classLoader, *strings.toTypedArray()
+                )
+            }
             DexInstallScheduler.queryDexKit {
                 val bridge = dexKitBridge ?: return@queryDexKit emptyList()
                 val out = linkedSetOf<Member>()

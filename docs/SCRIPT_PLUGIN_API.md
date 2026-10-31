@@ -132,7 +132,10 @@ process=main
 | `dexKit` | Hchat 封装后的 DexKit 脚本接口。 |
 | `dexKitBridge` | DexKit 原始桥接对象。 |
 | `dexFinder` | Hchat DexFinder 实例。 |
-| `dexBridgeHolder` | DexKit 持有器。 |
+| `dexBridgeHolder` | DexKit 持有器。旧接口继续受兼容租约保护，暂不因脚本闲置自动关闭宿主 bridge。 |
+
+### 受控 DexKit 查询（新脚本接口基础）
+脚本运行时内部的 `dexKit.findClassList(...)` / `findMemberList(...)` 已优先使用带代际管理器的受控查询路径：DexKit native 查询和结果转换都在共享串行区间内完成，脚本拿到的只有 `Class` / `Member` 列表。旧版脚本仍可通过 `dexKitBridge`、`dexFinder`、`dexBridgeHolder` 取得原始对象，因此当前仍由兼容租约保活，尚未开启宿主 bridge 自动回收。
 | `XposedBridgeClass` / `XposedHelpersClass` / `XC_MethodHookClass` | 对应 Xposed 类对象。 |
 | `WeChatApisClass` / `KavaReflectorClass` | 对应 Hchat 内部类对象。 |
 | `DexKitBridgeClass` / `DexFinderClass` / `DexBridgeHolderClass` | 对应 DexKit 相关类对象。 |

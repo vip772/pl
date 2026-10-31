@@ -11,6 +11,7 @@ core = r / 'app/src/main/java/t/mma/hooks/core/DexInstallScheduler.kt'
 manager = r / 'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java'
 holder = r / 'app/src/main/java/t/mma/dexkit/DexBridgeHolder.java'
 script = r / 'app/src/main/java/t/mma/hooks/items/script/ScriptDexKitBridge.kt'
+query_api = r / 'app/src/main/java/t/mma/hooks/core/DexKitQueryApi.kt'
 with tempfile.TemporaryDirectory() as td:
  p = Path(td)
  classes = p / 'classes'; classes.mkdir()
@@ -48,7 +49,7 @@ fun main(){
  println("PASS Dex consumers: real DexKit Java/Kotlin ABI, empty/unavailable bridge, shared Java/Kotlin concurrency, nesting, exception recovery")
 }
 ''')
- subprocess.run(compiler+['-classpath',cp,'-d',str(p/'test.jar'),str(script),str(p/'Test.kt')],check=True,timeout=45)
+ subprocess.run(compiler+['-classpath',cp,'-d',str(p/'test.jar'),str(query_api),str(script),str(p/'Test.kt')],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{p/"test.jar"}:{cp}','t.mma.hooks.items.script.TestKt'],check=True,timeout=15)
 # Ensure the entire helper and native-backed conversion remain inside the gate.
 s = script.read_text()
