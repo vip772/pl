@@ -1702,7 +1702,7 @@ object ScriptPluginAgentLocalReverseTools {
     ) : AutoCloseable {
         private val queryBridge = ThreadLocal<DexKitBridge>()
         val dex: DexKitBridge get() = queryBridge.get() ?: externalDex
-            ?: error("宿主 DexKit 只能在 withDex 查询中读取")
+            ?: throw IllegalStateException("宿主 DexKit 只能在 withDex 查询中读取")
         fun <T> withDex(action: () -> T): T {
             val controlled = manager
             if (controlled == null) return DexInstallScheduler.queryDexKit(action)
