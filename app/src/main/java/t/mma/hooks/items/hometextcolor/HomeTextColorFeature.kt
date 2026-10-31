@@ -244,7 +244,8 @@ private class HomeTextColorRuntime(
         if (!allowDexSearch) return emptyList()
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply { usingStrings(listOf(spec.anchor)) })
                 }
@@ -255,6 +256,7 @@ private class HomeTextColorRuntime(
                 .filter { method -> isConversationAdapterGetView(method, spec) }
                 .distinctBy(::methodDescriptor)
                 .toList()
+            }
         }.getOrElse {
             HLog.e("$TAG 定位 ${spec.anchor} 失败: ${it.message}", it)
             return emptyList()
@@ -312,15 +314,18 @@ private class HomeTextColorRuntime(
 
         val candidates = runCatching {
             val methods = if (anchorOnMethod) {
-                context.dexKitBridge().findMethod(
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findMethod(
                     FindMethod().apply {
                         matcher(MethodMatcher().apply { usingStrings(listOf(anchor)) })
                     }
                 ).mapNotNull { data ->
                     runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                 }
+                }
             } else {
-                context.dexKitBridge().findClass(
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findClass(
                     FindClass().apply {
                         matcher(ClassMatcher().apply { usingStrings(listOf(anchor)) })
                     }
@@ -328,6 +333,7 @@ private class HomeTextColorRuntime(
                     .mapNotNull { KavaReflector.loadClass(it.name, context.hostClassLoader()) }
                     .flatMap { KavaReflector.declaredMethods(it).asSequence() }
                     .toList()
+                }
             }
             methods.asSequence()
                 .filter { it.declaringClass.name.startsWith(ownerPrefix) }
@@ -468,7 +474,8 @@ private class HomeTextColorRuntime(
         if (!allowDexSearch) return null
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -483,6 +490,7 @@ private class HomeTextColorRuntime(
                 .filter(::isModernConversationBind)
                 .distinctBy(::methodDescriptor)
                 .toList()
+            }
         }.getOrElse {
             HLog.e("$TAG 定位高版本首页会话绑定入口失败: ${it.message}", it)
             return null
@@ -551,7 +559,8 @@ private class HomeTextColorRuntime(
         layoutInflaterSearchAttempted = true
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -569,6 +578,7 @@ private class HomeTextColorRuntime(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isLayoutInflaterFactoryMethod)
                 .distinctBy(::methodDescriptor)
+            }
         }.getOrElse {
             HLog.e("$TAG 定位微信布局创建入口失败: ${it.message}", it)
             emptyList()

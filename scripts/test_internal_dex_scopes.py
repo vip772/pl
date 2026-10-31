@@ -31,6 +31,7 @@ files = [
     'messagetextcolor/MessageTextColorFeature.kt',
     'dynamicbadge/DynamicBadgeFeature.kt',
     'conversationgroup/ConversationGroupRuntime.kt',
+    'hometextcolor/HomeTextColorFeature.kt',
 ]
 total = 0
 scopes = []
@@ -47,7 +48,7 @@ for relative in files:
             end += 1
         scope = source[match.start():end]
         assert 'bridge.findMethod(' in scope or 'bridge.findClass(' in scope, relative
-        assert any(token in scope for token in ['getMethodInstance', 'getConstructorInstance', 'R.loadClass(it.name, loader)', 'map { it.name }']), relative
+        assert any(token in scope for token in ['getMethodInstance', 'getConstructorInstance', 'R.loadClass(it.name, loader)', 'KavaReflector.loadClass(it.name, context.hostClassLoader())', 'map { it.name }']), relative
         total += 1
         scopes.append(scope)
 print(f'PASS internal DexKit source boundaries: {total} manager-protected query scopes; no raw bridge calls in migrated files')
@@ -76,7 +77,16 @@ import org.luckypray.dexkit.query.matchers.MethodMatcher
 import org.luckypray.dexkit.query.matchers.ClassMatcher
 import org.luckypray.dexkit.query.enums.StringMatchType
 import t.mma.dexkit.DexKitBridgeManager
-object KavaReflector {fun declaredMethods(c:Class<*>) = c.declaredMethods}
+object KavaReflector {
+ fun declaredMethods(c:Class<*>) = c.declaredMethods
+ fun loadClass(n:String,l:ClassLoader):Class<*>? = null
+}
+class Spec(val anchor:String = "anchor")
+val spec = Spec()
+fun isConversationAdapterGetView(m:Method,s:Spec) = true
+fun isModernConversationBind(m:Method) = true
+fun isLayoutInflaterFactoryMethod(m:Method) = true
+fun methodDescriptor(m:Method) = m.toGenericString()
 data class RevokeEntry(val method: Method, val invokedMethods: List<Method>)
 class Context {
  fun dexKitManager() = DexKitBridgeManager()
@@ -110,7 +120,8 @@ fun isLegacyConversationBind(m: Method) = true
 fun isNativeGroupMenuCreateMethod(m: Method) = true
 fun isNativeGroupMenuClickMethod(m: Method) = true
 '''
-    names = set(re.findall(r'\b[A-Z][A-Z_]+\b', '\n'.join(scopes))) - {'R', 'ERR', 'MODERN_BIND_ANCHORS', 'LEGACY_BIND_ANCHORS'}
+    names = set(re.findall(r'\b[A-Z][A-Z_]+\b', '\n'.join(scopes))) - {'R', 'ERR', 'MODERN_BIND_ANCHORS', 'LEGACY_BIND_ANCHORS', 'MODERN_CONVERSATION_BIND_ANCHORS'}
+    prelude += 'val MODERN_CONVERSATION_BIND_ANCHORS = listOf("anchor")\n'
     prelude += 'val MODERN_BIND_ANCHORS = listOf("anchor")\nval LEGACY_BIND_ANCHORS = listOf("anchor")\n'
     prelude += '\n'.join(f'const val {name} = "anchor"' for name in sorted(names))
     types = ['List<Constructor<*>>', 'List<Method>', 'List<Method>', 'List<Member>',
@@ -120,7 +131,8 @@ fun isNativeGroupMenuClickMethod(m: Method) = true
              'Method?', 'List<Constructor<*>>', 'List<String>',
              'List<Method>', 'List<Method>', 'List<RevokeEntry>', 'List<Method>', 'List<Method>',
              'Method?', 'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>',
-             'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'Method?']
+             'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'Method?',
+             'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>']
     assert len(types) == len(scopes)
     body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))
