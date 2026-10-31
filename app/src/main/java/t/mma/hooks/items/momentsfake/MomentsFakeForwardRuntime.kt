@@ -469,11 +469,13 @@ internal class MomentsFakeForwardRuntime(
             CACHE_IMPROVE_PAGE_QUERY
         )
         val method = cached?.takeIf(::isImprovePageQueryMethod) ?: runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply {
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(FindMethod().apply {
                 matcher(MethodMatcher().usingStrings("getPageList key:", "getSeqDownLimit", "getSeqUpLimit"))
             }).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter(::isImprovePageQueryMethod)
                 .singleOrNull()
+            }
         }.onFailure { logger("朋友圈 Improve 分页诊断入口定位失败", it) }.getOrNull() ?: return false
         DexMethodCache.save(cachePrefs, runtimeKey, CACHE_IMPROVE_PAGE_QUERY, method)
         return runCatching {
@@ -638,11 +640,13 @@ internal class MomentsFakeForwardRuntime(
                 return it
             }
         val method = runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply {
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(FindMethod().apply {
                 matcher(MethodMatcher().declaredClass(IMPROVE_MVVM_LIST_CLASS).usingStrings("submitRefreshAll"))
             }).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter { isImproveTimelineRefreshMethod(it, mvvmListClass) }
                 .singleOrNull()
+            }
         }.onFailure { logger("朋友圈 Improve 本地数据重载入口定位失败", it) }.getOrNull() ?: return null
         DexMethodCache.save(cachePrefs, runtimeKey, CACHE_IMPROVE_TIMELINE_REFRESH, method)
         improveTimelineRefreshMethod = method
@@ -770,11 +774,13 @@ internal class MomentsFakeForwardRuntime(
                 return it
             }
         val method = runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply {
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(FindMethod().apply {
                 matcher(MethodMatcher().usingStrings("onNotifyChange", "SnsTimeLineVendingAdapter"))
             }).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter(::isTimelineLocalReloadMethod)
                 .singleOrNull()
+            }
         }.onFailure { logger("朋友圈本地 Cursor 重载入口定位失败", it) }.getOrNull() ?: return null
         DexMethodCache.save(cachePrefs, runtimeKey, CACHE_TIMELINE_LOCAL_RELOAD, method)
         timelineLocalReloadMethod = method
@@ -876,10 +882,12 @@ internal class MomentsFakeForwardRuntime(
         val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         val cached = DexMethodCache.load(cachePrefs, runtimeKey, context.hostClassLoader(), CACHE_DELETE_CALLBACK)
         val method = cached?.takeIf(::isDeleteCallback) ?: runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply {
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(FindMethod().apply {
                 matcher(MethodMatcher().usingStrings("delete by server", "onItemDelClick:"))
             }).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter(::isDeleteCallback).firstOrNull()
+            }
         }.getOrNull() ?: return false
         DexMethodCache.save(cachePrefs, runtimeKey, CACHE_DELETE_CALLBACK, method)
         return runCatching {
@@ -920,10 +928,12 @@ internal class MomentsFakeForwardRuntime(
         val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         val cached = DexMethodCache.load(cachePrefs, runtimeKey, context.hostClassLoader(), CACHE_USER_QUERY)
         val method = cached?.takeIf(::isUserQueryMethod) ?: runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply {
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(FindMethod().apply {
                 matcher(MethodMatcher().usingStrings("getCursorByUserName", "com.tencent.mm.plugin.sns.storage.SnsInfoStorage"))
             }).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter(::isUserQueryMethod).singleOrNull()
+            }
         }.getOrNull() ?: return false
         val cachedPredicate = DexMethodCache.load(
             cachePrefs,
@@ -932,10 +942,12 @@ internal class MomentsFakeForwardRuntime(
             CACHE_USER_QUERY_PREDICATE
         )
         val predicate = cachedPredicate?.takeIf(::isUserQueryPredicateMethod) ?: runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply {
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(FindMethod().apply {
                 matcher(MethodMatcher().usingStrings("getCDAboveIncludeSeq"))
             }).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter(::isUserQueryPredicateMethod).singleOrNull()
+            }
         }.getOrNull() ?: return false
         val cachedTimeline = DexMethodCache.load(
             cachePrefs,
@@ -944,13 +956,15 @@ internal class MomentsFakeForwardRuntime(
             CACHE_TIMELINE_QUERY
         )
         val timeline = cachedTimeline?.takeIf(::isTimelineQueryCallback) ?: runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply {
+            context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(FindMethod().apply {
                 matcher(MethodMatcher().usingStrings(
                     "getCursorForTimeLine",
                     "select *,rowid from SnsInfo  where  (sourceType & 2 != 0 ) "
                 ))
             }).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter(::isTimelineQueryCallback).singleOrNull()
+            }
         }.getOrNull() ?: return false
         DexMethodCache.save(cachePrefs, runtimeKey, CACHE_USER_QUERY, method)
         DexMethodCache.save(cachePrefs, runtimeKey, CACHE_USER_QUERY_PREDICATE, predicate)
