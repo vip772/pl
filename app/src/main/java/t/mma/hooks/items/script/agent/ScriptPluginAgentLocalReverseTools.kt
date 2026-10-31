@@ -777,6 +777,7 @@ object ScriptPluginAgentLocalReverseTools {
         }
     }
 
+    }
     private fun attachTarget(rawResult: String, target: Binding): String {
         return runCatching {
             JSONObject(rawResult).apply {
