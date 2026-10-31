@@ -51,6 +51,7 @@ files = [
     'zombiecheck/ZombieCheckFeature.kt',
     'moments/MomentsKeywordBlockFeature.kt',
     'moments/MomentsBottomDetailFeature.kt',
+    'hchatextra/HchatExtraFeature.kt',
 ]
 total = 0
 scopes = []
@@ -67,7 +68,7 @@ for relative in files:
             end += 1
         scope = source[match.start():end]
         assert 'bridge.findMethod(' in scope or 'bridge.findClass(' in scope, relative
-        assert any(token in scope for token in ['getMethodInstance', 'getConstructorInstance', 'R.loadClass(it.name, loader)', 'KavaReflector.loadClass(it.name, context.hostClassLoader())', 'map { it.name }']), relative
+        assert any(token in scope for token in ['getMethodInstance', 'getConstructorInstance', 'toRuntimeMethodOrNull()', 'R.loadClass(it.name, loader)', 'KavaReflector.loadClass(it.name, context.hostClassLoader())', 'map { it.name }']), relative
         total += 1
         scopes.append(scope)
 print(f'PASS internal DexKit source boundaries: {total} manager-protected query scopes; no raw bridge calls in migrated files')
@@ -120,6 +121,13 @@ fun isRetransmitDoneCandidate(m:Method) = true
 fun isNewQuoteCandidate(m:Method) = true
 fun isProbeConstructor(c:Constructor<*>) = true
 fun isDeleteMethod(m:Method) = true
+fun isRedPacketTimeFormatterMethod(m:Method) = true
+fun isBind(m:Method) = true
+val adapterClass = Any::class.java
+val clazz = Any::class.java
+val searchPackage: String? = "package"
+fun org.luckypray.dexkit.result.MethodData.toRuntimeMethodOrNull(): Method? =
+ runCatching { getMethodInstance(context.hostClassLoader()) }.getOrNull()
 class Context {
  fun dexKitManager() = DexKitBridgeManager()
  fun hostClassLoader() = ClassLoader.getSystemClassLoader()
@@ -176,8 +184,9 @@ fun isRecorderDurationMethod(m: Method) = true
     types += ['List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'Method?']
     types += ['List<Constructor<*>>', 'List<Method>']
     types += ['List<Method>', 'Method?', 'Method?']
+    types += ['Method?', 'Method?', 'List<Method>', 'List<Method>', 'Class<*>?', 'List<Method>', 'Class<*>?']
     assert len(types) == len(scopes)
-    body = '\n'.join(f'fun query{i}(): {t} {{ val strings = {"listOf" if i == 54 else "arrayOf"}("anchor"); val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
+    body = '\n'.join(f'fun query{i}(): {t} {{ val strings = {"listOf" if i == 54 or i >= 64 else "arrayOf"}("anchor"); val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))
     (p / 'Scopes.kt').write_text(prelude + '\n' + body)
     subprocess.run(compiler + ['-classpath', f'{classes}:{std}:{dex}', '-d', str(p / 'scopes.jar'),

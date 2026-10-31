@@ -489,7 +489,8 @@ private class HchatExtraHooker(
             ?.takeIf { isRedPacketTimeFormatterMethod(it) }
             ?.let { return it }
         val method = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     searchPackages("com.tencent.mm.plugin.luckymoney.model")
                     matcher(
@@ -500,6 +501,7 @@ private class HchatExtraHooker(
                 }
             ).mapNotNull { it.toRuntimeMethodOrNull() }
                 .firstOrNull { isRedPacketTimeFormatterMethod(it) }
+            }
         }.getOrElse {
             logger("红包详情时间格式化定位失败", it)
             null
@@ -692,7 +694,8 @@ private class HchatExtraHooker(
         val methodCacheKey = methodCacheKey()
         DexMethodCache.load(methodPrefs, methodCacheKey, context.hostClassLoader(), cacheName)?.let { return it }
         val method = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     if (!searchPackage.isNullOrBlank()) searchPackages(searchPackage)
                     matcher(
@@ -702,6 +705,7 @@ private class HchatExtraHooker(
                     )
                 }
             ).firstNotNullOfOrNull { it.toRuntimeMethodOrNull() }
+            }
         }.getOrElse {
             logger("DexKit定位失败: $cacheName", it)
             null
@@ -717,13 +721,15 @@ private class HchatExtraHooker(
             ?.takeIf { isMessageViewBindCandidate(it) }
             ?.let { return it }
         val matches = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         usingStrings(listOf("MicroMsg.MvvmChattingItem", "[onBindView]"))
                     })
                 }
             ).mapNotNull { it.toRuntimeMethodOrNull() }
+            }
         }.getOrElse {
             logger("消息显示时间定位失败", it)
             emptyList()
@@ -751,13 +757,15 @@ private class HchatExtraHooker(
             return cached
         }
         val fullBinds = runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply {
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(FindMethod().apply {
                 matcher(MethodMatcher().apply {
                     declaredClass(adapterClass.name)
                     usingStrings(listOf("MicroMsg.ChattingDataAdapterV3", "_onBindViewHolder[", "msgInfo"))
                 })
             }).mapNotNull { it.toRuntimeMethodOrNull() }
                 .filter { isBind(it) && it.parameterTypes.size == 2 }
+            }
         }.getOrElse {
             logger("聊天适配器完整绑定定位失败", it)
             emptyList()
@@ -789,13 +797,15 @@ private class HchatExtraHooker(
             }
         }
         val clazz = runCatching {
-            context.dexKitBridge().findClass(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findClass(
                 FindClass().apply {
                     matcher(ClassMatcher().apply {
                         usingStrings(listOf("MicroMsg.ChattingDataAdapterV3", "[handleMsgChange] isLockNotify:"))
                     })
                 }
             ).firstOrNull()?.let { KavaReflector.loadClass(it.name, context.hostClassLoader()) }
+            }
         }.getOrElse {
             logger("Hchat聊天消息Adapter定位失败", it)
             null
@@ -832,7 +842,8 @@ private class HchatExtraHooker(
             .filter { it.declaringClass == clazz }
         if (cached.isNotEmpty()) return cached
         val methods = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -842,6 +853,7 @@ private class HchatExtraHooker(
                     )
                 }
             ).mapNotNull { it.toRuntimeMethodOrNull() }
+            }
         }.getOrElse {
             logger("DexKit定位失败: $cacheName", it)
             emptyList()
@@ -866,11 +878,13 @@ private class HchatExtraHooker(
             }
             if (classes.size > index) return@forEachIndexed
             val clazz = runCatching {
-                context.dexKitBridge().findClass(
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findClass(
                     FindClass().apply {
                         matcher(ClassMatcher().apply { usingStrings(strings) })
                     }
                 ).firstOrNull()?.let { KavaReflector.loadClass(it.name, context.hostClassLoader()) }
+                }
             }.getOrElse {
                 logger("DexKit定位类失败: $key", it)
                 null
