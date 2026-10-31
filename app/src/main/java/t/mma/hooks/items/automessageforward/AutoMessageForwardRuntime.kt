@@ -28,7 +28,12 @@ internal class AutoMessageForwardRuntime(
         Thread(runnable, "Hchat-AutoMessageForward").apply { isDaemon = true }
     }.apply {
         removeOnCancelPolicy = true
+        setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
+        setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
+        setKeepAliveTime(30L, TimeUnit.SECONDS)
+        allowCoreThreadTimeOut(true)
     }
+    @Volatile private var closed = false
     private val recentMessages = LinkedHashMap<String, Long>()
     private val pendingKeys = ConcurrentHashMap.newKeySet<String>()
     private val pendingForwards = ConcurrentHashMap<String, PendingForward>()
@@ -47,34 +52,39 @@ internal class AutoMessageForwardRuntime(
 
     fun handleMessage(observed: WeChatMessageObserveApi.ObservedMessage) {
         if (observed.talker.isBlank()) return
-        if (executor.isShutdown) return
+        if (closed || executor.isShutdown) return
         if (observed.isRecalled()) {
             schedule(0L) { acceptObservedRecall(observed) }
             return
         }
         val delayMillis = if (observed.outgoing) MODULE_OUTGOING_SETTLE_DELAY_MS else 0L
         runCatching {
-            executor.schedule(Runnable { acceptMessage(observed) }, delayMillis, TimeUnit.MILLISECONDS)
+            executor.schedule(Runnable { if (!closed) acceptMessage(observed) }, delayMillis, TimeUnit.MILLISECONDS)
         }
     }
 
     fun handleRecall(event: Events.MessageRecalled) {
-        if (event.talker.isBlank() || executor.isShutdown) return
+        if (event.talker.isBlank() || closed || executor.isShutdown) return
         schedule(0L) { acceptRecall(event) }
     }
 
+    @Synchronized
     fun shutdown() {
-        executor.shutdownNow()
-        synchronized(recentMessages) { recentMessages.clear() }
-        pendingKeys.clear()
-        pendingForwards.clear()
-        moduleOutgoing.clear()
-        recallRecords.clear()
-        recentRecallKeys.clear()
-        recallRevocationsInFlight.clear()
+        if (closed) return
+        closed = true
+        executor.queue.clear()
+        // Serialize cache cleanup after an already-started send; never interrupt native/database work.
+        runCatching { executor.execute { clearRuntimeState() } }
+        executor.shutdown()
     }
-
+    private fun clearRuntimeState() {
+        synchronized(recentMessages) { recentMessages.clear() }
+        pendingKeys.clear(); pendingForwards.clear(); protectedMediaPaths.clear()
+        moduleOutgoing.clear(); recallRecords.clear(); recentRecallKeys.clear()
+        recallRevocationsInFlight.clear(); recallAccount = ""; nextSendAllowedAt = 0L
+    }
     private fun acceptMessage(observed: WeChatMessageObserveApi.ObservedMessage) {
+        if (closed) return
         if (observed.outgoing && consumeModuleOutgoing(observed)) return
         if (!AutoMessageForwardSettings.isEnabled(appContext)) return
         if (!isSupportedKind(observed)) return
@@ -143,7 +153,7 @@ internal class AutoMessageForwardRuntime(
     }
 
     private fun prepareAndSend(pending: PendingForward) {
-        if (pending.key !in pendingKeys || !AutoMessageForwardSettings.isEnabled(appContext)) {
+        if (closed || pending.key !in pendingKeys || !AutoMessageForwardSettings.isEnabled(appContext)) {
             finishPending(pending)
             return
         }
@@ -197,7 +207,7 @@ internal class AutoMessageForwardRuntime(
     }
 
     private fun sendNextInternal(pending: PendingForward, plan: ForwardPlan, index: Int) {
-        if (pending.key !in pendingKeys || !AutoMessageForwardSettings.isEnabled(appContext)) {
+        if (closed || pending.key !in pendingKeys || !AutoMessageForwardSettings.isEnabled(appContext)) {
             finishPending(pending)
             return
         }
@@ -244,9 +254,9 @@ internal class AutoMessageForwardRuntime(
     }
 
     private fun schedule(delayMillis: Long, action: () -> Unit): Boolean {
-        if (executor.isShutdown) return false
+        if (closed || executor.isShutdown) return false
         return runCatching {
-            executor.schedule(Runnable { action() }, delayMillis.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
+            executor.schedule(Runnable { if (!closed) action() }, delayMillis.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
             true
         }.getOrDefault(false)
     }
@@ -423,6 +433,7 @@ internal class AutoMessageForwardRuntime(
     }
 
     private fun send(plan: ForwardPlan, target: String): Boolean {
+        if (closed) return false
         val sender = WeChatApis.message().sender() ?: return false
         val media = WeChatApis.media()
         return when (plan.type) {
