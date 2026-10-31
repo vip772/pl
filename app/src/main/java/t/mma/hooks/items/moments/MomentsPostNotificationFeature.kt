@@ -17,6 +17,7 @@ import android.widget.Toast
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.sns.WeChatSnsPostObserver
 import t.mma.hooks.core.BaseFeature
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.items.customfriendavatar.CustomFriendAvatarSettings
 import t.mma.hooks.items.customfriendavatar.CustomFriendAvatarStore
@@ -42,15 +43,25 @@ class MomentsPostNotificationFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val current = MomentsPostNotificationRuntime(context, ::logError)
-        runtime = current
-        trackResource {
-            current.destroy()
-            if (runtime === current) runtime = null
-        }
-        current.start()
+        val prefs = HchatStorage.preferences(context.hostContext(), MomentsPostNotificationSettings.PREFS_NAME)
+        val owner = PreferenceRuntimeOwner(prefs, setOf(MomentsPostNotificationSettings.KEY_ENABLE),
+            enabled = {
+                val enabled = prefs.getBoolean(MomentsPostNotificationSettings.KEY_ENABLE, false)
+                if (!enabled) prefs.edit().putLong(MomentsPostNotificationSettings.KEY_ENABLED_AT_SECONDS, 0L)
+                    .remove(MomentsPostNotificationSettings.KEY_NOTIFIED_IDS).apply()
+                enabled
+            }, create = { resources ->
+                val current = MomentsPostNotificationRuntime(context, ::logError)
+                runtime = current
+                resources.register {
+                    current.destroy()
+                    if (runtime === current) runtime = null
+                }
+                current.start()
+            }, onError = { logError("朋友圈通知热启停失败", it) })
+        trackResource { owner.close() }
+        owner.start()
     }
-
     companion object {
         const val ID = "moments_post_notification"
     }

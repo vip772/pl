@@ -12,7 +12,7 @@ assert 'Executors.newSingleThreadExecutor' in runtime_source
 assert 'notifyGeneration' in runtime_source and 'processingGeneration' in runtime_source
 assert 'isCurrentGeneration(generation)' in runtime_source
 assert 'if (!notifyGate) return' in runtime_source
-assert feature_source.index('trackResource { KeywordNotificationRuntime.stop() }') < feature_source.index('subscribe(Events.DexReady')
+assert feature_source.index('resources.register { KeywordNotificationRuntime.stop() }') < feature_source.index('observe.subscribe')
 
 stubs = {
     'Context.kt': '''package android.content
@@ -132,6 +132,34 @@ fun main() {
 ''',
 }
 
+stubs['Prefs.kt'] = """package android.content
+interface SharedPreferences {
+ fun getBoolean(key:String, defaultValue:Boolean):Boolean
+ fun registerOnSharedPreferenceChangeListener(listener:OnSharedPreferenceChangeListener)
+ fun unregisterOnSharedPreferenceChangeListener(listener:OnSharedPreferenceChangeListener)
+ fun interface OnSharedPreferenceChangeListener {fun onSharedPreferenceChanged(prefs:SharedPreferences,key:String?)}
+}
+class Prefs:SharedPreferences {
+ var enabled=true
+ val listeners=mutableListOf<SharedPreferences.OnSharedPreferenceChangeListener>()
+ override fun getBoolean(key:String,defaultValue:Boolean)=enabled
+ override fun registerOnSharedPreferenceChangeListener(listener:SharedPreferences.OnSharedPreferenceChangeListener){listeners+=listener}
+ override fun unregisterOnSharedPreferenceChangeListener(listener:SharedPreferences.OnSharedPreferenceChangeListener){listeners-=listener}
+ fun toggle(value:Boolean){enabled=value;listeners.toList().forEach{it.onSharedPreferenceChanged(this,"enable")}}
+}
+"""
+stubs['Storage.kt'] = """package t.mma.preferences
+object HchatStorage {val prefs=android.content.Prefs();fun preferences(c:android.content.Context,n:String)=prefs}
+"""
+stubs['Settings.kt'] = """package t.mma.hooks.items.keywordnotify
+object KeywordNotificationSettings {const val PREFS_NAME="fixture";const val KEY_ENABLE="enable";const val DEFAULT_ENABLE=false}
+"""
+stubs['FeatureContext.kt']=stubs['FeatureContext.kt'].replace('class EventBus','class EventBus {fun <E> subscribe(t:Class<E>,h:(E)->Unit,p:Int)=Any();fun unsubscribe(s:Any){}}')
+stubs['BaseFeature.kt']=stubs['BaseFeature.kt'].replace('    fun registerSettingsProvider','    fun logError(message:String,error:Throwable){}\n    fun registerSettingsProvider')
+stubs['FeatureTest.kt']=stubs['FeatureTest.kt'].replace('    feature.close()\n    check(!RuntimeState.enabled', '    t.mma.preferences.HchatStorage.prefs.toggle(false)\n    check(!RuntimeState.enabled);t.mma.preferences.HchatStorage.prefs.toggle(true)\n    check(RuntimeState.enabled)\n    feature.close()\n    check(!RuntimeState.enabled',1)
+# Keep original counter assertions: exercise extra toggles in a separate fresh feature after baseline checks.
+stubs['FeatureTest.kt']=stubs['FeatureTest.kt'].replace('    t.mma.preferences.HchatStorage.prefs.toggle(false)\n    check(!RuntimeState.enabled);t.mma.preferences.HchatStorage.prefs.toggle(true)\n    check(RuntimeState.enabled)\n','')
+stubs['FeatureTest.kt']=stubs['FeatureTest.kt'].replace('    println("PASS production keyword feature entry:', '    val toggled=KeywordNotificationFeature();toggled.onFeatureInstall(context)\n    t.mma.preferences.HchatStorage.prefs.toggle(false);check(!RuntimeState.enabled)\n    t.mma.preferences.HchatStorage.prefs.toggle(true);check(RuntimeState.enabled)\n    toggled.close();check(t.mma.preferences.HchatStorage.prefs.listeners.isEmpty())\n    println("PASS production keyword feature entry:')
 with tempfile.TemporaryDirectory() as td:
     temp = Path(td)
     for name, content in stubs.items():
@@ -141,6 +169,6 @@ with tempfile.TemporaryDirectory() as td:
         'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-nowarn', '-no-stdlib', '-no-reflect',
         '-classpath', str(stdlib), '-d', str(temp / 'test.jar'),
     ]
-    subprocess.run(compiler + [str(path) for path in temp.glob('*.kt')] + [str(root / 'app/src/main/java/t/mma/hooks/items/keywordnotify/KeywordNotificationFeature.kt')], check=True, timeout=45)
+    subprocess.run(compiler + [str(path) for path in temp.glob('*.kt')] + [str(root / 'app/src/main/java/t/mma/hooks/items/keywordnotify/KeywordNotificationFeature.kt'),str(root/'app/src/main/java/t/mma/hooks/core/FeatureResourceScope.kt'),str(root/'app/src/main/java/t/mma/hooks/core/PreferenceRuntimeOwner.kt')], check=True, timeout=45)
     subprocess.run(['java', '-cp', f'{temp / "test.jar"}:{stdlib}', 't.mma.hooks.items.keywordnotify.FeatureTestKt'], check=True, timeout=15)
     subprocess.run(['java', '-cp', f'{temp / "test.jar"}:{stdlib}', 'GenerationModelKt'], check=True, timeout=15)

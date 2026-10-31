@@ -7,7 +7,8 @@ root = Path(__file__).resolve().parents[1]
 source = (root / 'app/src/main/java/t/mma/hooks/items/moments/MomentsPostNotificationFeature.kt').read_text()
 install = source.split('override fun onFeatureInstall(', 1)[1].split('companion object', 1)[0]
 destroy = source.split('fun destroy() {', 1)[1].split('private fun onPostStored', 1)[0]
-assert install.index('trackResource {') < install.index('current.start()')
+assert install.index('resources.register {') < install.index('current.start()')
+assert install.index('trackResource { owner.close() }') < install.index('owner.start()')
 assert 'current.destroy()' in install
 assert 'if (runtime === current) runtime = null' in install
 assert 'active.getAndSet(false)' in destroy
