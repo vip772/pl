@@ -139,19 +139,21 @@ private class SkipGlobalMiniProgramSplashAdsRuntime(
         )?.takeIf(::isSplashAdCheckMethod)?.let { return it }
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
-                FindMethod().apply {
-                    matcher(
-                        MethodMatcher().apply {
-                            usingEqStrings(SPLASH_AD_LOG_TAG, SPLASH_AD_RESULT_LOG)
-                        }
-                    )
-                }
-            ).mapNotNull { data ->
-                if (data.isConstructor) return@mapNotNull null
-                runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
-            }.filter(::isSplashAdCheckMethod)
-                .distinctBy { it.toGenericString() }
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
+                    FindMethod().apply {
+                        matcher(
+                            MethodMatcher().apply {
+                                usingEqStrings(SPLASH_AD_LOG_TAG, SPLASH_AD_RESULT_LOG)
+                            }
+                        )
+                    }
+                ).mapNotNull { data ->
+                    if (data.isConstructor) return@mapNotNull null
+                    runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+                }.filter(::isSplashAdCheckMethod)
+                    .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("定位小程序开屏广告资格方法失败", it)
             emptyList()
