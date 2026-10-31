@@ -247,7 +247,8 @@ private class VoiceForwardHooker(
             cacheName
         ).filter(::isFavoriteSearchItemClickMethod).takeIf { it.isNotEmpty() }?.let { return it }
         val methods = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -260,6 +261,7 @@ private class VoiceForwardHooker(
             }
                 .filter(::isFavoriteSearchItemClickMethod)
                 .distinctBy(Method::toGenericString)
+            }
         }.onFailure {
             logger("收藏语音搜索结果点击方法定位失败", it)
         }.getOrDefault(emptyList())
@@ -1011,7 +1013,8 @@ private class VoiceForwardHooker(
         if (cached.isNotEmpty()) return cached
 
         val methods = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -1023,6 +1026,7 @@ private class VoiceForwardHooker(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter { isVoiceClickMethod(it) }
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("转发语音DexKit定位失败", it)
             emptyList()
@@ -1424,7 +1428,8 @@ private class VoiceForwardHooker(
 
     private fun locateFavoriteDataPathMethods(dataClass: Class<*>): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -1437,6 +1442,7 @@ private class VoiceForwardHooker(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter { isFavoriteDataPathMethod(it, dataClass) }
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("收藏语音定位文件路径方法失败", it)
             emptyList()

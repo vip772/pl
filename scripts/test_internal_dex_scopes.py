@@ -234,3 +234,13 @@ for relative, helpers in {
         assert 'withCurrentBridge { bridge ->\n            ' + helper + '(bridge, runtimeKey' in source
         assert 'private fun ' + helper + '(' in source
 print('PASS call locator helper ownership: raw query/result consumption stays in private manager-owned resolvers')
+for relative, count in {
+    'voiceforward/VoiceForwardFeature.kt': 3,
+    'selectedmessages/OfficialMassSendSender.kt': 3,
+}.items():
+    source = (base / relative).read_text()
+    assert 'context.dexKitBridge().findMethod' not in source
+    assert source.count('context.dexKitManager().withCurrentBridge { bridge ->') == count
+mass = (base / 'selectedmessages/OfficialMassSendSender.kt').read_text()
+assert mass.count('emojiRuntimeFromMethodData(') == 2
+assert 'val fieldsByClass = methodData.usingFields' in mass

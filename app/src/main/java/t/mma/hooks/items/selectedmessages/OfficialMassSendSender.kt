@@ -514,13 +514,15 @@ class OfficialMassSendSender(
         val cached = DexMethodCache.load(methodPrefs, cacheKey, context.hostClassLoader(), CACHE_ANCHOR)
         val baseRuntime = cached?.let(::runtimeFromAnchor) ?: run {
             val anchors = runCatching {
-                context.dexKitBridge().findMethod(
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findMethod(
                     FindMethod().apply {
                         matcher(MethodMatcher().apply {
                             usingStrings(listOf("MicroMsg.NetSceneMasSend"))
                         })
                     }
                 ).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
+                }
             }.onFailure { logger("定位微信原生群发助手网络类失败", it) }.getOrDefault(emptyList())
             val grouped = anchors.groupBy { it.declaringClass }.mapNotNull { (_, methods) ->
                 methods.firstNotNullOfOrNull(::runtimeFromAnchor)?.let { methods.first() to it }
@@ -568,7 +570,8 @@ class OfficialMassSendSender(
         DexMethodCache.clear(methodPrefs, cacheKey, CACHE_NATIVE_DISPATCHER_GETTER)
         DexMethodCache.clear(methodPrefs, cacheKey, CACHE_NATIVE_SUBMIT)
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         usingStrings(listOf("MicroMsg.MassSendFooterEventImpl"))
@@ -588,6 +591,7 @@ class OfficialMassSendSender(
                 NativeSubmitRuntime(getter, submit)
             }.distinctBy {
                 it.dispatcherGetter.toGenericString() + "\n" + it.submitMethod.toGenericString()
+            }
             }
         }.onFailure {
             logger("定位微信原生群发助手精确派发入口失败", it)
@@ -628,7 +632,8 @@ class OfficialMassSendSender(
             emojiRuntimeFromSpec(methodPrefs.getString(CACHE_EMOJI_SPEC, "").orEmpty())?.let { return it }
         }
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         usingStrings(listOf("MicroMsg.MassSendFooterEventImpl"))
@@ -640,6 +645,7 @@ class OfficialMassSendSender(
                 }.getOrNull() ?: return@mapNotNull null
                 val resolved = emojiRuntimeFromMethodData(methodData) ?: return@mapNotNull null
                 method to resolved
+            }
             }
         }.onFailure { logger("定位微信原生群发表情协议失败", it) }.getOrDefault(emptyList())
         val single = candidates.singleOrNull()
