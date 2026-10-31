@@ -16,12 +16,26 @@ import java.util.concurrent.ConcurrentHashMap
 object CustomFriendAvatarStore {
     private data class CacheEntry(val modified: Long, val size: Long, val bitmap: Bitmap)
 
-    private val cache = ConcurrentHashMap<String, CacheEntry>()
+    private val cache = java.util.Collections.synchronizedMap(java.util.LinkedHashMap<String, CacheEntry>(16, 0.75f, true))
+    private fun cacheEntry(id: String, entry: CacheEntry) {
+        synchronized(cache) {
+            cache.remove(id)
+            val bytes = entry.bitmap.allocationByteCount.toLong()
+            if (bytes > 8L * 1024 * 1024) { checked.remove(id); return }
+            cache[id] = entry
+            var total = cache.values.sumOf { it.bitmap.allocationByteCount.toLong() }
+            val iterator = cache.entries.iterator()
+            while (iterator.hasNext() && (cache.size > 64 || total > 8L * 1024 * 1024)) {
+                val oldest = iterator.next()
+                total -= oldest.value.bitmap.allocationByteCount.toLong()
+                checked.remove(oldest.key)
+                iterator.remove()
+            }
+        }
+    }
     private val checked = ConcurrentHashMap<String, Long>()
 
-    private val preloader = java.util.concurrent.Executors.newSingleThreadExecutor { task ->
-        Thread(task, "Hchat-AvatarPreload").apply { isDaemon = true }
-    }
+    private val preloader = t.mma.hooks.core.IdleSerialExecutor.create("Hchat-AvatarPreload")
     private val preloadStarted = java.util.concurrent.atomic.AtomicBoolean()
     fun preload(context: Context) {
         if (!preloadStarted.compareAndSet(false, true)) return
@@ -56,7 +70,7 @@ object CustomFriendAvatarStore {
         if (id.isEmpty()) return null
         val now = android.os.SystemClock.elapsedRealtime()
         val cached = cache[id]?.bitmap?.takeUnless { it.isRecycled }
-        if (now - (checked[id] ?: Long.MIN_VALUE / 2) < 2000L) return cached
+        if (cached != null && now - (checked[id] ?: Long.MIN_VALUE / 2) < 2000L) return cached
         if (checked.size > 256) checked.clear()
         checked[id] = now
         val file = avatarFile(context, id)
@@ -67,7 +81,7 @@ object CustomFriendAvatarStore {
         val decoded = runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
             ?.takeIf { !it.isRecycled && it.width > 0 && it.height > 0 }
             ?: return null
-        cache[id] = CacheEntry(file.lastModified(), file.length(), decoded)
+        cacheEntry(id, CacheEntry(file.lastModified(), file.length(), decoded))
         return decoded
     }
 
@@ -134,7 +148,7 @@ object CustomFriendAvatarStore {
                     .putStringSet(CustomFriendAvatarSettings.KEY_CONFIGURED_FRIENDS, ids)
                     .apply()
             }
-            cache[id] = CacheEntry(target.lastModified(), target.length(), bitmap)
+            cacheEntry(id, CacheEntry(target.lastModified(), target.length(), bitmap))
             checked[id] = android.os.SystemClock.elapsedRealtime()
             true
         }.getOrElse {

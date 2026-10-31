@@ -10,12 +10,13 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.Calendar
-import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
 
-internal class ConversationAnalysisAi(private val context: Context) {
-    private val configStore = ConversationAnalysisAiConfigStore(context)
-    private val executor = Executors.newSingleThreadExecutor { Thread(it, "Hchat-ConversationAnalysisAI").apply { isDaemon = true } }
+internal class ConversationAnalysisAi(context: Context) {
+    private val configStore = ConversationAnalysisAiConfigStore(context.applicationContext ?: context)
+    private val executor = t.mma.hooks.core.IdleSerialExecutor.create("Hchat-ConversationAnalysisAI")
+    @Volatile private var closed = false
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
     private val requestToken = AtomicLong(0L)
     @Volatile private var activeConnection: HttpURLConnection? = null
     @Volatile private var sampleCount = 0
@@ -31,16 +32,32 @@ internal class ConversationAnalysisAi(private val context: Context) {
         generateStreaming(talker, days, onResult, onResult)
     }
 
+    @Synchronized
     fun generateStreaming(talker: String, days: Int, onUpdate: (String) -> Unit, onFinished: (String) -> Unit) {
+        if (closed) return
         val token = requestToken.incrementAndGet()
         activeConnection?.disconnect()
         executor.execute {
+            if (closed) return@execute
             val result = runCatching { requestStreaming(talker, days, token, onUpdate) }
                 .getOrElse { "AI 总结失败：${it.message ?: it.javaClass.simpleName}" }
-            android.os.Handler(android.os.Looper.getMainLooper()).post { if (token == requestToken.get()) onFinished(result) }
+            postResult { if (token == requestToken.get()) onFinished(result) }
         }
     }
 
+    @Synchronized private fun postResult(block: () -> Unit) {
+        if (closed) return
+        main.post { if (!closed) block() }
+    }
+
+    @Synchronized fun close() {
+        if (closed) return
+        closed = true
+        cancel()
+        executor.queue.clear()
+        executor.shutdown()
+        main.removeCallbacksAndMessages(null)
+    }
     fun cancel() {
         requestToken.incrementAndGet()
         activeConnection?.disconnect()
@@ -53,34 +70,44 @@ internal class ConversationAnalysisAi(private val context: Context) {
     }
 
     fun saveProfile(profile: ConversationAiProfile) = configStore.save(profile)
+    @Synchronized
     fun testConnection(address: String, path: String, key: String, onResult: (Boolean, String) -> Unit) {
+        if (closed) return
         executor.execute {
+            if (closed) return@execute
             val result: Pair<Boolean, String> = runCatching<Pair<Boolean, String>> {
                 val conn = URL(join(address, path)).openConnection() as HttpURLConnection
+                activeConnection = conn
                 try {
+                    check(!closed) { "页面已关闭" }
                     conn.requestMethod = "POST"; conn.doOutput = true; conn.connectTimeout = 10000; conn.readTimeout = 10000
                     conn.setRequestProperty("Authorization", "Bearer $key"); conn.setRequestProperty("Content-Type", "application/json")
                     conn.outputStream.use { it.write("{}".toByteArray(StandardCharsets.UTF_8)) }
                     val code = conn.responseCode
                     Pair(code in 200..499, "HTTP $code")
-                } finally { conn.disconnect() }
+                } finally { if (activeConnection === conn) activeConnection = null; conn.disconnect() }
             }.getOrElse { Pair(false, it.message ?: it.javaClass.simpleName) }
-            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(result.first, result.second) }
+            postResult { onResult(result.first, result.second) }
         }
     }
+    @Synchronized
     fun fetchModels(address: String, key: String, onResult: (List<String>, String?) -> Unit) {
+        if (closed) return
         executor.execute {
+            if (closed) return@execute
             val result = runCatching {
                 val conn = URL(join(address, "models")).openConnection() as HttpURLConnection
+                activeConnection = conn
                 try {
+                    check(!closed) { "页面已关闭" }
                     conn.requestMethod = "GET"; conn.connectTimeout = 10000; conn.readTimeout = 10000
                     conn.setRequestProperty("Authorization", "Bearer $key")
                     val response = BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { it.readText() }
                     val data = JSONObject(response).optJSONArray("data") ?: JSONArray()
                     (0 until data.length()).mapNotNull { data.optJSONObject(it)?.optString("id")?.takeIf(String::isNotBlank) }
-                } finally { conn.disconnect() }
+                } finally { if (activeConnection === conn) activeConnection = null; conn.disconnect() }
             }.fold(onSuccess = { it to null }, onFailure = { emptyList<String>() to (it.message ?: it.javaClass.simpleName) })
-            android.os.Handler(android.os.Looper.getMainLooper()).post { onResult(result.first, result.second) }
+            postResult { onResult(result.first, result.second) }
         }
     }
     private fun normalizeRecord(talker: String, raw: String, isSend: Boolean): String {
@@ -137,6 +164,7 @@ ${records.joinToString("\n")}
 【聊天记录结束】
     """.trimIndent()
 private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (String) -> Unit): String {
+        check(!closed && token == requestToken.get()) { "生成已取消" }
         val cfg = config()
         require(configured()) { "请先配置 AI 地址、密钥和模型" }
         val db = WeChatApis.database() ?: error("数据库API尚未初始化")
@@ -155,6 +183,7 @@ private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (
         val conn = URL(join(cfg.address, cfg.path)).openConnection() as HttpURLConnection
         activeConnection = conn
         try {
+            check(!closed && token == requestToken.get()) { "生成已取消" }
             conn.requestMethod = "POST"; conn.doOutput = true; conn.connectTimeout = 20000; conn.readTimeout = 120000
             conn.setRequestProperty("Authorization", "Bearer ${cfg.key}"); conn.setRequestProperty("Content-Type", "application/json; charset=utf-8"); conn.setRequestProperty("Accept", "application/json")
             conn.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }

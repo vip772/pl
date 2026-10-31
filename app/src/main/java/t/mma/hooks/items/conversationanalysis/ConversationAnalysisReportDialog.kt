@@ -30,13 +30,19 @@ import t.mma.hooks.api.core.WeChatApis
 import java.io.File
 
 internal object ConversationAnalysisReportDialog {
-    private var generatedReportView: ConversationAnalysisAiReportView? = null
-    private val executor = Executors.newSingleThreadExecutor { task ->
-        Thread(task, "Hchat-ConversationAnalysis").apply { isDaemon = true }
-    }
+    private val generatedReportViews = java.util.WeakHashMap<Dialog, java.lang.ref.WeakReference<ConversationAnalysisAiReportView>>()
+    private val pageTasks = java.util.WeakHashMap<Dialog, ConversationAnalysisPageTasks>()
+    private val reportRequests = java.util.WeakHashMap<Dialog, ConversationAnalysisAi>()
+    private val executor = t.mma.hooks.core.IdleSerialExecutor.create("Hchat-ConversationAnalysis")
     fun show(activity: Activity, talker: String, logger: (String, Throwable?) -> Unit) {
         if (activity.isFinishing || activity.isDestroyed) return
         val dialog = Dialog(activity, android.R.style.Theme_Material_Light_NoActionBar)
+        pageTasks[dialog] = ConversationAnalysisPageTasks()
+        dialog.setOnDismissListener {
+            pageTasks.remove(dialog)?.close()
+            reportRequests.remove(dialog)?.close()
+            generatedReportViews.remove(dialog)?.clear()
+        }
         var days = 1
         val root = LinearLayout(activity).apply {
             orientation = LinearLayout.VERTICAL
@@ -90,9 +96,10 @@ internal object ConversationAnalysisReportDialog {
     }
 
     private fun load(activity: Activity, dialog: Dialog, metrics: LinearLayout, talker: String, days: Int, logger: (String, Throwable?) -> Unit) {
-        executor.execute {
+        val tasks = pageTasks[dialog] ?: return
+        tasks.execute {
             val result = runCatching { ConversationAnalysisRepository().loadSummary(talker, days) }.onFailure { logger("群聊分析报告读取失败", it) }.getOrElse { error -> ConversationAnalysisSummary(talker, 0, 0, 0, 0, 0, 0, 0, 0, error.message) }
-            Handler(Looper.getMainLooper()).post {
+            tasks.post {
                 if (!dialog.isShowing || result.error != null) return@post
                 updateMetric(metrics, 0, result.periodSpeakers.toString())
                 updateMetric(metrics, 1, result.periodTotal.toString())
@@ -281,6 +288,9 @@ internal object ConversationAnalysisReportDialog {
 
     private fun buildDeepCharts(activity: Activity, dialog: Dialog, talker: String, days: Int, metrics: LinearLayout, range: TextView, logger: (String, Throwable?) -> Unit): LinearLayout {
         val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; background = rounded(cardColor(activity), dp(activity, 28)); setPadding(dp(activity, 16), dp(activity, 12), dp(activity, 16), dp(activity, 14)) }
+        val tasks = pageTasks[dialog] ?: return root
+        var activityEpoch = 0
+        var rankingEpoch = 0
         val activityBody = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         val cycle = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 16), dp(activity, 18), dp(activity, 16), dp(activity, 18)); background = rounded(panelColor(activity), dp(activity, 22)) }
         val activityTitle = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
@@ -301,9 +311,11 @@ internal object ConversationAnalysisReportDialog {
         activityBody.addView(inactive, LinearLayout.LayoutParams(-1, dp(activity, 54)))
         addCollapsible(activity, root, "♟", "群聊活跃检测", activityBody, false)
         fun reloadActivity(nextDays: Int) {
-            executor.execute {
+            val epoch = ++activityEpoch
+            tasks.execute {
                 val result = runCatching { ConversationAnalysisDetailsRepository().load(talker, nextDays) }.getOrElse { ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), it.message) }
-                Handler(Looper.getMainLooper()).post {
+                tasks.post {
+                    if (!dialog.isShowing || activity.isFinishing || activity.isDestroyed || epoch != activityEpoch) return@post
                     activeValue.text = result.ranking.count { it.count > 0 }.toString()
                     memberValue.text = result.lowActivity.size.toString()
                     inactive.text = "查看/清理未发言成员（${result.lowActivity.count { it.count == 0 }}人）"
@@ -329,19 +341,25 @@ internal object ConversationAnalysisReportDialog {
         }
         reloadRanking = { periodDays ->
             rankingPeriod = periodDays
-            executor.execute {
+            val epoch = ++rankingEpoch
+            tasks.execute {
                 val refreshed = runCatching { ConversationAnalysisDetailsRepository().load(talker, periodDays) }.getOrElse {
                     ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), it.message)
                 }
-                Handler(Looper.getMainLooper()).post { renderRanking(activity, bodies["活跃发言排行"], refreshed.ranking, reloadRanking, rankingPeriod) }
+                tasks.post {
+                    if (!dialog.isShowing || activity.isFinishing || activity.isDestroyed || epoch != rankingEpoch) return@post
+                    renderRanking(activity, bodies["活跃发言排行"], refreshed.ranking, reloadRanking, periodDays)
+                }
             }
         }
-        executor.execute {
+        tasks.execute {
             val details = runCatching { ConversationAnalysisDetailsRepository().load(talker, days) }.getOrElse {
                 ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), it.message)
             }
-            Handler(Looper.getMainLooper()).post {
+            tasks.post {
+                if (!dialog.isShowing || activity.isFinishing || activity.isDestroyed) return@post
                 renderDeepData(activity, bodies, details, reloadRanking)
+                if (rankingEpoch > 0) reloadRanking?.invoke(rankingPeriod)
                 val active = details.ranking.size
                 updateMetric(metrics, 0, active.toString())
             }
@@ -536,6 +554,7 @@ internal object ConversationAnalysisReportDialog {
 
     private fun showAiConfig(activity: Activity) {
         val ai = ConversationAnalysisAi(activity)
+        val configMain = Handler(Looper.getMainLooper())
         val store = ConversationAnalysisAiConfigStore(activity)
         var selected = store.activeProfileId()
         val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 26), dp(activity, 22), dp(activity, 26), dp(activity, 18)); background = rounded(pageColor(activity), dp(activity, 26)) }
@@ -565,7 +584,7 @@ internal object ConversationAnalysisReportDialog {
             ai.testConnection(fields[1].text.toString(), fields[2].text.toString(), fields[3].text.toString()) { ok, _ ->
                 testButton.text = if (ok) "连接成功" else "连接失败"
                 testButton.setTextColor(if (ok) 0xff4caf50.toInt() else 0xffd94b4b.toInt())
-                Handler(Looper.getMainLooper()).postDelayed({
+                configMain.postDelayed({
                     if (testButton.isAttachedToWindow) {
                         testButton.text = "测试连接"
                         testButton.setTextColor(0xffffa13a.toInt())
@@ -591,11 +610,14 @@ internal object ConversationAnalysisReportDialog {
         dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
         dialog.window?.setWindowAnimations(0)
         dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .88f).toInt()) }
+        dialog.setOnDismissListener { ai.close(); configMain.removeCallbacksAndMessages(null) }
         dialog.show()
         loadProfile(selected)
     }
 
     private fun showAi(activity: Activity, reportDialog: Dialog, talker: String, days: Int, logger: (String, Throwable?) -> Unit, reportHost: LinearLayout, screenshot: TextView) {
+        if (!reportDialog.isShowing || activity.isFinishing || activity.isDestroyed) return
+        val tasks = pageTasks[reportDialog] ?: return
         val ai = ConversationAnalysisAi(activity)
         if (!ai.configured()) {
             val box = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 20), dp(activity, 18), dp(activity, 20), dp(activity, 18)); background = rounded(pageColor(activity), dp(activity, 22)) }
@@ -611,9 +633,11 @@ internal object ConversationAnalysisReportDialog {
             configDialog.setContentView(box)
             configDialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
             configDialog.setOnShowListener { configDialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .86f).toInt(), (activity.resources.displayMetrics.heightPixels * .55f).toInt()) }
+            configDialog.setOnDismissListener { ai.close() }
             configDialog.show()
             return
         }
+        reportRequests.put(reportDialog, ai)?.close()
         reportHost.removeAllViews()
         screenshot.isEnabled = false
         screenshot.setTextColor(0xff999999.toInt())
@@ -621,20 +645,22 @@ internal object ConversationAnalysisReportDialog {
         val reportView = ConversationAnalysisAiReportView(activity)
         val reportTitle = WeChatApis.conversations()?.getConversationTitle(talker).orEmpty().ifBlank { talker }
         reportView.update(reportTitle, days, "正在生成…")
-        generatedReportView = reportView
-        executor.execute {
+        generatedReportViews[reportDialog] = java.lang.ref.WeakReference(reportView)
+        tasks.execute {
             val summary = runCatching { ConversationAnalysisRepository().loadSummary(talker, days) }.getOrNull()
             val members = WeChatApis.contacts()?.getGroupMemberIds(talker).orEmpty().distinct().size
-            Handler(Looper.getMainLooper()).post {
-                if (summary != null) reportView.updateMeta(reportTitle, days, members, summary.periodSpeakers)
+            tasks.post {
+                if (reportDialog.isShowing && reportRequests[reportDialog] === ai && summary != null) reportView.updateMeta(reportTitle, days, members, summary.periodSpeakers)
             }
         }
         reportHost.addView(reportView, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
         reportHost.requestLayout()
-        ai.generateStreaming(talker, days, { partial ->
+        ai.generateStreaming(talker, days, partial@{ partial ->
+            if (!reportDialog.isShowing || reportRequests[reportDialog] !== ai) return@partial
             reportView.update(talker, days, partial)
             reportHost.requestLayout()
-        }, { final ->
+        }, completed@{ final ->
+            if (!reportDialog.isShowing || reportRequests[reportDialog] !== ai) return@completed
             reportView.update(talker, days, final)
             reportView.updateSampleCount(ai.lastSampleCount())
             val success = !final.startsWith("AI 总结失败：") && !final.startsWith("所选时段暂无") && !final.startsWith("请先配置")
@@ -646,7 +672,7 @@ internal object ConversationAnalysisReportDialog {
     }
 
     private fun showGeneratedReportPicker(activity: Activity, reportDialog: Dialog, currentTalker: String) {
-        val report = generatedReportView ?: run {
+        val report = generatedReportViews[reportDialog]?.get() ?: run {
             Toast.makeText(activity, "请先点击开始生成", Toast.LENGTH_SHORT).show()
             return
         }
@@ -750,12 +776,15 @@ internal object ConversationAnalysisReportDialog {
         val loading = Dialog(activity)
         loading.setTitle("排行与深度分析")
         loading.setContentView(message(activity, "正在分析排行、作息和内容特征…", Color.DKGRAY))
+        val tasks = ConversationAnalysisPageTasks()
+        loading.setOnDismissListener { tasks.close() }
         loading.show()
-        executor.execute {
+        tasks.execute {
             val details = runCatching { ConversationAnalysisDetailsRepository().load(talker, days) }
                 .onFailure { logger("群聊分析深度统计失败", it) }
                 .getOrElse { ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), it.message) }
-            Handler(Looper.getMainLooper()).post {
+            tasks.post {
+                if (!loading.isShowing) return@post
                 loading.dismiss()
                 if (!activity.isFinishing && !activity.isDestroyed) {
                     ConversationAnalysisDetailsDialog.show(activity, "排行与深度分析", details)

@@ -18,9 +18,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 internal object ConversationGroupMenu {
     private const val TAG = "[Hchat:ConversationGroup]"
     private val main = Handler(Looper.getMainLooper())
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Hchat-ConversationGroupMenu").apply { isDaemon = true }
-    }
+    private val executor = t.mma.hooks.core.IdleSerialExecutor.create("Hchat-ConversationGroupMenu")
 
     fun show(activity: Activity, groupId: String, onChanged: () -> Unit) {
         val group = group(activity, groupId) ?: return

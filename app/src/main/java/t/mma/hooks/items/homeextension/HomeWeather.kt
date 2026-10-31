@@ -21,7 +21,7 @@ internal object HomeWeather {
     private const val API_KEY = "92858ad8f04a427480e004ae8fefac7e"
     private const val CACHE_TTL = 6 * 60 * 60_000L
     data class City(val name: String, val latitude: Double, val longitude: Double)
-    private val worker = Executors.newSingleThreadExecutor { Thread(it, "Hchat-Weather").apply { isDaemon = true } }
+    private val worker = t.mma.hooks.core.IdleSerialExecutor.create("Hchat-Weather")
     private val main = Handler(Looper.getMainLooper())
     private val inFlight = HashSet<String>()
     private val listeners = HashMap<String, MutableList<java.lang.ref.WeakReference<() -> Unit>>>()

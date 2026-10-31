@@ -110,7 +110,6 @@ internal class ConversationAnalysisDetailsRepository {
 }
 
 internal object ConversationAnalysisDetailsDialog {
-    private val executor = Executors.newSingleThreadExecutor { Thread(it, "Hchat-ConversationAnalysisDetails").apply { isDaemon = true } }
     fun show(activity: Activity, title: String, details: ConversationAnalysisDetails) {
         val dialog = Dialog(activity)
         val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 18), dp(activity, 16), dp(activity, 18), dp(activity, 16)); background = bg(Color.rgb(250, 250, 250), 16) }
