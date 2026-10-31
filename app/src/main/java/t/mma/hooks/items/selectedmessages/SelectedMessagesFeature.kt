@@ -562,7 +562,8 @@ private class SelectedMessagesHooker(
         ).filter(::isRetransmitDoneMethod)
         if (cached.isNotEmpty()) return cached
         val methods = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         declaredClass(SelectedMessageModuleSender.MSG_RETRANSMIT_UI)
@@ -572,6 +573,7 @@ private class SelectedMessagesHooker(
             ).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
                 .filter(::isRetransmitDoneMethod)
                 .distinctBy { it.toGenericString() }
+            }
         }.onFailure { logger("定位群发助手重发完成方法失败", it) }.getOrDefault(emptyList())
         if (methods.isNotEmpty()) {
             DexMethodCache.saveList(methodPrefs, cacheKey, CACHE_RETRANSMIT_DONE, methods)

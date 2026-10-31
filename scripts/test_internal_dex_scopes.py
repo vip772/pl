@@ -39,6 +39,11 @@ files = [
     'patblock/PatBlockFeature.kt',
     'payment/fakebalance/FakeWalletBalanceFeature.kt',
     'fakevoiceduration/FakeVoiceDurationFeature.kt',
+    'fakescancamera/FakeScanCameraFeature.kt',
+    'backgroundbeauty/BackgroundBeautyFeature.kt',
+    'selectedmessages/SelectedMessagesFeature.kt',
+    'payment/transfer/TransferReceiveAccountStore.kt',
+    'messageforward/ChatLivePhotoResolver.kt',
 ]
 total = 0
 scopes = []
@@ -95,6 +100,13 @@ fun isModernConversationBind(m:Method) = true
 fun isLayoutInflaterFactoryMethod(m:Method) = true
 fun methodDescriptor(m:Method) = m.toGenericString()
 data class RevokeEntry(val method: Method, val invokedMethods: List<Method>)
+object SelectedMessageModuleSender {const val MSG_RETRANSMIT_UI = "owner"}
+data class ChatLivePhotoMethods(val getter:Method,val query:Method,val factory:Method)
+fun isFactory(m:Method,c:Class<*>) = true
+fun isRecordQuery(m:Method,c:Class<*>) = true
+fun isStorageGetter(m:Method,c:Class<*>) = true
+fun isRetransmitDoneMethod(m:Method) = true
+fun isAccountParser(m:Method) = true
 class Context {
  fun dexKitManager() = DexKitBridgeManager()
  fun hostClassLoader() = ClassLoader.getSystemClassLoader()
@@ -144,6 +156,7 @@ fun isRecorderDurationMethod(m: Method) = true
              'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'Method?',
              'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>']
     types += ['List<Method>', 'List<Method>', 'List<Method>', 'Method?', 'List<Method>', 'List<Method>', 'List<Method>']
+    types += ['List<Method>', 'List<Method>', 'List<Method>', 'Method?', 'ChatLivePhotoMethods?']
     assert len(types) == len(scopes)
     body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))

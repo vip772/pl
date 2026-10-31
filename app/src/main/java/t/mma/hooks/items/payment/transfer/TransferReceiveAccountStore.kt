@@ -203,7 +203,8 @@ object TransferReceiveAccountStore {
         logger: (String, Throwable?) -> Unit
     ): Method? {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         usingEqStrings(
@@ -216,6 +217,7 @@ object TransferReceiveAccountStore {
             ).mapNotNull { data ->
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.firstOrNull(::isAccountParser)
+            }
         }.getOrElse {
             logger("定位转账收款账户解析方法失败", it)
             null

@@ -1724,7 +1724,8 @@ private class BackgroundBeautyRuntime(
             DexMethodCache.clear(methodPrefs, runtimeKey, CACHE_CHAT_BACKGROUND_COMPONENT)
             if (!allowDexSearch) return false
             val candidates = runCatching {
-                context.dexKitBridge().findMethod(FindMethod().apply {
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findMethod(FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         usingStrings(
                             listOf(
@@ -1742,6 +1743,7 @@ private class BackgroundBeautyRuntime(
                     }
                     .distinctBy { candidate -> candidate.toGenericString() }
                     .toList()
+                }
             }.getOrElse {
                 HLog.e("$TAG 定位聊天原生背景初始化失败: ${it.message}", it)
                 emptyList()

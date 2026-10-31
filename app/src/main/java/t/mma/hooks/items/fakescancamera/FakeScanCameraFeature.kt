@@ -134,7 +134,8 @@ private class FakeScanCameraHooker(
 
     private fun findMethodsByExactStrings(vararg strings: String): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -143,6 +144,7 @@ private class FakeScanCameraHooker(
                     )
                 }
             ).mapNotNull { it.getMethodInstance(context.hostClassLoader()) }
+            }
         }.getOrElse {
             HLog.e("$TAG 精确定位 QBarStringHandler 失败(${strings.joinToString()}): ${it.message}", it)
             emptyList()

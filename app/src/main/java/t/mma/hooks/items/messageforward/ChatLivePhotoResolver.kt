@@ -262,7 +262,8 @@ private object ChatLivePhotoLocator {
         logger: (String, Throwable?) -> Unit
     ): ChatLivePhotoMethods? {
         return runCatching {
-            val callers = context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+            val callers = bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         usingStrings(
@@ -289,10 +290,11 @@ private object ChatLivePhotoLocator {
                     val query = invokes.firstOrNull { isRecordQuery(it, recordClass) } ?: continue
                     val getter = invokes.firstOrNull { isStorageGetter(it, query.declaringClass) }
                         ?: continue
-                    return@runCatching ChatLivePhotoMethods(getter, query, factory)
+                    return@withCurrentBridge ChatLivePhotoMethods(getter, query, factory)
                 }
             }
             null
+            }
         }.onFailure {
             logger("定位聊天实况图片方法失败", it)
         }.getOrNull()
