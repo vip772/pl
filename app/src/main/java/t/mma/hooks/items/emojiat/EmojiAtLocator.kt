@@ -18,8 +18,10 @@ internal class EmojiAtLocator(private val context: FeatureContext) {
         val key = DexMethodCache.runtimeKey(context.hostContext(), loader)
         fun owners(anchors: List<String>): List<Class<*>> = anchors.flatMap { anchor ->
             val matcher = ClassMatcher().apply { usingStrings(listOf(anchor)) }
-            context.dexKitBridge().findClass(FindClass().apply { matcher(matcher) })
-                .mapNotNull { R.loadClass(it.name, loader) }
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findClass(FindClass().apply { matcher(matcher) })
+                    .mapNotNull { R.loadClass(it.name, loader) }
+            }
         }.distinct()
         fun method(name: String, anchors: List<String>, valid: (Method) -> Boolean): Method {
             DexMethodCache.load(cache, key, loader, name)?.takeIf(valid)?.let { return it }

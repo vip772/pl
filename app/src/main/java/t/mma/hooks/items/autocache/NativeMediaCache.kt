@@ -23,17 +23,22 @@ internal class NativeMediaCache(private val context: FeatureContext) {
     @Volatile private var downloadVideo: Method? = null
     @Volatile private var attachmentFileLength: Method? = null
 
-    private fun methods(vararg strings: String): List<Method> = context.dexKitBridge().findMethod(
-        FindMethod().apply { matcher(MethodMatcher().apply { usingEqStrings(*strings) }) }
-    ).filter { !it.isConstructor }.map { it.getMethodInstance(context.hostClassLoader()) }
+    private fun methods(vararg strings: String): List<Method> =
+        context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
+                FindMethod().apply { matcher(MethodMatcher().apply { usingEqStrings(*strings) }) }
+            ).filter { !it.isConstructor }.map { it.getMethodInstance(context.hostClassLoader()) }
+        }
 
     private fun constructor(tag: String, name: String, shape: (Array<Class<*>>) -> Boolean): Constructor<*>? {
         val runtime = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         DexMethodCache.loadConstructor(cache, runtime, context.hostClassLoader(), name)
             ?.takeIf { shape(it.parameterTypes) }?.let { return it }
-        val owners = context.dexKitBridge().findMethod(
-            FindMethod().apply { matcher(MethodMatcher().apply { usingEqStrings(tag) }) }
-        ).filter { it.isConstructor }.map { it.getConstructorInstance(context.hostClassLoader()).declaringClass }.distinct()
+        val owners = context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(
+                FindMethod().apply { matcher(MethodMatcher().apply { usingEqStrings(tag) }) }
+            ).filter { it.isConstructor }.map { it.getConstructorInstance(context.hostClassLoader()).declaringClass }.distinct()
+        }
         return owners.flatMap { KavaReflector.declaredConstructors(it) }
             .singleOrNull { shape(it.parameterTypes) }?.also { DexMethodCache.saveConstructor(cache, runtime, name, it) }
     }
@@ -83,13 +88,15 @@ internal class NativeMediaCache(private val context: FeatureContext) {
         downloadVideo = DexMethodCache.load(cache, runtime, context.hostClassLoader(), "video_offline")
             ?: run {
                 val online = methods("start complete online video, but can not stream video now!").toSet()
-                context.dexKitBridge().findMethod(
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findMethod(
                     FindMethod().apply { matcher(MethodMatcher().apply {
                         usingEqStrings("MicroMsg.VideoLogic", "ERR:", " getinfo failed: ", " get status failed: ", " update failed: ")
                         // 接收状态 112、更新掩码 3328；排除暂停接收和发送入口。
                         usingNumbers(112, 3328)
                     }) }
-                ).map { it.getMethodInstance(context.hostClassLoader()) }
+                    ).map { it.getMethodInstance(context.hostClassLoader()) }
+                }
                     .filter { it !in online && Modifier.isStatic(it.modifiers) && it.returnType == int &&
                         it.parameterTypes.toList() == listOf(String::class.java) }.singleOrNull()
                     ?.also { DexMethodCache.save(cache, runtime, "video_offline", it) }
