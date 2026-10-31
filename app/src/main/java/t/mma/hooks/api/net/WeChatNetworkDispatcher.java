@@ -33,6 +33,24 @@ public class WeChatNetworkDispatcher {
         void log(String message);
     }
 
+    private volatile boolean destroyed;
+    private final java.util.List<XC_MethodHook.Unhook> ownedHooks = new java.util.ArrayList<>();
+    private synchronized XC_MethodHook.Unhook hookOwned(java.lang.reflect.Member member, XC_MethodHook callback) {
+        if (destroyed) throw new IllegalStateException("Dispatcher closed");
+        XC_MethodHook.Unhook handle = HookRegistry.get().hook(member, callback);
+        ownedHooks.add(handle);
+        return handle;
+    }
+    public synchronized void destroy() {
+        if (destroyed) return;
+        destroyed = true;
+        for (XC_MethodHook.Unhook handle : ownedHooks) {
+            try { HookRegistry.get().unhook(handle); } catch (Throwable error) { de.robv.android.xposed.XposedBridge.log(error); }
+        }
+        ownedHooks.clear(); hookedQueueMethods.clear(); observedCompletionMethods.clear();
+        moduleRequests.clear(); failureLogTimes.clear(); queueCandidateClasses = Collections.emptyList();
+        dispatcherInstance = null; dispatcherMethod = null;
+    }
     private final Logger logger;
     private volatile Object dispatcherInstance;
     private volatile Method dispatcherMethod;
@@ -53,6 +71,7 @@ public class WeChatNetworkDispatcher {
     }
 
     public synchronized void hookNetworkQueue(Class<?> netQueueClass, List<Class<?>> candidates) {
+        if (destroyed) return;
         LinkedHashSet<Class<?>> classes = new LinkedHashSet<>();
         if (netQueueClass != null) classes.add(netQueueClass);
         if (candidates != null) classes.addAll(candidates);
@@ -68,9 +87,10 @@ public class WeChatNetworkDispatcher {
                 for (Method method : KavaReflector.declaredMethods(queueClass)) {
                     if (!isSendMethodCandidate(method, null) || !hookedQueueMethods.add(method)) continue;
                     try {
-                        HookRegistry.get().hook(method, new XC_MethodHook() {
+                        hookOwned(method, new XC_MethodHook() {
                             @Override
                             protected void beforeHookedMethod(MethodHookParam param) {
+                        if (destroyed) return;
                                 if (dispatcherInstance == null
                                         || methodPriority(method) > methodPriority(dispatcherMethod)) {
                                     cacheDispatcher(param.thisObject, method, "网络发包器已缓存");
@@ -95,6 +115,7 @@ public class WeChatNetworkDispatcher {
     }
 
     public boolean send(Object request) {
+        if (destroyed) return false;
         if (request == null) return false;
         Object realRequest = unwrapRequest(request);
         if (realRequest == null) return false;
@@ -148,8 +169,9 @@ public class WeChatNetworkDispatcher {
                     || types[2] != String.class || !isNetworkRequestType(types[3])
                     || !observedCompletionMethods.add(method)) continue;
             try {
-                HookRegistry.get().hook(method, new XC_MethodHook() {
+                hookOwned(method, new XC_MethodHook() {
                     @Override protected void afterHookedMethod(MethodHookParam param) {
+                        if (destroyed) return;
                         // Candidate classes include business listeners. Only the exact cached queue applies.
                         if (param.thisObject != dispatcherInstance || param.args == null || param.args.length != 4) return;
                         try {
@@ -397,7 +419,8 @@ public class WeChatNetworkDispatcher {
         }
     }
 
-    private void cacheDispatcher(Object instance, Method method, String reason) {
+    private synchronized void cacheDispatcher(Object instance, Method method, String reason) {
+        if (destroyed) return;
         if (instance == null || method == null) return;
         dispatcherInstance = instance;
         dispatcherMethod = method;

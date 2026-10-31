@@ -27,6 +27,7 @@ import t.mma.hooks.items.payment.core.RedPacketSettings;
  * 红包领取成功后的本机 TTS 播报。
  */
 public final class RedPacketAnnouncer {
+    private volatile boolean destroyed;
     private static final String TAG = "[Hchat:RedPacketAnnouncer]";
     private static final String DEFAULT_TEXT = "抢到红包 {amount} 元";
     private static final int MAX_TTS_RETRY = 1;
@@ -62,6 +63,7 @@ public final class RedPacketAnnouncer {
     }
 
     public void announceReceived(String amount, String talker, String nativeUrl, RedPacketEffectiveRule rule) {
+        if (destroyed || !settings.isEnabled()) return;
         if (rule == null) rule = RedPacketRuleResolver.legacyRule(settings);
         if (!rule.getAnnounceEnabled()) return;
         String template = rule.getAnnounceText();
@@ -91,6 +93,7 @@ public final class RedPacketAnnouncer {
     }
 
     private void speakOnMain(PendingSpeech speech) {
+        if (destroyed || !settings.isEnabled()) return;
         if (speech == null || TextUtils.isEmpty(speech.text)) {
             releasePending(speech);
             return;
@@ -104,6 +107,7 @@ public final class RedPacketAnnouncer {
     }
 
     private void ensureTtsOnMain() {
+        if (destroyed || !settings.isEnabled()) return;
         if (ttsReady && tts != null) {
             drainPendingSpeeches();
             return;
@@ -123,6 +127,7 @@ public final class RedPacketAnnouncer {
     }
 
     private void onTtsInit(int status) {
+        if (destroyed || !settings.isEnabled()) return;
         ttsInitializing = false;
         if (status != TextToSpeech.SUCCESS || tts == null) {
             safeShutdown();
@@ -158,6 +163,7 @@ public final class RedPacketAnnouncer {
     }
 
     private void drainPendingSpeeches() {
+        if (destroyed || !settings.isEnabled()) return;
         PendingSpeech speech;
         while (ttsReady && tts != null && (speech = pendingSpeeches.poll()) != null) {
             if (!speakNow(speech)) {
@@ -168,6 +174,7 @@ public final class RedPacketAnnouncer {
     }
 
     private boolean speakNow(PendingSpeech speech) {
+        if (destroyed || !settings.isEnabled()) return false;
         if (speech == null || tts == null || TextUtils.isEmpty(speech.text)) {
             releasePending(speech);
             return true;
@@ -202,6 +209,7 @@ public final class RedPacketAnnouncer {
     }
 
     private void retrySpeech(PendingSpeech speech, String reason) {
+        if (destroyed || !settings.isEnabled()) return;
         safeShutdown();
         if (speech == null) return;
         if (speech.retryCount >= MAX_TTS_RETRY) {
@@ -214,6 +222,7 @@ public final class RedPacketAnnouncer {
     }
 
     private void retryPendingSpeeches(String reason) {
+        if (destroyed || !settings.isEnabled()) return;
         if (pendingSpeeches.isEmpty()) return;
         int count = pendingSpeeches.size();
         for (int i = 0; i < count; i++) {
@@ -231,6 +240,15 @@ public final class RedPacketAnnouncer {
         }
     }
 
+    public void destroy() {
+        destroyed = true;
+        mainHandler.removeCallbacksAndMessages(null);
+        mainHandler.post(() -> {
+            pendingSpeeches.clear(); pendingKeys.clear(); announcedKeys.clear();
+            ttsInitializing = false;
+            safeShutdown();
+        });
+    }
     private void safeShutdown() {
         try {
             if (tts != null) tts.shutdown();

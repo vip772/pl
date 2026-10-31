@@ -12,6 +12,7 @@ import t.mma.hooks.api.sns.PreparedSnsForward
 import t.mma.hooks.api.sns.SnsForwardContentResolver
 import t.mma.hooks.api.sns.SnsForwardSnapshot
 import t.mma.hooks.core.BaseFeature
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.FeatureContext
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
@@ -40,16 +41,25 @@ class MomentsAutoForwardFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val installed = MomentsAutoForwardRuntime(context, ::logError)
-        runtime = installed
-        installed.start()
+        val prefs = HchatStorage.preferences(context.hostContext(), MomentsAutoForwardSettings.PREFS_NAME)
+        val owner = PreferenceRuntimeOwner(prefs, setOf(MomentsAutoForwardSettings.KEY_ENABLE),
+            enabled = {
+                val enabled = prefs.getBoolean(MomentsAutoForwardSettings.KEY_ENABLE, MomentsAutoForwardSettings.DEFAULT_ENABLE)
+                if (!enabled) prefs.edit().putLong(MomentsAutoForwardSettings.KEY_ENABLED_AT_SECONDS, 0L).apply()
+                enabled
+            }, create = { resources ->
+                val installed = MomentsAutoForwardRuntime(context, ::logError)
+                runtime = installed
+                resources.register { installed.destroy(); if (runtime === installed) runtime = null }
+                installed.start()
+            }, onError = { logError("朋友圈自动任务热启停失败", it) })
+        trackResource { owner.close() }
+        owner.start()
     }
-
     override fun onFeatureDestroy(context: FeatureContext) {
         runtime?.destroy()
         runtime = null
     }
-
     companion object {
         const val ID = "moments_auto_forward"
     }
@@ -85,7 +95,13 @@ private class MomentsAutoForwardRuntime(
     private val resolver = SnsForwardContentResolver(context, logger)
     private val worker = ScheduledThreadPoolExecutor(1) { runnable ->
         Thread(runnable, "Hchat-MomentsAutoForward").apply { isDaemon = true }
-    }.apply { removeOnCancelPolicy = true }
+    }.apply {
+        removeOnCancelPolicy = true
+        setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
+        setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
+        setKeepAliveTime(30L, TimeUnit.SECONDS)
+        allowCoreThreadTimeOut(true)
+    }
     private val lifecycleLock = Any()
     private val handledLock = Any()
     private val dailyLock = Any()
@@ -98,7 +114,7 @@ private class MomentsAutoForwardRuntime(
     @Volatile private var generation = 0L
     @Volatile private var destroyed = false
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == MomentsAutoForwardSettings.KEY_ENABLE) {
+        if (!destroyed && key == MomentsAutoForwardSettings.KEY_ENABLE) {
             onEnabledChanged(
                 prefs.getBoolean(
                     MomentsAutoForwardSettings.KEY_ENABLE,
@@ -130,18 +146,21 @@ private class MomentsAutoForwardRuntime(
         deleteSubscription = WeChatApis.databaseChanges()?.subscribe(::onDatabaseChange)
     }
 
+    @Synchronized
     fun destroy() {
+        if (destroyed) return
         destroyed = true
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        postSubscription?.unsubscribe()
+        runCatching { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }.onFailure { logger("取消朋友圈订阅失败", it) }
+        runCatching { postSubscription?.unsubscribe() }.onFailure { logger("取消朋友圈订阅失败", it) }
         postSubscription = null
-        deleteSubscription?.unsubscribe()
+        runCatching { deleteSubscription?.unsubscribe() }.onFailure { logger("取消朋友圈订阅失败", it) }
         deleteSubscription = null
         synchronized(lifecycleLock) {
             generation++
             cancelPendingLocked()
         }
-        worker.shutdownNow()
+        worker.queue.clear()
+        worker.shutdown()
     }
 
     private fun onEnabledChanged(enabled: Boolean) {
@@ -179,6 +198,7 @@ private class MomentsAutoForwardRuntime(
     }
 
     private fun onPostStored(nativeInfo: Any) {
+        if (destroyed) return
         if (!isEnabled()) return
         val currentGeneration = generation
         runCatching {
@@ -241,7 +261,7 @@ private class MomentsAutoForwardRuntime(
                 logger("调度朋友圈自动转发失败: snsId=${post.key}", it)
             }.getOrNull() ?: return
             task.future = future
-            if (task.canceled.get() || pending[post.key] !== task) future.cancel(true)
+            if (task.canceled.get() || pending[post.key] !== task) future.cancel(false)
         }
         log("已捕捉 ${displayName(post.userName)} 的${type.label}朋友圈，${delaySeconds}秒后转发")
     }
@@ -296,7 +316,7 @@ private class MomentsAutoForwardRuntime(
             if (future != null) {
                 task.future = future
                 if (task.canceled.get() || pending[task.post.key] !== task) {
-                    future.cancel(true)
+                    future.cancel(false)
                     return false
                 }
                 log("转发失败 ${displayName(task.post.userName)}，${RETRY_DELAY_SECONDS}秒后重试一次")
@@ -534,13 +554,14 @@ private class MomentsAutoForwardRuntime(
     }
 
     private fun onDatabaseChange(change: DatabaseChange?) {
+        if (destroyed) return
         if (change == null || !change.table.equals("SnsInfo", ignoreCase = true) || !change.isDelete()) return
         val key = deletedSnsId(change) ?: return
         var canceled = false
         synchronized(lifecycleLock) {
             pending.remove(key)?.let { task ->
                 task.canceled.set(true)
-                task.future?.cancel(true)
+                task.future?.cancel(false)
                 canceled = true
             }
             if (enabledState) markHandledLocked(key)
@@ -661,7 +682,7 @@ private class MomentsAutoForwardRuntime(
     private fun cancelPendingLocked() {
         pending.values.forEach { task ->
             task.canceled.set(true)
-            task.future?.cancel(true)
+            task.future?.cancel(false)
         }
         pending.clear()
     }

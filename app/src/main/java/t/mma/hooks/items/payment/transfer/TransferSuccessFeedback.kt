@@ -19,6 +19,7 @@ class TransferSuccessFeedback(
     private val context: Context,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var destroyed = false
     private val mainHandler = Handler(Looper.getMainLooper())
     private val notifier = RedPacketNotifier(
         context,
@@ -38,6 +39,7 @@ class TransferSuccessFeedback(
         info: TransferMessageInfo,
         rule: TransferEffectiveRule
     ) {
+        if (destroyed || !settings.isEnabled()) return
         if (key.isNotBlank() && !handled.add(key)) return
         val receivedAt = System.currentTimeMillis()
         val title = "自动收款"
@@ -79,10 +81,12 @@ class TransferSuccessFeedback(
         receivedAt: Long,
         index: Int
     ) {
+        if (destroyed || !settings.isEnabled()) return
         if (talker.isBlank() || index !in steps.indices) return
         val step = steps[index]
         val delay = step.nextDelayMillis().coerceAtLeast(0L)
         mainHandler.postDelayed({
+            if (destroyed || !settings.isEnabled()) return@postDelayed
             runCatching { sendStep(talker, sender, message, info, step, receivedAt) }
                 .onFailure { logger("自动收款回复失败", it) }
             sendReplySteps(talker, sender, message, info, steps, receivedAt, index + 1)
@@ -97,6 +101,7 @@ class TransferSuccessFeedback(
         step: RedPacketReplyStep,
         receivedAt: Long
     ): Boolean {
+        if (destroyed || !settings.isEnabled()) return false
         val selected = pick(step.content)
         val formatted = if (step.mode == RedPacketRuleConfig.REPLY_TEXT ||
             step.mode == RedPacketRuleConfig.REPLY_AT_SENDER ||
@@ -163,6 +168,7 @@ class TransferSuccessFeedback(
     private fun announce(text: String) {
         if (text.isBlank()) return
         mainHandler.post {
+            if (destroyed || !settings.isEnabled()) return@post
             if (ttsReady) {
                 speak(text)
                 return@post
@@ -170,12 +176,13 @@ class TransferSuccessFeedback(
             pendingSpeech.addLast(text)
             if (tts != null) return@post
             tts = TextToSpeech(context.applicationContext) { status ->
-                mainHandler.post {
+                mainHandler.post ready@{
+                    if (destroyed || !settings.isEnabled()) return@ready
                     ttsReady = status == TextToSpeech.SUCCESS
                     if (!ttsReady) {
                         logger("自动收款播报初始化失败: $status", null)
                         pendingSpeech.clear()
-                        return@post
+                        return@ready
                     }
                     tts?.language = Locale.CHINA
                     while (pendingSpeech.isNotEmpty()) speak(pendingSpeech.removeFirst())
@@ -185,11 +192,27 @@ class TransferSuccessFeedback(
     }
 
     private fun speak(text: String) {
+        if (destroyed || !settings.isEnabled()) return
         runCatching {
             tts?.speak(text, TextToSpeech.QUEUE_ADD, Bundle(), "hchat_transfer_${System.currentTimeMillis()}")
         }.onFailure { logger("自动收款播报失败", it) }
     }
 
+    fun destroy() {
+        if (destroyed) return
+        destroyed = true
+        notifier.destroy()
+        mainHandler.removeCallbacksAndMessages(null)
+        handled.clear()
+        mainHandler.post {
+            pendingSpeech.clear()
+            ttsReady = false
+            val engine = tts
+            tts = null
+            runCatching { engine?.stop() }
+            runCatching { engine?.shutdown() }
+        }
+    }
     companion object {
         private val AT_TOKENS = listOf("{@转账的人}", "{@sender}", "{@成员}")
     }

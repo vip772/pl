@@ -13,6 +13,7 @@ import android.widget.Button;
 import android.widget.TextView;
 
 import t.mma.hooks.core.HookRegistry;
+import t.mma.hooks.items.payment.core.PaymentResourceScope;
 import t.mma.hooks.items.payment.core.RedPacketSettings;
 import t.mma.hooks.items.payment.detect.RedPacketParser;
 import t.mma.utils.KavaReflector;
@@ -31,6 +32,20 @@ import de.robv.android.xposed.XC_MethodHook;
  * 负责在红包领取页自动点击、在详情页识别成功金额，并按配置自动关闭页面。
  */
 public class RedPacketUiAutomator {
+    private final PaymentResourceScope resources = new PaymentResourceScope();
+    private final Map<View, ViewTreeObserver.OnGlobalLayoutListener> layoutListeners = new WeakHashMap<>();
+    public void destroy() {
+        resources.close();
+        new Handler(android.os.Looper.getMainLooper()).post(() -> {
+            for (Map.Entry<View, ViewTreeObserver.OnGlobalLayoutListener> entry : layoutListeners.entrySet()) {
+                View view = entry.getKey();
+                if (view != null) view.getViewTreeObserver().removeOnGlobalLayoutListener(entry.getValue());
+            }
+            layoutListeners.clear();
+            clickedActivities.clear();
+            clickedViews.clear();
+        });
+    }
     public interface FilterCallback {
         boolean shouldSkip(String nativeUrl);
     }
@@ -101,6 +116,7 @@ public class RedPacketUiAutomator {
         if (hookDeclaredAfter(clazz, "initView", null, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                 handleReceivePage(param.thisObject, "initView", true);
             }
         })) {
@@ -110,6 +126,7 @@ public class RedPacketUiAutomator {
         hookDeclaredAfter(clazz, "onCreate", new Class<?>[]{Bundle.class}, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                 handleReceivePage(param.thisObject, "onCreate", false);
             }
         });
@@ -117,6 +134,7 @@ public class RedPacketUiAutomator {
         hookDeclaredAfter(clazz, "onResume", null, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                 handleReceivePage(param.thisObject, "onResume", true);
             }
         });
@@ -125,9 +143,10 @@ public class RedPacketUiAutomator {
             for (Method method : KavaReflector.declaredMethods(clazz)) {
                 if (!"onSceneEnd".equals(method.getName())) continue;
                 if (method.getParameterTypes().length != 4) continue;
-                HookRegistry.get().hook(method, new XC_MethodHook() {
+                resources.hook(method, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                         handleReceivePage(param.thisObject, "onSceneEnd", true);
                     }
                 });
@@ -142,6 +161,7 @@ public class RedPacketUiAutomator {
             hookDeclaredAfter(clazz, "onDestroy", null, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                     if (param.thisObject instanceof Activity) {
                         clickedActivities.remove((Activity) param.thisObject);
                     }
@@ -152,7 +172,7 @@ public class RedPacketUiAutomator {
 
     private void handleReceivePage(Object thisObject, String source, boolean click) {
         if (!(thisObject instanceof Activity)) return;
-        if (!settings.isEnabled() || settings.getInt(RedPacketSettings.KEY_GRAB_MODE, RedPacketSettings.DEFAULT_GRAB_MODE) == 1) return;
+        if (resources.isClosed() || !settings.isEnabled() || settings.getInt(RedPacketSettings.KEY_GRAB_MODE, RedPacketSettings.DEFAULT_GRAB_MODE) == 1) return;
         Activity activity = (Activity) thisObject;
         String nativeUrl = getNativeUrl(activity);
         log("领取页" + source + ": nativeurl=" + nativeUrl);
@@ -184,6 +204,7 @@ public class RedPacketUiAutomator {
         if (hookDeclaredAfter(clazz, "onCreate", new Class<?>[]{Bundle.class}, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                 if (param.thisObject instanceof Activity) {
                     scheduleDetailSuccessCheck((Activity) param.thisObject);
                 }
@@ -194,6 +215,7 @@ public class RedPacketUiAutomator {
         if (hookDeclaredAfter(clazz, "onResume", null, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                 if (param.thisObject instanceof Activity) {
                     scheduleDetailSuccessCheck((Activity) param.thisObject);
                 }
@@ -209,7 +231,7 @@ public class RedPacketUiAutomator {
                     ? KavaReflector.findDeclaredMethod(clazz, methodName)
                     : KavaReflector.findDeclaredMethod(clazz, methodName, parameterTypes);
             if (method == null) return false;
-            HookRegistry.get().hook(method, callback);
+            resources.hook(method, callback);
             return true;
         } catch (Throwable e) {
             log("Hook红包页面方法失败: " + clazz.getName() + "." + methodName + " | " + e.getMessage());
@@ -218,22 +240,22 @@ public class RedPacketUiAutomator {
     }
 
     private void startContinuousCheck(Activity activity, String nativeUrl) {
-        Handler handler = new Handler(activity.getMainLooper());
+
         int maxChecks = settings.getInt(RedPacketSettings.KEY_CHECK_TIMES, 10);
         final int[] count = {0};
         Runnable runnable = new Runnable() {
             @Override
             public void run() {
-                if (activity.isFinishing() || activity.isDestroyed()) return;
+                if (resources.isClosed() || !settings.isEnabled() || activity.isFinishing() || activity.isDestroyed()) return;
                 boolean closed = checkAndCloseIfFailed(activity, nativeUrl);
-                if (!closed && count[0]++ < maxChecks) handler.postDelayed(this, 300);
+                if (!closed && count[0]++ < maxChecks) resources.post("failed:" + System.identityHashCode(activity), 300, this);
             }
         };
-        handler.postDelayed(runnable, 300);
+        resources.post("failed:" + System.identityHashCode(activity), 300, runnable);
     }
 
     private void scheduleDetailSuccessCheck(Activity activity) {
-        if (!settings.isEnabled()) return;
+        if (resources.isClosed() || !settings.isEnabled()) return;
         String nativeUrl = getNativeUrl(activity);
         boolean selfSent = false;
         try {
@@ -241,18 +263,18 @@ public class RedPacketUiAutomator {
             selfSent = intent != null && intent.getBooleanExtra("key_is_self_sent", false);
         } catch (Throwable ignored) {}
         boolean finalSelfSent = selfSent;
-        Handler handler = new Handler(activity.getMainLooper());
+
         int maxChecks = Math.max(3, settings.getInt(RedPacketSettings.KEY_CHECK_TIMES, 10));
         final int[] count = {0};
         Runnable runnable = new Runnable() {
             @Override
             public void run() {
-                if (activity.isFinishing() || activity.isDestroyed()) return;
+                if (resources.isClosed() || !settings.isEnabled() || activity.isFinishing() || activity.isDestroyed()) return;
                 boolean success = checkAndCloseIfSuccess(activity, nativeUrl, finalSelfSent);
-                if (!success && count[0]++ < maxChecks) handler.postDelayed(this, 300);
+                if (!success && count[0]++ < maxChecks) resources.post("detail:" + System.identityHashCode(activity), 300, this);
             }
         };
-        handler.postDelayed(runnable, 100);
+        resources.post("detail:" + System.identityHashCode(activity), 100, runnable);
     }
 
     private boolean checkAndCloseIfFailed(Activity activity, String nativeUrl) {
@@ -450,24 +472,33 @@ public class RedPacketUiAutomator {
     }
 
     private void clickView(View view) {
+        if (resources.isClosed() || !settings.isEnabled()) return;
         view.setEnabled(true);
-        view.post(() -> view.getViewTreeObserver().addOnGlobalLayoutListener(
-                new ViewTreeObserver.OnGlobalLayoutListener() {
-                    @Override
-                    public void onGlobalLayout() {
-                        if (view.isEnabled() && view.getVisibility() == View.VISIBLE) {
-                            try {
-                                view.performClick();
-                                log("红包按钮已点击");
-                            } catch (Throwable e) {
-                                log("红包按钮点击失败: " + e.getMessage());
-                            }
-                            view.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+        java.lang.ref.WeakReference<View> reference = new java.lang.ref.WeakReference<>(view);
+        resources.post("click:" + System.identityHashCode(view), 0L, () -> {
+            View current = reference.get();
+            if (current == null || resources.isClosed() || !settings.isEnabled()) return;
+            ViewTreeObserver.OnGlobalLayoutListener previous = layoutListeners.remove(current);
+            if (previous != null) current.getViewTreeObserver().removeOnGlobalLayoutListener(previous);
+            ViewTreeObserver.OnGlobalLayoutListener listener = new ViewTreeObserver.OnGlobalLayoutListener() {
+                @Override public void onGlobalLayout() {
+                    View target = reference.get();
+                    if (target == null) return;
+                    boolean stopped = resources.isClosed() || !settings.isEnabled();
+                    if (stopped || target.isEnabled() && target.getVisibility() == View.VISIBLE) {
+                        target.getViewTreeObserver().removeOnGlobalLayoutListener(this);
+                        layoutListeners.remove(target);
+                        if (!stopped) {
+                            try { target.performClick(); log("红包按钮已点击"); }
+                            catch (Throwable error) { log("红包按钮点击失败: " + error.getMessage()); }
                         }
                     }
-                }));
+                }
+            };
+            layoutListeners.put(current, listener);
+            current.getViewTreeObserver().addOnGlobalLayoutListener(listener);
+        });
     }
-
     private boolean shouldSkip(String nativeUrl) {
         return filterCallback != null && filterCallback.shouldSkip(nativeUrl);
     }

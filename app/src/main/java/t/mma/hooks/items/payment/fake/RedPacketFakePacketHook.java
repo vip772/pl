@@ -4,6 +4,7 @@ import android.text.TextUtils;
 
 import t.mma.dexkit.DexFinder;
 import t.mma.hooks.core.HookRegistry;
+import t.mma.hooks.items.payment.core.PaymentResourceScope;
 import t.mma.hooks.items.payment.core.RedPacketSettings;
 import t.mma.utils.KavaReflector;
 
@@ -24,6 +25,8 @@ import de.robv.android.xposed.XC_MethodHook;
  * 伪造/分裂红包发包与响应修正。
  */
 public class RedPacketFakePacketHook {
+    private final PaymentResourceScope resources = new PaymentResourceScope();
+    public void destroy() { resources.close(); }
     public interface Logger {
         void log(String message);
     }
@@ -73,9 +76,10 @@ public class RedPacketFakePacketHook {
                     if (method.getParameterTypes().length != 3) continue;
                     String desc = sceneBaseClass.getName() + "#" + method;
                     if (!hookedDesc.add(desc)) continue;
-                    HookRegistry.get().hook(method, new XC_MethodHook() {
+                    resources.hook(method, new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                             handlePacketTamperBeforeDispatch(param);
                         }
                     });
@@ -363,9 +367,10 @@ public class RedPacketFakePacketHook {
                 for (Method method : KavaReflector.declaredMethods(clazz)) {
                     if (!"onGYNetEnd".equals(method.getName())) continue;
                     if (method.getParameterTypes().length != 3) continue;
-                    HookRegistry.get().hook(method, new XC_MethodHook() {
+                    resources.hook(method, new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                             fixFakePacketResponse(param.thisObject);
                         }
                     });

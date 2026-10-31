@@ -2,6 +2,7 @@ package t.mma.hooks.items.moments
 
 import android.content.SharedPreferences
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
@@ -22,18 +23,20 @@ class MomentsAutoRefreshFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = MomentsAutoRefreshRuntime(context, ::logError)
-        DexInstallScheduler.schedule(
-            "$ID:runtime",
-            name(),
-            DexInstallScheduler.Stage.WARMUP
-        ) {
-            val current = runtime ?: return@schedule false
-            current.start()
-            true
-        }
+        val prefs = HchatStorage.preferences(context.hostContext(), MomentsAutoRefreshSettings.PREFS_NAME)
+        val owner = PreferenceRuntimeOwner(prefs, setOf(MomentsAutoRefreshSettings.KEY_ENABLE),
+            enabled = { prefs.getBoolean(MomentsAutoRefreshSettings.KEY_ENABLE, false) },
+            create = { resources ->
+                val installed = MomentsAutoRefreshRuntime(context, ::logError)
+                runtime = installed
+                resources.register { installed.destroy(); if (runtime === installed) runtime = null }
+                val ticket = DexInstallScheduler.installation(ID + ":runtime", name(), DexInstallScheduler.Stage.WARMUP)
+                resources.register { ticket.close() }
+                ticket.schedule { installed.start(); true }
+            }, onError = { logError("自动刷新热启停失败", it) })
+        trackResource { owner.close() }
+        owner.start()
     }
-
     override fun onFeatureDestroy(context: FeatureContext) {
         runtime?.destroy()
         runtime = null
@@ -49,25 +52,31 @@ private class MomentsAutoRefreshRuntime(
     private val logger: (String, Throwable?) -> Unit
 ) {
     private val prefs = HchatStorage.preferences(context.hostContext(), MomentsAutoRefreshSettings.PREFS_NAME)
+    @Volatile private var destroyed = false
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == MomentsAutoRefreshSettings.KEY_ENABLE) reconfigure()
     }
     private var scheduler: ScheduledExecutorService? = null
     private var lastAttemptAt = 0L
 
+    @Synchronized
     fun start() {
+        if (destroyed) return
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
         reconfigure()
     }
 
+    @Synchronized
     fun destroy() {
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        stopScheduler()
+        if (destroyed) return
+        destroyed = true
+        try { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
+        finally { stopScheduler() }
     }
 
     @Synchronized
     private fun reconfigure() {
-        if (!prefs.getBoolean(MomentsAutoRefreshSettings.KEY_ENABLE, false)) {
+        if (destroyed || !prefs.getBoolean(MomentsAutoRefreshSettings.KEY_ENABLE, false)) {
             stopScheduler()
             return
         }
@@ -80,12 +89,12 @@ private class MomentsAutoRefreshRuntime(
 
     @Synchronized
     private fun stopScheduler() {
-        scheduler?.shutdownNow()
+        scheduler?.shutdown()
         scheduler = null
     }
 
     private fun tick() {
-        if (!prefs.getBoolean(MomentsAutoRefreshSettings.KEY_ENABLE, false)) return
+        if (destroyed || !prefs.getBoolean(MomentsAutoRefreshSettings.KEY_ENABLE, false)) return
         if (prefs.getBoolean(MomentsAutoRefreshSettings.KEY_TIME_WINDOW_ENABLE, false) &&
             !isInMomentsTimeWindow(
                 prefs.getString(MomentsAutoRefreshSettings.KEY_START_TIME, MomentsAutoRefreshSettings.DEFAULT_START_TIME).orEmpty(),
@@ -112,6 +121,7 @@ private class MomentsAutoRefreshRuntime(
     }
 
     private fun saveResult(time: Long, result: String) {
+        if (destroyed) return
         prefs.edit()
             .putLong(MomentsAutoRefreshSettings.KEY_LAST_TIME, time)
             .putString(MomentsAutoRefreshSettings.KEY_LAST_RESULT, result)

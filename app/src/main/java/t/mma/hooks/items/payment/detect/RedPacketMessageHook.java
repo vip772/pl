@@ -4,6 +4,7 @@ import android.text.TextUtils;
 
 import t.mma.dexkit.DexFinder;
 import t.mma.hooks.core.HookRegistry;
+import t.mma.hooks.items.payment.core.PaymentResourceScope;
 import t.mma.hooks.items.payment.core.RedPacketSettings;
 import t.mma.utils.KavaReflector;
 
@@ -18,6 +19,8 @@ import de.robv.android.xposed.XC_MethodHook;
  * 负责从微信 AddMsg 对象中识别红包消息，并把识别结果回调给业务层。
  */
 public class RedPacketMessageHook {
+    private final PaymentResourceScope resources = new PaymentResourceScope();
+    public void destroy() { resources.close(); }
     public interface Logger {
         void log(String message);
     }
@@ -73,9 +76,10 @@ public class RedPacketMessageHook {
                 }
                 if (addMsgArgIndexes.isEmpty()) continue;
 
-                HookRegistry.get().hook(method, new XC_MethodHook() {
+                resources.hook(method, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                         if (param.args == null) return;
                         for (int index : addMsgArgIndexes) {
                             if (index >= 0 && index < param.args.length && param.args[index] != null) {

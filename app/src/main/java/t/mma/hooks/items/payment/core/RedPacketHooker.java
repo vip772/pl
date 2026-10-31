@@ -35,6 +35,8 @@ import t.mma.utils.KavaReflector;
  */
 public class RedPacketHooker {
 
+    private final PaymentResourceScope resources = new PaymentResourceScope();
+    private RedPacketNotifier notifier;
     private static final String TAG = "[Hchat:RedPacket]";
 
     // ---- 全局状态 ----
@@ -81,7 +83,7 @@ public class RedPacketHooker {
                 settings,
                 state,
                 stats,
-                new RedPacketNotifier(context),
+                this.notifier = new RedPacketNotifier(context),
                 formatter
         );
         this.announcer = new RedPacketAnnouncer(context, settings, formatter, this::logx);
@@ -143,11 +145,12 @@ public class RedPacketHooker {
     // ==================== 入口 ====================
 
     public List<Object> hookAll() {
+        if (resources.isClosed()) return java.util.Collections.emptyList();
         List<Object> subscriptions = new ArrayList<>();
         mLogEnabled = settings.getBoolean(RedPacketSettings.KEY_LOG_ENABLE, false);
         refreshFastSettingsCache();
         Object newGroupSubscription = newGroupBlocker.install();
-        if (newGroupSubscription != null) subscriptions.add(newGroupSubscription);
+        if (newGroupSubscription != null) ownSubscription(newGroupSubscription);
         logx("hookAll 开始, 收红包类=" + (dexFinder.receiveLuckyMoneyClass != null ? dexFinder.receiveLuckyMoneyClass.getName() : "null")
                 + " 拆红包类=" + (dexFinder.openLuckyMoneyClass != null ? dexFinder.openLuckyMoneyClass.getName() : "null"));
 
@@ -253,7 +256,7 @@ public class RedPacketHooker {
                 logx("消息观察订阅失败，使用红包检测 fallback");
                 return false;
             }
-            subscriptions.add(subscription);
+            ownSubscription(subscription);
             observeSubscribed = true;
             logx("红包检测入口: WeChatApis.message().observe()");
             return true;
@@ -364,6 +367,7 @@ public class RedPacketHooker {
     }
 
     private void handleUiReceived(String nativeUrl, String amount, boolean selfSent) {
+        if (resources.isClosed() || !settings.isEnabled()) return;
         if (!TextUtils.isEmpty(nativeUrl) && !stats.incrementSuccess(nativeUrl)) return;
         String talker = !TextUtils.isEmpty(nativeUrl) ? state.talkerMap.get(nativeUrl) : null;
         RedPacketEffectiveRule rule = resolveReceivedRule(nativeUrl);
@@ -379,6 +383,7 @@ public class RedPacketHooker {
     }
 
     private void handleUiFailed(String nativeUrl, String reason) {
+        if (resources.isClosed() || !settings.isEnabled()) return;
         String talker = !TextUtils.isEmpty(nativeUrl) ? state.talkerMap.get(nativeUrl) : null;
         notificationCenter.notifyFailed(talker, nativeUrl, reason, resolveReceivedRule(nativeUrl));
         if (!TextUtils.isEmpty(nativeUrl)) {
@@ -393,6 +398,7 @@ public class RedPacketHooker {
 
     private void handleSilentReceived(String amount, String talker,
                                       String nativeUrl, String sendId, Object jsonObj) {
+        if (resources.isClosed() || !settings.isEnabled()) return;
         RedPacketEffectiveRule rule = resolveReceivedRule(nativeUrl);
         notificationCenter.notifyReceived(amount, talker, nativeUrl, rule);
         announcer.announceReceived(amount, talker, nativeUrl, rule);
@@ -401,6 +407,7 @@ public class RedPacketHooker {
     }
 
     private void handleSilentFailed(String talker, String nativeUrl, String sendId, String reason) {
+        if (resources.isClosed() || !settings.isEnabled()) return;
         notificationCenter.notifyFailed(talker, nativeUrl, reason, resolveReceivedRule(nativeUrl));
     }
 
@@ -422,7 +429,7 @@ public class RedPacketHooker {
 
     private void processDetectedRedBag(String source, String xml, String sender,
                                        String talker, String nu, String exUser) {
-        if (!settings.isEnabled()) return;
+        if (resources.isClosed() || !settings.isEnabled()) return;
         refreshFastSettingsCache();
         if (!state.markDetected(nu, sender, xml, talker)) {
             logx(source + " 跳过: nu=" + (TextUtils.isEmpty(nu) ? "empty" : "dup"));
@@ -470,19 +477,24 @@ public class RedPacketHooker {
     }
 
     private void scheduleOnMain(String key, long delay, Runnable runnable) {
-        if (runnable == null) return;
-        try {
-            WeChatTaskApi tasks = WeChatApis.runtime().tasks();
-            if (tasks != null && tasks.isAvailable()) {
-                tasks.runOnMainDelayed(key, Math.max(0L, delay), runnable);
-                return;
-            }
-        } catch (Throwable e) {
-            logx("任务API调度失败，直接执行: " + e.getMessage());
-        }
-        runnable.run();
+        if (runnable == null || resources.isClosed()) return;
+        resources.post(key, delay, () -> {
+            if (!resources.isClosed() && settings.isEnabled()) runnable.run();
+        });
     }
-
+    private void ownSubscription(Object subscription) {
+        resources.register(() -> KavaReflector.invoke(
+                KavaReflector.findMethod(subscription.getClass(), "unsubscribe"), subscription));
+    }
+    public void destroy() {
+        resources.close();
+        for (Runnable release : new Runnable[]{messageHook::destroy, databaseHook::destroy,
+                uiAutomator::destroy, fakePacketHook::destroy, silentHandler::destroy,
+                autoReply::destroy, announcer::destroy, notifier::destroy, networkDispatcher::destroy,
+                newGroupBlocker::destroy}) {
+            try { release.run(); } catch (Throwable error) { XposedBridge.log(error); }
+        }
+    }
     private void startLuckyMoneyActivity(Intent intent) {
         String[] cls = {"nk4.l", "oq4.l", "pn4.l", "qm4.l", "rm4.l",
                 "sm4.l", "tm4.l", "um4.l", "vm4.l", "wl4.l"};

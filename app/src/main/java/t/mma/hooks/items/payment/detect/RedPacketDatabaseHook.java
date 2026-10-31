@@ -4,6 +4,7 @@ import android.content.ContentValues;
 import android.text.TextUtils;
 
 import t.mma.hooks.core.HookRegistry;
+import t.mma.hooks.items.payment.core.PaymentResourceScope;
 import t.mma.hooks.items.payment.core.RedPacketSettings;
 import t.mma.hooks.items.payment.fake.RedPacketFakePacketCompat;
 import t.mma.utils.KavaReflector;
@@ -17,6 +18,8 @@ import de.robv.android.xposed.XC_MethodHook;
  * AddMsg Hook 失效或错过时，从 message 表写入的 ContentValues 中再次识别红包。
  */
 public class RedPacketDatabaseHook {
+    private final PaymentResourceScope resources = new PaymentResourceScope();
+    public void destroy() { resources.close(); }
     public interface LoginProvider {
         String getLoginWxid();
     }
@@ -81,9 +84,10 @@ public class RedPacketDatabaseHook {
                 }
                 if (!hasContentValuesArg(method)) continue;
 
-                HookRegistry.get().hook(method, new XC_MethodHook() {
+                resources.hook(method, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
+                        if (resources.isClosed()) return;
                         ContentValues values = findContentValuesArg(param.args);
                         if (values == null) return;
                         handleDatabaseInsert(findTableNameArg(param.args), values);

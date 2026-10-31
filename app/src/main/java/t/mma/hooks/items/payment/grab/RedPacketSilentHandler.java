@@ -7,6 +7,7 @@ import t.mma.hooks.api.core.WeChatApis;
 import t.mma.hooks.api.net.WeChatNetworkDispatcher;
 import t.mma.hooks.api.runtime.WeChatTaskApi;
 import t.mma.hooks.core.HookRegistry;
+import t.mma.hooks.items.payment.core.PaymentResourceScope;
 import t.mma.hooks.items.payment.core.RedPacketSettings;
 import t.mma.hooks.items.payment.core.RedPacketState;
 import t.mma.hooks.items.payment.detect.RedPacketParser;
@@ -26,6 +27,8 @@ import de.robv.android.xposed.XC_MethodHook;
  * 负责构造收红包请求、监听收包回调、构造拆包请求、监听拆包回调。
  */
 public class RedPacketSilentHandler {
+    private final PaymentResourceScope resources = new PaymentResourceScope();
+    public void destroy() { resources.close(); }
     private static final int MAX_RECEIVE_RETRY = 2;
     private static final int MAX_OPEN_RETRY = 1;
     private static final long RECEIVE_TIMEOUT_MS = 4500L;
@@ -90,7 +93,7 @@ public class RedPacketSilentHandler {
                 + " dispatcher=" + networkDispatcher.hasDispatcherInstance()
                 + " method=" + networkDispatcher.hasDispatcherMethod());
 
-        if (!settings.isSilentGrabEnabled()) {
+        if (resources.isClosed() || !settings.isSilentGrabEnabled()) {
             log("  放弃: silentGrabEnabled=false");
             return;
         }
@@ -254,10 +257,11 @@ public class RedPacketSilentHandler {
             }
             if (onGYNetEnd == null) return false;
 
-            HookRegistry.get().hook(onGYNetEnd, new XC_MethodHook() {
+            resources.hook(onGYNetEnd, new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
-                    if (!settings.isSilentGrabEnabled()) return;
+                        if (resources.isClosed()) return;
+                    if (resources.isClosed() || !settings.isSilentGrabEnabled()) return;
                     try {
                         Object jsonObj = param.args[2];
                         if (jsonObj == null) return;
@@ -388,10 +392,11 @@ public class RedPacketSilentHandler {
             }
             if (onGYNetEnd == null) return false;
 
-            HookRegistry.get().hook(onGYNetEnd, new XC_MethodHook() {
+            resources.hook(onGYNetEnd, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    if (!settings.isSilentGrabEnabled()) return;
+                        if (resources.isClosed()) return;
+                    if (resources.isClosed() || !settings.isSilentGrabEnabled()) return;
                     try {
                         Object jsonObj = (param.args != null && param.args.length > 2) ? param.args[2] : null;
                         String sendId = null;
@@ -546,23 +551,11 @@ public class RedPacketSilentHandler {
     }
 
     private void runDelayed(String key, long delayMs, Runnable runnable) {
-        try {
-            WeChatTaskApi tasks = WeChatApis.runtime().tasks();
-            if (tasks != null && tasks.isAvailable()) {
-                tasks.runOnMainDelayed(key, delayMs, runnable);
-                return;
-            }
-        } catch (Throwable ignored) {}
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(runnable, delayMs);
+        resources.post(key, delayMs, () -> {
+            if (!resources.isClosed() && settings.isEnabled()) runnable.run();
+        });
     }
-
-    private void cancelTask(String key) {
-        try {
-            WeChatTaskApi tasks = WeChatApis.runtime().tasks();
-            if (tasks != null && tasks.isAvailable()) tasks.cancel(key);
-        } catch (Throwable ignored) {}
-    }
-
+    private void cancelTask(String key) { resources.cancel(key); }
     private String receiveTimeoutKey(String sendId) {
         return "redpacket_receive_timeout:" + sendId;
     }

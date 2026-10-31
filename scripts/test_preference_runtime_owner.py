@@ -33,6 +33,11 @@ fun main(){
  val stale=p.listeners.single();p.failRemove=true;owner.close();owner.close()
  check(stops==7 && errors==2 && p.listeners.isEmpty())
  stale.onSharedPreferenceChanged(p,"enable");owner.start();check(starts==7)
+ val p2=Prefs();p2.enabled=true;var births=0;var deaths=0
+ val multi=PreferenceRuntimeOwner(p2,setOf("enable"),{p2.enabled},{s->births++;s.register{deaths++}},{throw it},restartOnChange=true)
+ multi.start();multi.refresh();check(births==1 && deaths==0)
+ p2.toggle(true);check(births==2 && deaths==1)
+ p2.toggle(false);check(deaths==2);multi.close()
  println("PASS production preference owner: disabled startup, repeated toggles, no duplicate install, partial failure cleanup/retry, stale callback rejection, cleanup despite listener removal failure")
 }
 '''

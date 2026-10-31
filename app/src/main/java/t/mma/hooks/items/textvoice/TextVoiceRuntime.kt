@@ -12,6 +12,7 @@ import android.widget.Toast
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.message.SingleMessageMenuLocator
+import t.mma.hooks.core.FeatureResourceScope
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.items.script.ScriptSendButtonHook
@@ -53,17 +54,19 @@ internal class TextVoiceRuntime(
     private val client = BiliTextVoiceClient()
     private val ttsSynthesizer = AndroidTtsFileSynthesizer(context.hostContext())
     private val active = AtomicBoolean(true)
+    private val hookResources = FeatureResourceScope { logger("释放文本转语音 Hook 失败", it) }
     private val sendModes = ConcurrentHashMap<String, SendMode>()
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
     private val bindings = Collections.synchronizedMap(WeakHashMap<MenuItem, TextPayload>())
     private val executor = ThreadPoolExecutor(
         1,
         1,
-        0L,
-        TimeUnit.MILLISECONDS,
+        30L,
+        TimeUnit.SECONDS,
         ArrayBlockingQueue(8),
         { runnable -> Thread(runnable, "Hchat-TextVoice").apply { isDaemon = true } }
     )
+    init { executor.allowCoreThreadTimeOut(true) }
     private var player: MediaPlayer? = null
     private var playerFile: File? = null
     private var playerGeneration = 0L
@@ -76,12 +79,13 @@ internal class TextVoiceRuntime(
     init {
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
         cacheDirectory().listFiles()?.forEach { file ->
-            if (file.name.startsWith(CACHE_PREFIX)) file.delete()
+            if (file.name.startsWith(CACHE_PREFIX) && System.currentTimeMillis() - file.lastModified() > TimeUnit.DAYS.toMillis(1)) file.delete()
         }
     }
 
     @Synchronized
     fun installMessageMenu(): Boolean {
+        if (!active.get()) return false
         val createHooked = SingleMessageMenuLocator.menuCreateMethods(context, logger).count { method ->
             hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
@@ -128,20 +132,25 @@ internal class TextVoiceRuntime(
         return true
     }
 
+    @Synchronized
     fun destroy() {
         if (!active.compareAndSet(true, false)) return
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
+        runCatching { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }.onFailure { logger("注销语音设置监听失败", it) }
+        hookResources.close()
+        hookedMethods.clear()
         sendModes.clear()
         bindings.clear()
-        client.cancelAll()
-        ttsSynthesizer.cancelAll()
-        executor.shutdownNow()
+        runCatching { client.cancelAll() }.onFailure { logger("取消语音网络请求失败", it) }
+        runCatching { ttsSynthesizer.cancelAll() }.onFailure { logger("取消语音合成失败", it) }
+        executor.queue.clear()
+        executor.shutdown()
         main.post { releasePlayer(deleteFile = true) }
     }
 
     private fun enqueueSend(talker: String, text: String, config: SynthesisConfig) {
         try {
             executor.execute {
+                if (!sendEnabled()) return@execute
                 val file = newCacheFile(config)
                 try {
                     synthesize(text, config, file)
@@ -172,6 +181,7 @@ internal class TextVoiceRuntime(
     private fun enqueuePlayback(text: String) {
         try {
             executor.execute {
+                if (!playEnabled()) return@execute
                 val config = synthesisConfig(null)
                 val file = newCacheFile(config)
                 var handedToPlayer = false
@@ -250,7 +260,8 @@ internal class TextVoiceRuntime(
         if (Modifier.isAbstract(method.modifiers) || method.declaringClass.isInterface) return false
         if (!hookedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            val handle = HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            hookResources.register { HookRegistry.get().unhook(handle) }
             true
         }.getOrElse {
             hookedMethods.remove(method)
@@ -486,6 +497,7 @@ internal class TextVoiceRuntime(
     private fun toast(message: String) {
         val activity = WeChatApis.currentActivity()?.currentActivity()
         main.post {
+            if (!active.get()) return@post
             if (activity == null || !activity.isUsable()) {
                 Toast.makeText(context.hostContext(), message, Toast.LENGTH_SHORT).show()
             } else {

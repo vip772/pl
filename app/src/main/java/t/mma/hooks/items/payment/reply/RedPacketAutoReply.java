@@ -21,6 +21,8 @@ import java.util.Random;
  * 抢到红包后的自动回复。
  */
 public final class RedPacketAutoReply {
+    private final t.mma.hooks.items.payment.core.PaymentResourceScope resources = new t.mma.hooks.items.payment.core.PaymentResourceScope();
+    public void destroy() { resources.close(); }
     public interface Logger {
         void log(String message);
     }
@@ -97,7 +99,7 @@ public final class RedPacketAutoReply {
                                    String sender, List<ReplyPlan> plans, int index) {
         if (index >= plans.size()) return;
         ReplyPlan plan = plans.get(index);
-        tasks.runOnMainDelayed(replyKey + ":step:" + index, plan.delayMs, () -> {
+        resources.post(replyKey + ":step:" + index, plan.delayMs, () -> {
             if (!isReplyEnabled()) {
                 log("自动回复跳过: 全局开关已关闭");
                 return;
@@ -133,7 +135,7 @@ public final class RedPacketAutoReply {
     }
 
     private boolean isReplyEnabled() {
-        return settings.getBoolean(RedPacketSettings.KEY_REPLY_ENABLE, false);
+        return !resources.isClosed() && settings.isEnabled() && settings.getBoolean(RedPacketSettings.KEY_REPLY_ENABLE, false);
     }
 
     private boolean sendByMode(String talker, String content, String sender,

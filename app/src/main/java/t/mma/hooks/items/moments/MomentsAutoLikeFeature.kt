@@ -8,6 +8,7 @@ import t.mma.hooks.api.sns.SnsContentKind
 import t.mma.hooks.api.sns.WeChatSnsApi
 import t.mma.hooks.api.sns.WeChatSnsPostObserver
 import t.mma.hooks.core.BaseFeature
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.FeatureContext
 import t.mma.preferences.HchatStorage
 import org.json.JSONArray
@@ -35,16 +36,25 @@ class MomentsAutoLikeFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val installed = MomentsAutoLikeRuntime(context, ::logError)
-        runtime = installed
-        installed.start()
+        val prefs = HchatStorage.preferences(context.hostContext(), MomentsAutoLikeSettings.PREFS_NAME)
+        val owner = PreferenceRuntimeOwner(prefs, setOf(MomentsAutoLikeSettings.KEY_ENABLE),
+            enabled = {
+                val enabled = prefs.getBoolean(MomentsAutoLikeSettings.KEY_ENABLE, MomentsAutoLikeSettings.DEFAULT_ENABLE)
+                if (!enabled) prefs.edit().putLong(MomentsAutoLikeSettings.KEY_ENABLED_AT_SECONDS, 0L).apply()
+                enabled
+            }, create = { resources ->
+                val installed = MomentsAutoLikeRuntime(context, ::logError)
+                runtime = installed
+                resources.register { installed.destroy(); if (runtime === installed) runtime = null }
+                installed.start()
+            }, onError = { logError("朋友圈自动任务热启停失败", it) })
+        trackResource { owner.close() }
+        owner.start()
     }
-
     override fun onFeatureDestroy(context: FeatureContext) {
         runtime?.destroy()
         runtime = null
     }
-
     companion object {
         const val ID = "moments_auto_like"
     }
@@ -59,16 +69,23 @@ private class MomentsAutoLikeRuntime(
     private val prefs = HchatStorage.preferences(context.hostContext(), MomentsAutoLikeSettings.PREFS_NAME)
     private val worker = ScheduledThreadPoolExecutor(1) { runnable ->
         Thread(runnable, "Hchat-MomentsAutoLike").apply { isDaemon = true }
-    }.apply { removeOnCancelPolicy = true }
+    }.apply {
+        removeOnCancelPolicy = true
+        setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
+        setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
+        setKeepAliveTime(30L, TimeUnit.SECONDS)
+        allowCoreThreadTimeOut(true)
+    }
     private val stateLock = Any()
     private val dailyLikeLock = Any()
     private val states = LinkedHashMap<String, State>()
     private val successfulIds = LinkedHashSet<String>()
     private val pending = ConcurrentHashMap<String, ScheduledFuture<*>>()
     private val snsApi: WeChatSnsApi? get() = WeChatApis.snsApi()
+    @Volatile private var destroyed = false
     private var enabledState = prefs.getBoolean(MomentsAutoLikeSettings.KEY_ENABLE, false)
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == MomentsAutoLikeSettings.KEY_ENABLE) {
+        if (!destroyed && key == MomentsAutoLikeSettings.KEY_ENABLE) {
             val enabled = prefs.getBoolean(MomentsAutoLikeSettings.KEY_ENABLE, false)
             if (enabled && !enabledState) {
                 prefs.edit()
@@ -96,27 +113,34 @@ private class MomentsAutoLikeRuntime(
         deleteSubscription = WeChatApis.databaseChanges()?.subscribe(::onDatabaseChange)
     }
 
+    @Synchronized
     fun destroy() {
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        postSubscription?.unsubscribe()
+        if (destroyed) return
+        destroyed = true
+        runCatching { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }.onFailure { logger("取消朋友圈订阅失败", it) }
+        runCatching { postSubscription?.unsubscribe() }.onFailure { logger("取消朋友圈订阅失败", it) }
         postSubscription = null
-        deleteSubscription?.unsubscribe()
+        runCatching { deleteSubscription?.unsubscribe() }.onFailure { logger("取消朋友圈订阅失败", it) }
         deleteSubscription = null
         cancelPendingLikes()
-        worker.shutdownNow()
+        worker.queue.clear()
+        worker.shutdown()
     }
 
     private fun onDatabaseChange(change: DatabaseChange?) {
+        if (destroyed) return
         if (change == null || !change.table.equals("SnsInfo", ignoreCase = true)) return
         if (change.isDelete()) cancelDeleted(change)
     }
 
     private fun onPostStored(nativeInfo: Any) {
+        if (destroyed) return
         if (!prefs.getBoolean(MomentsAutoLikeSettings.KEY_ENABLE, MomentsAutoLikeSettings.DEFAULT_ENABLE)) return
         runCatching { worker.execute { process(nativeInfo) } }
     }
 
     private fun process(nativeInfo: Any) {
+        if (destroyed) return
         val api = snsApi ?: return
         val post = MomentsPostRecord.from(nativeInfo, api) ?: return
         if (isHandled(post.key)) return
@@ -129,7 +153,7 @@ private class MomentsAutoLikeRuntime(
         if (!claim(post.key)) return
         val delaySeconds = nextDelaySeconds()
         log("已捕捉 ${displayName(post.userName)} 的${post.type.label}朋友圈，${delaySeconds}秒后点赞")
-        val future = worker.schedule({ execute(post) }, delaySeconds, TimeUnit.SECONDS)
+        val future = runCatching { worker.schedule({ execute(post) }, delaySeconds, TimeUnit.SECONDS) }.getOrNull() ?: return
         pending[post.key] = future
         if (future.isDone) pending.remove(post.key, future)
     }
@@ -160,7 +184,7 @@ private class MomentsAutoLikeRuntime(
     }
 
     private fun rejectionReason(post: MomentsPostRecord): String? {
-        if (!prefs.getBoolean(MomentsAutoLikeSettings.KEY_ENABLE, false)) return "功能已关闭"
+        if (destroyed || !prefs.getBoolean(MomentsAutoLikeSettings.KEY_ENABLE, false)) return "功能已关闭"
         val self = WeChatApis.account()?.selfWxId().orEmpty()
         val isSelf = self.isNotBlank() && self == post.userName
         if (isSelf && !prefs.getBoolean(

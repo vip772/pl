@@ -20,6 +20,8 @@ import t.mma.hooks.items.payment.detect.RedPacketParser;
 public final class RedPacketNewGroupBlocker {
     private final RedPacketSettings settings;
     private final Consumer<String> logger;
+    private volatile boolean destroyed;
+    public void destroy() { destroyed = true; }
     private volatile boolean subscribed;
     private volatile boolean baselineLoaded;
 
@@ -29,6 +31,7 @@ public final class RedPacketNewGroupBlocker {
     }
 
     public synchronized Object install() {
+        if (destroyed) return null;
         preloadKnownGroups();
         if (subscribed) return null;
         WeChatChatroomChangeApi api = null;
@@ -72,6 +75,7 @@ public final class RedPacketNewGroupBlocker {
     }
 
     private void handleChatroomChange(WeChatChatroomChangeApi.ChatroomChange change) {
+        if (destroyed) return;
         if (change == null) return;
         String groupId = normalizeGroupId(change.chatroomId());
         if (TextUtils.isEmpty(groupId)) return;

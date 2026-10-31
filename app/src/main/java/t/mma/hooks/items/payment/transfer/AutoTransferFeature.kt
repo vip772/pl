@@ -8,6 +8,7 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.message.WeChatMessageObserveApi
 import t.mma.hooks.api.payment.TransferOperationParams
 import t.mma.hooks.api.payment.TransferQueryParams
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
@@ -16,7 +17,8 @@ import java.util.concurrent.ConcurrentHashMap
 class AutoTransferFeature : BaseFeature() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val handledTransfers = ConcurrentHashMap<String, Long>()
-    @Volatile private var observerInstalled = false
+    @Volatile private var generation: Any? = null
+    @Volatile private var currentSettings: AutoTransferSettings? = null
     @Volatile private var feedback: TransferSuccessFeedback? = null
 
     private data class TransferAttempt(val success: Boolean, val failure: String = "")
@@ -31,37 +33,50 @@ class AutoTransferFeature : BaseFeature() {
 
     @Throws(Throwable::class)
     override fun onFeatureInstall(context: FeatureContext) {
-        scheduleInstall(context)
-        subscribe(Events.DexReady::class.java) {
-            scheduleInstall(context)
-        }
-    }
-
-    private fun scheduleInstall(context: FeatureContext) {
-        DexInstallScheduler.schedule(ID, name(), stage = DexInstallScheduler.Stage.WARMUP) {
-            try {
-                TransferReceiveAccountStore.install(context, ::logError)
-                if (feedback == null) {
-                    feedback = TransferSuccessFeedback(context.hostContext(), ::logError)
+        val settings = AutoTransferSettings(context.hostContext())
+        currentSettings = settings
+        val prefs = settings.getHostPreferences() ?: return
+        var schedule: (() -> Unit)? = null
+        val owner = PreferenceRuntimeOwner(prefs, setOf(AutoTransferSettings.KEY_ENABLE),
+            enabled = { settings.isEnabled() }, create = { resources ->
+                val token = Any()
+                generation = token
+                val currentFeedback = TransferSuccessFeedback(context.hostContext(), ::logError)
+                feedback = currentFeedback
+                resources.register {
+                    if (generation === token) generation = null
+                    mainHandler.removeCallbacksAndMessages(token)
+                    currentFeedback.destroy()
+                    if (feedback === currentFeedback) feedback = null
                 }
-                if (observerInstalled) return@schedule true
-                val observer = WeChatApis.message().observe()
-                if (observer == null || !observer.isAvailable) {
-                    logError("消息观察不可用，自动收款未安装", null)
-                    return@schedule false
-                } else {
-                    trackSubscription(observer.subscribe { message -> handleMessage(context, message) })
-                    observerInstalled = true
-                    return@schedule true
+                val ticket = DexInstallScheduler.installation(ID, name(), DexInstallScheduler.Stage.WARMUP)
+                resources.register { ticket.close(); schedule = null }
+                var observerInstalled = false
+                schedule = {
+                    ticket.schedule {
+                        if (resources.isClosed() || !isCurrent(token)) false else {
+                            TransferReceiveAccountStore.install(context, ::logError)
+                            if (observerInstalled) true else {
+                                val observer = WeChatApis.message().observe()
+                                if (observer == null || !observer.isAvailable) false else {
+                                    val subscription = observer.subscribe { message -> handleMessage(context, message, token) }
+                                    resources.register { subscription.unsubscribe() }
+                                    observerInstalled = true
+                                    true
+                                }
+                            }
+                        }
+                    }
                 }
-            } catch (e: Throwable) {
-                logError("自动收款安装失败", e)
-                false
-            }
-        }
+                schedule?.invoke()
+            }, onError = { logError("自动收款热启停失败", it) })
+        trackResource { owner.close(); currentSettings = null; handledTransfers.clear() }
+        owner.start()
+        subscribe(Events.DexReady::class.java) { owner.refresh(); schedule?.invoke() }
     }
-
-    private fun handleMessage(context: FeatureContext, message: WeChatMessageObserveApi.ObservedMessage?) {
+    private fun isCurrent(token: Any): Boolean = generation === token && currentSettings?.isEnabled() == true
+    private fun handleMessage(context: FeatureContext, message: WeChatMessageObserveApi.ObservedMessage?, token: Any) {
+        if (!isCurrent(token)) return
         if (message == null) return
         val rawContent = message.content.ifBlank { message.xml }
         if (message.outgoing) {
@@ -106,14 +121,16 @@ class AutoTransferFeature : BaseFeature() {
         val rejectReason = rejectReason(rule, info, message)
         val delay = rule.nextDelayMillis()
         val action = Runnable {
+            if (!isCurrent(token)) return@Runnable
             if (rejectReason == null) {
-                receiveTransfer(settings, rule, message, info)
+                receiveTransfer(settings, rule, message, info, token)
             } else if (rule.refundRejected) {
-                refundTransfer(message, info, rejectReason)
+                refundTransfer(message, info, rejectReason, token)
             }
         }
         if (delay > 0L) {
-            mainHandler.postDelayed(action, delay)
+            mainHandler.postAtTime(action, token, android.os.SystemClock.uptimeMillis() + delay)
+            if (!isCurrent(token)) mainHandler.removeCallbacksAndMessages(token)
         } else {
             action.run()
         }
@@ -162,21 +179,23 @@ class AutoTransferFeature : BaseFeature() {
         settings: AutoTransferSettings,
         rule: TransferEffectiveRule,
         message: WeChatMessageObserveApi.ObservedMessage,
-        info: TransferMessageInfo
+        info: TransferMessageInfo,
+        token: Any
     ) {
+        if (!isCurrent(token)) return
         val selectedKey = rule.receiveAccount
         if (selectedKey == TransferReceiveAccountStore.DEFAULT_KEY) {
-            finishReceive(rule, message, info, null)
+            finishReceive(rule, message, info, null, token)
             return
         }
         val cachedAccount = TransferReceiveAccountStore.find(settings.hostContext(), selectedKey)
         if (cachedAccount != null) {
-            finishReceive(rule, message, info, cachedAccount)
+            finishReceive(rule, message, info, cachedAccount, token)
             return
         }
         val api = WeChatApis.payment().transfers()
         if (api == null || !api.canQuery()) {
-            finishReceive(rule, message, info, null)
+            finishReceive(rule, message, info, null, token)
             return
         }
         val started = api.query(
@@ -188,16 +207,17 @@ class AutoTransferFeature : BaseFeature() {
                 transferAttach = info.transferAttach
             )
         ) { result ->
+            if (!isCurrent(token)) return@query
             val accounts = if (result != null && result.errorCode == 0) {
                 TransferReceiveAccountStore.captureResponse(settings.hostContext(), result.response)
             } else {
                 emptyList()
             }
             val matched = TransferReceiveAccountStore.find(accounts, selectedKey)
-            finishReceive(rule, message, info, matched)
+            finishReceive(rule, message, info, matched, token)
         }
         if (!started) {
-            finishReceive(rule, message, info, null)
+            finishReceive(rule, message, info, null, token)
         }
     }
 
@@ -205,8 +225,10 @@ class AutoTransferFeature : BaseFeature() {
         rule: TransferEffectiveRule,
         message: WeChatMessageObserveApi.ObservedMessage,
         info: TransferMessageInfo,
-        account: TransferReceiveAccount?
+        account: TransferReceiveAccount?,
+        token: Any
     ) {
+        if (!isCurrent(token)) return
         val attempt = operateTransfer(message, info, "confirm", account)
         if (!attempt.success) {
             logError(
@@ -215,14 +237,17 @@ class AutoTransferFeature : BaseFeature() {
             )
         }
         if (!attempt.success) return
+        if (!isCurrent(token)) return
         feedback?.onReceived(transferKey(info), message, info, rule)
     }
 
     private fun refundTransfer(
         message: WeChatMessageObserveApi.ObservedMessage,
         info: TransferMessageInfo,
-        reason: String
+        reason: String,
+        token: Any
     ) {
+        if (!isCurrent(token)) return
         val attempt = operateTransfer(message, info, "refuse", null)
         if (!attempt.success) {
             logError(

@@ -8,13 +8,14 @@ internal class PreferenceRuntimeOwner(
     private val keys: Set<String>,
     private val enabled: () -> Boolean,
     private val create: (FeatureResourceScope) -> Unit,
-    private val onError: (Throwable) -> Unit
+    private val onError: (Throwable) -> Unit,
+    private val restartOnChange: Boolean = false
 ) : AutoCloseable {
     private var closed = false
     private var started = false
     private var resources: FeatureResourceScope? = null
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == null || key in keys) refresh()
+        if (key == null || key in keys) refresh(restartOnChange)
     }
     @Synchronized fun start() {
         if (closed || started) return
@@ -22,10 +23,11 @@ internal class PreferenceRuntimeOwner(
         try { prefs.registerOnSharedPreferenceChangeListener(listener); refresh() }
         catch (error: Throwable) { close(); onError(error) }
     }
-    @Synchronized fun refresh() {
+    @Synchronized fun refresh(restart: Boolean = false) {
         if (closed || !started) return
         try {
             if (!enabled()) { stopRuntime(); return }
+            if (restart) stopRuntime()
             if (resources != null) return
             val next = FeatureResourceScope(onError)
             resources = next

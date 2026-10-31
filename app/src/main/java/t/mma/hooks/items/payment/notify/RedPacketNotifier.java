@@ -38,6 +38,16 @@ public class RedPacketNotifier {
     private final String channelName;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private volatile long lastManualSoundAt;
+    private volatile boolean destroyed;
+    private final java.util.Set<Ringtone> activeRingtones = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
+    public void destroy() {
+        destroyed = true;
+        mainHandler.removeCallbacksAndMessages(null);
+        mainHandler.post(() -> {
+            for (Ringtone ringtone : activeRingtones) stopRingtone(ringtone);
+            activeRingtones.clear();
+        });
+    }
 
     public RedPacketNotifier(Context hostContext) {
         this(hostContext, DEFAULT_TAG, DEFAULT_CHANNEL_ID, DEFAULT_CHANNEL_NAME);
@@ -53,6 +63,7 @@ public class RedPacketNotifier {
     public void showToast(final String text) {
         if (TextUtils.isEmpty(text)) return;
         mainHandler.post(() -> {
+            if (destroyed) return;
             try {
                 Toast.makeText(hostContext, text, Toast.LENGTH_SHORT).show();
             } catch (Throwable ignored) {}
@@ -71,6 +82,7 @@ public class RedPacketNotifier {
     public void sendNotice(String title, String text, String toastText, String talker,
                            String nativeUrl, int idSalt, boolean system, boolean toast,
                            boolean sound, boolean vibrate, String soundUri) {
+        if (destroyed) return;
         try {
             if (toast) showToast(toastText);
             if (!system) return;
@@ -163,6 +175,7 @@ public class RedPacketNotifier {
         if (now - lastManualSoundAt < MANUAL_SOUND_DEBOUNCE_MS) return;
         lastManualSoundAt = now;
         mainHandler.post(() -> {
+            if (destroyed) return;
             Ringtone ringtone;
             try {
                 ringtone = RingtoneManager.getRingtone(hostContext, uri);
@@ -175,6 +188,7 @@ public class RedPacketNotifier {
                 ringtone.setStreamType(android.media.AudioManager.STREAM_NOTIFICATION);
             } catch (Throwable ignored) {}
             try {
+                activeRingtones.add(ringtone);
                 ringtone.play();
                 mainHandler.postDelayed(() -> stopRingtone(ringtone), MANUAL_SOUND_STOP_DELAY_MS);
             } catch (Throwable e) {
@@ -184,6 +198,7 @@ public class RedPacketNotifier {
     }
 
     private void stopRingtone(Ringtone ringtone) {
+        activeRingtones.remove(ringtone);
         try {
             if (ringtone.isPlaying()) ringtone.stop();
         } catch (Throwable ignored) {}
