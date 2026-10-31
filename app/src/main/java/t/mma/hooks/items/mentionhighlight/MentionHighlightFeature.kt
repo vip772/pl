@@ -631,12 +631,14 @@ private class MentionHighlightRuntime(private val context: FeatureContext) {
     } ?: 0L
 
     private fun locateBindMethod(): Method? = runCatching {
-        context.dexKitBridge().findMethod(FindMethod().apply {
+        context.dexKitManager().withCurrentBridge { bridge ->
+            bridge.findMethod(FindMethod().apply {
             matcher(MethodMatcher().apply {
                 usingStrings(listOf("MicroMsg.ChattingDataAdapterV3", "_onBindViewHolder[", "msgInfo"))
             })
         }).mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
             .firstOrNull { it.parameterTypes.size == 2 && it.parameterTypes[1] == Int::class.javaPrimitiveType }
+        }
     }.getOrElse { HLog.e(TAG + " 绑定方法定位异常", it); null }
 
     private fun isAtAll(user: String): Boolean =

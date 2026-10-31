@@ -111,7 +111,8 @@ private class FakeVoiceDurationRuntime(
         )?.takeIf { isRecorderDurationMethod(it) }?.let { return it }
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -125,6 +126,7 @@ private class FakeVoiceDurationRuntime(
                 .flatMap { KavaReflector.declaredMethods(it) }
                 .filter { isRecorderDurationMethod(it) }
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("伪造语音时长定位录音器失败", it)
             emptyList()

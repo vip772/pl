@@ -319,7 +319,8 @@ private class FakeWalletBalanceHooker(
 
     private fun findTickerMethods(): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -331,6 +332,7 @@ private class FakeWalletBalanceHooker(
             ).mapNotNull { data ->
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                     ?.takeIf { isTickerTextMethod(it) }
+            }
             }
         }.getOrElse {
             HLog.e("$TAG 定位 TickerView 金额方法失败: ${it.message}", it)

@@ -101,7 +101,8 @@ private class PatBlockHooker(
         if (!allowDexSearch) return null
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -117,6 +118,7 @@ private class PatBlockHooker(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isAvatarDoubleClickMethod)
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("定位聊天头像双击入口失败", it)
             emptyList()

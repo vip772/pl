@@ -32,6 +32,13 @@ files = [
     'dynamicbadge/DynamicBadgeFeature.kt',
     'conversationgroup/ConversationGroupRuntime.kt',
     'hometextcolor/HomeTextColorFeature.kt',
+    'chattime/ChatTimeStyleFeature.kt',
+    'membertitle/MemberTitleRenderer.kt',
+    'messagebubble/MessageBubbleFeature.kt',
+    'mentionhighlight/MentionHighlightFeature.kt',
+    'patblock/PatBlockFeature.kt',
+    'payment/fakebalance/FakeWalletBalanceFeature.kt',
+    'fakevoiceduration/FakeVoiceDurationFeature.kt',
 ]
 total = 0
 scopes = []
@@ -78,7 +85,7 @@ import org.luckypray.dexkit.query.matchers.ClassMatcher
 import org.luckypray.dexkit.query.enums.StringMatchType
 import t.mma.dexkit.DexKitBridgeManager
 object KavaReflector {
- fun declaredMethods(c:Class<*>) = c.declaredMethods
+ fun declaredMethods(c:Class<*>?): List<Method> = c?.declaredMethods?.toList().orEmpty()
  fun loadClass(n:String,l:ClassLoader):Class<*>? = null
 }
 class Spec(val anchor:String = "anchor")
@@ -119,6 +126,9 @@ fun isModernBind(m: Method) = true
 fun isLegacyConversationBind(m: Method) = true
 fun isNativeGroupMenuCreateMethod(m: Method) = true
 fun isNativeGroupMenuClickMethod(m: Method) = true
+fun isAvatarDoubleClickMethod(m: Method) = true
+fun isTickerTextMethod(m: Method) = true
+fun isRecorderDurationMethod(m: Method) = true
 '''
     names = set(re.findall(r'\b[A-Z][A-Z_]+\b', '\n'.join(scopes))) - {'R', 'ERR', 'MODERN_BIND_ANCHORS', 'LEGACY_BIND_ANCHORS', 'MODERN_CONVERSATION_BIND_ANCHORS'}
     prelude += 'val MODERN_CONVERSATION_BIND_ANCHORS = listOf("anchor")\n'
@@ -133,6 +143,7 @@ fun isNativeGroupMenuClickMethod(m: Method) = true
              'Method?', 'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>',
              'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'Method?',
              'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>']
+    types += ['List<Method>', 'List<Method>', 'List<Method>', 'Method?', 'List<Method>', 'List<Method>', 'List<Method>']
     assert len(types) == len(scopes)
     body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))

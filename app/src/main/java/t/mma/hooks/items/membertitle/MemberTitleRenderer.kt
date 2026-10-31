@@ -329,7 +329,8 @@ class MemberTitleRenderer(
 
     private fun findMethodsByStrings(vararg strings: String): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 org.luckypray.dexkit.query.FindMethod().apply {
                     matcher(org.luckypray.dexkit.query.matchers.MethodMatcher().apply {
                         usingStrings(strings.toList())
@@ -337,6 +338,7 @@ class MemberTitleRenderer(
                 }
             ).mapNotNull { data ->
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+            }
             }
         }.getOrElse {
             logger("群员头衔定位方法失败", it)

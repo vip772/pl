@@ -196,7 +196,8 @@ private class ChatTimeStyleRuntime(
             ?.takeIf(::isBindCandidate)
             ?.let { return it }
         val methods = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -206,6 +207,7 @@ private class ChatTimeStyleRuntime(
                 }
             ).mapNotNull { data ->
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+            }
             }
         }.getOrElse {
             HLog.e("$TAG 定位聊天时间绑定方法异常: ${it.message}", it)
