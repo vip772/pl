@@ -122,12 +122,20 @@ internal class CallMediaLimitHooker(
             context.hostClassLoader(),
             CACHE_DEVICE_OCCUPY_METHODS
         ).takeIf(::isDeviceOccupyMethodSet)?.let { return it }
+        return context.dexKitManager().withCurrentBridge { bridge ->
+            locateDeviceOccupyFresh(bridge, runtimeKey)
+        }
+    }
+    private fun locateDeviceOccupyFresh(
+        bridge: org.luckypray.dexkit.DexKitBridge,
+        runtimeKey: String
+    ): List<Method> {
 
         val methods = LinkedHashSet<Method>()
         val rawMultiTalkMethods = LinkedHashSet<Method>()
         DEVICE_OCCUPY_ANCHORS.forEachIndexed { index, anchor ->
             val results = runCatching {
-                context.dexKitBridge().findMethod(
+                bridge.findMethod(
                     FindMethod().apply {
                         matcher(
                             MethodMatcher().apply {
@@ -182,7 +190,8 @@ internal class CallMediaLimitHooker(
         )?.takeIf(::isVoicePlaybackGuardMethod)?.let { return it }
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -201,6 +210,7 @@ internal class CallMediaLimitHooker(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isVoicePlaybackGuardMethod)
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("定位语音消息通话检查方法失败", it)
             emptyList()

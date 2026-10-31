@@ -186,7 +186,8 @@ private class RemoveForwardLimitHooker(
         }
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -199,6 +200,7 @@ private class RemoveForwardLimitHooker(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isLimitMethod)
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("定位转发会话数量限制方法失败", it)
             emptyList()
@@ -233,7 +235,8 @@ private class RemoveForwardLimitHooker(
         }
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -249,6 +252,7 @@ private class RemoveForwardLimitHooker(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isUicConfigMethod)
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("定位新版转发联系人配置失败", it)
             return null

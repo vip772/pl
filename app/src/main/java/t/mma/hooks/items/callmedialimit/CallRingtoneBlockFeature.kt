@@ -146,12 +146,14 @@ private class CallRingtoneBlockHooker(
         val methods = LinkedHashSet<Method>()
         DIRECTION_ANCHOR_GROUPS.forEach { anchors ->
             val candidates = runCatching {
-                context.dexKitBridge().findMethod(
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findMethod(
                     FindMethod().apply {
                         matcher(MethodMatcher().apply { usingEqStrings(*anchors) })
                     }
                 ).mapNotNull { data ->
                     runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+                }
                 }
             }.getOrElse {
                 logger("定位微信通话铃声入口失败: ${anchors.firstOrNull().orEmpty()}", it)
@@ -179,8 +181,16 @@ private class CallRingtoneBlockHooker(
         ).takeIf { methods -> methods.isNotEmpty() && methods.all(::isMultiTalkDirectionMethod) }
             ?.let { return it }
 
+        return context.dexKitManager().withCurrentBridge { bridge ->
+            locateMultiTalkFresh(bridge, runtimeKey, reportMissing)
+        }
+    }
+    private fun locateMultiTalkFresh(
+        bridge: org.luckypray.dexkit.DexKitBridge,
+        runtimeKey: String,
+        reportMissing: Boolean
+    ): List<Method> {
         val routeData = runCatching {
-            val bridge = context.dexKitBridge()
             val primary = bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply { usingEqStrings(*MULTI_TALK_ROUTE_ANCHORS) })
@@ -283,8 +293,16 @@ private class CallRingtoneBlockHooker(
         if (methodCache.getString(CACHE_CORE_SCAN_RUNTIME, "") == runtimeKey) {
             return emptyList()
         }
+        return context.dexKitManager().withCurrentBridge { bridge ->
+            locateCoreFresh(bridge, runtimeKey)
+        }
+    }
+    private fun locateCoreFresh(
+        bridge: org.luckypray.dexkit.DexKitBridge,
+        runtimeKey: String
+    ): List<CoreStartAccess> {
         val methodData = runCatching {
-            context.dexKitBridge().findMethod(
+            bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply { usingEqStrings(*CORE_START_ANCHORS) })
                 }

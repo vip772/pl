@@ -44,6 +44,7 @@ files = [
     'selectedmessages/SelectedMessagesFeature.kt',
     'payment/transfer/TransferReceiveAccountStore.kt',
     'messageforward/ChatLivePhotoResolver.kt',
+    'forwardlimit/RemoveForwardLimitFeature.kt',
 ]
 total = 0
 scopes = []
@@ -107,6 +108,8 @@ fun isRecordQuery(m:Method,c:Class<*>) = true
 fun isStorageGetter(m:Method,c:Class<*>) = true
 fun isRetransmitDoneMethod(m:Method) = true
 fun isAccountParser(m:Method) = true
+fun isLimitMethod(m:Method) = true
+fun isUicConfigMethod(m:Method) = true
 class Context {
  fun dexKitManager() = DexKitBridgeManager()
  fun hostClassLoader() = ClassLoader.getSystemClassLoader()
@@ -157,6 +160,7 @@ fun isRecorderDurationMethod(m: Method) = true
              'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>']
     types += ['List<Method>', 'List<Method>', 'List<Method>', 'Method?', 'List<Method>', 'List<Method>', 'List<Method>']
     types += ['List<Method>', 'List<Method>', 'List<Method>', 'Method?', 'ChatLivePhotoMethods?']
+    types += ['List<Method>', 'List<Method>']
     assert len(types) == len(scopes)
     body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))
@@ -185,3 +189,14 @@ assert 'val manager: DexKitBridgeManager' in monet
 assert 'current.owner.get() === context' in monet
 assert 'val owner: WeakReference<FeatureContext>' in monet
 assert 'return manager.withCurrentBridge { bridge ->\n            MonetDexEvidenceCollector.collect(bridge, candidates)' in monet
+for relative, helpers in {
+    'callmedialimit/CallRingtoneBlockFeature.kt': ['locateMultiTalkFresh', 'locateCoreFresh'],
+    'callmedialimit/CallMediaLimitFeature.kt': ['locateDeviceOccupyFresh'],
+}.items():
+    source = (base / relative).read_text()
+    assert 'context.dexKitBridge()' not in source
+    for helper in helpers:
+        assert source.count(helper + '(') == 2
+        assert 'withCurrentBridge { bridge ->\n            ' + helper + '(bridge, runtimeKey' in source
+        assert 'private fun ' + helper + '(' in source
+print('PASS call locator helper ownership: raw query/result consumption stays in private manager-owned resolvers')
