@@ -823,7 +823,8 @@ private class MessageTextColorRenderer(
 
     private fun findMethodsByStrings(vararg strings: String): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -833,6 +834,7 @@ private class MessageTextColorRenderer(
                 }
             ).mapNotNull { data ->
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+            }
             }
         }.getOrElse {
             HLog.e("$TAG 定位聊天消息绑定方法异常: ${it.message}", it)

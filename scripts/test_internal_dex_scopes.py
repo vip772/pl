@@ -26,6 +26,11 @@ files = [
     'customnotify/CustomNotificationRuntime.kt',
     'moments/SnsAntiRecallFeature.kt',
     'moments/OriginalMomentsUploadFeature.kt',
+    'realtail/RealNameTailRenderer.kt',
+    'shortvideo/FinderMediaDownloadFeature.kt',
+    'messagetextcolor/MessageTextColorFeature.kt',
+    'dynamicbadge/DynamicBadgeFeature.kt',
+    'conversationgroup/ConversationGroupRuntime.kt',
 ]
 total = 0
 scopes = []
@@ -81,7 +86,9 @@ val context = Context()
 val strings = arrayOf("a")
 val tag = "a"
 val anchor = "a"
+val methodName: String? = "method"
 val predicate: (Method) -> Boolean = { true }
+val query = FindMethod()
 val loader = context.hostClassLoader()
 val matcher: ClassMatcher = ClassMatcher()
 object R {fun loadClass(n:String,l:ClassLoader):Class<*>? = null}
@@ -98,8 +105,13 @@ fun isLegacySelfRecallMediaCleanupMethod(m: Method) = true
 fun isRevokeEntry(m: Method) = true
 fun isNativeNotificationBuilderCandidate(m: Method) = true
 fun isEnableFlutterSnsPageMethod(m: Method) = true
+fun isModernBind(m: Method) = true
+fun isLegacyConversationBind(m: Method) = true
+fun isNativeGroupMenuCreateMethod(m: Method) = true
+fun isNativeGroupMenuClickMethod(m: Method) = true
 '''
-    names = set(re.findall(r'\b[A-Z][A-Z_]+\b', '\n'.join(scopes))) - {'R', 'ERR'}
+    names = set(re.findall(r'\b[A-Z][A-Z_]+\b', '\n'.join(scopes))) - {'R', 'ERR', 'MODERN_BIND_ANCHORS', 'LEGACY_BIND_ANCHORS'}
+    prelude += 'val MODERN_BIND_ANCHORS = listOf("anchor")\nval LEGACY_BIND_ANCHORS = listOf("anchor")\n'
     prelude += '\n'.join(f'const val {name} = "anchor"' for name in sorted(names))
     types = ['List<Constructor<*>>', 'List<Method>', 'List<Method>', 'List<Member>',
              'List<Method>', 'List<Method>', 'List<Class<*>>', 'List<Method>', 'List<Class<*>>',
@@ -107,7 +119,8 @@ fun isEnableFlutterSnsPageMethod(m: Method) = true
              'List<Method>', 'List<Member>', 'Method?', 'Method?',
              'Method?', 'List<Constructor<*>>', 'List<String>',
              'List<Method>', 'List<Method>', 'List<RevokeEntry>', 'List<Method>', 'List<Method>',
-             'Method?', 'List<Method>', 'List<Method>']
+             'Method?', 'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>',
+             'List<Method>', 'List<Method>', 'List<Method>', 'List<Method>', 'Method?']
     assert len(types) == len(scopes)
     body = '\n'.join(f'fun query{i}(): {t} {{ val matcher = {"MethodMatcher" if i == 11 else "ClassMatcher"}(); return {s} }}'
                      for i, (s, t) in enumerate(zip(scopes, types)))

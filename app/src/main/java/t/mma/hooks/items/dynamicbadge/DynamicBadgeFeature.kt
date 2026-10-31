@@ -229,11 +229,13 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             DexMethodCache.clear(methodPrefs, runtimeKey, CACHE_MODERN_HOLDER)
             if (!allowDexSearch) return false
             val candidates = runCatching {
-                context.dexKitBridge().findMethod(
+                context.dexKitManager().withCurrentBridge { bridge ->
+                    bridge.findMethod(
                     FindMethod().apply { matcher(MethodMatcher().apply { usingStrings(MODERN_BIND_ANCHORS) }) }
                 ).asSequence().mapNotNull { data ->
                     runCatching { data.getMethodInstance(loader) }.getOrNull()
                 }.filter(::isModernBind).distinctBy(Method::toGenericString).toList()
+                }
             }.getOrElse {
                 HLogBridge.error("DexKit 查找现代会话绑定入口失败", null, it)
                 emptyList()
@@ -315,13 +317,15 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         DexMethodCache.clear(methodPrefs, runtimeKey, CACHE_BIND)
         if (!allowDexSearch) return emptySet()
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply { usingStrings(LEGACY_BIND_ANCHORS) })
                 }
             ).asSequence().mapNotNull { data ->
                 runCatching { data.getMethodInstance(loader) }.getOrNull()
             }.filter(::isLegacyConversationBind).distinctBy(Method::toGenericString).toList()
+            }
         }.getOrElse {
             HLogBridge.error("DexKit 查找会话行角标动画入口失败", null, it)
             emptyList()

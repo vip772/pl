@@ -462,7 +462,8 @@ private class FinderMediaDownloadHooker(
 
     private fun findMethods(methodName: String?, vararg strings: String): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -474,6 +475,7 @@ private class FinderMediaDownloadHooker(
             ).mapNotNull { data ->
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("视频号菜单DexKit定位失败", it)
             emptyList()

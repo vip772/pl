@@ -2305,7 +2305,8 @@ object ConversationGroupRuntime {
             return NativeGroupMenuMethods(cachedCreate, cachedClick)
         }
         val methods = runCatching {
-            val createCandidates = context.dexKitBridge().findMethod(
+            val createCandidates = context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         declaredClass(
@@ -2325,7 +2326,9 @@ object ConversationGroupRuntime {
             ).mapNotNull {
                 runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isNativeGroupMenuCreateMethod)
-            val clickCandidates = context.dexKitBridge().findMethod(
+            }
+            val clickCandidates = context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(MethodMatcher().apply {
                         declaredClass(
@@ -2341,6 +2344,7 @@ object ConversationGroupRuntime {
             ).mapNotNull {
                 runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isNativeGroupMenuClickMethod)
+            }
             createCandidates.flatMap { create ->
                 clickCandidates.mapNotNull { click ->
                     nativeGroupMenuPairOwner(create, click)
@@ -2437,9 +2441,11 @@ object ConversationGroupRuntime {
         val prefs = DexMethodCache.prefs(context.hostContext(), CACHE_PREFS)
         val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         val method = runCatching {
-            context.dexKitBridge().findMethod(query).asSequence()
-                .mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
-                .firstOrNull(predicate)
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(query).asSequence()
+                    .mapNotNull { runCatching { it.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
+                    .firstOrNull(predicate)
+            }
         }.onFailure {
             HLog.e("$TAG 定位微信会话入口失败 key=$key: ${it.message}", it)
         }.getOrNull()
