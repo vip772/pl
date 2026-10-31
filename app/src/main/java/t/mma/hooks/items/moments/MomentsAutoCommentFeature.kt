@@ -35,7 +35,9 @@ class MomentsAutoCommentFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = MomentsAutoCommentRuntime(context, ::logError).also { it.start() }
+        val installed = MomentsAutoCommentRuntime(context, ::logError)
+        runtime = installed
+        installed.start()
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {

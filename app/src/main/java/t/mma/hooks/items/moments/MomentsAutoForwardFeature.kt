@@ -40,7 +40,9 @@ class MomentsAutoForwardFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = MomentsAutoForwardRuntime(context, ::logError).also { it.start() }
+        val installed = MomentsAutoForwardRuntime(context, ::logError)
+        runtime = installed
+        installed.start()
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {

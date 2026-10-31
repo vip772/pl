@@ -27,7 +27,9 @@ class UploadTransparentAvatarFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = UploadTransparentAvatarRuntime(context).also { it.installCompressHook() }
+        val installed = UploadTransparentAvatarRuntime(context)
+        runtime = installed
+        installed.installCompressHook()
         scheduleMediaTailorLocate()
         subscribe(Events.DexReady::class.java) { scheduleMediaTailorLocate() }
     }

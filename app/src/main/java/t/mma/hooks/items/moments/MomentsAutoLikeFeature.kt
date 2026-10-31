@@ -35,7 +35,9 @@ class MomentsAutoLikeFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = MomentsAutoLikeRuntime(context, ::logError).also { it.start() }
+        val installed = MomentsAutoLikeRuntime(context, ::logError)
+        runtime = installed
+        installed.start()
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {

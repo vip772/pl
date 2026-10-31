@@ -19,7 +19,9 @@ class EmojiAtFeature : BaseFeature() {
     override fun isEnabled(context: FeatureContext) = true
     override fun onFeatureInstall(context: FeatureContext) {
         if (context.loadPackageParam().processName != context.loadPackageParam().packageName) return
-        runtime = EmojiAtRuntime(context).also { it.install() }
+        val installed = EmojiAtRuntime(context)
+        runtime = installed
+        installed.install()
     }
     override fun onFeatureDestroy(context: FeatureContext) { runtime?.destroy(); runtime = null }
 }

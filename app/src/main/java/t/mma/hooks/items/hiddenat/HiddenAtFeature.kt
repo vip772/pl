@@ -24,7 +24,9 @@ class HiddenAtFeature : BaseFeature() {
     override fun isEnabled(context: FeatureContext) = true
     override fun onFeatureInstall(context: FeatureContext) {
         if (context.loadPackageParam().processName != context.loadPackageParam().packageName) return
-        runtime = HiddenAtRuntime(context).also { it.install() }
+        val installed = HiddenAtRuntime(context)
+        runtime = installed
+        installed.install()
     }
     override fun onFeatureDestroy(context: FeatureContext) { runtime?.destroy(); runtime = null }
 }

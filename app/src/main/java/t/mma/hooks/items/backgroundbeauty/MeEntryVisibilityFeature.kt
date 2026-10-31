@@ -24,7 +24,9 @@ class MeEntryVisibilityFeature : BaseFeature() {
         registerSettingsProvider(MeEntryVisibilitySettingsProvider())
     }
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = MeEntryVisibilityRuntime(context).also { it.install() }
+        val installed = MeEntryVisibilityRuntime(context)
+        runtime = installed
+        installed.install()
     }
     override fun onFeatureDestroy(context: FeatureContext) {
         runtime?.destroy()

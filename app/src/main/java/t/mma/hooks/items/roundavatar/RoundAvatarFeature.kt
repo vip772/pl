@@ -40,7 +40,9 @@ class RoundAvatarFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = RoundAvatarRuntime(context).also { it.installNotificationHooks() }
+        val installed = RoundAvatarRuntime(context)
+        runtime = installed
+        installed.installNotificationHooks()
         scheduleInstall()
         subscribe(Events.DexReady::class.java) { scheduleInstall() }
     }

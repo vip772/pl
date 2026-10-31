@@ -65,7 +65,9 @@ class HomeExtensionFeature : BaseFeature() {
         ) {})
     }
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = HomeExtensionRuntime(context).also { it.install() }
+        val installed = HomeExtensionRuntime(context)
+        runtime = installed
+        installed.install()
     }
     override fun onFeatureDestroy(context: FeatureContext) {
         runtime?.destroy()

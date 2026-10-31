@@ -55,9 +55,9 @@ class CustomFriendAvatarFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = CustomFriendAvatarRuntime(context, ::logFeatureError).also {
-            it.installNotificationHooks()
-        }
+        val installed = CustomFriendAvatarRuntime(context, ::logFeatureError)
+        runtime = installed
+        installed.installNotificationHooks()
         scheduleInstall()
         subscribe(Events.DexReady::class.java) { scheduleInstall() }
     }

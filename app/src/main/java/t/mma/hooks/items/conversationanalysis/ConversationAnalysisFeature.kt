@@ -26,7 +26,9 @@ class ConversationAnalysisFeature : BaseFeature() {
 
     override fun onFeatureInstall(context: FeatureContext) {
         // Hook 需要在关闭状态下先安装；具体是否展示菜单由运行时实时检查开关。
-        runtime = ConversationAnalysisRuntime(context, ::logRuntimeError).also { it.install() }
+        val installed = ConversationAnalysisRuntime(context, ::logRuntimeError)
+        runtime = installed
+        installed.install()
         messageMenuRuntime = ConversationAnalysisMessageMenuRuntime(context, ::logRuntimeError)
         scheduleMessageMenuInstall()
         subscribe(Events.DexReady::class.java) { scheduleMessageMenuInstall() }
