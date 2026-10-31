@@ -5,6 +5,9 @@ import t.mma.dexkit.DexMethodCache
 import t.mma.event.Events
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.media.WeChatInternalServices
+import t.mma.hooks.core.FeatureResourceScope
+import t.mma.hooks.core.PreferenceRuntimeOwner
+import t.mma.preferences.HchatStorage
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
@@ -29,29 +32,32 @@ class ZombieCheckFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val currentRuntime = ZombieCheckRuntime(context.hostContext(), ::logRuntimeError)
-        val currentHooker = ZombieCheckHooker(context, currentRuntime, ::logRuntimeError)
-        currentRuntime.bind(currentHooker)
-        runtime = currentRuntime
-        hooker = currentHooker
-        ZombieCheckController.attach(currentRuntime)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
+        val prefs = HchatStorage.preferences(context.hostContext(), ZombieCheckSettings.PREFS_NAME)
+        var schedule: (() -> Unit)? = null
+        val owner = PreferenceRuntimeOwner(prefs, setOf(ZombieCheckSettings.KEY_ENABLE),
+            enabled = { prefs.getBoolean(ZombieCheckSettings.KEY_ENABLE, ZombieCheckSettings.DEFAULT_ENABLE) },
+            create = { resources ->
+                val currentRuntime = ZombieCheckRuntime(context.hostContext(), ::logRuntimeError)
+                runtime = currentRuntime
+                resources.register {
+                    currentRuntime.close()
+                    ZombieCheckController.detach(currentRuntime)
+                    if (runtime === currentRuntime) runtime = null
+                }
+                val currentHooker = ZombieCheckHooker(context, currentRuntime, ::logRuntimeError)
+                hooker = currentHooker
+                resources.register { currentHooker.destroy(); if (hooker === currentHooker) hooker = null }
+                currentRuntime.bind(currentHooker)
+                ZombieCheckController.attach(currentRuntime)
+                val ticket = DexInstallScheduler.installation(ID, name())
+                resources.register { ticket.close(); schedule = null }
+                schedule = { ticket.schedule { currentHooker.install() } }
+                schedule?.invoke()
+            }, onError = { logRuntimeError("检测资源启停失败", it) })
+        trackResource { owner.close() }
+        owner.start()
+        subscribe(Events.DexReady::class.java) { owner.refresh(); schedule?.invoke() }
     }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.close()
-        ZombieCheckController.detach(runtime)
-        runtime = null
-        hooker = null
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            hooker?.install() == true
-        }
-    }
-
     private fun logRuntimeError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -66,6 +72,16 @@ internal class ZombieCheckHooker(
     private val runtime: ZombieCheckRuntime,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var destroyed = false
+    private val resources = FeatureResourceScope { logger("释放检测 Hook 失败", it) }
+    @Synchronized fun destroy() {
+        if (destroyed) return
+        destroyed = true
+        resources.close()
+        probeConstructor = null
+        deleteMethod = null
+        deleteService = null
+    }
     private val cache = DexMethodCache.prefs(context.hostContext(), CACHE_PREFS)
     @Volatile private var probeConstructor: Constructor<*>? = null
     @Volatile private var deleteMethod: Method? = null
@@ -74,14 +90,16 @@ internal class ZombieCheckHooker(
 
     @Synchronized
     fun install(): Boolean {
+        if (destroyed) return false
         if (installed) return true
         return runCatching {
             val constructor = locateProbeConstructor() ?: return false
             val callback = locateCallbackMethod(constructor) ?: return false
             locateDeleteMethod()
             WeChatApis.network()?.installNetworkHook(context.dexFinder())
-            HookRegistry.get().hook(callback, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(callback, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val args = param.args ?: return
                     if (args.size != 3) return
                     runtime.onProbeCallback(
@@ -92,6 +110,7 @@ internal class ZombieCheckHooker(
                     )
                 }
             })
+            resources.register { HookRegistry.get().unhook(handle) }
             probeConstructor = constructor
             installed = true
             runtime.markReady()
@@ -103,6 +122,7 @@ internal class ZombieCheckHooker(
     }
 
     fun createProbe(wxid: String): Any? {
+        if (destroyed) return null
         val constructor = probeConstructor ?: return null
         if (!isProbeConstructor(constructor)) return null
         val types = constructor.parameterTypes
@@ -121,12 +141,14 @@ internal class ZombieCheckHooker(
     }
 
     fun sendProbe(scene: Any): Boolean {
+        if (destroyed) return false
         val network = WeChatApis.network() ?: return false
         network.installNetworkHook(context.dexFinder())
         return network.sendRequest(scene)
     }
 
     fun deleteFriend(wxid: String, clearRecord: Boolean): Boolean {
+        if (destroyed) return false
         val method = deleteMethod ?: locateDeleteMethod() ?: return false
         return runCatching {
             val service = resolveDeleteService(method) ?: run {

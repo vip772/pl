@@ -22,12 +22,26 @@ class ZombieCheckRuntime(
     private val context = context.applicationContext
     private val settings = ZombieCheckSettings(context)
     private val lock = Any()
+    @Volatile private var closed = false
+    private val stopSignal = java.util.concurrent.CountDownLatch(1)
     private val worker = ScheduledThreadPoolExecutor(1) { runnable ->
         Thread(runnable, "HchatZombieCheck").apply { isDaemon = true }
-    }.apply { removeOnCancelPolicy = true }
+    }.apply {
+        removeOnCancelPolicy = true
+        setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
+        setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
+        setKeepAliveTime(30, TimeUnit.SECONDS)
+        allowCoreThreadTimeOut(true)
+    }
     private val actionWorker = ScheduledThreadPoolExecutor(1) { runnable ->
         Thread(runnable, "HchatZombieAction").apply { isDaemon = true }
-    }.apply { removeOnCancelPolicy = true }
+    }.apply {
+        removeOnCancelPolicy = true
+        setExecuteExistingDelayedTasksAfterShutdownPolicy(false)
+        setContinueExistingPeriodicTasksAfterShutdownPolicy(false)
+        setKeepAliveTime(30, TimeUnit.SECONDS)
+        allowCoreThreadTimeOut(true)
+    }
     private val queue = ArrayDeque<QueueItem>()
     private val results = ArrayList<ZombieCheckResult>()
     private val logs = ArrayDeque<String>()
@@ -40,6 +54,7 @@ class ZombieCheckRuntime(
     private var currentName = ""
     private var totalCount = settings.totalCount()
     private var activeProbe: ActiveProbe? = null
+    private val pendingResults = LinkedHashMap<String, QueueItem>()
     private var actionGeneration = 0L
     private var deleting = false
     private var deleteTotalCount = 0
@@ -61,6 +76,7 @@ class ZombieCheckRuntime(
 
     internal fun markReady() {
         synchronized(lock) {
+            if (closed) return
             ready = true
             if (!running && queue.isEmpty() && results.isEmpty()) status = "等待检测"
         }
@@ -85,8 +101,8 @@ class ZombieCheckRuntime(
     }
 
     fun start(): ZombieCheckActionResult {
-        if (!settings.enabled()) return ZombieCheckActionResult(false, "请先启用僵尸粉检测")
-        if (!ready || hooker == null) return ZombieCheckActionResult(false, "检测接口尚未就绪")
+        if (closed || !settings.enabled()) return ZombieCheckActionResult(false, "请先启用僵尸粉检测")
+        if (closed || !ready || hooker == null) return ZombieCheckActionResult(false, "检测接口尚未就绪")
         synchronized(lock) {
             if (running) return ZombieCheckActionResult(false, "检测正在运行")
             if (deleting) return ZombieCheckActionResult(false, "正在批量删除好友")
@@ -102,6 +118,7 @@ class ZombieCheckRuntime(
         contacts.forEach { names[it.wxId] = it.displayName() }
 
         synchronized(lock) {
+            if (closed) return ZombieCheckActionResult(false, "检测已关闭")
             if (queue.isEmpty()) {
                 val configured = settings.targetIds()
                 val targets = (if (configured.isEmpty()) friendIds else configured.intersect(friendIds)) - excluded
@@ -130,6 +147,7 @@ class ZombieCheckRuntime(
 
     fun pause(): ZombieCheckActionResult {
         synchronized(lock) {
+            if (closed) return ZombieCheckActionResult(false, "检测已关闭")
             if (!running && activeProbe == null && !deleting) {
                 return ZombieCheckActionResult(false, "当前没有运行中的任务")
             }
@@ -154,12 +172,14 @@ class ZombieCheckRuntime(
 
     fun reset(): ZombieCheckActionResult {
         synchronized(lock) {
+            if (closed) return ZombieCheckActionResult(false, "检测已关闭")
             running = false
             deleting = false
             actionGeneration++
             activeProbe?.timeout?.cancel(false)
             activeProbe = null
             queue.clear()
+            pendingResults.clear()
             results.clear()
             logs.clear()
             names.clear()
@@ -182,13 +202,14 @@ class ZombieCheckRuntime(
         clearRecord: Boolean,
         delaySeconds: Int
     ): ZombieCheckActionResult {
-        if (!ready || hooker == null) return ZombieCheckActionResult(false, "删除好友接口尚未就绪")
+        if (closed || !ready || hooker == null) return ZombieCheckActionResult(false, "删除好友接口尚未就绪")
         val ids = targetIds.map { it.trim() }.distinct()
         if (ids.isEmpty()) return ZombieCheckActionResult(false, "请选择要删除的好友")
         if (ids.any { !isUsableFriendId(it) }) {
             return ZombieCheckActionResult(false, "选择中包含无效联系人，请重新选择")
         }
         synchronized(lock) {
+            if (closed) return ZombieCheckActionResult(false, "检测已关闭")
             if (running) return ZombieCheckActionResult(false, "请先暂停好友检测")
             if (deleting) return ZombieCheckActionResult(false, "批量删除正在运行")
         }
@@ -206,6 +227,7 @@ class ZombieCheckRuntime(
             DeleteTarget(wxid, contactsById.getValue(wxid).displayName().ifBlank { wxid })
         }
         val generation = synchronized(lock) {
+            if (closed) return ZombieCheckActionResult(false, "检测已关闭")
             if (running) return ZombieCheckActionResult(false, "请先暂停好友检测")
             if (deleting) return ZombieCheckActionResult(false, "批量删除正在运行")
             actionGeneration++
@@ -240,43 +262,54 @@ class ZombieCheckRuntime(
 
     internal fun onProbeCallback(scene: Any, errCode: Int, errMessage: String, response: JSONObject?) {
         val probe = synchronized(lock) {
+            if (closed) return
             val current = activeProbe
             if (current == null || current.scene !== scene) return
             current.timeout?.cancel(false)
+            pendingResults[current.item.wxid] = current.item
             activeProbe = null
             currentName = ""
             current
         }
-        worker.execute {
+        runCatching { worker.execute {
+            if (closed) return@execute
             val result = classify(probe.item.wxid, errCode, errMessage, response)
             recordResult(result)
-        }
+        } }.onFailure { if (!closed) logger("检测结果入队失败", it) }
     }
-
     fun close() {
         synchronized(lock) {
+            if (closed) return
+            closed = true
+            ready = false
+            stopSignal.countDown()
             running = false
             deleting = false
             actionGeneration++
-            activeProbe?.timeout?.cancel(false)
+            pendingResults.values.forEach { queue.addFirst(it) }
+            pendingResults.clear()
+            activeProbe?.let { it.timeout?.cancel(false); queue.addFirst(it.item) }
             activeProbe = null
             persistLocked()
         }
         releaseWakeLock()
         cancelNotification()
-        worker.shutdownNow()
-        actionWorker.shutdownNow()
+        worker.queue.clear()
+        actionWorker.queue.clear()
+        worker.shutdown()
+        actionWorker.shutdown()
+        hooker = null
     }
 
     private fun scheduleDispatch(delayMillis: Long) {
-        if (worker.isShutdown) return
-        worker.schedule({ dispatchNext() }, delayMillis.coerceAtLeast(0L), TimeUnit.MILLISECONDS)
+        if (closed || worker.isShutdown) return
+        runCatching { worker.schedule({ if (!closed) dispatchNext() }, delayMillis.coerceAtLeast(0L), TimeUnit.MILLISECONDS) }
     }
 
     private fun dispatchNext() {
         val item = synchronized(lock) {
-            if (!running || activeProbe != null) return
-            if (queue.isEmpty()) null else queue.removeFirst()
+            if (closed || !running || activeProbe != null) return
+            if (queue.isEmpty()) null else queue.removeFirst().also { pendingResults[it.wxid] = it }
         }
         if (item == null) {
             completeIfFinished()
@@ -292,6 +325,8 @@ class ZombieCheckRuntime(
         }
         val probe = ActiveProbe(item, scene)
         synchronized(lock) {
+            if (closed) return
+            pendingResults.remove(item.wxid)
             if (!running) {
                 queue.addFirst(item)
                 persistLocked()
@@ -312,11 +347,11 @@ class ZombieCheckRuntime(
             handleRetryOrFailure(probe, "检测请求发送失败")
             return
         }
-        val future = worker.schedule(
+        val future = runCatching { worker.schedule(
             { onProbeTimeout(probe) },
             settings.timeoutSeconds().toLong(),
             TimeUnit.SECONDS
-        )
+        ) }.getOrNull() ?: return
         synchronized(lock) {
             if (activeProbe === probe) {
                 probe.timeout = future
@@ -336,9 +371,11 @@ class ZombieCheckRuntime(
     }
 
     private fun handleRetryOrFailure(probe: ActiveProbe, reason: String) {
+        if (closed) return
         val retry = probe.item.attempt < settings.maxRetries()
         if (retry) {
             synchronized(lock) {
+                if (closed) return
                 if (!running) {
                     queue.addFirst(probe.item)
                 } else {
@@ -385,8 +422,11 @@ class ZombieCheckRuntime(
     }
 
     private fun recordResult(result: ZombieCheckResult) {
+        if (closed) return
         val shouldProcess = result.type == ZombieCheckResultType.DEAD
         synchronized(lock) {
+            if (closed) return
+            pendingResults.remove(result.wxid)
             results.removeAll { it.wxid == result.wxid }
             results += result
             status = when (result.type) {
@@ -418,7 +458,8 @@ class ZombieCheckRuntime(
 
     private fun processDeadFriend(result: ZombieCheckResult) {
         val generation = synchronized(lock) { actionGeneration }
-        actionWorker.execute {
+        runCatching { actionWorker.execute {
+            if (!actionStillValid(generation)) return@execute
             if (settings.autoTag()) {
                 val tagged = appendLabel(result.wxid, settings.labelName(), generation)
                 synchronized(lock) {
@@ -427,13 +468,13 @@ class ZombieCheckRuntime(
             }
             if (!settings.autoDelete()) return@execute
             val delay = settings.deleteDelaySeconds().toLong()
-            if (delay > 0L) runCatching { Thread.sleep(delay * 1000L) }
+            if (delay > 0L && stopSignal.await(delay, TimeUnit.SECONDS)) return@execute
             if (!settings.autoDelete() || !actionStillValid(generation)) return@execute
             val deleted = hooker?.deleteFriend(result.wxid, settings.clearRecord()) == true
             synchronized(lock) {
                 addLogLocked("${result.name}: ${if (deleted) "已提交删除好友" else "删除好友失败"}")
             }
-        }
+        } }.onFailure { if (!closed) logger("检测后续任务入队失败", it) }
     }
 
     private fun runBatchDelete(
@@ -481,7 +522,7 @@ class ZombieCheckRuntime(
     }
 
     private fun batchDeleteStillValidLocked(generation: Long): Boolean {
-        return deleting && generation == actionGeneration
+        return !closed && settings.enabled() && deleting && generation == actionGeneration
     }
 
     private fun appendLabel(wxid: String, labelName: String, generation: Long): Boolean {
@@ -513,7 +554,7 @@ class ZombieCheckRuntime(
     }
 
     private fun actionStillValid(generation: Long): Boolean = synchronized(lock) {
-        generation == actionGeneration
+        !closed && settings.enabled() && generation == actionGeneration
     }
 
     private fun randomDelayMillis(): Long {
@@ -525,6 +566,7 @@ class ZombieCheckRuntime(
     private fun persistLocked() {
         val pending = buildList {
             activeProbe?.let { add(it.item.wxid) }
+            pendingResults.values.forEach { add(it.wxid) }
             queue.forEach { add(it.wxid) }
         }
         settings.saveProgress(pending, totalCount, results)
@@ -542,13 +584,14 @@ class ZombieCheckRuntime(
     }
 
     private fun acquireWakeLockIfNeeded() {
-        if (!settings.keepAwake()) return
+        if (closed || !settings.keepAwake()) return
         runCatching {
             val manager = context.getSystemService(Context.POWER_SERVICE) as? PowerManager ?: return
             val lock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Hchat:ZombieCheck")
             lock.setReferenceCounted(false)
             lock.acquire(MAX_WAKE_LOCK_MILLIS)
             wakeLock = lock
+            if (closed) releaseWakeLock()
         }.onFailure { logger("申请僵尸粉检测 WakeLock 失败", it) }
     }
 
@@ -557,7 +600,8 @@ class ZombieCheckRuntime(
         wakeLock = null
     }
 
-    private fun updateNotification() {
+    private fun updateNotification(): Unit = synchronized(lock) {
+        if (closed) return
         runCatching {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
