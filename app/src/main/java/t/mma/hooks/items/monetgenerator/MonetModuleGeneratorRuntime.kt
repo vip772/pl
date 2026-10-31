@@ -6,7 +6,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import t.mma.hooks.core.DexInstallScheduler
+import t.mma.dexkit.DexKitBridgeManager
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.items.monetgenerator.engine.MonetDexCandidate
 import t.mma.hooks.items.monetgenerator.engine.MonetDexEvidenceCollector
@@ -17,10 +17,9 @@ import t.mma.hooks.items.monetgenerator.engine.MonetGenerationRequest
 import t.mma.hooks.items.monetgenerator.engine.MonetLogLevel
 import t.mma.hooks.items.monetgenerator.engine.MonetModuleGenerator
 import t.mma.hooks.items.monetgenerator.engine.MonetResourceDexEvidence
-import org.luckypray.dexkit.DexKitBridge
 import java.io.File
+import java.lang.ref.WeakReference
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicReference
 
 object MonetModuleGeneratorRuntime {
     private const val TAG = "[Hchat:MonetGenerator]"
@@ -31,16 +30,19 @@ object MonetModuleGeneratorRuntime {
     @Volatile
     private var binding: Binding? = null
 
+    @Synchronized
     fun attach(context: FeatureContext) {
         binding = Binding(
             context.hostContext().applicationContext ?: context.hostContext(),
-            context.dexKitBridge()
+            context.dexKitManager(),
+            WeakReference(context)
         )
     }
 
+    @Synchronized
     fun detach(context: FeatureContext) {
         val current = binding ?: return
-        if (current.dexKitBridge === context.dexKitBridge()) binding = null
+        if (current.owner.get() === context) binding = null
     }
 
     fun isRunning(): Boolean = running.get()
@@ -100,7 +102,7 @@ object MonetModuleGeneratorRuntime {
                     versionName = packageInfo.versionName.orEmpty().ifBlank { "unknown" },
                     sdkInt = Build.VERSION.SDK_INT,
                     dexEvidenceProvider = { candidates ->
-                        collectDexEvidence(current.dexKitBridge, candidates)
+                        collectDexEvidence(current.manager, candidates)
                     },
                     options = options,
                     workDir = File(sessionDir, "work").apply { mkdirs() },
@@ -137,20 +139,12 @@ object MonetModuleGeneratorRuntime {
     }
 
     private fun collectDexEvidence(
-        bridge: DexKitBridge,
+        manager: DexKitBridgeManager,
         candidates: List<MonetDexCandidate>
     ): List<MonetResourceDexEvidence> {
-        val result = AtomicReference<List<MonetResourceDexEvidence>>()
-        val failure = AtomicReference<Throwable>()
-        DexInstallScheduler.runDexKitTask {
-            try {
-                result.set(MonetDexEvidenceCollector.collect(bridge, candidates))
-            } catch (error: Throwable) {
-                failure.set(error)
-            }
+        return manager.withCurrentBridge { bridge ->
+            MonetDexEvidenceCollector.collect(bridge, candidates)
         }
-        failure.get()?.let { throw it }
-        return result.get() ?: error("DexKit 证据分析没有返回结果")
     }
 
     private fun logEvent(event: MonetGenerationEvent) {
@@ -170,6 +164,7 @@ object MonetModuleGeneratorRuntime {
 
     private data class Binding(
         val hostContext: Context,
-        val dexKitBridge: DexKitBridge
+        val manager: DexKitBridgeManager,
+        val owner: WeakReference<FeatureContext>
     )
 }

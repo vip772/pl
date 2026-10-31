@@ -126,3 +126,9 @@ assert 'bridge.getMethodData(viewType)?.usingFields' in fresh
 assert 'bindData.usingFields' in fresh
 assert 'typeFieldData.getFieldInstance(loader)' in fresh
 print('PASS forwarded record field-data consumption: private fresh resolver owned by manager scope')
+monet = (base / 'monetgenerator/MonetModuleGeneratorRuntime.kt').read_text()
+assert 'context.dexKitBridge()' not in monet
+assert 'val manager: DexKitBridgeManager' in monet
+assert 'current.owner.get() === context' in monet
+assert 'val owner: WeakReference<FeatureContext>' in monet
+assert 'return manager.withCurrentBridge { bridge ->\n            MonetDexEvidenceCollector.collect(bridge, candidates)' in monet
