@@ -174,12 +174,14 @@ private class HideChatAvatarRuntime(
 
     private fun findMethodsByStrings(vararg strings: String): List<Method> {
         return runCatching {
-            context.dexKitBridge().findMethod(
-                FindMethod().apply {
-                    matcher(MethodMatcher().apply { usingStrings(strings.toList()) })
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
+                    FindMethod().apply {
+                        matcher(MethodMatcher().apply { usingStrings(strings.toList()) })
+                    }
+                ).mapNotNull { data ->
+                    runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
                 }
-            ).mapNotNull { data ->
-                runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }
         }.getOrElse {
             HLog.e("$TAG 定位聊天头像绑定方法异常: ${it.message}", it)

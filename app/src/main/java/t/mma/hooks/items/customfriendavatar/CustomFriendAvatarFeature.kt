@@ -561,12 +561,14 @@ private class CustomFriendAvatarRuntime(
 
     private fun findMembersByStrings(vararg strings: String): List<Member> {
         return runCatching {
-            context.dexKitBridge().findMethod(FindMethod().apply {
-                matcher(MethodMatcher().apply { usingEqStrings(*strings) })
-            }).mapNotNull { data ->
-                runCatching {
-                    if (data.isConstructor) data.getConstructorInstance(context.hostClassLoader()) else data.getMethodInstance(context.hostClassLoader())
-                }.getOrNull()
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(FindMethod().apply {
+                    matcher(MethodMatcher().apply { usingEqStrings(*strings) })
+                }).mapNotNull { data ->
+                    runCatching {
+                        if (data.isConstructor) data.getConstructorInstance(context.hostClassLoader()) else data.getMethodInstance(context.hostClassLoader())
+                    }.getOrNull()
+                }
             }
         }.getOrElse {
             logger("定位头像入口失败", it)

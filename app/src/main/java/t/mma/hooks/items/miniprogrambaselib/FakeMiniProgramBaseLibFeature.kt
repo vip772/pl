@@ -122,7 +122,8 @@ private class MiniProgramCompatibilityRuntime(
         )?.takeIf(::isLaunchConstructor)?.let { return it }
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -137,6 +138,7 @@ private class MiniProgramCompatibilityRuntime(
                 }.getOrNull()
             }.filter(::isLaunchConstructor)
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("定位小程序启动请求构造器失败", it)
             emptyList()
@@ -169,7 +171,8 @@ private class MiniProgramCompatibilityRuntime(
         )?.takeIf(::isPrivateOpenUrlMethod)?.let { return it }
 
         val candidates = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -186,6 +189,7 @@ private class MiniProgramCompatibilityRuntime(
                 runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
             }.filter(::isPrivateOpenUrlMethod)
                 .distinctBy { it.toGenericString() }
+            }
         }.getOrElse {
             logger("定位小程序私有网页跳转方法失败", it)
             emptyList()

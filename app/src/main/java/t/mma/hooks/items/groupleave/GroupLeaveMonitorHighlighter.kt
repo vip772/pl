@@ -278,7 +278,8 @@ object GroupLeaveMonitorHighlighter {
             ?.let { return it }
         if (!allowDexSearch) return emptyList()
         val methods = runCatching {
-            context.dexKitBridge().findMethod(
+            context.dexKitManager().withCurrentBridge { bridge ->
+                bridge.findMethod(
                 FindMethod().apply {
                     matcher(
                         MethodMatcher().apply {
@@ -290,6 +291,7 @@ object GroupLeaveMonitorHighlighter {
                     )
                 }
             ).mapNotNull { it.getMethodInstance(context.hostClassLoader()) }
+            }
         }.getOrElse {
             logger("退群监控链接点击方法定位失败", it)
             emptyList()
