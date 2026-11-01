@@ -469,9 +469,12 @@ public class ModuleEntry implements IXposedHookLoadPackage {
             });
             // Never take the Agent target lock while holding the shared native gate.
             ScriptPluginAgentLocalReverseTools.install(featureContext.dexBridgeHolder(), hostContext);
-            final String managedApkPath = lpparam.appInfo.sourceDir;
-            DEXKIT_MANAGER.enableIdleRebuild(() -> newDexKitBridge(managedApkPath),
-                    featureContext.hostClassLoader(), managedApkPath, 30_000L);
+            // Idle native DexKit recycling is intentionally not enabled here yet.
+            // The process still exposes legacy/raw bridge holders (including script
+            // compatibility globals); enabling recycling before those owners migrate
+            // would allow a live escaped bridge to outlive its native generation.
+            // Keep the manager's lease/generation/rebuild machinery available, and
+            // enable idle rebuild only after the compatibility owners are eliminated.
 
         } catch (Throwable e) {
             HLog.e(TAG + " 初始化失败: " + e, e);

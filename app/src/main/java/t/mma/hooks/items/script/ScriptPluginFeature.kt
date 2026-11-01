@@ -27,6 +27,12 @@ class ScriptPluginFeature : BaseFeature() {
         }
     }
 
+    override fun onFeatureDestroy(context: FeatureContext) {
+        // ScriptPluginRuntime owns only script-private observers, tasks and plugin
+        // resources. Shared Dex hooks are released by their own owners/leases.
+        ScriptPluginRuntime.close()
+    }
+
     private fun scheduleDexHooks(context: FeatureContext) {
         DexInstallScheduler.schedule(
             "shared:finder_feed_detail",

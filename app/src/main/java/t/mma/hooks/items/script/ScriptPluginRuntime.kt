@@ -103,6 +103,10 @@ object ScriptPluginRuntime {
     @Volatile
     private var scriptRootObserver: FileObserver? = null
     private val loadedPlugins = ConcurrentHashMap<String, LoadedPlugin>()
+    // Runtime lifecycle gate. A closed generation must not accept new work; all
+    // queued callbacks already use LoadedPlugin identity checks before touching a
+    // script, so a later install cannot be affected by an old generation.
+    private val lifecycleClosed = AtomicBoolean(false)
     private val pluginDirObservers = ConcurrentHashMap<String, FileObserver>()
     private val pluginCatalogListeners = CopyOnWriteArrayList<() -> Unit>()
     private val reloadTasks = ConcurrentHashMap<String, Runnable>()
@@ -238,6 +242,7 @@ object ScriptPluginRuntime {
     }
 
     fun install(context: FeatureContext) {
+        lifecycleClosed.set(false)
         val hostAppContext = context.hostContext().applicationContext ?: context.hostContext()
         appContext = hostAppContext
         runtimeProcess = PROCESS_MAIN
@@ -256,6 +261,7 @@ object ScriptPluginRuntime {
 
     @JvmStatic
     fun installAppBrandProcess(context: Context, classLoader: ClassLoader, processName: String?) {
+        if (lifecycleClosed.get()) return
         val hostAppContext = context.applicationContext ?: context
         if (!isPluginRuntimeEnabled(hostAppContext)) return
         if (!initialLoadStarted.compareAndSet(false, true)) return
@@ -291,6 +297,7 @@ object ScriptPluginRuntime {
     }
 
     fun loadEnabledPluginsWhenReady(context: Context) {
+        if (lifecycleClosed.get()) return
         val hostAppContext = context.applicationContext ?: context
         val prefs = HchatStorage.preferences(hostAppContext, ScriptPluginSettings.PREFS_NAME)
         if (!prefs.getBoolean(ScriptPluginSettings.KEY_ENABLE, ScriptPluginSettings.DEFAULT_ENABLE)) return
@@ -756,10 +763,12 @@ object ScriptPluginRuntime {
     }
 
     fun dispatchOnClickSendBtn(text: String): SendButtonEventResult {
+        if (lifecycleClosed.get()) return SendButtonEventResult(false, emptyList())
         return dispatchSendButton(text, longClick = false)
     }
 
     fun dispatchOnLongClickSendBtn(text: String): SendButtonEventResult {
+        if (lifecycleClosed.get()) return SendButtonEventResult(false, emptyList())
         return dispatchSendButton(text, longClick = true)
     }
 
@@ -824,6 +833,7 @@ object ScriptPluginRuntime {
     fun hasHandleMsgCallbacks(): Boolean = loadedPlugins.values.any { it.hasHandleMsgCallback }
 
     fun dispatchOnHandleMsg(msgInfoBean: ScriptMessageBean) {
+        if (lifecycleClosed.get()) return
         captureHandleMsgDispatch(msgInfoBean)?.run()
     }
 
@@ -863,6 +873,7 @@ object ScriptPluginRuntime {
     }
 
     fun dispatchOnImageDownload(msgInfoBean: ScriptMessageBean) {
+        if (lifecycleClosed.get()) return
         if (loadedPlugins.values.none { it.hasImageDownloadCallback }) return
         if (!msgInfoBean.isImage()) return
         val imageMsg = runCatching { msgInfoBean.getImageMsg() }.getOrNull() ?: return
@@ -962,6 +973,7 @@ object ScriptPluginRuntime {
     }
 
     fun dispatchOnVideoDownload(msgInfoBean: ScriptMessageBean) {
+        if (lifecycleClosed.get()) return
         if (!msgInfoBean.isVideo()) return
         val targets = loadedPlugins.values
             .asSequence()
@@ -1059,6 +1071,7 @@ object ScriptPluginRuntime {
     }
 
     fun dispatchOnFinderMediaDownload(msgInfoBean: ScriptMessageBean) {
+        if (lifecycleClosed.get()) return
         val targets = loadedPlugins.values
             .asSequence()
             .filter { it.hasFinderMediaDownloadCallback }
@@ -1254,6 +1267,7 @@ object ScriptPluginRuntime {
     }
 
     fun dispatchOnProtobufPacket(packet: ProtobufPacketRuntime.Packet) {
+        if (lifecycleClosed.get()) return
         if (loadedPlugins.values.none { it.hasProtobufPacketCallback }) return
         try {
             protobufCallbackExecutor.execute {
@@ -1503,6 +1517,7 @@ object ScriptPluginRuntime {
         forceReload: Boolean,
         requireScriptApiReady: Boolean = true
     ): Result<Unit> {
+        if (lifecycleClosed.get()) return Result.failure(IllegalStateException("脚本运行时已关闭"))
         if (requireScriptApiReady && !isScriptApiReady()) {
             return Result.failure(IllegalStateException("微信联系人数据库尚未就绪，请稍后重试"))
         }
@@ -1594,6 +1609,43 @@ object ScriptPluginRuntime {
         snsPrepareCancellations.forEach { (taskId, canceled) ->
             if (taskId.startsWith(prefix)) canceled.set(true)
         }
+    }
+
+    /**
+     * Closes this process-local runtime generation. This is deliberately separate
+     * from the global feature switch: shared hooks/services are owned by their
+     * feature/lease and are not shut down here.
+     */
+    @Synchronized
+    fun close() {
+        if (!lifecycleClosed.compareAndSet(false, true)) return
+        runCatching { scriptRootObserver?.stopWatching() }
+        scriptRootObserver = null
+        pluginDirObservers.values.forEach { runCatching { it.stopWatching() } }
+        pluginDirObservers.clear()
+        reloadTasks.values.forEach { mainHandler.removeCallbacks(it) }
+        reloadTasks.clear()
+        snsPrepareCancellations.values.forEach { it.set(true) }
+        snsPrepareCancellations.clear()
+        runCatching { unloadAllPlugins() }
+            .onFailure { HLog.e("$TAG 关闭脚本运行时失败: ${it.message}", it) }
+        // Executors are process-local reusable services. Remove queued work rather
+        // than shutting them down, so a later install can create a fresh generation
+        // without leaking or permanently rejecting callbacks. In-flight tasks are
+        // isolated by LoadedPlugin identity checks and lifecycleClosed guards.
+        snsPrepareExecutor.queue.clear()
+        protobufCallbackExecutor.queue.clear()
+        imageDownloadCallbackExecutor.queue.clear()
+        videoDownloadCallbackExecutor.queue.clear()
+        finderMediaDownloadCallbackExecutor.queue.clear()
+        bridge = null
+        appContext = null
+        initialLoadStarted.set(false)
+        sendButtonDiagnosticLogAt.clear()
+        imageDownloadTasks.clear()
+        videoDownloadTasks.clear()
+        finderMediaDownloadTasks.clear()
+        loadedNativeLibraries.clear()
     }
 
     @Synchronized
