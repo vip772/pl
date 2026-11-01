@@ -23,6 +23,8 @@ sources += [r/'app/src/main/java/t/mma/hooks/items/moments'/n for n in ['Moments
 sources += list((r/'app/src/main/java/t/mma/hooks/items/homeextension').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/floatingchat').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/floatingshortcut').glob('*.kt'))
+sources += [r/'app/src/main/java/t/mma/hooks/items/custombottombar'/n for n in ['CustomBottomBarFeature.kt','CustomBottomBarIconStore.kt','CustomBottomBarIconPicker.kt']]
+sources += [r/'app/src/main/java/t/mma/ui/miuix/CustomBottomBarMiuixPage.kt']
 sources += list((r/'app/src/main/java/t/mma/hooks/items/selectedmessages').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/settings').glob('*.kt'))
 java_sources += [r/'app/src/main/java/t/mma/hooks/api/ui/SettingsInjector.java', r/'app/src/main/java/t/mma/dexkit/SettingsDexFinder.java', r/'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java']
@@ -46,6 +48,8 @@ with tempfile.TemporaryDirectory() as td:
   print(result.stderr);raise SystemExit(result.returncode)
  cp.insert(0,Path(td))
  cmd=['java','-Xmx512m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-jvm-target','17','-Xfriend-paths='+str(r/'app/build/intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes'),'-nowarn','-no-stdlib','-no-reflect','-classpath',':'.join(map(str,cp)),'-d',td,*map(str,sources)]
+ plugin=next(Path('/root/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compose-compiler-plugin-embeddable/2.4.0').glob('*/*.jar'))
+ cmd.insert(5,'-Xplugin='+str(plugin))
  result=subprocess.run(cmd,cwd=r,capture_output=True,text=True,timeout=180)
  if result.returncode:
   print(result.stdout);print(result.stderr);raise SystemExit(result.returncode)

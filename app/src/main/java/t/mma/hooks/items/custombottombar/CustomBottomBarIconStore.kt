@@ -77,10 +77,21 @@ object CustomBottomBarIconStore {
         if (value.isEmpty()) return null
         val file = File(value)
         if (!file.isFile || file.length() <= 0L) return null
-        return runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
-            ?.takeIf { !it.isRecycled && it.width > 0 && it.height > 0 }
+        return runCatching {
+            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BitmapFactory.decodeFile(file.absolutePath, bounds)
+            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return@runCatching null
+            var sample = 1
+            while (max(bounds.outWidth / sample, bounds.outHeight / sample) > MAX_ICON_EDGE * 2) sample *= 2
+            val decoded = BitmapFactory.decodeFile(file.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample }) ?: return@runCatching null
+            val edge = max(decoded.width, decoded.height)
+            if (edge <= MAX_ICON_EDGE) return@runCatching decoded
+            try {
+                val scale = MAX_ICON_EDGE.toFloat() / edge
+                Bitmap.createScaledBitmap(decoded, (decoded.width * scale).toInt().coerceAtLeast(1), (decoded.height * scale).toInt().coerceAtLeast(1), true)
+            } finally { decoded.recycle() }
+        }.getOrNull()
     }
-
     private fun decodeScaled(context: Context, uri: Uri): Bitmap? {
         val resolver = context.contentResolver
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }

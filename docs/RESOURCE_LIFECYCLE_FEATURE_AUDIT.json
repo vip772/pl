@@ -1019,6 +1019,22 @@
       ],
       "sharedRootCauseRefs": [
         "shared-schedule-mutable-runtime"
+      ],
+      "runtimeRepairProgress": [
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-bottom-20261101-143935/complete-150351",
+          "sdkEvidence": "/tmp/pl-bottom-20261101-143935/compose-150725",
+          "sdkLog": "sdk-retry.log",
+          "sdkDirectCompileExit": 0,
+          "focusedTestsPassed": 6,
+          "ownerSequenceIterations": 200,
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "Exact runtime and scheduler ownership; early process owner cleanup; local hook handles; bounded runtime/host tasks; isolated native/Compose restore; sampled 256px icons; page-owned picker sessions, bounded decode queue and late file disposal",
+          "boundary": "Synthetic host tests and direct Kotlin/SDK/existing ABI compilation with Compose compiler only; not Android/R8 build, device acceptance or demonstrated memory benefit."
+        }
       ]
     },
     {

@@ -72,6 +72,7 @@ internal fun CustomBottomBarMiuixPage(
     val latestIconPaths by rememberUpdatedState(iconPaths)
     val latestSavedIconPaths by rememberUpdatedState(savedIconPaths)
     val pageActive = remember { AtomicBoolean(true) }
+    val iconPicker = remember { CustomBottomBarIconPicker.openSession() }
     val activity = context as? Activity
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
@@ -80,6 +81,7 @@ internal fun CustomBottomBarMiuixPage(
         pageActive.set(true)
         onDispose {
             pageActive.set(false)
+            iconPicker.close()
             latestIconPaths.forEach { path ->
                 if (path.isNotBlank() && path !in latestSavedIconPaths) {
                     CustomBottomBarIconStore.delete(context, path)
@@ -146,7 +148,7 @@ internal fun CustomBottomBarMiuixPage(
             Toast.makeText(context, "当前页面无法打开图片选择器", Toast.LENGTH_SHORT).show()
             return
         }
-        CustomBottomBarIconPicker.launch(
+        iconPicker.launch(
             activity,
             CustomBottomBarSettings.TAB_KEYS[index]
         ) { result ->
