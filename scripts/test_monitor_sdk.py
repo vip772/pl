@@ -26,6 +26,7 @@ sources += list((r/'app/src/main/java/t/mma/hooks/items/floatingshortcut').glob(
 sources += [r/'app/src/main/java/t/mma/hooks/items/custombottombar'/n for n in ['CustomBottomBarFeature.kt','CustomBottomBarIconStore.kt','CustomBottomBarIconPicker.kt']]
 sources += [r/'app/src/main/java/t/mma/ui/miuix/CustomBottomBarMiuixPage.kt']
 sources += list((r/'app/src/main/java/t/mma/hooks/items/fakelocation').glob('*.kt'))
+sources += list((r/'app/src/main/java/t/mma/hooks/items/gameemoji').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/selectedmessages').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/settings').glob('*.kt'))
 java_sources += [r/'app/src/main/java/t/mma/hooks/api/ui/SettingsInjector.java', r/'app/src/main/java/t/mma/dexkit/SettingsDexFinder.java', r/'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java']

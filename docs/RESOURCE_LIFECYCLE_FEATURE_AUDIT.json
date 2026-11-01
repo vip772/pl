@@ -3858,6 +3858,26 @@
       ],
       "sharedRootCauseRefs": [
         "shared-schedule-mutable-runtime"
+      ],
+      "runtimeRepairProgress": [
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-game-r2-final-20261101-170236",
+          "focusedTestsPassed": 8,
+          "sdkDirectCompileExit": 0,
+          "ownerSequenceIterations": 200,
+          "toggleGenerationIterations": 100,
+          "capacityLimits": {
+            "pendingSends": 1,
+            "dialogs": 1,
+            "handlerQueue": "owned+cleared"
+          },
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "Preference-owned enabled intervals with per-interval GameEmojiRuntime, DexInstallScheduler.Installation and DexReady subscription; toggle changes inside an enabled interval do not rebuild the hook; synchronized close/install; single pending payload claimed once; dialog handle ownership; Host send and settings reads run outside the runtime monitor; failure-isolated unhook/logger/dialog clear.",
+          "boundary": "Synthetic host tests over the complete production GameEmojiRuntime plus onFeatureInstall wiring, and direct Kotlin/Java/SDK/existing ABI compilation, not Android/R8 or device acceptance. UI stub is not real Compose: Activity destruction mid-composition, real dismiss/select ordering under the actual decor.postOnAnimation queue, and repeated rapid toggles with live Dex warmup remain unverified. Game result protocol, MD5 and field payload unchanged by this repair. No memory or scrolling-smoothness data; deviceAcceptancePercent=0 and memoryBenefitProven=false."
+        }
       ]
     },
     {
