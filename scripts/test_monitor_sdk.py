@@ -22,6 +22,7 @@ sources += [r/'app/src/main/java/t/mma/hooks/items/grouplabel/QuickGroupChatLabe
 sources += [r/'app/src/main/java/t/mma/hooks/items/moments'/n for n in ['MomentsUploadTailFeature.kt','OriginalMomentsUploadFeature.kt','RemoveMomentsAdsFeature.kt']]
 sources += list((r/'app/src/main/java/t/mma/hooks/items/homeextension').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/floatingchat').glob('*.kt'))
+sources += list((r/'app/src/main/java/t/mma/hooks/items/floatingshortcut').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/selectedmessages').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/settings').glob('*.kt'))
 java_sources += [r/'app/src/main/java/t/mma/hooks/api/ui/SettingsInjector.java', r/'app/src/main/java/t/mma/dexkit/SettingsDexFinder.java', r/'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java']

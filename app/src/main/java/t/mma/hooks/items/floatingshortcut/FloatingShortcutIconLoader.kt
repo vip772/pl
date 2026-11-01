@@ -17,15 +17,31 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 /** All view/cache bookkeeping runs on main; only bounded image decoding runs on the worker. */
-internal object FloatingShortcutIconLoader {
-    private const val MAX_EDGE = 256
-    private const val MAX_PENDING = 64
+internal class FloatingShortcutIconLoader : AutoCloseable {
+    private val MAX_EDGE = 256
+    private val MAX_PENDING = 64
     private data class Entry(val bitmap: Bitmap?)
     private class Request {
+        var unpublished: Bitmap? = null
+        fun discard() { unpublished?.recycle(); unpublished = null; targets.clear() }
         val targets = mutableListOf<Pair<WeakReference<ImageView>, Any>>()
     }
 
+    private val lock = Any()
+    @Volatile private var closed = false
+    private var epoch = 0L
     private val main = Handler(Looper.getMainLooper())
+    private val pendingMain = linkedSetOf<MainTask>()
+    private inner class MainTask(var action: (() -> Unit)?) : Runnable {
+        override fun run() {
+            synchronized(lock) {
+                pendingMain.remove(this)
+                val work = if (closed) null else action
+                action = null
+                work?.invoke()
+            }
+        }
+    }
     private val cache = object : LruCache<String, Entry>(4 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Entry): Int =
             (value.bitmap?.allocationByteCount ?: 0) + 128
@@ -36,63 +52,92 @@ internal object FloatingShortcutIconLoader {
         0, 1, 30L, TimeUnit.SECONDS, LinkedBlockingQueue<Runnable>(MAX_PENDING),
         { task -> Thread(task, "Hchat-FloatingIcons").apply { isDaemon = true } }
     )
-
     fun bind(view: ImageView, path: String, fallback: Drawable) {
         check(Looper.myLooper() == Looper.getMainLooper())
-        val token = Any()
-        bindings[view] = token
-        view.setImageDrawable(fallback)
-        if (path.isBlank()) return
-        cache.get(path)?.let { entry ->
-            entry.bitmap?.let { view.setImageDrawable(BitmapDrawable(view.resources, it)) }
-            return
+        synchronized(lock) {
+            if (closed) return
+            if (!bindings.containsKey(view) && bindings.size >= 256) return
+            val token = Any()
+            bindings[view] = token
+            view.setImageDrawable(fallback)
+            if (path.isBlank()) return
+            cache.get(path)?.let { entry ->
+                entry.bitmap?.let { view.setImageDrawable(BitmapDrawable(view.resources, it)) }
+                return
+            }
+            request(path)?.targets?.let { targets ->
+                targets.removeAll { it.first.get() == null || it.first.get() === view }
+                if (targets.size < 256) targets.add(WeakReference(view) to token)
+            }
         }
-        request(path)?.targets?.add(WeakReference(view) to token)
     }
-
     fun prefetch(paths: List<String>) = onMain {
         paths.asSequence().filter { it.isNotBlank() }.distinct().take(MAX_PENDING).forEach { path ->
             if (cache.get(path) == null) request(path)
         }
     }
-
     fun invalidate(path: String) = onMain {
         cache.remove(path)
-        // The old decode may finish after replacement. Identity checks below discard that result.
-        pending.remove(path)
+        pending.remove(path)?.discard()
     }
-
-    fun clear() = onMain {
+    fun clear() {
+        synchronized(lock) { clearLocked() }
+    }
+    private fun clearLocked() {
+        epoch++
+        pending.values.forEach { it.discard() }
         pending.clear()
         bindings.clear()
         cache.evictAll()
         worker.queue.clear()
-        // Do not recycle cached bitmaps: detached views may still draw during their final frame.
+        pendingMain.forEach { it.action = null }
+        pendingMain.clear()
+        main.removeCallbacksAndMessages(null)
     }
-
+    override fun close() {
+        synchronized(lock) {
+            if (closed) return
+            closed = true
+            clearLocked()
+            worker.shutdown()
+        }
+    }
     private fun request(path: String): Request? {
+        if (closed) return null
         pending[path]?.let { return it }
         if (pending.size >= MAX_PENDING) return null
         val request = Request()
+        val generation = epoch
         pending[path] = request
         try {
             worker.execute {
-                val bitmap = try {
-                    decode(path)
-                } catch (error: Throwable) {
-                    HLog.e("[Hchat:FloatingShortcut] 图标解码失败", error)
+                val admitted = synchronized(lock) { !closed && epoch == generation && pending[path] === request }
+                if (!admitted) return@execute
+                val bitmap = try { decode(path) } catch (error: Throwable) {
+                    try { HLog.e("[Hchat:FloatingShortcut] 图标解码失败", error) } catch (_: Throwable) { }
                     null
                 }
-                main.post {
-                    if (pending[path] !== request) return@post
-                    pending.remove(path)
-                    cache.put(path, Entry(bitmap))
-                    if (bitmap != null) request.targets.forEach { (reference, token) ->
-                        val target = reference.get()
-                        if (target != null && bindings[target] === token && target.isAttachedToWindow) {
-                            target.setImageDrawable(BitmapDrawable(target.resources, bitmap))
+                synchronized(lock) {
+                    if (closed || epoch != generation || pending[path] !== request) {
+                        bitmap?.recycle()
+                        return@synchronized
+                    }
+                    request.unpublished = bitmap
+                    val posted = onMain {
+                        if (pending[path] === request && epoch == generation) {
+                            pending.remove(path)
+                            request.unpublished = null
+                            cache.put(path, Entry(bitmap))
+                            if (bitmap != null) request.targets.forEach { (reference, token) ->
+                                val target = reference.get()
+                                if (target != null && bindings[target] === token && target.isAttachedToWindow) {
+                                    target.setImageDrawable(BitmapDrawable(target.resources, bitmap))
+                                }
+                            }
+                            request.targets.clear()
                         }
                     }
+                    if (!posted) { pending.remove(path); request.discard() }
                 }
             }
         } catch (_: RejectedExecutionException) {
@@ -101,7 +146,6 @@ internal object FloatingShortcutIconLoader {
         }
         return request
     }
-
     private fun decode(path: String): Bitmap? {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(path, bounds)
@@ -122,7 +166,18 @@ internal object FloatingShortcutIconLoader {
         return scaled
     }
 
-    private fun onMain(block: () -> Unit) {
-        if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post { block() }
+    private fun onMain(block: () -> Unit): Boolean {
+        synchronized(lock) {
+            if (closed || pendingMain.size >= 64) return false
+            val task = MainTask(block)
+            pendingMain.add(task)
+            if (Looper.myLooper() == Looper.getMainLooper()) task.run()
+            else if (!main.post(task)) {
+                pendingMain.remove(task)
+                task.action = null
+                return false
+            }
+            return true
+        }
     }
 }

@@ -29,7 +29,7 @@ object FloatingShortcutIconStore {
                 temporary.copyTo(target, overwrite = true)
                 temporary.delete()
             }
-            FloatingShortcutIconLoader.invalidate(target.absolutePath)
+            FloatingShortcutRuntime.invalidateIcon(target.absolutePath)
             FloatingShortcutRuntime.onIconFileChanged(target.absolutePath)
             target.absolutePath
         } catch (_: Throwable) {
@@ -46,7 +46,7 @@ object FloatingShortcutIconStore {
         val target = runCatching { file.canonicalFile }.getOrNull() ?: return
         if (target.parentFile == root) {
             runCatching { target.delete() }
-            FloatingShortcutIconLoader.invalidate(target.absolutePath)
+            FloatingShortcutRuntime.invalidateIcon(target.absolutePath)
             FloatingShortcutRuntime.onIconFileChanged(target.absolutePath)
         }
     }

@@ -845,6 +845,22 @@
           "remainingOpen": true,
           "boundary": "仅核准所列源码持有与释放现状；关闭代际、异常隔离、共享依赖及实机仍按开放项处理，不代表功能验收通过。"
         }
+      ],
+      "runtimeRepairProgress": [
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-floating-final-20261101-143505",
+          "iconRegressionCasesPassed": 12,
+          "ownerSequenceIterations": 200,
+          "ownerTestExit": 0,
+          "sdkDirectCompileExit": 0,
+          "sourceStable": true,
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "Exact installation ownership; isolated cleanup; bounded queues and cache; entered decode preserved; unpublished bitmap recycling",
+          "boundary": "Synthetic host tests and SDK/existing ABI compile only; not Android/R8 build or device acceptance."
+        }
       ]
     },
     {

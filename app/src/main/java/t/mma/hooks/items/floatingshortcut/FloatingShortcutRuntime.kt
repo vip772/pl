@@ -40,11 +40,80 @@ import java.lang.ref.WeakReference
 import kotlin.math.abs
 
 object FloatingShortcutRuntime {
-    private const val TAG = "[Hchat:FloatingShortcut]"
-    private const val BUBBLE_TAG = "Hchat:FloatingShortcut:Bubble"
-    private const val ACTION_LABEL_TAG = "Hchat:FloatingShortcut:Label"
-    private const val ACTION_ICON_TAG = "Hchat:FloatingShortcut:Icon"
-    private const val LAUNCHER_ACTIVITY = "com.tencent.mm.ui.LauncherUI"
+    @Volatile private var current: FloatingShortcutInstallation? = null
+    private val retired = linkedSetOf<FloatingShortcutInstallation>()
+    private val main = Handler(Looper.getMainLooper())
+    @Synchronized
+    fun install(hostContext: Context) { acquire(hostContext) }
+    @Synchronized
+    internal fun acquire(hostContext: Context): FloatingShortcutInstallation {
+        current?.let { return it }
+        check(retired.size < 8) { "Floating shortcut main cleanup backlog full" }
+        val owner = FloatingShortcutInstallation()
+        current = owner
+        try { owner.install(hostContext) } catch (error: Throwable) {
+            current = null
+            owner.close()
+            throw error
+        }
+        return owner
+    }
+    @Synchronized
+    internal fun retire(owner: FloatingShortcutInstallation) {
+        if (!owner.closeOwned()) return
+        if (current === owner) current = null
+        retired.add(owner)
+        if (Looper.myLooper() == Looper.getMainLooper()) drainRetired()
+        else { main.removeCallbacks(cleanup); main.post(cleanup) }
+    }
+    private val cleanup = Runnable { drainRetired() }
+    internal fun drainRetired() {
+        check(Looper.myLooper() == Looper.getMainLooper())
+        val pending = synchronized(this) { retired.toList().also { retired.clear() } }
+        pending.forEach { it.cleanupMain() }
+    }
+    fun destroy() { current?.close() }
+    fun attach(activity: Activity) { current?.attach(activity) }
+    fun onChatPageChanged(inChatPage: Boolean) { current?.onChatPageChanged(inChatPage) }
+    internal fun onIconFileChanged(path: String) { current?.onIconFileChanged(path) }
+    internal fun invalidateIcon(path: String) { current?.invalidateIcon(path) }
+    fun setEnabled(context: Context, value: Boolean) {
+        HchatStorage.preferences(context, FloatingShortcutSettings.PREFS_NAME).edit()
+            .putBoolean(FloatingShortcutSettings.KEY_ENABLE, value).apply()
+        current?.applyEnabledState(value)
+    }
+    fun isEnabled(context: Context): Boolean =
+        HchatStorage.preferences(context, FloatingShortcutSettings.PREFS_NAME)
+            .getBoolean(FloatingShortcutSettings.KEY_ENABLE, FloatingShortcutSettings.DEFAULT_ENABLE)
+}
+internal class FloatingShortcutInstallation : AutoCloseable {
+    @Volatile private var closed = false
+    private val icons = FloatingShortcutIconLoader()
+    private val lifecycleLock = Any()
+    private val pendingMain = linkedSetOf<MainTask>()
+    private var bubblePositionListener: View.OnLayoutChangeListener? = null
+    private inner class MainTask(var action: (() -> Unit)?) : Runnable {
+        override fun run() {
+            val work = synchronized(lifecycleLock) {
+                pendingMain.remove(this)
+                val result = if (closed) null else action
+                action = null
+                result
+            }
+            if (work != null) safely(work)
+        }
+    }
+    private fun safely(action: () -> Unit) {
+        try { action() } catch (error: Throwable) {
+            try { HLog.e("[Hchat:FloatingShortcut] lifecycle operation failed", error) } catch (_: Throwable) { }
+        }
+    }
+
+    private val TAG = "[Hchat:FloatingShortcut]"
+    private val BUBBLE_TAG = "Hchat:FloatingShortcut:Bubble"
+    private val ACTION_LABEL_TAG = "Hchat:FloatingShortcut:Label"
+    private val ACTION_ICON_TAG = "Hchat:FloatingShortcut:Icon"
+    private val LAUNCHER_ACTIVITY = "com.tencent.mm.ui.LauncherUI"
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private var prefs: SharedPreferences? = null
@@ -64,6 +133,7 @@ object FloatingShortcutRuntime {
     @Volatile
     private var enabledItems: List<FloatingShortcutItem> = emptyList()
     private var pendingAction: Runnable? = null
+    private var chatAttachRetry: Runnable? = null
 
     private val activityLifecycleCallbacks = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) = Unit
@@ -96,56 +166,43 @@ object FloatingShortcutRuntime {
     }
 
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        when (key) {
+        runOnMain { when (key) {
             FloatingShortcutSettings.KEY_ENABLE -> refreshEnabledState()
             FloatingShortcutSettings.KEY_POSITION_X,
             FloatingShortcutSettings.KEY_POSITION_Y -> Unit
             else -> {
                 if (key == FloatingShortcutSettings.KEY_ITEMS || key == null) {
                     lifecycleApplication.get()?.let { application ->
-                        enabledItems = FloatingShortcutSettings.loadItems(application).filter { it.enabled }
+                        if (closed) return@runOnMain
+                        enabledItems = FloatingShortcutSettings.loadItems(application).asSequence().filter { it.enabled }.take(128).toList()
                     }
                 }
                 prefetchIcons()
                 refreshCurrentActivity()
             }
         }
+        }
     }
 
     @Synchronized
     fun install(hostContext: Context) {
-        if (installed) return
+        if (closed || installed) return
         val application = (hostContext as? Application)
             ?: (hostContext.applicationContext as? Application)
             ?: return
-        enabledItems = FloatingShortcutSettings.loadItems(hostContext).filter { it.enabled }
-        prefs = HchatStorage.preferences(hostContext, FloatingShortcutSettings.PREFS_NAME).also {
+        enabledItems = FloatingShortcutSettings.loadItems(hostContext).asSequence().filter { it.enabled }.take(128).toList()
+        prefs = HchatStorage.preferences(hostContext, FloatingShortcutSettings.PREFS_NAME)
+        prefs!!.also {
             it.registerOnSharedPreferenceChangeListener(preferenceListener)
             enabled = it.getBoolean(
                 FloatingShortcutSettings.KEY_ENABLE,
                 FloatingShortcutSettings.DEFAULT_ENABLE
             )
         }
-        application.registerActivityLifecycleCallbacks(activityLifecycleCallbacks)
         lifecycleApplication = WeakReference(application)
+        application.registerActivityLifecycleCallbacks(activityLifecycleCallbacks)
         installed = true
         if (enabled) prefetchIcons()
-    }
-
-    fun setEnabled(context: Context, value: Boolean) {
-        HchatStorage.preferences(context, FloatingShortcutSettings.PREFS_NAME)
-            .edit()
-            .putBoolean(FloatingShortcutSettings.KEY_ENABLE, value)
-            .apply()
-        applyEnabledState(value)
-    }
-
-    fun isEnabled(context: Context): Boolean {
-        return HchatStorage.preferences(context, FloatingShortcutSettings.PREFS_NAME)
-            .getBoolean(
-                FloatingShortcutSettings.KEY_ENABLE,
-                FloatingShortcutSettings.DEFAULT_ENABLE
-            )
     }
 
     private fun scheduleAttachRetry(activity: Activity) {
@@ -159,17 +216,23 @@ object FloatingShortcutRuntime {
                 if (!installed || !enabled || resumedActivity.get() !== target) return@Runnable
                 if (shouldShow(target)) attach(target)
             }
-            pendingAttachCallbacks.add(retry)
-            mainHandler.postDelayed(retry, delay)
+            synchronized(lifecycleLock) {
+                if (closed) return
+                pendingAttachCallbacks.add(retry)
+                if (!mainHandler.postDelayed(retry, delay)) pendingAttachCallbacks.remove(retry)
+            }
         }
     }
 
     private fun cancelAttachRetries() {
+        chatAttachRetry?.let(mainHandler::removeCallbacks)
+        chatAttachRetry = null
         pendingAttachCallbacks.forEach(mainHandler::removeCallbacks)
         pendingAttachCallbacks.clear()
     }
 
     fun onChatPageChanged(inChatPage: Boolean) {
+        if (closed) return
         chatPageVisible = inChatPage
         if (!installed || currentScope() != FloatingShortcutSettings.SCOPE_HOME) return
         runOnMain {
@@ -178,12 +241,20 @@ object FloatingShortcutRuntime {
                 detachNow(null)
                 return@runOnMain
             }
-            mainHandler.postDelayed({
-                if (!installed || !enabled || chatPageVisible) return@postDelayed
+            chatAttachRetry?.let(mainHandler::removeCallbacks)
+            val retry = Runnable {
+                chatAttachRetry = null
+                if (closed || !installed || !enabled || chatPageVisible) return@Runnable
                 val activity = resumedActivity.get()
-                    ?: WeChatApis.currentActivity()?.currentActivity() ?: return@postDelayed
+                    ?: WeChatApis.currentActivity()?.currentActivity() ?: return@Runnable
                 if (shouldShow(activity)) attach(activity)
-            }, 180L)
+            }
+            synchronized(lifecycleLock) {
+                if (!closed) {
+                    chatAttachRetry = retry
+                    if (!mainHandler.postDelayed(retry, 180L)) chatAttachRetry = null
+                }
+            }
         }
     }
 
@@ -205,26 +276,36 @@ object FloatingShortcutRuntime {
         }
     }
 
-    @Synchronized
-    fun destroy() {
-        lifecycleApplication.get()?.unregisterActivityLifecycleCallbacks(activityLifecycleCallbacks)
-        lifecycleApplication.clear()
-        prefs?.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        prefs = null
-        enabled = false
+    override fun close() { FloatingShortcutRuntime.retire(this) }
+    internal fun closeOwned(): Boolean {
+        synchronized(lifecycleLock) {
+            if (closed) return false
+            closed = true
+            pendingMain.forEach { it.action = null }
+            pendingMain.clear()
+            mainHandler.removeCallbacksAndMessages(null)
+        }
         installed = false
+        enabled = false
         enabledItems = emptyList()
         chatPageVisible = false
-        runOnMain {
-            cancelAttachRetries()
-            cancelPendingAction()
-            FloatingShortcutIconLoader.clear()
-            resumedActivity.clear()
-            currentActivity.get()?.let(MiuixSettingsPage::collapseFloatingScriptPluginAgent)
-            detachNow(null)
-        }
+        val application = lifecycleApplication.get()
+        lifecycleApplication.clear()
+        val preferences = prefs
+        prefs = null
+        safely { application?.unregisterActivityLifecycleCallbacks(activityLifecycleCallbacks) }
+        safely { preferences?.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
+        safely { icons.close() }
+        return true
     }
-
+    internal fun cleanupMain() {
+        safely { cancelAttachRetries() }
+        safely { cancelPendingAction() }
+        resumedActivity.clear()
+        safely { currentActivity.get()?.let(MiuixSettingsPage::collapseFloatingScriptPluginAgent) }
+        safely { detachNow(null) }
+    }
+    internal fun invalidateIcon(path: String) { icons.invalidate(path) }
     private fun refreshEnabledState() {
         val value = prefs?.getBoolean(
             FloatingShortcutSettings.KEY_ENABLE,
@@ -233,14 +314,15 @@ object FloatingShortcutRuntime {
         applyEnabledState(value)
     }
 
-    private fun applyEnabledState(value: Boolean) {
+    internal fun applyEnabledState(value: Boolean) {
+        if (closed) return
         enabled = value
         if (value) prefetchIcons()
         runOnMain {
             if (!value) {
                 cancelAttachRetries()
                 cancelPendingAction()
-                FloatingShortcutIconLoader.clear()
+                icons.clear()
                 currentActivity.get()?.let(MiuixSettingsPage::collapseFloatingScriptPluginAgent)
                 detachNow(null)
                 return@runOnMain
@@ -278,7 +360,8 @@ object FloatingShortcutRuntime {
     }
 
     private fun attachNow(activity: Activity) {
-        if (!enabled || !shouldShow(activity)) return
+        FloatingShortcutRuntime.drainRetired()
+        if (closed || !installed || !enabled || !shouldShow(activity)) return
         val decor = activity.window?.decorView as? ViewGroup ?: return
         val existing = currentBubble.get()
         if (currentActivity.get() === activity && existing?.parent === decor) {
@@ -304,6 +387,7 @@ object FloatingShortcutRuntime {
                 }
             }
         }
+        bubblePositionListener = positionListener
         bubble.addOnLayoutChangeListener(positionListener)
         decor.addView(
             bubble,
@@ -332,11 +416,15 @@ object FloatingShortcutRuntime {
         val activity = currentActivity.get()
         if (expectedActivity != null && activity !== expectedActivity) return
         cancelPendingAction()
-        closeMenu()
+        safely { closeMenu() }
         val bubble = currentBubble.get()
-        (bubble?.parent as? ViewGroup)?.removeView(bubble)
         currentBubble.clear()
         currentActivity.clear()
+        val listener = bubblePositionListener
+        bubblePositionListener = null
+        safely { if (listener != null) bubble?.removeOnLayoutChangeListener(listener) }
+        safely { bubble?.animate()?.cancel() }
+        safely { (bubble?.parent as? ViewGroup)?.removeView(bubble) }
     }
 
     private fun createBubble(activity: Activity, decor: ViewGroup): View {
@@ -568,7 +656,7 @@ object FloatingShortcutRuntime {
     }
 
     private fun dispatchAction(activity: Activity, item: FloatingShortcutItem) {
-        if (pendingAction != null) return
+        if (closed || !installed || !enabled || pendingAction != null) return
         val decor = activity.window?.decorView ?: return
         val activityRef = WeakReference(activity)
         val action = Runnable {
@@ -581,7 +669,9 @@ object FloatingShortcutRuntime {
         // Render menu removal before initializing a Compose page or starting a host Activity.
         // Posting from the frame callback runs navigation after this frame's traversal.
         decor.postOnAnimation {
-            if (pendingAction === action) mainHandler.post(action)
+            synchronized(lifecycleLock) {
+                if (!closed && pendingAction === action && !mainHandler.post(action)) pendingAction = null
+            }
         }
     }
 
@@ -595,7 +685,7 @@ object FloatingShortcutRuntime {
                 FloatingShortcutSettings.ACTION_PLUGIN_AGENT -> {
                     val toggled = MiuixSettingsPage.toggleFloatingScriptPluginAgent(activity)
                     (activity.window?.decorView as? ViewGroup)?.post {
-                        currentBubble.get()?.bringToFront()
+                        if (!closed && installed && enabled) currentBubble.get()?.bringToFront()
                     }
                     toggled
                 }
@@ -790,8 +880,8 @@ object FloatingShortcutRuntime {
 
     private fun closeMenu(animated: Boolean = false) {
         val dismissLayer = currentDismissLayer.get()
-        (dismissLayer?.parent as? ViewGroup)?.removeView(dismissLayer)
         currentDismissLayer.clear()
+        safely { (dismissLayer?.parent as? ViewGroup)?.removeView(dismissLayer) }
         val menu = currentMenu.get() ?: return
         val parent = menu.parent as? ViewGroup
         if (!animated || parent == null || menu.visibility != View.VISIBLE) {
@@ -1011,7 +1101,7 @@ object FloatingShortcutRuntime {
 
     private fun prefetchIcons() {
         if (!enabled) return
-        FloatingShortcutIconLoader.prefetch(buildList {
+        icons.prefetch(buildList {
             add(prefs?.getString(FloatingShortcutSettings.KEY_BUBBLE_ICON, "").orEmpty())
             add(prefs?.getString(FloatingShortcutSettings.KEY_BUBBLE_DARK_ICON, "").orEmpty())
             enabledItems.forEach { item ->
@@ -1025,7 +1115,7 @@ object FloatingShortcutRuntime {
         val regularPath = prefs?.getString(FloatingShortcutSettings.KEY_BUBBLE_ICON, "").orEmpty()
         val darkPath = prefs?.getString(FloatingShortcutSettings.KEY_BUBBLE_DARK_ICON, "").orEmpty()
         val path = if (isDark(view.context) && darkPath.isNotBlank()) darkPath else regularPath
-        FloatingShortcutIconLoader.bind(view, path, FloatingShortcutGlyphDrawable(FloatingShortcutGlyph.MENU, tint))
+        icons.bind(view, path, FloatingShortcutGlyphDrawable(FloatingShortcutGlyph.MENU, tint))
     }
 
     private fun bindActionIcon(view: ImageView, item: FloatingShortcutItem, tint: Int) {
@@ -1039,7 +1129,7 @@ object FloatingShortcutRuntime {
         } else {
             FloatingShortcutGlyphDrawable(FloatingShortcutGlyphs.forItem(item), tint)
         }
-        FloatingShortcutIconLoader.bind(view, path, fallback)
+        icons.bind(view, path, fallback)
     }
 
     private fun ovalSurface(context: Context, colors: IntArray): Drawable {
@@ -1170,6 +1260,7 @@ object FloatingShortcutRuntime {
         view.setTextColor(colors[0])
         if (colors.size < 2) return
         view.post {
+            if (closed || !installed || !enabled) return@post
             val availableWidth = (view.width - view.totalPaddingLeft - view.totalPaddingRight)
                 .toFloat()
                 .coerceAtLeast(1f)
@@ -1248,14 +1339,17 @@ object FloatingShortcutRuntime {
     }
 
     private fun runOnMain(block: () -> Unit) {
-        val guarded = Runnable {
-            runCatching(block).onFailure { error ->
-                HLog.e("$TAG 主线程悬浮层操作失败: ${error.message}", error)
+        val task = MainTask(block)
+        synchronized(lifecycleLock) {
+            if (closed || pendingMain.size >= 64) return
+            pendingMain.add(task)
+            if (Looper.myLooper() != Looper.getMainLooper()) {
+                if (!mainHandler.post(task)) { pendingMain.remove(task); task.action = null }
+                return
             }
         }
-        if (Looper.myLooper() == Looper.getMainLooper()) guarded.run() else mainHandler.post(guarded)
+        task.run()
     }
-
     private fun dp(context: Context, value: Int): Int {
         return (value * context.resources.displayMetrics.density + 0.5f).toInt()
     }

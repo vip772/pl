@@ -16,18 +16,19 @@ class FloatingShortcutFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        FloatingShortcutRuntime.install(context.hostContext())
+        val owner = FloatingShortcutRuntime.acquire(context.hostContext())
+        trackResource { owner.close() }
         // Activity 由早期注册的 Application 回调统一跟踪，避免重复派发挂载任务。
         trackSubscription(
             WeChatApis.chatPage()?.subscribe { event ->
-                FloatingShortcutRuntime.onChatPageChanged(event.isEnter)
+                owner.onChatPageChanged(event.isEnter)
             }
         )
-        WeChatApis.currentActivity()?.currentActivity()?.let(FloatingShortcutRuntime::attach)
+        WeChatApis.currentActivity()?.currentActivity()?.let(owner::attach)
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {
-        FloatingShortcutRuntime.destroy()
+        // Exact installation owner is released by the feature scope.
     }
 
     companion object {

@@ -22,7 +22,7 @@ function run(args) {
 run(['-Xmx256m', '-cp', jars.map(name => path.join(lib, name)).join(path.delimiter),
     'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-no-stdlib', '-no-reflect',
     '-classpath', path.join(lib, stdlib), '-d', jar,
-    'app/src/main/java/h/Hchat/hooks/items/floatingshortcut/FloatingShortcutIconLoader.kt',
+    'app/src/main/java/t/mma/hooks/items/floatingshortcut/FloatingShortcutIconLoader.kt',
     ...fs.readdirSync(path.join(root, 'scripts/tests/floating_shortcut_icons')).filter(name => name.endsWith('.kt')).map(name => 'scripts/tests/floating_shortcut_icons/' + name)]);
-run(['-cp', jar + path.delimiter + path.join(lib, stdlib), 'h.Hchat.hooks.items.floatingshortcut.IconLoaderRegressionKt']);
+run(['-cp', jar + path.delimiter + path.join(lib, stdlib), 't.mma.hooks.items.floatingshortcut.IconLoaderRegressionKt']);
 console.log('Test artifacts: ' + output);

@@ -105,6 +105,7 @@ class FeatureManager {
         }
         installedFeatures.clear()
         initializedFeatures.clear()
+        t.mma.hooks.items.floatingshortcut.FloatingShortcutRuntime.destroy()
         t.mma.hooks.api.media.WeChatImageApi.closeMarsRuntime()
         HookRegistry.get().unhookAll()
     }

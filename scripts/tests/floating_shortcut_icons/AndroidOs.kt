@@ -10,8 +10,17 @@ class Looper private constructor() {
     }
 }
 class Handler(looper: Looper) {
-    fun post(runnable: Runnable): Boolean = tasks.offer(runnable)
+    private val owned = java.util.concurrent.ConcurrentHashMap.newKeySet<Runnable>()
+    fun post(runnable: Runnable): Boolean {
+        if (reject) return false
+        lateinit var wrapper: Runnable
+        wrapper = Runnable { owned.remove(wrapper); runnable.run() }
+        owned.add(wrapper)
+        return tasks.offer(wrapper)
+    }
+    fun removeCallbacksAndMessages(token: Any?) { tasks.removeAll(owned); owned.clear() }
     companion object {
+        @Volatile var reject = false
         private val tasks = LinkedBlockingQueue<Runnable>()
         fun runNext() { checkNotNull(tasks.poll(3, TimeUnit.SECONDS)) { "Worker callback timed out" }.run() }
         fun drain() { while (true) (tasks.poll() ?: return).run() }
