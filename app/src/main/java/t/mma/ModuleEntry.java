@@ -219,6 +219,7 @@ public class ModuleEntry implements IXposedHookLoadPackage {
         if (!TermsGate.INSTANCE.isAccepted(context)) {
             FakeLocationFeature.destroyProcessHooks();
             FakeMiniProgramBaseLibFeature.destroyProcessHooks();
+            SkipMiniProgramVideoAdsFeature.destroyProcessHooks();
             return;
         }
         boolean failed = false;
@@ -229,9 +230,12 @@ public class ModuleEntry implements IXposedHookLoadPackage {
         } else {
             FakeMiniProgramBaseLibFeature.destroyProcessHooks();
         }
-        if (SkipMiniProgramVideoAdsFeature.isEnabled(context)
-                && !SkipMiniProgramVideoAdsFeature.install(context, classLoader)) {
-            failed = true;
+        if (SkipMiniProgramVideoAdsFeature.isEnabled(context)) {
+            if (!SkipMiniProgramVideoAdsFeature.installAppBrandProcessHook(context, classLoader)) {
+                failed = true;
+            }
+        } else {
+            SkipMiniProgramVideoAdsFeature.destroyProcessHooks();
         }
         if (SkipGlobalMiniProgramSplashAdsFeature.isEnabled(context)) {
             SkipGlobalMiniProgramSplashAdsFeature.scheduleAppBrandProcessHook(context, classLoader);

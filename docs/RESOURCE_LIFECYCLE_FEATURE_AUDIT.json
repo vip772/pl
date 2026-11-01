@@ -3992,6 +3992,27 @@
           "remainingOpen": true,
           "boundary": "ModuleEntry:225-228与主Feature都调用静态install；installedLoaders同步去重，但只保留loader身份字符串、无句柄/scope/释放重置；callback只检查设置，没有进程关闭代际；主子进程不能共用主Feature清理证明。"
         }
+      ],
+      "runtimeRepairProgress": [
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-va-validate-final-20261101-233733",
+          "focusedTestsPassed": 10,
+          "sdkDirectCompileExit": 0,
+          "toggleGenerationIterations": 100,
+          "capacityLimits": {
+            "mainProcessGenerations": 1,
+            "appbrandProcessOwner": 1,
+            "dexInstallTicketsPerGeneration": 1,
+            "dexReadySubscriptionsPerGeneration": 1,
+            "hookHandlesPerOwner": 1
+          },
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "Main process: PreferenceRuntimeOwner per enabled interval owning one MiniProgramVideoAdsHooker, one DexInstallScheduler.Installation ticket and one DexReady subscription, all registered in the feature resource scope. The hook handle is held by the owner and released through HookRegistry.unhook with runCatching isolation; the callback only snapshots the closed flag before reading the preference and rewriting the payload. Appbrand process: installAppBrandProcessHook now delegates to the same hooker class bound to that loader, with destroyProcessHooks() releasing it on disabled settings, unaccepted terms and loader replacement (old owner released before the new install attempt). The static installedLoaders set is gone, so a global unhook no longer leaves a stale installed marker that would skip reinstallation.",
+          "boundary": "Synthetic host regression over the complete production file plus direct Kotlin/Java/SDK/existing-ABI compilation, not Android/R8 and not device acceptance. The synthetic AppBrandJsBridgeBinding reproduces only the subscribeHandler(String,String,int,String) descriptor the feature resolves; real bridge availability at appbrand process start, the real onVideoTimeUpdate payload shape across WeChat versions, cross-process preferences visibility and repeated rapid toggles during a live Dex warmup remain unverified. The progress rewrite (position=60, duration=1) and the event name are unchanged by this repair. No memory or scrolling-smoothness data; deviceAcceptancePercent=0 and memoryBenefitProven=false."
+        }
       ]
     },
     {

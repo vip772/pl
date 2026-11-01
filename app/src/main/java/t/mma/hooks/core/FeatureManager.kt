@@ -109,6 +109,7 @@ class FeatureManager {
         t.mma.hooks.items.custombottombar.CustomBottomBarFeature.destroyEarlyRuntimes()
         t.mma.hooks.items.custombottombar.CustomBottomBarIconPicker.destroy()
         t.mma.hooks.items.fakelocation.FakeLocationFeature.destroyProcessHooks()
+        t.mma.hooks.items.miniprogramvideoad.SkipMiniProgramVideoAdsFeature.destroyProcessHooks()
         t.mma.hooks.api.media.WeChatImageApi.closeMarsRuntime()
         HookRegistry.get().unhookAll()
     }
