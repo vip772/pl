@@ -216,7 +216,10 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                                             ClassLoader classLoader,
                                             XC_LoadPackage.LoadPackageParam lpparam,
                                             boolean applicationReady) {
-        if (!TermsGate.INSTANCE.isAccepted(context)) return;
+        if (!TermsGate.INSTANCE.isAccepted(context)) {
+            FakeLocationFeature.destroyProcessHooks();
+            return;
+        }
         boolean failed = false;
         if (FakeMiniProgramBaseLibFeature.isEnabled(context)
                 && !FakeMiniProgramBaseLibFeature.installAppBrandProcessHook(context, classLoader)) {
@@ -229,9 +232,12 @@ public class ModuleEntry implements IXposedHookLoadPackage {
         if (SkipGlobalMiniProgramSplashAdsFeature.isEnabled(context)) {
             SkipGlobalMiniProgramSplashAdsFeature.scheduleAppBrandProcessHook(context, classLoader);
         }
-        if (FakeLocationFeature.isEnabled(context)
-                && !FakeLocationFeature.installAppBrandProcessHook(context, classLoader)) {
-            failed = true;
+        if (FakeLocationFeature.isEnabled(context)) {
+            if (!FakeLocationFeature.installAppBrandProcessHook(context, classLoader)) {
+                failed = true;
+            }
+        } else {
+            FakeLocationFeature.destroyProcessHooks();
         }
         if (applicationReady) {
             ScriptPluginRuntime.installAppBrandProcess(

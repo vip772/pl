@@ -8,6 +8,7 @@ import t.mma.event.Events
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
@@ -15,33 +16,33 @@ import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
-import java.util.concurrent.ConcurrentHashMap
 
 class FakeLocationFeature : BaseFeature() {
-    private var hooker: FakeLocationHooker? = null
-
     override fun featureId(): String = ID
-
     override fun name(): String = "虚拟定位"
-
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(FakeLocationSettingsProvider())
     }
-
     override fun onFeatureInstall(context: FeatureContext) {
-        hooker = FakeLocationHooker(context, ::logFeatureError)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
-    }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        hooker = null
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name(), stage = DexInstallScheduler.Stage.BRIDGE) {
-            hooker?.install() == true
-        }
+        val prefs = HchatStorage.preferences(context.hostContext(), FakeLocationSettings.PREFS_NAME)
+        val runtime = PreferenceRuntimeOwner(
+            prefs, setOf(FakeLocationSettings.KEY_ENABLE),
+            enabled = { isEnabled(context.hostContext()) },
+            create = { resources ->
+                val owner = FakeLocationHooker(context, ::logFeatureError)
+                resources.register { owner.close() }
+                val installation = DexInstallScheduler.installation(ID, name())
+                resources.register { installation.close() }
+                installation.schedule { owner.install() }
+                val subscription = context.eventBus().subscribe(Events.DexReady::class.java, {
+                    if (!resources.isClosed()) installation.schedule { owner.install() }
+                })
+                resources.register { context.eventBus().unsubscribe(subscription) }
+            },
+            onError = { logFeatureError("虚拟定位启停失败", it) }
+        )
+        trackResource { runtime.close() }
+        runtime.start()
     }
 
     private fun logFeatureError(message: String, throwable: Throwable?) {
@@ -60,8 +61,24 @@ class FakeLocationFeature : BaseFeature() {
                 .getBoolean(FakeLocationSettings.KEY_ENABLE, FakeLocationSettings.DEFAULT_ENABLE)
         }
 
+        private var appBrandOwner: FakeLocationProcessHooker? = null
+        private var appBrandLoader: ClassLoader? = null
         @JvmStatic
+        @Synchronized
+        fun destroyProcessHooks() {
+            val old = appBrandOwner
+            appBrandOwner = null
+            appBrandLoader = null
+            old?.close()
+        }
+        @JvmStatic
+        @Synchronized
         fun installAppBrandProcessHook(context: Context, classLoader: ClassLoader): Boolean {
+            if (!isEnabled(context)) {
+                destroyProcessHooks()
+                return false
+            }
+            if (appBrandLoader !== classLoader) destroyProcessHooks()
             val prefs = DexMethodCache.prefs(context, CACHE_PREFS_NAME)
             val runtimeKey = DexMethodCache.runtimeKey(context, classLoader)
             val callbacks = DexMethodCache.loadListCrossProcess(
@@ -71,9 +88,13 @@ class FakeLocationFeature : BaseFeature() {
                 CACHE_LOCATION_CALLBACKS
             ).filter(::isLocationCallback)
             if (callbacks.isEmpty()) return false
-            return FakeLocationProcessHooker.install(context, callbacks) { message, throwable ->
+            val owner = appBrandOwner ?: FakeLocationProcessHooker(context) { message, throwable ->
                 HLog.e("[Hchat:FakeLocation] $message", throwable)
+            }.also {
+                appBrandOwner = it
+                appBrandLoader = classLoader
             }
+            return owner.install(callbacks)
         }
     }
 }
@@ -84,14 +105,23 @@ private class FakeLocationHooker(
 ) {
     private val cache = DexMethodCache.prefs(context.hostContext(), FakeLocationFeature.CACHE_PREFS_NAME)
 
+    private val owner = FakeLocationProcessHooker(context.hostContext(), logger)
+    private var closed = false
     @Volatile private var installed = false
-
+    @Synchronized
+    fun close() {
+        if (closed) return
+        closed = true
+        installed = false
+        owner.close()
+    }
     @Synchronized
     fun install(): Boolean {
+        if (closed) return false
         if (installed) return true
         val callbacks = locateLocationCallbacks()
         if (callbacks.isEmpty()) return false
-        installed = FakeLocationProcessHooker.install(context.hostContext(), callbacks, logger)
+        installed = owner.install(callbacks)
         return installed
     }
 
@@ -151,70 +181,77 @@ private class FakeLocationHooker(
     }
 }
 
-private object FakeLocationProcessHooker {
-    private val hookedCallbacks = ConcurrentHashMap.newKeySet<Method>()
-    private val hookedGetters = ConcurrentHashMap.newKeySet<Method>()
-    private val rejectedLocationClasses = ConcurrentHashMap.newKeySet<Class<*>>()
-
-    fun install(
-        context: Context,
-        callbacks: List<Method>,
-        logger: (String, Throwable?) -> Unit
-    ): Boolean {
+/** One process installation; callbacks, dynamic getters and rejection cache share its lifetime. */
+private class FakeLocationProcessHooker(
+    context: Context,
+    private val logger: (String, Throwable?) -> Unit
+) : AutoCloseable {
+    private val context = context.applicationContext ?: context
+    private var closed = false
+    private val hookedCallbacks = linkedMapOf<Method, XC_MethodHook.Unhook>()
+    private val hookedGetters = linkedMapOf<Method, XC_MethodHook.Unhook>()
+    private val rejectedLocationClasses = linkedSetOf<Class<*>>()
+    private fun report(message: String, error: Throwable?) {
+        runCatching { logger(message, error) }
+    }
+    @Synchronized
+    override fun close() {
+        if (closed) return
+        closed = true
+        val handles = hookedCallbacks.values.toList() + hookedGetters.values.toList()
+        hookedCallbacks.clear()
+        hookedGetters.clear()
+        rejectedLocationClasses.clear()
+        handles.forEach { handle ->
+            runCatching { HookRegistry.get().unhook(handle) }
+                .onFailure { report("虚拟定位 Hook 释放失败", it) }
+        }
+    }
+    @Synchronized
+    fun install(callbacks: List<Method>): Boolean {
+        if (closed || callbacks.isEmpty()) return false
         callbacks.forEach { callback ->
-            if (!hookedCallbacks.add(callback)) return@forEach
+            if (hookedCallbacks.containsKey(callback) || hookedCallbacks.size >= 128) return@forEach
             runCatching {
-                HookRegistry.get().hook(callback, object : XC_MethodHook() {
+                hookedCallbacks[callback] = HookRegistry.get().hook(callback, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
-                        runCatching {
-                            hookLocationGetters(context, param.args?.firstOrNull(), logger)
-                        }.onFailure {
-                            logger("虚拟定位运行时 Hook 失败", it)
+                        synchronized(this@FakeLocationProcessHooker) {
+                            if (closed || !FakeLocationFeature.isEnabled(context)) return
+                            runCatching { hookLocationGetters(param.args?.firstOrNull()) }
+                                .onFailure { report("虚拟定位运行时 Hook 失败", it) }
                         }
                     }
                 })
-            }.onFailure {
-                hookedCallbacks.remove(callback)
-                logger("虚拟定位回调 Hook 安装失败: ${callback.toGenericString()}", it)
-            }
+            }.onFailure { report("虚拟定位回调 Hook 安装失败: ${callback.toGenericString()}", it) }
         }
-        return callbacks.all(hookedCallbacks::contains)
+        return callbacks.all(hookedCallbacks::containsKey)
     }
-
-    private fun hookLocationGetters(
-        context: Context,
-        location: Any?,
-        logger: (String, Throwable?) -> Unit
-    ) {
-        if (location == null) return
+    private fun hookLocationGetters(location: Any?) {
+        if (closed || location == null) return
         val clazz = location.javaClass
+        if (clazz in rejectedLocationClasses) return
         val latitudeMethod = KavaReflector.findMethodRecursive(clazz, "getLatitude")
         val longitudeMethod = KavaReflector.findMethodRecursive(clazz, "getLongitude")
         if (!isConcreteDoubleGetter(latitudeMethod) || !isConcreteDoubleGetter(longitudeMethod)) {
-            if (rejectedLocationClasses.add(clazz)) {
-                logger("TencentLocation 经纬度 getter 不匹配: ${clazz.name}", null)
+            if (rejectedLocationClasses.size < 64 && rejectedLocationClasses.add(clazz)) {
+                report("TencentLocation 经纬度 getter 不匹配: ${clazz.name}", null)
             }
             return
         }
-        hookGetter(context, latitudeMethod!!) { FakeLocationSettings.latitude(context) }
-        hookGetter(context, longitudeMethod!!) { FakeLocationSettings.longitude(context) }
+        hookGetter(latitudeMethod!!) { FakeLocationSettings.latitude(context) }
+        hookGetter(longitudeMethod!!) { FakeLocationSettings.longitude(context) }
     }
-
-    private fun hookGetter(context: Context, method: Method, value: () -> Double) {
-        if (!hookedGetters.add(method)) return
-        runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!FakeLocationFeature.isEnabled(context)) return
+    private fun hookGetter(method: Method, value: () -> Double) {
+        if (closed || hookedGetters.containsKey(method) || hookedGetters.size >= 256) return
+        hookedGetters[method] = HookRegistry.get().hook(method, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                synchronized(this@FakeLocationProcessHooker) {
+                    if (closed || !FakeLocationFeature.isEnabled(context)) return
                     param.result = value()
                 }
-            })
-        }.onFailure {
-            hookedGetters.remove(method)
-            throw it
-        }
+            }
+        })
     }
-
     private fun isConcreteDoubleGetter(method: Method?): Boolean {
         if (method == null) return false
         return !Modifier.isAbstract(method.modifiers) &&
@@ -222,9 +259,7 @@ private object FakeLocationProcessHooker {
             method.parameterTypes.isEmpty() &&
             (method.returnType == java.lang.Double.TYPE || method.returnType == java.lang.Double::class.java)
     }
-
 }
-
 private fun isLocationCallback(method: Method): Boolean {
     val types = method.parameterTypes
     return !Modifier.isAbstract(method.modifiers) &&

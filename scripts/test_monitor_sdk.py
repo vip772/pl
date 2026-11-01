@@ -25,6 +25,7 @@ sources += list((r/'app/src/main/java/t/mma/hooks/items/floatingchat').glob('*.k
 sources += list((r/'app/src/main/java/t/mma/hooks/items/floatingshortcut').glob('*.kt'))
 sources += [r/'app/src/main/java/t/mma/hooks/items/custombottombar'/n for n in ['CustomBottomBarFeature.kt','CustomBottomBarIconStore.kt','CustomBottomBarIconPicker.kt']]
 sources += [r/'app/src/main/java/t/mma/ui/miuix/CustomBottomBarMiuixPage.kt']
+sources += list((r/'app/src/main/java/t/mma/hooks/items/fakelocation').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/selectedmessages').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/settings').glob('*.kt'))
 java_sources += [r/'app/src/main/java/t/mma/hooks/api/ui/SettingsInjector.java', r/'app/src/main/java/t/mma/dexkit/SettingsDexFinder.java', r/'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java']
@@ -37,6 +38,9 @@ java_sources += [r/'app/src/main/java/t/mma/hooks/api/net/WeChatNetworkDispatche
 java_sources += [r/'app/src/main/java/t/mma/hooks/api/message/WeChatMessageApi.java']
 sources += list((r/'app/src/main/java/t/mma/hooks/items/messageforward').glob('*.kt'))
 java_sources += [r/'app/src/main/java/t/mma/event/EventBus.java']
+sources += [r/'app/src/main/java/t/mma/hooks/core/ResourceMemoryCallbacks.kt']
+java_sources += [r/'app/src/main/java/t/mma/ModuleEntry.java']
+java_sources += [r/'app/src/main/java/t/mma/utils/StartupSyncRetryGuard.java',r/'app/src/main/java/t/mma/dexkit/DexFinder.java',r/'app/src/main/java/t/mma/dexkit/DexBridgeHolder.java']
 sources+=java_sources
 with tempfile.TemporaryDirectory() as td:
  # Generate compile-only ids from current declarations; cached R.jar may predate source.
@@ -46,6 +50,14 @@ with tempfile.TemporaryDirectory() as td:
  result=subprocess.run(['javac','-d',td,str(resource)],capture_output=True,text=True,timeout=30)
  if result.returncode:
   print(result.stderr);raise SystemExit(result.returncode)
+ # Compile the exact production cache object without unrelated settings UI.
+ ui=(r/'app/src/main/java/t/mma/ui/miuix/MiuixSettingsPage.kt').read_text()
+ a=ui.index('internal object AvatarMemoryCache {');b=ui.index('{',a);end=b+1;depth=1
+ while depth:
+  depth+=(ui[end]=='{')-(ui[end]=='}');end+=1
+ avatar=Path(td)/'AvatarMemoryCache.kt'
+ avatar.write_text('package t.mma.ui.miuix'+chr(10)+'import androidx.compose.ui.graphics.ImageBitmap'+chr(10)+'import androidx.compose.ui.graphics.asAndroidBitmap'+chr(10)+ui[a:end])
+ sources.append(avatar)
  cp.insert(0,Path(td))
  cmd=['java','-Xmx512m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-jvm-target','17','-Xfriend-paths='+str(r/'app/build/intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes'),'-nowarn','-no-stdlib','-no-reflect','-classpath',':'.join(map(str,cp)),'-d',td,*map(str,sources)]
  plugin=next(Path('/root/.gradle/caches/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-compose-compiler-plugin-embeddable/2.4.0').glob('*/*.jar'))

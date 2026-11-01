@@ -3775,6 +3775,26 @@
       ],
       "sharedRootCauseRefs": [
         "shared-schedule-mutable-runtime"
+      ],
+      "runtimeRepairProgress": [
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-fake-final-20261101-154335",
+          "focusedTestsPassed": 7,
+          "sdkDirectCompileExit": 0,
+          "ownerSequenceIterations": 200,
+          "toggleGenerationIterations": 100,
+          "capacityLimits": {
+            "callbacks": 128,
+            "getters": 256,
+            "rejectedClasses": 64
+          },
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "Per-installation main/process hook owners; synchronized close/install; exact handle release with failure isolation; bounded caches; preference-owned enabled intervals and DexReady subscription; child loader replacement and disabled/terms-denied entry cleanup; FeatureManager shutdown.",
+          "boundary": "Synthetic host tests and direct Kotlin/Java/SDK/existing ABI compilation including ModuleEntry, not Android/R8 or device acceptance. No verified cross-process preference propagation or immediate child-process cleanup on main-process toggle; child hooks remain process-owned until an observed disabled entry, explicit destroy or process death. FeatureManager destroyAll has no located production caller. Native unhook failure only proves local ownership release, not native removal. Memory benefit and scrolling smoothness unproven."
+        }
       ]
     },
     {
