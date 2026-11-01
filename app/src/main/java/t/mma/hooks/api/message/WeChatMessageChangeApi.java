@@ -13,7 +13,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * message 表变更监听 API。
  */
-public final class WeChatMessageChangeApi {
+public final class WeChatMessageChangeApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -63,7 +63,7 @@ public final class WeChatMessageChangeApi {
         }
 
         public boolean isActive() {
-            return active;
+            return active && !closed;
         }
     }
 
@@ -73,6 +73,8 @@ public final class WeChatMessageChangeApi {
     private final Logger logger;
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private volatile boolean installed;
+    private volatile boolean closed;
+    private WeChatDatabaseListenerApi.Subscription upstream;
 
     public WeChatMessageChangeApi(WeChatDatabaseListenerApi databaseListenerApi,
                                   WeChatMessageStoreApi messageStoreApi,
@@ -98,8 +100,8 @@ public final class WeChatMessageChangeApi {
         return installed;
     }
 
-    public Subscription subscribe(Listener listener) {
-        if (listener == null) return null;
+    public synchronized Subscription subscribe(Listener listener) {
+        if (closed || listener == null) return null;
         listeners.addIfAbsent(listener);
         return new Subscription(listener);
     }
@@ -108,8 +110,20 @@ public final class WeChatMessageChangeApi {
         if (listener != null) listeners.remove(listener);
     }
 
+    /** Only the public API generation owner closes shared services. */
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        installed = false;
+        WeChatDatabaseListenerApi.Subscription subscription = upstream;
+        upstream = null;
+        listeners.clear();
+        if (subscription != null) subscription.unsubscribe();
+    }
+
     public synchronized void install() {
-        if (installed || databaseListenerApi == null) return;
+        if (closed || installed || databaseListenerApi == null) return;
         databaseListenerApi.install();
         if (!databaseListenerApi.isOperational()) {
             log("消息变更监听未就绪: databaseHooks="
@@ -120,16 +134,18 @@ public final class WeChatMessageChangeApi {
                     + databaseListenerApi.hookedWrapperInsertMethodCount());
             return;
         }
-        databaseListenerApi.subscribe(this::onDatabaseChanged);
+        upstream = databaseListenerApi.subscribe(this::onDatabaseChanged);
         installed = true;
         log("消息变更监听已安装");
     }
 
     private void onDatabaseChanged(DatabaseChange change) {
+        if (closed) return;
         if (change == null || !isMessageTable(change.table)) return;
         WeChatMessage message = resolveMessage(change);
         MessageChange event = new MessageChange(change, message);
         for (Listener listener : listeners) {
+            if (closed) return;
             try {
                 listener.onMessageChanged(event);
             } catch (Throwable e) {

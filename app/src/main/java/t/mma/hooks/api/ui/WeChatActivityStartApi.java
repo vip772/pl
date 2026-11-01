@@ -15,7 +15,7 @@ import de.robv.android.xposed.XC_MethodHook;
 /**
  * 微信 Activity 启动监听 API。
  */
-public final class WeChatActivityStartApi {
+public final class WeChatActivityStartApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -39,13 +39,20 @@ public final class WeChatActivityStartApi {
         }
 
         public boolean isActive() {
-            return active;
+            return active && !closed;
         }
     }
 
     private final Logger logger;
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private volatile boolean installed;
+    private volatile boolean closed;
+    private final java.util.ArrayList<XC_MethodHook.Unhook> ownedHooks = new java.util.ArrayList<>();
+    private XC_MethodHook.Unhook hook(java.lang.reflect.Member method, XC_MethodHook callback) {
+        XC_MethodHook.Unhook handle = HookRegistry.get().hook(method, callback);
+        ownedHooks.add(handle);
+        return handle;
+    }
     private volatile int hookedMethodCount;
 
     public WeChatActivityStartApi(Logger logger) {
@@ -60,8 +67,8 @@ public final class WeChatActivityStartApi {
         return hookedMethodCount;
     }
 
-    public Subscription subscribe(Listener listener) {
-        if (listener == null) return null;
+    public synchronized Subscription subscribe(Listener listener) {
+        if (closed || listener == null) return null;
         listeners.addIfAbsent(listener);
         return new Subscription(listener);
     }
@@ -70,8 +77,22 @@ public final class WeChatActivityStartApi {
         if (listener != null) listeners.remove(listener);
     }
 
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        installed = false;
+        listeners.clear();
+        hookedMethodCount = 0;
+        java.util.ArrayList<XC_MethodHook.Unhook> snapshot = new java.util.ArrayList<>(ownedHooks);
+        ownedHooks.clear();
+        for (XC_MethodHook.Unhook handle : snapshot) {
+            try { HookRegistry.get().unhook(handle); } catch (Throwable ignored) { }
+        }
+    }
+
     public synchronized void install() {
-        if (installed) return;
+        if (closed || installed) return;
         int count = hookStartMethods(Activity.class);
         count += hookStartMethods(ContextWrapper.class);
         hookedMethodCount = count;
@@ -83,9 +104,10 @@ public final class WeChatActivityStartApi {
         int count = 0;
         for (Method method : KavaReflector.declaredMethods(clazz)) {
             if (!isStartMethod(method)) continue;
-            HookRegistry.get().hook(method, new XC_MethodHook() {
+            hook(method, new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
+                    if (closed) return;
                     Intent intent = findIntent(param.args);
                     if (intent != null) dispatch(intent, param.thisObject, method);
                 }
@@ -119,6 +141,7 @@ public final class WeChatActivityStartApi {
 
     private void dispatch(Intent intent, Object caller, Method method) {
         for (Listener listener : listeners) {
+            if (closed) return;
             try {
                 listener.onStartActivity(intent, caller, method);
             } catch (Throwable e) {

@@ -42,7 +42,7 @@ class WeChatSnsApi(
     private val contactApi: WeChatContactApi?,
     private val featureContext: FeatureContext?,
     private val logger: Logger?
-) {
+) : AutoCloseable {
     fun interface Logger {
         fun log(message: String)
     }
@@ -55,10 +55,17 @@ class WeChatSnsApi(
         val loader = classLoader ?: return@lazy null
         SnsInteractionLocator(context, loader, dexKitManager, ::log)
     }
-    private val postObserver: WeChatSnsPostObserver? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+    private val postObserverDelegate = lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         val context = hostContext ?: return@lazy null
         val loader = classLoader ?: return@lazy null
         WeChatSnsPostObserver(context, loader, dexKitManager, ::log)
+    }
+    private val postObserver: WeChatSnsPostObserver? get() = postObserverDelegate.value
+    @Volatile private var closed = false
+    @Synchronized override fun close() {
+        if (closed) return
+        closed = true
+        if (postObserverDelegate.isInitialized()) postObserverDelegate.value?.close()
     }
     private val cachedPostStorage: SnsCachedPostStorage? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         val context = hostContext ?: return@lazy null
@@ -76,7 +83,7 @@ class WeChatSnsApi(
     private var livePhotoUploadRuntime: SnsLivePhotoUploadRuntime? = null
     private val mediaPrepareLocks = ConcurrentHashMap<String, MediaPrepareLock>()
 
-    fun installPostObserver(): Boolean = postObserver?.install() == true
+    @Synchronized fun installPostObserver(): Boolean = !closed && postObserver?.install() == true
 
     fun warmupCachedPosts(): Boolean = cachedPostStorage?.warmup() == true
 
@@ -98,7 +105,8 @@ class WeChatSnsApi(
         return likeReady && commentReady && refreshReady
     }
 
-    fun observePosts(listener: WeChatSnsPostObserver.Listener): WeChatSnsPostObserver.Subscription? {
+    @Synchronized fun observePosts(listener: WeChatSnsPostObserver.Listener): WeChatSnsPostObserver.Subscription? {
+        if (closed) return null
         return postObserver?.subscribe(listener)
     }
 

@@ -22,7 +22,7 @@ import de.robv.android.xposed.XC_MethodHook;
 /**
  * 微信 SqliteDB wrapper 变更与查询监听 API。
  */
-public final class WeChatDatabaseListenerApi {
+public final class WeChatDatabaseListenerApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -50,7 +50,7 @@ public final class WeChatDatabaseListenerApi {
         }
 
         public boolean isActive() {
-            return active;
+            return active && !closed;
         }
     }
 
@@ -69,7 +69,7 @@ public final class WeChatDatabaseListenerApi {
         }
 
         public boolean isActive() {
-            return active;
+            return active && !closed;
         }
     }
 
@@ -86,6 +86,8 @@ public final class WeChatDatabaseListenerApi {
     private final ThreadLocal<Integer> mutationDepth = ThreadLocal.withInitial(() -> 0);
     private final ThreadLocal<Integer> queryDepth = ThreadLocal.withInitial(() -> 0);
     private volatile boolean installed;
+    private volatile boolean closed;
+    private final java.util.ArrayList<XC_MethodHook.Unhook> ownedHooks = new java.util.ArrayList<>();
     private volatile int hookedMethodCount;
     private volatile Class<?> hookedWrapperClass;
 
@@ -120,6 +122,7 @@ public final class WeChatDatabaseListenerApi {
     }
 
     public boolean isOperational() {
+        if (closed) return false;
         Class<?> wrapperClass = dexFinder != null ? dexFinder.sqliteDbWrapperClass : null;
         boolean wrapperReady = wrapperClass != null
                 && wrapperClass == hookedWrapperClass
@@ -127,8 +130,8 @@ public final class WeChatDatabaseListenerApi {
         return wrapperReady || !hookedStandardInsertMethods.isEmpty();
     }
 
-    public Subscription subscribe(Listener listener) {
-        if (listener == null) return null;
+    public synchronized Subscription subscribe(Listener listener) {
+        if (closed || listener == null) return null;
         listeners.addIfAbsent(listener);
         return new Subscription(listener);
     }
@@ -137,8 +140,8 @@ public final class WeChatDatabaseListenerApi {
         if (listener != null) listeners.remove(listener);
     }
 
-    public QuerySubscription subscribeQuery(QueryInterceptor interceptor) {
-        if (interceptor == null) return null;
+    public synchronized QuerySubscription subscribeQuery(QueryInterceptor interceptor) {
+        if (closed || interceptor == null) return null;
         queryInterceptors.addIfAbsent(interceptor);
         return new QuerySubscription(interceptor);
     }
@@ -147,8 +150,29 @@ public final class WeChatDatabaseListenerApi {
         if (interceptor != null) queryInterceptors.remove(interceptor);
     }
 
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        installed = false;
+        listeners.clear();
+        queryInterceptors.clear();
+        java.util.ArrayList<XC_MethodHook.Unhook> snapshot = new java.util.ArrayList<>(ownedHooks);
+        ownedHooks.clear();
+        hookedMethods.clear();
+        hookedWrapperMutationMethods.clear();
+        hookedWrapperInsertMethods.clear();
+        hookedStandardInsertMethods.clear();
+        hookedWrapperClass = null;
+        hookedMethodCount = 0;
+        // Other threads remove their own depths when their admitted callbacks return.
+        for (XC_MethodHook.Unhook hook : snapshot) {
+            try { HookRegistry.get().unhook(hook); } catch (Throwable ignored) { }
+        }
+    }
+
     public synchronized void install() {
-        if (!isAvailable()) return;
+        if (closed || !isAvailable()) return;
         Class<?> wrapperClass = dexFinder != null ? dexFinder.sqliteDbWrapperClass : null;
         if (isOperational()) return;
         if (wrapperClass != hookedWrapperClass) {
@@ -290,30 +314,45 @@ public final class WeChatDatabaseListenerApi {
                 continue;
             }
             try {
-                HookRegistry.get().hook(method, new XC_MethodHook(de.robv.android.xposed.callbacks.XCallback.PRIORITY_LOWEST) {
+                ownedHooks.add(HookRegistry.get().hook(method, new XC_MethodHook(de.robv.android.xposed.callbacks.XCallback.PRIORITY_LOWEST) {
+                    private final String depthKey = "hchat.db.depth." + System.identityHashCode(this);
                     @Override
-                    protected void beforeHookedMethod(MethodHookParam param) {
+                    protected void beforeHookedMethod(MethodHookParam param) throws Throwable {
+                        if (closed) return;
                         if (query) {
-                            if (enterQuery()) transformQuery(param.args);
+                            boolean outermost = enterQuery();
+                            try {
+                                if (outermost) transformQuery(param.args);
+                            } catch (Throwable error) {
+                                leaveQuery();
+                                throw error;
+                            }
                         } else {
                             enterMutation();
-                            normalizeLegacyMsgSource(operation, param.thisObject, param.args);
+                            try {
+                                normalizeLegacyMsgSource(operation, param.thisObject, param.args);
+                            } catch (Throwable error) {
+                                leaveMutation();
+                                throw error;
+                            }
                         }
+                        param.setObjectExtra(depthKey, Boolean.TRUE);
                     }
 
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
+                        if (!Boolean.TRUE.equals(param.getObjectExtra(depthKey))) return;
                         if (query) {
                             leaveQuery();
                         } else {
                             boolean outermostMutation = leaveMutation();
                             if (outermostMutation || (!allowObfuscatedWrapperMethod
                                     && DatabaseChange.INSERT.equals(operation))) {
-                                dispatchIfSuccessful(operation, method, param.args, param.getResult());
+                                if (!closed) dispatchIfSuccessful(operation, method, param.args, param.getResult());
                             }
                         }
                     }
-                });
+                }));
                 hookedMethods.add(method);
                 recordHookedMutation(method, operation, allowObfuscatedWrapperMethod);
                 count++;
@@ -378,6 +417,7 @@ public final class WeChatDatabaseListenerApi {
         if (TextUtils.isEmpty(sql)) return;
         String rewritten = sql;
         for (QueryInterceptor interceptor : queryInterceptors) {
+            if (closed) return;
             try {
                 String next = interceptor.onQuery(rewritten);
                 if (next != null) rewritten = next;
@@ -543,6 +583,7 @@ public final class WeChatDatabaseListenerApi {
 
     private void dispatch(DatabaseChange change) {
         for (Listener listener : listeners) {
+            if (closed) return;
             try {
                 listener.onDatabaseChanged(change);
             } catch (Throwable e) {

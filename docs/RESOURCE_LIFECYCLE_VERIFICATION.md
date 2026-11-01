@@ -105,3 +105,21 @@
 原81项冻结运行中断在78项，无DONE、无退出码；原目录与日志保留。续跑剩余3项至独立目录 `/tmp/pl-resource-regression-selected-settings-81-resume`，合并81个唯一测试，failed=0、sourceStable=true、listMatch=true、resumed=true。冻结HEAD为 `2f8fb6cd9e5bb33cc0e0e981bed89030fbc74d98`，全部已记录源码SHA256与续跑结束源码一致。首次读取清单使用ast.literal_eval遇到Call表达式失败，改为runpy读取清单后核实；不属于生产测试失败。
 
 此阶段仅有直接SDK/ABI编译及JVM合成测试证据；公共API、脚本全局运行时、群发容量与复杂UI等剩余边界仍按审计文档继续，最终Actions与实机功能、线程、Java/native内存验收未完成。
+
+
+### 2026-11-01 公共API后续修复与第二次接续
+
+阶段提交3a6d05c已推送dev，Actions 41266154636构建成功，发布v10.7.0；该APK对应阶段快照，不包含随后尚未提交的公共API修改，也不代表109项闭环。
+公共API新增HookRegistry异常finally移除本地句柄测试、生产Change/Observe/Event/数据库API合成关闭测试；初始与扩展定向均通过。数据库嵌套depth平衡、重复close、关闭后拒收、fresh实例、消息去重缓存硬上限已纳入测试。UI/本地消息/SNS观察新增close仍需扩大编译与集成验证。
+
+编译历史完整保留：initial旧ABI缺DexKitBridgeManager构造签名；retry1错误引用不存在的WeChatMediaApi.kt及更多旧ABI；retry2编译期间源码继续修改导致符号视图不一致；frozen-v1无完成/退出记录，接续发现进程已终止，不能计通过。resume1以当前冻结源码重新启动，日志/退出码独立保存。
+83项冻结在12个结果后会话中断；原目录/DONE缺失状态保留，源SHA256复核一致，在独立resume1目录续跑剩余71项。完成后必须复核83个唯一测试、失败列表、源哈希及清单一致性。
+
+只读依赖复核发现ScriptNewFriendHook同时供AutoReplyFeature消费，不能在脚本销毁时全局关闭或清原生订阅者。脚本全局Runtime、目录观察器、重载线程、executor可重建及跨代回调尚未修复，不能把局部scope测试列为该Runtime验收。
+
+### 2026-11-01 公共API阶段提交前复核
+用户授权“先修好，然后提交推送”。移除上轮误加入、调用不存在的 ScriptPluginRuntime.close() 的 Feature 销毁钩子，恢复可编译状态；未以空实现伪装 Runtime 生命周期修复。脚本 Runtime 代际关闭、可重建及迟到回调隔离仍为 open findings，共享好友/发送按钮监听未关闭。
+修正 test_dex_finder_gates 的 Xposed Java 测试桩，补齐 Unhook、hookMethod、log，删除重复/丢失的 Kotlin 桩输入；测试编译真实 HookRegistry。原首败与所有后续失败日志保留，不覆盖为通过。
+独立定向：test_hook_registry_shutdown、test_public_api_shutdown 通过；test_dex_finder_gates 修正后通过（/tmp/pl-dex-finder-fixed4.exit=0）。扩大直接 SDK/ABI 编译通过（/tmp/pl-api-sdk.final.exit=0），不等同 Android/R8 构建。
+全新冻结回归 /tmp/pl-resource-regression-final-83：83/83、83个唯一测试、failed=0、sourceStable=true、listMatch=true；结束后独立SHA256重算零漂移，退出码0。证据 /tmp/pl-resource-final83-verified.json；历史83项中1项失败记录保留。文档更新在冻结验证完成后进行，不改生产源码/测试。
+这是公共 API 所有权与关闭链的阶段提交，不代表109项审计完成。最终 Actions 构建结果需推送后核实，实机功能/线程/Java-native 内存验收未执行。

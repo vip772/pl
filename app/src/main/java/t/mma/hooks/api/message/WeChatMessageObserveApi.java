@@ -19,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * 业务级消息观察 API。
  */
-public final class WeChatMessageObserveApi {
+public final class WeChatMessageObserveApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -365,7 +365,7 @@ public final class WeChatMessageObserveApi {
         }
 
         public boolean isActive() {
-            return active;
+            return active && !closed;
         }
     }
 
@@ -375,9 +375,20 @@ public final class WeChatMessageObserveApi {
     private final WeChatAccountApi accountApi;
     private final Logger logger;
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
-    private final ConcurrentHashMap<String, Long> recentOutgoing = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<String, Long> recentIncomingDatabaseMessages = new ConcurrentHashMap<>();
+    private final java.util.Map<String, Long> recentOutgoing = boundedCache(64);
+    private final java.util.Map<String, Long> recentIncomingDatabaseMessages = boundedCache(1024);
+    private static java.util.Map<String, Long> boundedCache(final int maximum) {
+        return java.util.Collections.synchronizedMap(new java.util.LinkedHashMap<String, Long>() {
+            @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, Long> eldest) {
+                return size() > maximum;
+            }
+        });
+    }
     private volatile boolean installed;
+    private volatile boolean closed;
+    private t.mma.event.EventBus.Subscription messageSubscription;
+    private t.mma.event.EventBus.Subscription patSubscription;
+    private WeChatMessageChangeApi.Subscription changeSubscription;
     private volatile boolean pbLayerActive;
     private volatile boolean dbLayerActive;
     private volatile long databaseIncomingStartedAt;
@@ -399,8 +410,8 @@ public final class WeChatMessageObserveApi {
                 || (changeApi != null && changeApi.isAvailable());
     }
 
-    public Subscription subscribe(Listener listener) {
-        if (listener == null) return null;
+    public synchronized Subscription subscribe(Listener listener) {
+        if (closed || listener == null) return null;
         listeners.addIfAbsent(listener);
         return new Subscription(listener);
     }
@@ -409,16 +420,45 @@ public final class WeChatMessageObserveApi {
         if (listener != null) listeners.remove(listener);
     }
 
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        installed = false;
+        pbLayerActive = false;
+        dbLayerActive = false;
+        databaseIncomingStartedAt = 0L;
+        t.mma.event.EventBus.Subscription message = messageSubscription;
+        t.mma.event.EventBus.Subscription pat = patSubscription;
+        WeChatMessageChangeApi.Subscription change = changeSubscription;
+        messageSubscription = null;
+        patSubscription = null;
+        changeSubscription = null;
+        listeners.clear();
+        recentOutgoing.clear();
+        recentIncomingDatabaseMessages.clear();
+        try {
+            if (message != null && eventApi != null) eventApi.unsubscribe(message);
+        } finally {
+            try {
+                if (pat != null && eventApi != null) eventApi.unsubscribe(pat);
+            } finally {
+                if (change != null) change.unsubscribe();
+            }
+        }
+    }
+
     public synchronized void install() {
+        if (closed) return;
         boolean usePbLayer = eventApi != null && eventApi.isAvailable();
         if (usePbLayer && !pbLayerActive) {
-            eventApi.subscribeMessage(this::onMessageReceived);
-            eventApi.subscribePat(this::onPatDetected);
+            messageSubscription = eventApi.subscribeMessage(this::onMessageReceived);
+            patSubscription = eventApi.subscribePat(this::onPatDetected);
             pbLayerActive = true;
         }
         if (changeApi != null && changeApi.isAvailable() && !dbLayerActive) {
             databaseIncomingStartedAt = System.currentTimeMillis();
-            changeApi.subscribe(this::onMessageChanged);
+            changeSubscription = changeApi.subscribe(this::onMessageChanged);
             dbLayerActive = true;
         }
         installed = true;
@@ -427,6 +467,7 @@ public final class WeChatMessageObserveApi {
     }
 
     private void onMessageReceived(Events.MessageReceived event) {
+        if (closed) return;
         if (event == null) return;
         String nativeUrl = parseApi != null
                 ? parseApi.getXmlParamByTag(event.xml, "nativeurl") : "";
@@ -478,6 +519,7 @@ public final class WeChatMessageObserveApi {
     }
 
     private void onPatDetected(Events.PatDetected event) {
+        if (closed) return;
         if (event == null) return;
         boolean outgoing = isSelf(event.fromUser);
         long millis = event.createTime > 100000000000L
@@ -511,6 +553,7 @@ public final class WeChatMessageObserveApi {
     }
 
     private void onMessageChanged(WeChatMessageChangeApi.MessageChange change) {
+        if (closed) return;
         if (change == null || change.message == null) return;
         WeChatMessage msg = change.message;
         if (pbLayerActive && !msg.isOutgoing()) return;
@@ -552,7 +595,9 @@ public final class WeChatMessageObserveApi {
             key = "fallback:" + message.talker + ':' + message.type + ':' + createTime + ':'
                     + Integer.toHexString(message.content.hashCode());
         }
-        if (recentIncomingDatabaseMessages.putIfAbsent(key, now) != null) return false;
+        synchronized (recentIncomingDatabaseMessages) {
+            if (closed || recentIncomingDatabaseMessages.putIfAbsent(key, now) != null) return false;
+        }
         cleanupIncomingDatabaseMessages(now);
         return true;
     }
@@ -565,7 +610,10 @@ public final class WeChatMessageObserveApi {
 
     private void markOutgoing(String talker, String content) {
         if (TextUtils.isEmpty(talker) || TextUtils.isEmpty(content)) return;
-        recentOutgoing.put(outgoingKey(talker, content), System.currentTimeMillis());
+        synchronized (recentOutgoing) {
+            if (closed) return;
+            recentOutgoing.put(outgoingKey(talker, content), System.currentTimeMillis());
+        }
         cleanupRecentOutgoing();
     }
 
@@ -668,6 +716,7 @@ public final class WeChatMessageObserveApi {
 
     private void dispatch(ObservedMessage message) {
         for (Listener listener : listeners) {
+            if (closed) return;
             try {
                 listener.onObservedMessage(message);
             } catch (Throwable e) {

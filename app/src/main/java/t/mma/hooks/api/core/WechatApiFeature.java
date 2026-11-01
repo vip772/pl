@@ -28,6 +28,27 @@ import de.robv.android.xposed.XposedBridge;
 public class WechatApiFeature implements Feature {
     public static final String ID = "wechat_api";
     private static final String TAG = "[Hchat:WechatApi]";
+    private final java.util.ArrayList<AutoCloseable> resources = new java.util.ArrayList<>();
+    private final java.util.ArrayList<DexInstallScheduler.Installation> installations = new java.util.ArrayList<>();
+    private volatile Generation generation;
+    private static final class Generation { volatile boolean closed; }
+
+    private <T extends AutoCloseable> T own(T resource) {
+        resources.add(resource);
+        return resource;
+    }
+
+    private void scheduleOwned(Generation owner, String key, String label,
+                               DexInstallScheduler.Stage stage, int priority,
+                               java.util.concurrent.Callable<Boolean> task) {
+        DexInstallScheduler.Installation ticket = DexInstallScheduler.INSTANCE.installation(key, label, stage, priority);
+        installations.add(ticket);
+        ticket.schedule(() -> {
+            if (owner.closed) return true;
+            try { return task.call(); }
+            catch (Exception error) { throw new RuntimeException(error); }
+        });
+    }
 
     @Override
     public String featureId() {
@@ -45,8 +66,13 @@ public class WechatApiFeature implements Feature {
     }
 
     @Override
-    public void install(FeatureContext context) throws Throwable {
+    public synchronized void install(FeatureContext context) throws Throwable {
+        if (generation != null && !generation.closed) return;
+        Generation owner = new Generation();
+        generation = owner;
+        try {
         WeChatNetworkDispatcher dispatcher = new WeChatNetworkDispatcher(this::log);
+        own(dispatcher::destroy);
         WeChatConfigApi configApi = new WeChatConfigApi(context.hostContext(), this::log);
         WeChatNetworkApi networkApi = new WeChatNetworkApi(dispatcher, this::log);
         WeChatDatabaseApi databaseApi = new WeChatDatabaseApi(context.dexFinder(), this::log);
@@ -63,6 +89,7 @@ public class WechatApiFeature implements Feature {
         WeChatMessageApi messageApi = new WeChatMessageApi(
                 context.dexFinder(), dispatcher, accountApi, contactApi, messageStoreApi, context.eventBus(), this::log);
         WeChatLocalMessageApi localMessageApi = new WeChatLocalMessageApi(context.dexFinder(), this::log);
+        own(localMessageApi);
         localMessageApi.installCreateTimeHook();
         WeChatConversationApi conversationApi = new WeChatConversationApi(
                 databaseApi, contactApi, notifyApi, context.dexFinder(), this::log);
@@ -73,32 +100,44 @@ public class WechatApiFeature implements Feature {
         WeChatMessageParseApi messageParseApi = new WeChatMessageParseApi();
         WeChatMessageEventApi messageEventApi = new WeChatMessageEventApi(
                 context.dexFinder(), accountApi, messageParseApi, context.eventBus(), this::log);
+        own(messageEventApi);
         WeChatPermissionApi permissionApi = new WeChatPermissionApi();
         WeChatDatabaseListenerApi databaseListenerApi = new WeChatDatabaseListenerApi(
                 context.dexFinder(), context.hostClassLoader(), this::log);
+        own(databaseListenerApi);
         WeChatCurrentActivityApi currentActivityApi = new WeChatCurrentActivityApi(this::log);
+        own(currentActivityApi);
         WeChatMediaApi mediaApi = new WeChatMediaApi(
                 context.hostContext(), context.dexFinder(), context.hostClassLoader(),
                 context.dexKitManager(), currentActivityApi, this::log);
         WeChatActivityStartApi activityStartApi = new WeChatActivityStartApi(this::log);
+        own(activityStartApi);
         WeChatMessageChangeApi messageChangeApi = new WeChatMessageChangeApi(
                 databaseListenerApi, messageStoreApi, accountApi, this::log);
+        own(messageChangeApi);
         WeChatConversationChangeApi conversationChangeApi = new WeChatConversationChangeApi(
                 databaseListenerApi, conversationApi, this::log);
+        own(conversationChangeApi);
         WeChatContactChangeApi contactChangeApi = new WeChatContactChangeApi(
                 databaseListenerApi, contactApi, this::log);
+        own(contactChangeApi);
         WeChatChatroomChangeApi chatroomChangeApi = new WeChatChatroomChangeApi(
                 databaseListenerApi, chatroomApi, this::log);
+        own(chatroomChangeApi);
         WeChatLifecycleApi lifecycleApi = new WeChatLifecycleApi(this::log);
+        own(lifecycleApi);
         WeChatDiagnosticsApi diagnosticsApi = new WeChatDiagnosticsApi(
                 context.dexFinder(), this::log);
         WeChatTaskApi taskApi = new WeChatTaskApi(context.hostContext(), this::log);
+        own(taskApi::shutdown);
         WeChatVersionApi versionApi = new WeChatVersionApi(
                 context.hostContext(), context.hostClassLoader(), this::log);
         WeChatMessageObserveApi messageObserveApi = new WeChatMessageObserveApi(
                 messageEventApi, messageChangeApi, messageParseApi, accountApi, this::log);
+        own(messageObserveApi);
         WeChatChatPageApi chatPageApi = new WeChatChatPageApi(
                 context.dexFinder(), currentActivityApi, lifecycleApi, activityStartApi, contactApi, this::log);
+        own(chatPageApi);
         WeChatTransferApi transferApi = new WeChatTransferApi(
                 context.dexFinder(), dispatcher, this::log);
         WeChatVerifyUserApi verifyUserApi = new WeChatVerifyUserApi(
@@ -106,18 +145,19 @@ public class WechatApiFeature implements Feature {
         WeChatSnsApi snsApi = new WeChatSnsApi(
                 context.hostContext(), context.dexFinder(), context.hostClassLoader(),
                 context.dexKitManager(), networkApi, accountApi, contactApi, context, this::log);
+        own(snsApi);
         // 网络队列 Hook 延后到 wechat_api:warmup，避免在微信启动网络状态未就绪时扫描并挂钩候选类。
         messageEventApi.installAddMsgHook();
-        installApiHook("databaseChanges", databaseListenerApi::install);
-        installApiHook("messageChanges", messageChangeApi::install);
-        installApiHook("conversationChanges", conversationChangeApi::install);
-        installApiHook("contactChanges", contactChangeApi::install);
-        installApiHook("chatroomChanges", chatroomChangeApi::install);
-        installApiHook("currentActivity", currentActivityApi::install);
-        installApiHook("activityStart", activityStartApi::install);
-        installApiHook("lifecycle", lifecycleApi::install);
-        installApiHook("messageObserve", messageObserveApi::install);
-        installApiHook("chatPage", chatPageApi::install);
+        installApiHook(owner, "databaseChanges", databaseListenerApi::install);
+        installApiHook(owner, "messageChanges", messageChangeApi::install);
+        installApiHook(owner, "conversationChanges", conversationChangeApi::install);
+        installApiHook(owner, "contactChanges", contactChangeApi::install);
+        installApiHook(owner, "chatroomChanges", chatroomChangeApi::install);
+        installApiHook(owner, "currentActivity", currentActivityApi::install);
+        installApiHook(owner, "activityStart", activityStartApi::install);
+        installApiHook(owner, "lifecycle", lifecycleApi::install);
+        installApiHook(owner, "messageObserve", messageObserveApi::install);
+        installApiHook(owner, "chatPage", chatPageApi::install);
         WeChatApis.init(messageApi, databaseApi, accountApi, contactApi,
                 messageStoreApi, conversationApi, notifyApi, configApi, networkApi, userApi,
                 chatroomApi, storageApi, messageParseApi, messageEventApi,
@@ -126,26 +166,29 @@ public class WechatApiFeature implements Feature {
                 conversationChangeApi, contactChangeApi, chatroomChangeApi,
                 lifecycleApi, diagnosticsApi, taskApi, messageObserveApi, chatPageApi, versionApi,
                 transferApi, verifyUserApi, snsApi);
-        DexInstallScheduler.scheduleTask("wechat_api:warmup", "微信公共API预热",
+        scheduleOwned(owner, "wechat_api:warmup", "微信公共API预热",
                 DexInstallScheduler.Stage.BRIDGE, 1000, () -> {
             try {
                 context.dexFinder().resolveAll();
+                if (owner.closed) return true;
                 networkApi.installNetworkHook(context.dexFinder());
-                installApiHook("snsInteractionWarmup", snsApi::warmupInteraction);
-                installApiHook("snsCachedPostsWarmup", snsApi::warmupCachedPosts);
-                installApiHook("snsPostObserverWarmup", snsApi::installPostObserver);
+                if (owner.closed) return true;
+                installApiHook(owner, "snsInteractionWarmup", snsApi::warmupInteraction);
+                installApiHook(owner, "snsCachedPostsWarmup", snsApi::warmupCachedPosts);
+                installApiHook(owner, "snsPostObserverWarmup", snsApi::installPostObserver);
                 messageEventApi.installAddMsgHook();
-                installApiHook("databaseChangesWarmup", databaseListenerApi::install);
-                installApiHook("messageChangesWarmup", messageChangeApi::install);
-                installApiHook("conversationChangesWarmup", conversationChangeApi::install);
-                installApiHook("contactChangesWarmup", contactChangeApi::install);
-                installApiHook("chatroomChangesWarmup", chatroomChangeApi::install);
-                installApiHook("messageObserveWarmup", messageObserveApi::install);
-                installApiHook("chatPageWarmup", chatPageApi::install);
+                installApiHook(owner, "databaseChangesWarmup", databaseListenerApi::install);
+                installApiHook(owner, "messageChangesWarmup", messageChangeApi::install);
+                installApiHook(owner, "conversationChangesWarmup", conversationChangeApi::install);
+                installApiHook(owner, "contactChangesWarmup", contactChangeApi::install);
+                installApiHook(owner, "chatroomChangesWarmup", chatroomChangeApi::install);
+                installApiHook(owner, "messageObserveWarmup", messageObserveApi::install);
+                installApiHook(owner, "chatPageWarmup", chatPageApi::install);
             } catch (Throwable e) {
                 log("DexKit 预热失败: " + e.getMessage());
             } finally {
                 try {
+                    if (owner.closed) return true;
                     DexInstallScheduler.markDexWarmupReady();
                     context.eventBus().post(new Events.DexReady());
                 } catch (Throwable e) {
@@ -154,13 +197,14 @@ public class WechatApiFeature implements Feature {
             }
             return true;
         });
-        DexInstallScheduler.scheduleTask(
+        scheduleOwned(owner,
                 "wechat_api:database_changes",
                 "数据库变更监听补装",
                 DexInstallScheduler.Stage.WARMUP,
                 -1000,
                 () -> {
                     context.dexFinder().resolveDatabaseApi();
+                if (owner.closed) return true;
                     databaseListenerApi.install();
                     messageChangeApi.install();
                     conversationChangeApi.install();
@@ -168,21 +212,35 @@ public class WechatApiFeature implements Feature {
                     chatroomChangeApi.install();
                     return databaseListenerApi.isOperational() && messageChangeApi.isInstalled();
                 });
-        DexInstallScheduler.scheduleTask(
+        scheduleOwned(owner,
                 "wechat_api:private_conversation_mute",
                 "私聊免打扰API补定位",
                 DexInstallScheduler.Stage.WARMUP,
                 0,
                 () -> {
                     context.dexFinder().resolveConversationMuteApi();
+                if (owner.closed) return true;
                     return context.dexFinder().isPrivateConversationMuteApiReady();
                 });
+        } catch (Throwable failure) {
+            onDestroy(context);
+            throw failure;
+        }
     }
 
     @Override
-    public void onDestroy(FeatureContext context) {
-        WeChatTaskApi taskApi = WeChatApis.tasks();
-        if (taskApi != null) taskApi.shutdown();
+    public synchronized void onDestroy(FeatureContext context) {
+        Generation owner = generation;
+        if (owner == null || owner.closed) return;
+        owner.closed = true;
+        for (DexInstallScheduler.Installation ticket : installations) {
+            try { ticket.close(); } catch (Throwable ignored) { }
+        }
+        installations.clear();
+        for (int i = resources.size() - 1; i >= 0; i--) {
+            try { resources.get(i).close(); } catch (Throwable ignored) { }
+        }
+        resources.clear();
         WeChatApis.clear();
     }
 
@@ -197,7 +255,8 @@ public class WechatApiFeature implements Feature {
         }
     }
 
-    private void installApiHook(String name, Runnable runnable) {
+    private void installApiHook(Generation owner, String name, Runnable runnable) {
+        if (owner.closed) return;
         try {
             runnable.run();
         } catch (Throwable e) {

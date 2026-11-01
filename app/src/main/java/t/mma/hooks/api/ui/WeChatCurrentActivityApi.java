@@ -13,7 +13,7 @@ import de.robv.android.xposed.XC_MethodHook;
 /**
  * 当前微信 Activity 跟踪 API。
  */
-public final class WeChatCurrentActivityApi {
+public final class WeChatCurrentActivityApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -22,6 +22,13 @@ public final class WeChatCurrentActivityApi {
     private volatile WeakReference<Activity> currentActivity =
             new WeakReference<>(null);
     private volatile boolean installed;
+    private volatile boolean closed;
+    private final java.util.ArrayList<XC_MethodHook.Unhook> ownedHooks = new java.util.ArrayList<>();
+    private XC_MethodHook.Unhook hook(java.lang.reflect.Member method, XC_MethodHook callback) {
+        XC_MethodHook.Unhook handle = HookRegistry.get().hook(method, callback);
+        ownedHooks.add(handle);
+        return handle;
+    }
 
     public WeChatCurrentActivityApi(Logger logger) {
         this.logger = logger;
@@ -31,15 +38,29 @@ public final class WeChatCurrentActivityApi {
         return installed;
     }
 
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        installed = false;
+        currentActivity = new WeakReference<>(null);
+        java.util.ArrayList<XC_MethodHook.Unhook> snapshot = new java.util.ArrayList<>(ownedHooks);
+        ownedHooks.clear();
+        for (XC_MethodHook.Unhook handle : snapshot) {
+            try { HookRegistry.get().unhook(handle); } catch (Throwable ignored) { }
+        }
+    }
+
     public synchronized void install() {
-        if (installed) return;
+        if (closed || installed) return;
         try {
             Method onResume = KavaReflector.findDeclaredMethod(Activity.class, "onResume");
             Method onPause = KavaReflector.findDeclaredMethod(Activity.class, "onPause");
             Method onDestroy = KavaReflector.findDeclaredMethod(Activity.class, "onDestroy");
-            HookRegistry.get().hook(onResume, new XC_MethodHook() {
+            hook(onResume, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                    if (closed) return;
                     if (param.thisObject instanceof Activity) {
                         currentActivity = new WeakReference<>((Activity) param.thisObject);
                     }
@@ -48,14 +69,15 @@ public final class WeChatCurrentActivityApi {
             XC_MethodHook clearHook = new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                    if (closed) return;
                     Activity current = currentActivity();
                     if (current != null && current == param.thisObject) {
                         currentActivity = new WeakReference<>(null);
                     }
                 }
             };
-            HookRegistry.get().hook(onPause, clearHook);
-            HookRegistry.get().hook(onDestroy, clearHook);
+            hook(onPause, clearHook);
+            hook(onDestroy, clearHook);
             installed = true;
             log("当前Activity Hook已安装");
         } catch (Throwable e) {
@@ -64,12 +86,13 @@ public final class WeChatCurrentActivityApi {
     }
 
     public Activity currentActivity() {
+        if (closed) return null;
         WeakReference<Activity> ref = currentActivity;
         return ref != null ? ref.get() : null;
     }
 
-    public void updateCurrentActivity(Activity activity) {
-        if (activity != null && !activity.isFinishing()) {
+    public synchronized void updateCurrentActivity(Activity activity) {
+        if (!closed && activity != null && !activity.isFinishing()) {
             currentActivity = new WeakReference<>(activity);
         }
     }

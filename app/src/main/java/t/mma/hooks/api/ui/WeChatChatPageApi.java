@@ -17,7 +17,7 @@ import de.robv.android.xposed.XC_MethodHook;
 /**
  * 当前聊天页 API。
  */
-public final class WeChatChatPageApi {
+public final class WeChatChatPageApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -72,7 +72,7 @@ public final class WeChatChatPageApi {
         }
 
         public boolean isActive() {
-            return active;
+            return active && !closed;
         }
     }
 
@@ -87,6 +87,15 @@ public final class WeChatChatPageApi {
     private final Logger logger;
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private volatile boolean installed;
+    private volatile boolean closed;
+    private final java.util.ArrayList<XC_MethodHook.Unhook> ownedHooks = new java.util.ArrayList<>();
+    private XC_MethodHook.Unhook hook(java.lang.reflect.Member method, XC_MethodHook callback) {
+        XC_MethodHook.Unhook handle = HookRegistry.get().hook(method, callback);
+        ownedHooks.add(handle);
+        return handle;
+    }
+    private WeChatActivityStartApi.Subscription activitySubscription;
+    private WeChatLifecycleApi.Subscription lifecycleSubscription;
     private volatile int hookedDexMethodCount;
     private volatile String currentTalker = "";
     private volatile String pendingTalker = "";
@@ -110,8 +119,8 @@ public final class WeChatChatPageApi {
         return installed;
     }
 
-    public Subscription subscribe(Listener listener) {
-        if (listener == null) return null;
+    public synchronized Subscription subscribe(Listener listener) {
+        if (closed || listener == null) return null;
         listeners.addIfAbsent(listener);
         return new Subscription(listener);
     }
@@ -120,25 +129,50 @@ public final class WeChatChatPageApi {
         if (listener != null) listeners.remove(listener);
     }
 
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        installed = false;
+        listeners.clear();
+        currentTalker = "";
+        pendingTalker = "";
+        lastEnterAt = 0L;
+        hookedDexMethodCount = 0;
+        WeChatActivityStartApi.Subscription activity = activitySubscription;
+        WeChatLifecycleApi.Subscription lifecycle = lifecycleSubscription;
+        activitySubscription = null;
+        lifecycleSubscription = null;
+        try { if (activity != null) activity.unsubscribe(); } catch (Throwable ignored) { }
+        try { if (lifecycle != null) lifecycle.unsubscribe(); } catch (Throwable ignored) { }
+        java.util.ArrayList<XC_MethodHook.Unhook> snapshot = new java.util.ArrayList<>(ownedHooks);
+        ownedHooks.clear();
+        for (XC_MethodHook.Unhook handle : snapshot) {
+            try { HookRegistry.get().unhook(handle); } catch (Throwable ignored) { }
+        }
+    }
+
     public synchronized void install() {
-        if (installed) return;
+        if (closed || installed) return;
         hookedDexMethodCount = installDexHooks();
         if (activityStartApi != null) {
-            activityStartApi.subscribe(this::onStartActivity);
+            activitySubscription = activityStartApi.subscribe(this::onStartActivity);
         }
         if (lifecycleApi != null) {
-            lifecycleApi.subscribe(this::onActivityEvent);
+            lifecycleSubscription = lifecycleApi.subscribe(this::onActivityEvent);
         }
         installed = true;
         log("聊天页监听已安装: dexMethods=" + hookedDexMethodCount);
     }
 
     public boolean isInChatPage() {
+        if (closed) return false;
         Activity activity = currentActivityApi != null ? currentActivityApi.currentActivity() : null;
         return isChattingActivity(activity) || !TextUtils.isEmpty(currentTalker);
     }
 
     public String currentTalker() {
+        if (closed) return "";
         Activity activity = currentActivityApi != null ? currentActivityApi.currentActivity() : null;
         if (isChattingActivity(activity)) {
             String talker = talkerFromActivity(activity);
@@ -162,6 +196,7 @@ public final class WeChatChatPageApi {
     }
 
     private void onStartActivity(Intent intent, Object caller, Method method) {
+        if (closed) return;
         if (intent == null) return;
         String className = intent.getComponent() != null ? intent.getComponent().getClassName() : "";
         String talker = talkerFromIntent(intent);
@@ -173,6 +208,7 @@ public final class WeChatChatPageApi {
     }
 
     private void onActivityEvent(WeChatLifecycleApi.ActivityEvent event) {
+        if (closed) return;
         if (event == null) return;
         if (event.isResume() && CHATTING_UI.equals(event.activityName)) {
             String talker = talkerFromActivity(event.activity);
@@ -204,6 +240,7 @@ public final class WeChatChatPageApi {
     }
 
     private void dispatchEnter(String talker, String activityName) {
+        if (closed) return;
         if (TextUtils.isEmpty(talker)) return;
         long now = System.currentTimeMillis();
         if (talker.equals(currentTalker) && now - lastEnterAt < 500L) return;
@@ -230,9 +267,10 @@ public final class WeChatChatPageApi {
         if (method == null) return 0;
         try {
             KavaReflector.accessible(method);
-            HookRegistry.get().hook(method, new XC_MethodHook() {
+            hook(method, new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
+                    if (closed) return;
                     String talker = firstStringArg(param.args);
                     if (TextUtils.isEmpty(talker)) return;
                     pendingTalker = talker;
@@ -251,9 +289,10 @@ public final class WeChatChatPageApi {
         if (method == null) return 0;
         try {
             KavaReflector.accessible(method);
-            HookRegistry.get().hook(method, new XC_MethodHook() {
+            hook(method, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                    if (closed) return;
                     String talker = callStringMethod(param.thisObject, "getStringExtra", CHAT_USER);
                     if (TextUtils.isEmpty(talker)) talker = pendingTalker;
                     if (!TextUtils.isEmpty(talker)) {
@@ -273,9 +312,10 @@ public final class WeChatChatPageApi {
         if (method == null) return 0;
         try {
             KavaReflector.accessible(method);
-            HookRegistry.get().hook(method, new XC_MethodHook() {
+            hook(method, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                    if (closed) return;
                     String old = currentTalker;
                     currentTalker = "";
                     pendingTalker = "";
@@ -360,6 +400,7 @@ public final class WeChatChatPageApi {
                 contactApi != null && contactApi.isGroup(talker),
                 activityName);
         for (Listener listener : listeners) {
+            if (closed) return;
             try {
                 listener.onChatPageChanged(pageEvent);
             } catch (Throwable e) {

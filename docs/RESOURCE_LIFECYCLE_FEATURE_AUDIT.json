@@ -31,22 +31,26 @@
     {
       "feature": "WechatApiFeature",
       "source": "app/src/main/java/t/mma/hooks/api/core/WechatApiFeature.java",
-      "status": "已定位生命周期缺口；修复/归属闭环待完成",
+      "status": "进程所有权修复实现中；共享观察订阅/Hook关闭及缓存上限定向通过；扩大编译和83项续跑待完成，非完整闭环",
       "evidence": [
         "48: public void install(FeatureContext context) throws Throwable {",
         "200: private void installApiHook(String name, Runnable runnable) {"
       ],
-      "ownership": null,
-      "cleanup": null,
+      "ownership": "WechatApiFeature持有本代数据库/消息观察/UI监听API、localMessage、SNS postObserver与dispatcher；三个调度任务有独立Installation票据；不由单个消费者销毁共享服务",
+      "cleanup": "按已登记资源逆序关闭；共享ChangeApi释放数据库上游；MessageObserve释放PB/Pat/数据库订阅；API自身closed门拒绝重装；HookRegistry finally释放本地句柄归属",
       "inFlight": null,
       "lateCallbacks": null,
-      "bounds": null,
-      "tests": [],
+      "bounds": "消息观察recentOutgoing硬上限64，recentIncomingDatabaseMessages硬上限1024，Pat去重硬上限128；容量压力下移除最早记录，TTL仍保留",
+      "tests": [
+        "scripts/test_hook_registry_shutdown.py",
+        "scripts/test_public_api_shutdown.py",
+        "scripts/test_monitor_sdk.py"
+      ],
       "openFindings": [
-        "WechatApiFeature.java: onDestroy只关闭TaskApi并清空WeChatApis引用，预热与补装任务未撤销",
-        "公共API Hook及数据库观察依赖需按进程共享生命周期核查，不能直接由单一消费者关闭",
-        "追加核查：WechatApiFeature.java:129-179 三个共享任务与WeChatApis清空无代际互斥；WeChatMessageApi静态缩略图预取池/本地发送fallback定时器不随onDestroy停止，不能简单关闭单个消费者。",
-        "共享观察链补证：MessageChange/ConversationChange/ContactChange/ChatroomChangeApi.install 丢弃数据库订阅句柄，MessageObserveApi.install 丢弃changeApi订阅句柄；退出应按依赖逆序关闭并清理监听，不可仅WeChatApis.clear。"
+        "公共API安装/退出与在途warmup、DexReady发布交错仍需完整验证；closed检查不等于所有竞态已关闭。",
+        "网络dispatcher执行中退出、SnsLivePhotoUploadRuntime/媒体/静态发送fallback与缩略图预取等完整依赖所有权尚未闭环。",
+        "源码扩大编译此前有ABI过旧与编译期间变更导致的失败；/tmp/pl-api-sdk.resume1为冻结源码重试，未见退出码前不得声称通过。",
+        "83项新冻结在12项后会话中断；源哈希已核实一致，从/tmp/pl-resource-regression-public-api-83-resume1续跑，其结果不能替代109项/实机验收。"
       ]
     },
     {
@@ -2261,15 +2265,33 @@
         "ScriptPluginFeature.kt: 未实现onFeatureDestroy；菜单及消息等安装任务归属需核实",
         "ScriptPluginRuntime.kt: 根目录及插件目录FileObserver在startPluginObservers启动，Feature销毁无对应入口",
         "插件卸载资源scope测试不等于全局目录观察器和宿主入口已验证",
-        "追加核查：ScriptPluginRuntime.kt:2248-2325 根目录/子目录观察器回调、reloadTasks 和新建reload线程均需进程代际关闭；多个有界executor为object常量，关闭后重建策略须一并设计。"
+        "追加核查：ScriptPluginRuntime.kt:2248-2325 根目录/子目录观察器回调、reloadTasks 和新建reload线程均需进程代际关闭；多个有界executor为object常量，关闭后重建策略须一并设计。",
+        "2026-11-01补证：ScriptNewFriendHook.install/subscribe由AutoReplyFeature.kt:62-63同时消费；脚本退出不得直接清nativeListeners或关闭该共享监听，需租约/共同进程所有者。"
       ]
     }
   ],
   "latestFrozenRegression": {
-    "output": "/tmp/pl-resource-regression-header-recovery-78",
-    "total": 78,
-    "failed": 0,
-    "sourceStable": true,
-    "limitation": "78个唯一测试与清单完全一致，结束时源码哈希一致；不覆盖随后群发修改，不代表109项闭环"
+    "directory": "/tmp/pl-resource-regression-final-83",
+    "resumeDirectory": "/tmp/pl-resource-regression-public-api-83-resume1",
+    "status": "83/83 unique tests passed; sourceStable=true; listMatch=true; independently rehashed with zero drift",
+    "stagePush": "3a6d05cb734f322651da1b27b3e78facaf416b91",
+    "stageRelease": "v10.7.0",
+    "stageActions": {
+      "id": 41266154636,
+      "conclusion": "success"
+    },
+    "finalAcceptance": "not performed",
+    "previousFrozenResult": {
+      "directory": "/tmp/pl-resource-regression-public-api-83-resume1",
+      "total": 83,
+      "failed": 1,
+      "note": "Original failure preserved: outdated Xposed test fixtures; do not rewrite original evidence"
+    },
+    "sdkCompile": {
+      "log": "/tmp/pl-api-sdk.final.log",
+      "exit": 0,
+      "scope": "direct SDK/ABI compile only, not Android/R8"
+    },
+    "scriptRuntime": "Full generation close/rebuild not implemented; removed dangling feature call to nonexistent close(); shared listeners unchanged"
   }
 }

@@ -13,7 +13,7 @@ import de.robv.android.xposed.XC_MethodHook;
 /**
  * 微信 Activity 生命周期监听 API。
  */
-public final class WeChatLifecycleApi {
+public final class WeChatLifecycleApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -69,13 +69,20 @@ public final class WeChatLifecycleApi {
         }
 
         public boolean isActive() {
-            return active;
+            return active && !closed;
         }
     }
 
     private final Logger logger;
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private volatile boolean installed;
+    private volatile boolean closed;
+    private final java.util.ArrayList<XC_MethodHook.Unhook> ownedHooks = new java.util.ArrayList<>();
+    private XC_MethodHook.Unhook hook(java.lang.reflect.Member method, XC_MethodHook callback) {
+        XC_MethodHook.Unhook handle = HookRegistry.get().hook(method, callback);
+        ownedHooks.add(handle);
+        return handle;
+    }
     private volatile int hookedMethodCount;
 
     public WeChatLifecycleApi(Logger logger) {
@@ -90,8 +97,8 @@ public final class WeChatLifecycleApi {
         return hookedMethodCount;
     }
 
-    public Subscription subscribe(Listener listener) {
-        if (listener == null) return null;
+    public synchronized Subscription subscribe(Listener listener) {
+        if (closed || listener == null) return null;
         listeners.addIfAbsent(listener);
         return new Subscription(listener);
     }
@@ -100,8 +107,22 @@ public final class WeChatLifecycleApi {
         if (listener != null) listeners.remove(listener);
     }
 
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        installed = false;
+        listeners.clear();
+        hookedMethodCount = 0;
+        java.util.ArrayList<XC_MethodHook.Unhook> snapshot = new java.util.ArrayList<>(ownedHooks);
+        ownedHooks.clear();
+        for (XC_MethodHook.Unhook handle : snapshot) {
+            try { HookRegistry.get().unhook(handle); } catch (Throwable ignored) { }
+        }
+    }
+
     public synchronized void install() {
-        if (installed) return;
+        if (closed || installed) return;
         int count = 0;
         count += hookLifecycleMethod("onResume", ActivityEvent.RESUME);
         count += hookLifecycleMethod("onPause", ActivityEvent.PAUSE);
@@ -114,9 +135,10 @@ public final class WeChatLifecycleApi {
     private int hookLifecycleMethod(String methodName, String event) {
         try {
             Method method = KavaReflector.findDeclaredMethod(Activity.class, methodName);
-            HookRegistry.get().hook(method, new XC_MethodHook() {
+            hook(method, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                    if (closed) return;
                     if (param.thisObject instanceof Activity) {
                         dispatch(new ActivityEvent(event, (Activity) param.thisObject));
                     }
@@ -131,6 +153,7 @@ public final class WeChatLifecycleApi {
 
     private void dispatch(ActivityEvent event) {
         for (Listener listener : listeners) {
+            if (closed) return;
             try {
                 listener.onActivityEvent(event);
             } catch (Throwable e) {

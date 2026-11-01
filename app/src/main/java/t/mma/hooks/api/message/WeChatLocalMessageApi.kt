@@ -19,7 +19,17 @@ import java.lang.reflect.Method
 class WeChatLocalMessageApi(
     private val dexFinder: DexFinder?,
     private val logger: Logger?
-) {
+) : AutoCloseable {
+    @Volatile private var closed = false
+    private var createTimeHook: XC_MethodHook.Unhook? = null
+    @Synchronized override fun close() {
+        if (closed) return
+        closed = true
+        val hook = createTimeHook
+        createTimeHook = null
+        createTimeHookInstalled = false
+        if (hook != null) HookRegistry.get().unhook(hook)
+    }
     private val pendingCreateTime = ThreadLocal<TimedInsert?>()
     @Volatile
     private var createTimeHookInstalled = false
@@ -33,6 +43,7 @@ class WeChatLocalMessageApi(
     }
 
     fun ensureReady() {
+        if (closed) return
         val finder = dexFinder ?: return
         if (!finder.hasLocalMessageApi() || finder.localMessageCreateTimeMethod == null) {
             finder.resolveLocalMessageApi()
@@ -41,6 +52,7 @@ class WeChatLocalMessageApi(
     }
 
     fun installCreateTimeHook(): Boolean {
+        if (closed) return false
         if (createTimeHookInstalled) return true
         val finder = dexFinder ?: return false
         if (finder.localMessageCreateTimeMethod == null) {
@@ -52,10 +64,12 @@ class WeChatLocalMessageApi(
             return false
         }
         synchronized(this) {
+            if (closed) return false
             if (createTimeHookInstalled) return true
             try {
                 val unhook = HookRegistry.get().hook(method, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (closed) return
                         val pending = pendingCreateTime.get() ?: return
                         val args = param.args ?: return
                         val talker = args.getOrNull(0) as? String ?: return
@@ -67,6 +81,7 @@ class WeChatLocalMessageApi(
                     log("创建时间Hook未返回有效句柄: ${describe(method)}")
                     return false
                 }
+                createTimeHook = unhook
                 createTimeHookInstalled = true
             } catch (t: Throwable) {
                 logThrowable("创建时间Hook失败", t)
@@ -90,6 +105,7 @@ class WeChatLocalMessageApi(
         createTime: Long,
         useWechatCreateTime: Boolean
     ): Long {
+        if (closed) return 0L
         if (TextUtils.isEmpty(talker) || TextUtils.isEmpty(content)) {
             log("插入系统消息失败: talker/content 为空")
             return 0L

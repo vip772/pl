@@ -21,7 +21,7 @@ import de.robv.android.xposed.XC_MethodHook;
 /**
  * 微信消息事件 API。
  */
-public final class WeChatMessageEventApi {
+public final class WeChatMessageEventApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -32,8 +32,33 @@ public final class WeChatMessageEventApi {
     private final EventBus eventBus;
     private final Logger logger;
     private volatile boolean hooked;
+    private volatile boolean closed;
+    private final java.util.ArrayList<XC_MethodHook.Unhook> ownedHooks = new java.util.ArrayList<>();
+    private XC_MethodHook.Unhook hook(java.lang.reflect.Member method, XC_MethodHook callback) {
+        XC_MethodHook.Unhook handle = HookRegistry.get().hook(method, callback);
+        ownedHooks.add(handle);
+        return handle;
+    }
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        hooked = false;
+        patHooked = false;
+        recentPatEvents.clear();
+        java.util.ArrayList<XC_MethodHook.Unhook> snapshot = new java.util.ArrayList<>(ownedHooks);
+        ownedHooks.clear();
+        for (XC_MethodHook.Unhook handle : snapshot) {
+            try { HookRegistry.get().unhook(handle); } catch (Throwable ignored) { }
+        }
+    }
     private volatile boolean patHooked;
-    private final ConcurrentHashMap<String, Long> recentPatEvents = new ConcurrentHashMap<>();
+    private final java.util.Map<String, Long> recentPatEvents = java.util.Collections.synchronizedMap(
+            new java.util.LinkedHashMap<String, Long>() {
+                @Override protected boolean removeEldestEntry(java.util.Map.Entry<String, Long> eldest) {
+                    return size() > 128;
+                }
+            });
 
     public WeChatMessageEventApi(DexFinder dexFinder,
                                  WeChatAccountApi accountApi,
@@ -53,7 +78,8 @@ public final class WeChatMessageEventApi {
                 && parseApi != null && eventBus != null;
     }
 
-    public void installAddMsgHook() {
+    public synchronized void installAddMsgHook() {
+        if (closed) return;
         if (!isAvailable()) return;
         if (hooked) {
             installPatMsgHook();
@@ -69,9 +95,10 @@ public final class WeChatMessageEventApi {
                     if (parseApi.isLikelyAddMsgClass(parameterTypes[i])) addMsgArgIndexes.add(i);
                 }
                 if (addMsgArgIndexes.isEmpty()) continue;
-                HookRegistry.get().hook(method, new XC_MethodHook() {
+                hook(method, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
+                if (closed) return;
                         if (param.args == null) return;
                         for (int index : addMsgArgIndexes) {
                             if (index >= 0 && index < param.args.length && param.args[index] != null) {
@@ -89,17 +116,17 @@ public final class WeChatMessageEventApi {
     }
 
     public EventBus.Subscription subscribeMessage(EventHandler<Events.MessageReceived> handler) {
-        return eventBus != null ? eventBus.subscribe(Events.MessageReceived.class, handler)
+        return !closed && eventBus != null ? eventBus.subscribe(Events.MessageReceived.class, handler)
                 : null;
     }
 
     public EventBus.Subscription subscribeRedPacket(EventHandler<Events.RedPacketDetected> handler) {
-        return eventBus != null ? eventBus.subscribe(Events.RedPacketDetected.class, handler)
+        return !closed && eventBus != null ? eventBus.subscribe(Events.RedPacketDetected.class, handler)
                 : null;
     }
 
     public EventBus.Subscription subscribePat(EventHandler<Events.PatDetected> handler) {
-        return eventBus != null ? eventBus.subscribe(Events.PatDetected.class, handler)
+        return !closed && eventBus != null ? eventBus.subscribe(Events.PatDetected.class, handler)
                 : null;
     }
 
@@ -108,16 +135,19 @@ public final class WeChatMessageEventApi {
     }
 
     private void dispatchAddMsg(Object addMsg) {
+        if (closed) return;
         try {
             String selfWxId = accountApi != null ? accountApi.selfWxId() : "";
             WeChatParsedMessage parsed = parseApi.parseAddMsg(addMsg, selfWxId);
             if (parsed == null) return;
+            if (closed) return;
             eventBus.post(new Events.MessageReceived(
                     parsed.xml, parsed.sender, parsed.talker, parsed.content,
                     String.valueOf(parsed.type), parsed.createTimeSeconds, parsed.msgSvrId,
                     parsed.msgSource, parsed.selfWxId));
             if (parsed.redPacketMessage) {
-                eventBus.post(new Events.RedPacketDetected(
+                if (closed) return;
+            eventBus.post(new Events.RedPacketDetected(
                         "WeChatMessageEventApi",
                         parsed.xml,
                         parsed.sender,
@@ -135,9 +165,10 @@ public final class WeChatMessageEventApi {
                 || eventBus == null) {
             return;
         }
-        HookRegistry.get().hook(dexFinder.patDisplayTemplateMethod, new XC_MethodHook() {
+        hook(dexFinder.patDisplayTemplateMethod, new XC_MethodHook() {
             @Override
             protected void beforeHookedMethod(MethodHookParam param) {
+                if (closed) return;
                 if (param.args == null || param.args.length < 1) return;
                 dispatchPatMsg(param.args[0], param.args.length > 1 ? param.args[1] : null);
             }
@@ -148,6 +179,7 @@ public final class WeChatMessageEventApi {
     }
 
     private void dispatchPatMsg(Object patMsg, Object talkerArg) {
+        if (closed) return;
         try {
             if (patMsg == null) return;
             String fromUser = readFieldString(patMsg, "d");
@@ -159,10 +191,15 @@ public final class WeChatMessageEventApi {
             if (!isRecentPat(createTime)) return;
             String key = fromUser + ":" + pattedUser + ":" + svrId + ":" + createTime + ":" + template;
             long now = System.currentTimeMillis();
-            Long previous = recentPatEvents.put(key, now);
+            Long previous;
+            synchronized (recentPatEvents) {
+                if (closed) return;
+                previous = recentPatEvents.put(key, now);
+            }
             if (previous != null && now - previous < 300000L) return;
             cleanupPatEvents(now);
             String talker = talkerArg instanceof String ? (String) talkerArg : "";
+            if (closed) return;
             eventBus.post(new Events.PatDetected(
                     fromUser,
                     pattedUser,

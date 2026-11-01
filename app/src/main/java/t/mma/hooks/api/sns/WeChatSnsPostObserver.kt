@@ -18,7 +18,7 @@ class WeChatSnsPostObserver(
     private val classLoader: ClassLoader,
     private val dexKitManager: DexKitBridgeManager?,
     private val logger: (String) -> Unit
-) {
+) : AutoCloseable {
     fun interface Listener {
         fun onPostStored(snsInfo: Any)
     }
@@ -33,14 +33,26 @@ class WeChatSnsPostObserver(
         }
     }
 
+    @Volatile private var closed = false
+    private var ownedHook: XC_MethodHook.Unhook? = null
+    @Synchronized override fun close() {
+        if (closed) return
+        closed = true
+        val hook = ownedHook
+        ownedHook = null
+        hookedMethod = null
+        listeners.clear()
+        if (hook != null) HookRegistry.get().unhook(hook)
+    }
     private val prefs = DexMethodCache.prefs(context, PREFS_NAME)
     private val listeners = CopyOnWriteArrayList<Listener>()
     private val suppressDispatch = ThreadLocal<Boolean>()
     @Volatile private var hookedMethod: Method? = null
 
-    fun subscribe(listener: Listener): Subscription {
-        listeners.addIfAbsent(listener)
-        return Subscription(listener)
+    @Synchronized fun subscribe(listener: Listener): Subscription {
+        val subscription = Subscription(listener)
+        if (closed) subscription.unsubscribe() else listeners.addIfAbsent(listener)
+        return subscription
     }
 
     internal fun <T> withoutDispatch(block: () -> T): T {
@@ -56,6 +68,7 @@ class WeChatSnsPostObserver(
     fun install(): Boolean = DexInstallScheduler.queryDexKit { installLocked() }
     @Synchronized
     private fun installLocked(): Boolean {
+        if (closed) return false
         hookedMethod?.takeIf(::isPostStoreMethod)?.let { return true }
         val runtimeKey = DexMethodCache.runtimeKey(context, classLoader)
         val method = DexMethodCache.load(prefs, runtimeKey, classLoader, CACHE_STORE)
@@ -65,8 +78,9 @@ class WeChatSnsPostObserver(
             }
             ?: return false
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
+            ownedHook = HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (closed) return
                     if (suppressDispatch.get() == true) return
                     if (param.result != true) return
                     val snsInfo = param.args?.firstOrNull {
@@ -75,6 +89,7 @@ class WeChatSnsPostObserver(
                     if (KavaReflector.invokeMethod(snsInfo, "isAd") == true) return
                     if (SnsLocalPostIdentity.isLocalOnly(context, KavaReflector.readField(snsInfo, "field_snsId"))) return
                     listeners.forEach { listener ->
+                        if (closed) return
                         runCatching { listener.onPostStored(snsInfo) }
                             .onFailure { logger("朋友圈入库观察回调失败: ${it.message}") }
                     }

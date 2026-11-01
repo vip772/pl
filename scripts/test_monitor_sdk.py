@@ -7,7 +7,7 @@ cp=[r/'app/build/intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes
 assert all(p.exists() for p in cp), 'Existing SDK/ABI fixtures required; do not invoke Gradle'
 cp += [r/'app/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar']
 cp+=list(Path('/root/.gradle/caches/modules-2/files-2.1').glob('*/*/*/*/*.jar'))+list(Path('/root/.gradle/caches').glob('*/transforms/*/transformed/*/jars/classes.jar'))+list(libs.glob('*.jar'))
-sources=[r/'app/src/main/java/t/mma/hooks/core'/n for n in ['BaseFeature.kt','Feature.kt','FeatureContext.kt','FeatureResourceScope.kt','PreferenceRuntimeOwner.kt','IdleSerialExecutor.kt','PendingNoticeTasks.kt','DexInstallScheduler.kt']]
+sources=[r/'app/src/main/java/t/mma/hooks/core'/n for n in ['BaseFeature.kt','Feature.kt','FeatureContext.kt','FeatureResourceScope.kt','PreferenceRuntimeOwner.kt','IdleSerialExecutor.kt','PendingNoticeTasks.kt','DexInstallScheduler.kt','HookRegistry.kt']]
 sources+=[r/'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java']
 for folder in ['grouprename','groupleave','voicetotext','stepmultiplier','protobuf','hidemenu','messagemenuextension','groupbar','nicknamewidth','mentionextension','swipequote','backgroundbeauty','typingreport','patblock','inputhint','textspeech','forwardlimit','callmedialimit','statuslimit','quickread','fakevoiceduration','quoteclear']:
  sources+=list((r/'app/src/main/java/t/mma/hooks/items'/folder).glob('*.kt'))
@@ -25,6 +25,12 @@ sources += list((r/'app/src/main/java/t/mma/hooks/items/floatingchat').glob('*.k
 sources += list((r/'app/src/main/java/t/mma/hooks/items/selectedmessages').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/settings').glob('*.kt'))
 java_sources += [r/'app/src/main/java/t/mma/hooks/api/ui/SettingsInjector.java', r/'app/src/main/java/t/mma/dexkit/SettingsDexFinder.java', r/'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java']
+java_sources += [r/'app/src/main/java/t/mma/hooks/api'/name for name in ['core/WechatApiFeature.java','runtime/WeChatDatabaseListenerApi.java','message/WeChatMessageEventApi.java','message/WeChatMessageChangeApi.java','message/WeChatMessageObserveApi.java','conversation/WeChatConversationChangeApi.java','contact/WeChatContactChangeApi.java','contact/WeChatChatroomChangeApi.java','ui/WeChatChatPageApi.java','ui/WeChatLifecycleApi.java','ui/WeChatActivityStartApi.java','ui/WeChatCurrentActivityApi.java']]
+sources += list((r/'app/src/main/java/t/mma/hooks/api/sns').glob('*.kt'))
+sources += list((r/'app/src/main/java/t/mma/hooks/api/media').glob('*.kt'))
+java_sources += list((r/'app/src/main/java/t/mma/hooks/api/media').glob('*.java'))
+sources += [r/'app/src/main/java/t/mma/hooks/api/message/WeChatLocalMessageApi.kt']
+java_sources += [r/'app/src/main/java/t/mma/hooks/api/net/WeChatNetworkDispatcher.java']
 sources+=java_sources
 with tempfile.TemporaryDirectory() as td:
  # Generate compile-only ids from current declarations; cached R.jar may predate source.

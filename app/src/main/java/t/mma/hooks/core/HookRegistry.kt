@@ -29,9 +29,12 @@ class HookRegistry private constructor() {
 
     fun unhook(unhook: XC_MethodHook.Unhook?) {
         if (unhook == null) return
-        unhook.unhook()
-        // Xposed 解除回调后，还必须释放模块注册表持有的句柄及脚本解释器。
-        synchronized(lock) { unhooks.remove(unhook) }
+        try {
+            unhook.unhook()
+        } finally {
+            // Release registry ownership even when native unhook throws.
+            synchronized(lock) { unhooks.removeAll { it === unhook } }
+        }
     }
 
     fun unhookAll() {

@@ -12,7 +12,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * 联系人相关表变更监听 API。
  */
-public final class WeChatContactChangeApi {
+public final class WeChatContactChangeApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -59,7 +59,7 @@ public final class WeChatContactChangeApi {
         }
 
         public boolean isActive() {
-            return active;
+            return active && !closed;
         }
     }
 
@@ -68,6 +68,8 @@ public final class WeChatContactChangeApi {
     private final Logger logger;
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
     private volatile boolean installed;
+    private volatile boolean closed;
+    private WeChatDatabaseListenerApi.Subscription upstream;
 
     public WeChatContactChangeApi(WeChatDatabaseListenerApi databaseListenerApi,
                                   WeChatContactApi contactApi,
@@ -81,8 +83,8 @@ public final class WeChatContactChangeApi {
         return databaseListenerApi != null && databaseListenerApi.isAvailable();
     }
 
-    public Subscription subscribe(Listener listener) {
-        if (listener == null) return null;
+    public synchronized Subscription subscribe(Listener listener) {
+        if (closed || listener == null) return null;
         listeners.addIfAbsent(listener);
         return new Subscription(listener);
     }
@@ -91,14 +93,27 @@ public final class WeChatContactChangeApi {
         if (listener != null) listeners.remove(listener);
     }
 
+    /** Only the public API generation owner closes shared services. */
+    @Override
+    public synchronized void close() {
+        if (closed) return;
+        closed = true;
+        installed = false;
+        WeChatDatabaseListenerApi.Subscription subscription = upstream;
+        upstream = null;
+        listeners.clear();
+        if (subscription != null) subscription.unsubscribe();
+    }
+
     public synchronized void install() {
-        if (installed || databaseListenerApi == null) return;
-        databaseListenerApi.subscribe(this::onDatabaseChanged);
+        if (closed || installed || databaseListenerApi == null) return;
+        upstream = databaseListenerApi.subscribe(this::onDatabaseChanged);
         installed = true;
         log("联系人变更监听已安装");
     }
 
     private void onDatabaseChanged(DatabaseChange change) {
+        if (closed) return;
         if (change == null || (!"rcontact".equalsIgnoreCase(change.table)
                 && !"img_flag".equalsIgnoreCase(change.table))) {
             return;
@@ -106,6 +121,7 @@ public final class WeChatContactChangeApi {
         WeChatContact contact = resolveContact(change);
         ContactChange event = new ContactChange(change, contact);
         for (Listener listener : listeners) {
+            if (closed) return;
             try {
                 listener.onContactChanged(event);
             } catch (Throwable e) {
