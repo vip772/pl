@@ -19,7 +19,6 @@ import java.lang.reflect.Modifier
 import java.util.concurrent.ConcurrentHashMap
 
 class RemoveForwardLimitFeature : BaseFeature() {
-    private var hooker: RemoveForwardLimitHooker? = null
 
     override fun featureId(): String = ID
 
@@ -31,15 +30,11 @@ class RemoveForwardLimitFeature : BaseFeature() {
 
     override fun onFeatureInstall(context: FeatureContext) {
         val currentHooker = RemoveForwardLimitHooker(context, ::logRuntimeError)
-        hooker = currentHooker
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { currentHooker.destroy() }
+        trackResource { ticket.close() }
         currentHooker.installDirect()
-        DexInstallScheduler.schedule(ID, name()) {
-            hooker?.installWithDexKit() == true
-        }
-    }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        hooker = null
+        ticket.schedule { currentHooker.installWithDexKit() }
     }
 
     private fun logRuntimeError(message: String, throwable: Throwable?) {
@@ -61,6 +56,12 @@ private class RemoveForwardLimitHooker(
     )
     private val methodPrefs = DexMethodCache.prefs(context.hostContext(), CACHE_PREFS_NAME)
     private val hookedMethods = ConcurrentHashMap.newKeySet<Method>()
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("转发限制资源释放失败", it) }
+    @Synchronized
+    fun destroy() {
+        resources.close()
+        hookedMethods.clear()
+    }
 
     @Volatile
     private var legacyInstalled = false
@@ -70,6 +71,7 @@ private class RemoveForwardLimitHooker(
 
     @Synchronized
     fun installDirect(): Boolean {
+        if (resources.isClosed()) return false
         if (legacyInstalled) return true
         val limitMethod = locateDirectLimitMethod() ?: return false
         return installLegacyHooks(limitMethod)
@@ -77,6 +79,7 @@ private class RemoveForwardLimitHooker(
 
     @Synchronized
     fun installWithDexKit(): Boolean {
+        if (resources.isClosed()) return false
         if (!legacyInstalled) {
             val limitMethod = locateLimitMethodWithDexKit() ?: return false
             if (!installLegacyHooks(limitMethod)) return false
@@ -146,13 +149,15 @@ private class RemoveForwardLimitHooker(
         label: String,
         before: (XC_MethodHook.MethodHookParam) -> Unit
     ): Boolean {
+        if (resources.isClosed()) return false
         if (!hookedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    before(param)
+                    if (!resources.isClosed()) before(param)
                 }
             })
+            resources.register { HookRegistry.get().unhook(handle) }
             true
         }.getOrElse {
             hookedMethods.remove(method)

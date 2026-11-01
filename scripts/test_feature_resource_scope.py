@@ -80,6 +80,9 @@ fun main(){
  scope.register{order+=1};scope.register{error("cleanup")};scope.register{order+=2}
  scope.close();scope.close();scope.register{order+=3}
  check(order==listOf(2,1,3)&&errors==1)
+ val throwingReporter=FeatureResourceScope{error("reporter failure")};var afterFailure=0
+ throwingReporter.register{afterFailure++};throwingReporter.register{error("cleanup failure")}
+ throwingReporter.close();throwingReporter.register{error("late cleanup failure")};check(afterFailure==1&&throwingReporter.isClosed())
  val released=AtomicInteger();val concurrent=FeatureResourceScope{throw it};val pool=Executors.newFixedThreadPool(4)
  repeat(1000){pool.submit{concurrent.register{released.incrementAndGet()}}};pool.submit{concurrent.close()}
  pool.shutdown();check(pool.awaitTermination(5,TimeUnit.SECONDS));concurrent.close();check(released.get()==1000)

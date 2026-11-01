@@ -49,6 +49,8 @@ public class ProtobufPacketHook {
     private final ConcurrentHashMap<String, PacketSnapshot> snapshots = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Long> recentLogs = new ConcurrentHashMap<>();
     private volatile boolean installed;
+    private volatile boolean closed;
+    private final List<XC_MethodHook.Unhook> handles = new ArrayList<>();
     private static final int MAX_CAPTURE_BYTES = 1024 * 1024;
     private final ThreadPoolExecutor captureExecutor = new ThreadPoolExecutor(
             1, 1, 30L, TimeUnit.SECONDS, new ArrayBlockingQueue<>(64), runnable -> {
@@ -68,10 +70,13 @@ public class ProtobufPacketHook {
         this.fileLogger = fileLogger;
         this.logger = logger;
         this.genericSender = new ProtobufGenericSender(dexFinder, classLoader);
+        captureExecutor.allowCoreThreadTimeOut(true);
     }
 
-    public boolean install() {
+    public synchronized boolean install() {
+        if (closed) return false;
         if (installed) return true;
+        if (!releaseHooks()) return false;
         try {
             List<Class<?>> bases = collectBaseClasses();
             int hooked = 0;
@@ -82,12 +87,12 @@ public class ProtobufPacketHook {
                     if (method.getParameterTypes().length != 3) continue;
                     String desc = base.getName() + "#" + method.toString();
                     if (!hookedDesc.add(desc)) continue;
-                    HookRegistry.get().hook(method, new XC_MethodHook() {
+                    handles.add(HookRegistry.get().hook(method, new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
                             handleDispatch(param);
                         }
-                    });
+                    }));
                     hooked++;
                 }
             }
@@ -95,13 +100,35 @@ public class ProtobufPacketHook {
             if (hooked <= 0) error("Hook失败: 未找到dispatch");
             return installed;
         } catch (Throwable e) {
+            installed = false;
+            releaseHooks();
             error("Hook失败: " + e.getMessage());
             return false;
         }
     }
 
+    /** Retain failed handles so retries cannot stack duplicate hooks. */
+    private boolean releaseHooks() {
+        Iterator<XC_MethodHook.Unhook> iterator = handles.iterator();
+        while (iterator.hasNext()) {
+            XC_MethodHook.Unhook handle = iterator.next();
+            try { HookRegistry.get().unhook(handle); iterator.remove(); }
+            catch (Throwable failure) { error("解除抓包Hook失败: " + failure.getClass().getSimpleName()); }
+        }
+        return handles.isEmpty();
+    }
+    public synchronized void close() {
+        closed = true;
+        installed = false;
+        releaseHooks();
+        captureExecutor.getQueue().clear();
+        captureExecutor.shutdown();
+        snapshots.clear(); recentLogs.clear();
+    }
+
     public boolean send(String uri, int cgiId, int funcId, int routeId, String json,
                         ProtobufPacketRuntime.Callback callback) {
+        if (closed) { notify(callback, false, "Protobuf API已关闭"); return false; }
         try {
             JSONObject signedJson = ProtobufPacketSigner.sign(cgiId,
                     new JSONObject(json == null || json.trim().isEmpty() ? "{}" : json));
@@ -258,6 +285,7 @@ public class ProtobufPacketHook {
     }
 
     private void handleDispatch(XC_MethodHook.MethodHookParam param) {
+        if (closed || !installed) return;
         boolean logEnabled = enabled();
         boolean listenerEnabled = ProtobufPacketRuntime.hasListeners();
         if (!logEnabled && !listenerEnabled) return;
@@ -277,8 +305,7 @@ public class ProtobufPacketHook {
 
             PacketSnapshot snapshot = captureRequest(param.thisObject, reqResp, uri, cgiId);
             if (snapshot != null) {
-                snapshots.put(snapshot.key(), snapshot);
-                trimSnapshots();
+                if (!rememberSnapshot(snapshot)) return;
                 if (listenerEnabled) {
                     broadcastPacket(ProtobufPacketRuntime.DIRECTION_REQUEST, uri, cgiId, snapshot.bytes);
                 }
@@ -342,6 +369,7 @@ public class ProtobufPacketHook {
     }
 
     private void captureResponse(String uri, int cgiId, Object reqResp, Object[] args) {
+        if (closed || !installed) return;
         boolean listenerEnabled = ProtobufPacketRuntime.hasListeners();
         boolean logEnabled = enabled() && captureResponseEnabled() && !isBlocked(cgiId);
         if (!listenerEnabled && !logEnabled) return;
@@ -439,6 +467,12 @@ public class ProtobufPacketHook {
         return exactLatest;
     }
 
+    private synchronized boolean rememberSnapshot(PacketSnapshot snapshot) {
+        if (closed || !installed) return false;
+        snapshots.put(snapshot.key(), snapshot);
+        trimSnapshots();
+        return true;
+    }
     private void trimSnapshots() {
         if (snapshots.size() <= 60) return;
         try {
@@ -448,7 +482,8 @@ public class ProtobufPacketHook {
         }
     }
 
-    private boolean shouldLog(String prefix, byte[] bytes) {
+    private synchronized boolean shouldLog(String prefix, byte[] bytes) {
+        if (closed || !installed) return false;
         String key = prefix + "|" + java.util.Arrays.hashCode(bytes);
         long now = System.currentTimeMillis();
         Long last = recentLogs.put(key, now);
@@ -466,10 +501,11 @@ public class ProtobufPacketHook {
         byte[] copy = bytes.clone();
         enqueueCapture(() -> writePacketLog(direction, uri, cgiId, copy));
     }
-    private void enqueueCapture(Runnable task) {
+    private synchronized void enqueueCapture(Runnable task) {
+        if (closed) return;
         try {
             captureExecutor.execute(() -> {
-                try { task.run(); }
+                try { if (!closed) task.run(); }
                 catch (Throwable error) { t.mma.utils.HLog.e(TAG + " 后台抓包处理失败", error); }
             });
         } catch (RejectedExecutionException ignored) {

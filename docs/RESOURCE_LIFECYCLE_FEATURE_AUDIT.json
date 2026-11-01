@@ -1,0 +1,2275 @@
+{
+  "baseline": "2f8fb6cd9e5bb33cc0e0e981bed89030fbc74d98",
+  "scope": "注册入口109项；待核查不等于有依据保留；定向通过不等于完整验收",
+  "features": [
+    {
+      "feature": "SettingsFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/settings/SettingsFeature.kt",
+      "status": "Provider/Hook/Handler/长按原值释放已修复；生产方法合成与SDK/ABI编译通过；原生页面及交错仍待验收",
+      "evidence": [],
+      "ownership": "BaseFeature归属三个Provider及SettingsInjector；局部OwnedHooks持有所有方法/构造/getString句柄；私有Handler与弱引用长按绑定",
+      "cleanup": "幂等close；逐句柄失败隔离；clear私有Handler与反射类缓存；只在仍持有本模块监听器时恢复原listener/longClickable，恢复原tag",
+      "inFlight": "设置安装与close互斥；晚到Hook取得立即释放；不关闭QuickRead/QuickTerminate共享运行时",
+      "lateCallbacks": "全部Hook回调及设置页打开入口closed门；长按晚回调透传原监听器；UI恢复快照主线程执行",
+      "bounds": null,
+      "tests": [
+        "scripts/test_settings_injector_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "真实旧版/新版设置项注入后页面移除及菜单模型回收仍需核查；合成释放测试不等于宿主页面验收。",
+        "退出与已进入Hook回调的UI改写交错、Handler拒绝恢复投递边界待验证。",
+        "全局HookRegistry.unhook异常时句柄仍保留，此共享根因需要单独处理而非在设置功能掩盖。",
+        "81项新冻结进行中，尚未据此标记整体完成。"
+      ],
+      "resolvedFindings": [
+        "SettingsFeature.kt: 直接实现Feature，Provider注册及SettingsInjector需核查进程所有者",
+        "SettingsInjector.java: 包含全局构造Hook注册，需核查重复安装及设置页面销毁闭环",
+        "追加核查：SettingsInjector.java 的构造/方法Hook以及临时getStringHook需逐类持有；launcher onCreate延迟Handler任务和Provider注销缺少退出边界。"
+      ]
+    },
+    {
+      "feature": "WechatApiFeature",
+      "source": "app/src/main/java/t/mma/hooks/api/core/WechatApiFeature.java",
+      "status": "已定位生命周期缺口；修复/归属闭环待完成",
+      "evidence": [
+        "48: public void install(FeatureContext context) throws Throwable {",
+        "200: private void installApiHook(String name, Runnable runnable) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "WechatApiFeature.java: onDestroy只关闭TaskApi并清空WeChatApis引用，预热与补装任务未撤销",
+        "公共API Hook及数据库观察依赖需按进程共享生命周期核查，不能直接由单一消费者关闭",
+        "追加核查：WechatApiFeature.java:129-179 三个共享任务与WeChatApis清空无代际互斥；WeChatMessageApi静态缩略图预取池/本地发送fallback定时器不随onDestroy停止，不能简单关闭单个消费者。",
+        "共享观察链补证：MessageChange/ConversationChange/ContactChange/ChatroomChangeApi.install 丢弃数据库订阅句柄，MessageObserveApi.install 丢弃changeApi订阅句柄；退出应按依赖逆序关闭并清理监听，不可仅WeChatApis.clear。"
+      ]
+    },
+    {
+      "feature": "BackgroundBeautyFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt",
+      "status": "Hook归属及清理顺序已修复；定向Hook测试通过；待冻结回归与并发UI复核",
+      "evidence": [
+        "65: registerSettingsProvider(BackgroundBeautySettingsProvider())",
+        "68: override fun onFeatureInstall(context: FeatureContext) {",
+        "71: trackResource { installed.destroy(); if (runtime === installed) runtime = null }",
+        "76: subscribe(Events.DexReady::class.java) {"
+      ],
+      "ownership": "BackgroundBeautyRuntime持有独占chatInstallation和hookResources，订阅捕获installed实例",
+      "cleanup": "destroy幂等；先关闭安装票据/Hook/偏好监听/Handler/loader；UI逐项恢复隔离异常",
+      "inFlight": null,
+      "lateCallbacks": "hookOnce关闭门控；所有Hook句柄包含直接Hook统一注册到scope，迟到句柄立即释放",
+      "bounds": null,
+      "tests": [
+        "scripts/test_background_hook_ownership.py",
+        "scripts/test_background_resource_lifecycle.py",
+        "scripts/test_background_render_gate.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "后台加载与UI恢复的并发访问仍需复核；无实机业务验证",
+        "扩大源码SDK/既有ABI编译已通过（合成R.id依据当前ids.xml）；先前64项回归因旧R缓存编译失败已中止，新65项回归待完成"
+      ]
+    },
+    {
+      "feature": "MeEntryVisibilityFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/backgroundbeauty/MeEntryVisibilityFeature.kt",
+      "status": "生命周期修复已应用；定向测试/扩大编译记录见当前验证；待整体集成",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/backgroundbeauty/MeEntryVisibilityFeature.kt"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [
+        "scripts/test_me_entry_visibility.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "最新冻结回归待完成；无实机业务测试",
+        "原问题修复记录见当前git diff；仍需其余依赖与并发链逐项证明"
+      ]
+    },
+    {
+      "feature": "ChatToolbarFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/chattoolbar/ChatToolbarFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/chattoolbar/ChatToolbarFeature.kt: 入口、关联Runtime资源及销毁链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口启用区间scope、独立Installation和生命周期订阅；Runtime关闭Hook及移除工具栏UI已有",
+        "入口先注销偏好再stopRuntime，注销异常会跳过运行时释放；旧异步UI清理/面板回调与缓存预算需复核"
+      ]
+    },
+    {
+      "feature": "HomeSidePanelFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/homesidepanel/HomeSidePanelFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/homesidepanel/HomeSidePanelFeature.kt: 入口、关联Runtime资源及销毁链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "启用区间scope持有Runtime、页面与生命周期订阅；QuickMarkReadRuntime为共享依赖需进程保留依据",
+        "入口unregister异常可跳过stopRuntime；Runtime内部UI/异步清理链仍需复核"
+      ]
+    },
+    {
+      "feature": "HomeExtensionFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/homeextension/HomeExtensionFeature.kt",
+      "status": "释放异常隔离及头像队列上限已修复；定向合成验证与SDK编译通过；其余异步边界待闭环",
+      "evidence": [
+        "58: private var runtimeOwner: t.mma.hooks.core.PreferenceRuntimeOwner? = null",
+        "63: registerSettingsProvider(object : SimpleFeatureSettingsProvider(",
+        "68: override fun onFeatureInstall(context: FeatureContext) {",
+        "71: val owner = t.mma.hooks.core.PreferenceRuntimeOwner(prefs, setOf(HomeExtensionSettings.ENABLE),",
+        "91: override fun onFeatureDestroy(context: FeatureContext) {",
+        "最后六入口复核：入口安装、调度、Runtime.destroy/detach 与 Hook 注册链；未据此判定验收通过"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [
+        "scripts/test_home_extension_shutdown.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "首页扩展所有者统一释放 Runtime，单项注销/Hook/session/日志异常不再阻断其他清理；头像队列限制32项，拒绝任务会清除请求并回告失败。",
+        "联系人/日历 worker 队列预算、执行中网络连接截止、旧 Session 排队回调及共享 HomeMusic/HomeWeather 归属仍待闭环；当前定向测试不能替代完整行为验收。"
+      ]
+    },
+    {
+      "feature": "StepMultiplierFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/stepmultiplier/StepMultiplierFeature.kt",
+      "status": "修复后定向验证通过；待整体集成/实机",
+      "evidence": [
+        "30: registerSettingsProvider(Provider()) { prefs.getBoolean(StepMultiplierSettings.ENABLE,false) }",
+        "32: override fun onFeatureInstall(context:FeatureContext) {",
+        "61: override fun onFeatureDestroy(context:FeatureContext) {"
+      ],
+      "ownership": "ENABLE每开启区间独占安装票据与构造Hook；偏好监听由Feature作用域持有",
+      "cleanup": "关闭interval回收票据及句柄；销毁后重装不沿用destroyed或installed旧状态",
+      "inFlight": "Hook仅变更当前构造参数；不触发上报、不取消已进入宿主流程",
+      "lateCallbacks": "闭包捕获旧scope；关闭后迟到登记句柄立即释放，旧回调检查原scope",
+      "bounds": "每区间一个构造Hook；没有轮询或私有线程",
+      "tests": [
+        "test_step_multiplier_lifecycle",
+        "test_monitor_sdk：20261101 SDK5退出0"
+      ]
+    },
+    {
+      "feature": "AutoCacheFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/autocache/AutoCacheFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/autocache/AutoCacheFeature.kt"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "Feature启停及Runtime.shutdown已复核；订阅迟到注册由scope释放，worker关停及stopped门控存在",
+        "pending/lastSubmitted及ScheduledExecutor延迟队列没有总容量上限；每消息最多720次重试，仍需资源预算闭环"
+      ]
+    },
+    {
+      "feature": "MonetModuleGeneratorFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/monetgenerator/MonetModuleGeneratorFeature.kt",
+      "status": "源码链路已核查；既有导出生命周期回归通过",
+      "evidence": [
+        "19: MonetModuleGeneratorRuntime.detach(context)"
+      ],
+      "ownership": "Feature attach绑定ExportSession与弱owner，设置Provider归属BaseFeature",
+      "cleanup": "onDestroy detach校验owner，取消当前导出及token主线程回调",
+      "inFlight": "checkActive拒绝取消或绑定切换；由导出会话清理其输出资源",
+      "lateCallbacks": "postEvent/postComplete检查取消和binding身份",
+      "bounds": "running限制单导出；无永久轮询",
+      "tests": [
+        "test_monet_export_lifecycle.py"
+      ]
+    },
+    {
+      "feature": "AntiSecureMessageFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/securemessage/AntiSecureMessageFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/securemessage/AntiSecureMessageFeature.kt: 安装/销毁/资源注册及相关异步入口复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule及多组installed标记未按安装代际管理；无onFeatureDestroy或独占Hook scope",
+        "menuMarkerStates ThreadLocal包含临时菜单标记，销毁时需保证已进入调用仍然执行恢复；部分安装重试去重待核查"
+      ]
+    },
+    {
+      "feature": "SendSecureMessageFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/securemessage/SendSecureMessageFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/securemessage/SendSecureMessageFeature.kt: 安装/销毁/资源注册及相关异步入口复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule与多组installed标记无销毁重置；Hook句柄未按Feature归属",
+        "多条入库/表情/合并回调无关闭代际；部分成功后重试需要逐方法去重且保留前后配对语义"
+      ]
+    },
+    {
+      "feature": "UploadTransparentAvatarFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/transparentavatar/UploadTransparentAvatarFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/transparentavatar/UploadTransparentAvatarFeature.kt: 安装、销毁和Hook/异步资源复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "PreferenceRuntimeOwner及专属Installation拥有Runtime，installCompressHook/locate/destroy同步；Hook scope及destroyed门控完整",
+        "关闭与已进入compress回调之间的边界、启停失败重试仍待定向行为验证；不能只用入口检查判定完成"
+      ]
+    },
+    {
+      "feature": "SpecialMessageFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/specialmessage/SpecialMessageFeature.kt",
+      "status": "入口容器已核实；关联页面/消费者另列待核查",
+      "evidence": [
+        "17: registerSettingsProvider(",
+        "27: override fun onFeatureInstall(context: FeatureContext) {"
+      ],
+      "ownership": "纯设置容器，安全消息实际所有者为SendSecureMessageFeature；不重复安装",
+      "cleanup": "BaseFeature设置Provider作用域释放，无私有任务；其业务链不在本行冒认通过",
+      "inFlight": "入口无在途任务；不执行业务",
+      "lateCallbacks": "入口无异步安装",
+      "bounds": "入口无运行缓存或队列",
+      "tests": [
+        "源码Feature入口/BaseFeature登记核查；非设备验证"
+      ]
+    },
+    {
+      "feature": "HiddenAtFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/hiddenat/HiddenAtFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/hiddenat/HiddenAtFeature.kt: 安装、释放、Hook回调和缓存引用链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "已有alive/enabled/generation门控、三个Hook句柄和pending清理",
+        "destroy注销监听异常会阻断stop；stop任一close/unhook异常会阻断其余释放",
+        "共享调度key逐代递增且不可关闭；监听不检查alive，迟到开启可留下无效任务；ThreadLocal跨线程清理和安装失败释放需复核"
+      ]
+    },
+    {
+      "feature": "EmojiAtFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/emojiat/EmojiAtFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/emojiat/EmojiAtFeature.kt: 入口及Runtime/Renderer释放与UI回调复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "Runtime拥有独占Installation、alive/enabled/generation门控和idle worker，stop清Hook及队列、关闭旧选择弹窗",
+        "destroy注销偏好/Activity监听异常可阻断stop和worker.shutdown；stop逐Hook unhook无异常隔离，部分失败会遗留其余Hook"
+      ]
+    },
+    {
+      "feature": "FloatingShortcutFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/floatingshortcut/FloatingShortcutFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "15: registerSettingsProvider(FloatingShortcutSettingsProvider())",
+        "18: override fun onFeatureInstall(context: FeatureContext) {",
+        "29: override fun onFeatureDestroy(context: FeatureContext) {",
+        "最后六入口复核：入口安装、调度、Runtime.destroy/detach 与 Hook 注册链；未据此判定验收通过"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口订阅由 BaseFeature 持有；Runtime.destroy 注销生命周期与偏好监听。",
+        "单例 destroy 的主线程异步清理缺少代际约束，可能清理重装后的资源；首项注销异常可阻断后续释放。"
+      ]
+    },
+    {
+      "feature": "FloatingChatHeaderFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatHeaderFeature.kt",
+      "status": "标题栏及共享卡片恢复链已补修；新增3项生产方法合成通过；78项冻结进行中，未整功能验收",
+      "evidence": [
+        "40: registerSettingsProvider(FloatingChatHeaderSettingsProvider())",
+        "42: override fun onFeatureInstall(context: FeatureContext) {",
+        "46: override fun onFeatureDestroy(context: FeatureContext) {",
+        "最后六入口复核：入口安装、调度、Runtime.destroy/detach 与 Hook 注册链；未据此判定验收通过",
+        "2026-11-01：75b续跑75/75、无重复遗漏、源码哈希一致。",
+        "Capsule逐项释放异常隔离及日志异常隔离；头像队列16，拒绝恢复loading；8秒检查式下载预算，单次阻塞仍受4秒读超时约束。",
+        "overlay保存真实原值（先记录再set），关闭/禁用恢复；反射背景各层恢复隔离。旧代主线程恢复登记并在新apply前排空，普通布局仅volatile快速检查。",
+        "/tmp/pl-header-final-targeted：Capsule、overlay/恢复屏障、Hook三项退出0；未宣称整功能验收。"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [
+        "scripts/test_header_hook_lifecycle.py",
+        "scripts/test_monitor_sdk.py",
+        "scripts/test_header_capsule_shutdown.py",
+        "scripts/test_header_visual_recovery.py",
+        "scripts/test_header_card_restore.py"
+      ],
+      "openFindings": [
+        "真实Android主线程交错、后台Hook已进入执行边界待验证；恢复屏障已增加并合成核查排空/异常隔离。",
+        "下载预算为检查式，DNS/阻塞退出及队列拒绝后重试仍待完整合成；不声称严格8秒取消。",
+        "共享卡片tint及内容/headerZone恢复遗漏已补修，待78项冻结及全部依赖集成。"
+      ]
+    },
+    {
+      "feature": "CustomBottomBarFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/custombottombar/CustomBottomBarFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "72: registerSettingsProvider(CustomBottomBarSettingsProvider())",
+        "73: registerSettingsProvider(FloatingBottomBarSettingsProvider())",
+        "76: override fun onFeatureInstall(context: FeatureContext) {",
+        "78: if (runtime?.install(allowDexSearch = false) != true) scheduleInstall()",
+        "80: subscribe(Events.DexReady::class.java) { scheduleInstall() }",
+        "83: override fun onFeatureDestroy(context: FeatureContext) {",
+        "88: private fun scheduleInstall() {",
+        "最后六入口复核：入口安装、调度、Runtime.destroy/detach 与 Hook 注册链；未据此判定验收通过"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "earlyRuntimes 将早期 Runtime 转交功能实例，destroy 恢复底栏视图。",
+        "共享 schedule 读取可变 runtime；destroy 无关闭门控、未释放 Hook；监听注销或单项 restore 异常会阻断其余清理，早期所有者退出路径待闭环。"
+      ]
+    },
+    {
+      "feature": "DynamicBadgeFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/dynamicbadge/DynamicBadgeFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/dynamicbadge/DynamicBadgeFeature.kt: 安装、释放、Hook回调和缓存引用链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule捕获可变runtime；多处Hook句柄未归属",
+        "destroy有destroyed、监听注销、Handler清理及overlay恢复，但任一步异常会阻断后续释放",
+        "WeakHashMap<View,BadgeOverlay>值及动态Drawable回调可能反向引用View；需核查动画调度和attach监听引用链"
+      ]
+    },
+    {
+      "feature": "RoundAvatarFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/roundavatar/RoundAvatarFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/roundavatar/RoundAvatarFeature.kt: 安装、释放、Hook回调和缓存引用链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口PreferenceRuntimeOwner及独立Installation，Runtime有hookResources和destroyed门控",
+        "Bitmap处理器为同步弱键/弱值缓存，destroy清空；没有独占线程",
+        "通知Hook安装未与destroy同步，hookOwned迟到句柄可释放但容器/旧回调检查与UI半径恢复仍需核查；缓存项数无硬上限"
+      ]
+    },
+    {
+      "feature": "CustomFriendAvatarFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/customfriendavatar/CustomFriendAvatarFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/customfriendavatar/CustomFriendAvatarFeature.kt: 入口及Runtime/Renderer释放与UI回调复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "PreferenceRuntimeOwner持有Runtime及两个独占Installation；Hook scope、destroyed、菜单注销和缓存清理已有",
+        "头像弹窗句柄及确认回调的销毁归属未闭环；Store bitmap缓存/磁盘加载预算、旧回调与通知安装并发需深核"
+      ]
+    },
+    {
+      "feature": "RealNameTailFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/realtail/RealNameTailFeature.kt",
+      "status": "查询/调度/预取销毁已修改；SDK与调度器测试通过；并发代际待补",
+      "evidence": [
+        "21: registerSettingsProvider(RealNameTailSettingsProvider())",
+        "22: registerSettingsProvider(GroupNicknameColorSettingsProvider())",
+        "25: override fun onFeatureInstall(context: FeatureContext) {",
+        "41: trackResource { installedRenderer.destroy(); if (renderer === installedRenderer) renderer = null }",
+        "42: scheduleInstall()",
+        "43: subscribe(Events.DexReady::class.java) {",
+        "44: scheduleInstall()",
+        "62: private fun scheduleInstall() {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [
+        "test_monitor_sdk.py",
+        "test_realtail_scheduler_lifecycle.py"
+      ],
+      "openFindings": [
+        "并发销毁后重新排队、跨代同名Task key取消及可变renderer回调尚需行为验证",
+        "watchdog短暂线程与查询已进入宿主后仅做失活，资源预算仍需闭环"
+      ]
+    },
+    {
+      "feature": "MemberTitleFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/membertitle/MemberTitleFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/membertitle/MemberTitleFeature.kt: 入口及Runtime/Renderer释放与UI回调复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口捕获installed、独立Installation和chatroom订阅；Renderer active门控、scope及逐View恢复异常隔离已有",
+        "Renderer.destroy中nativeNicknameGate.release及tasks.cancel未隔离，异常可阻断缓存清理/UI恢复；旧post恢复可能覆盖新实例头衔"
+      ]
+    },
+    {
+      "feature": "NicknameWidthFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/nicknamewidth/NicknameWidthFeature.kt",
+      "status": "代际门控已修改；SDK/现有宽度测试通过；完整代际行为测试待补",
+      "evidence": [
+        "70: registerSettingsProvider(NicknameWidthSettingsProvider())",
+        "72: override fun onFeatureInstall(context: FeatureContext) {",
+        "114: override fun onFeatureDestroy(context: FeatureContext) {"
+      ],
+      "ownership": "Feature持有Hook、偏好监听和弱键宽度状态；重装复位destroyed并递增generation",
+      "cleanup": "destroyed只置true不重置；关闭只还原宽度不撤私有Hook；旧restoreAll回调在重装后可能还原新状态",
+      "inFlight": null,
+      "lateCallbacks": "旧Hook/还原回调检查generation；主线程销毁即时还原；状态保留原宽度供后续绑定恢复",
+      "bounds": null,
+      "tests": [
+        "test_monitor_sdk",
+        "test_nickname_width"
+      ]
+    },
+    {
+      "feature": "AutoRedPacketFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/payment/core/AutoRedPacketFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/payment/core/AutoRedPacketFeature.kt: 入口、释放、调度和回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "PreferenceRuntimeOwner和独立Installation捕获RedPacketHooker；destroy逐组件隔离异常；resources拥有订阅和延迟任务",
+        "RedPacketHooker及message/database/UI/silent/network等子组件需逐个证明Hook归属和执行中网络/反馈边界，不能仅入口关闭视为完整验收"
+      ]
+    },
+    {
+      "feature": "WeChatTabletFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/tablet/WeChatTabletFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/tablet/WeChatTabletFeature.kt",
+        "app/src/main/java/t/mma/ModuleEntry.java:384"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "ModuleEntry.java:384-398同时调用静态installCached/install，属于早期进程共享Hook；不能由单个Feature随意关闭",
+        "静态hookPadCheck回调未查询设置；需明确重启生效边界并核查共享HookRegistry全局清理后的去重状态",
+        "FeatureManager.kt:94-107已确认destroyAll最终unhookAll；需复核静态去重状态重置及早期进程共享安装代际"
+      ]
+    },
+    {
+      "feature": "AutoTransferFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/payment/transfer/AutoTransferFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/payment/transfer/AutoTransferFeature.kt: 入口、释放、调度和回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "PreferenceRuntimeOwner持有token/feedback/独立Installation和观察订阅；延迟Handler以token清除且入口检查代际",
+        "resources释放块内removeCallbacks或feedback.destroy异常会阻断后续状态清理；TransferReceiveAccountStore共享安装所有者待闭环",
+        "已提交转账查询/收款/退款的完成边界、handledTransfers容量和异步结果代际待深核"
+      ]
+    },
+    {
+      "feature": "FakeWalletBalanceFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/payment/fakebalance/FakeWalletBalanceFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/payment/fakebalance/FakeWalletBalanceFeature.kt: 入口、释放、调度和回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule捕获可变hooker，无销毁链；多组Hook无scope",
+        "amountHookFrames及activeAmountOverride前后配对ThreadLocal必须保留已进入after清理；ValueAnimator及金额View样式/弱映射恢复待闭环"
+      ]
+    },
+    {
+      "feature": "AntiRecallFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/antirecall/AntiRecallFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/antirecall/AntiRecallFeature.kt: 入口、关联Runtime资源及销毁链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "无onFeatureDestroy；共享安装任务及多组Hook未按Feature作用域归属",
+        "部分消息去重缓存上限1000；rawMessageRows和pendingNoticeKeys需预算及清理证明；noticeHandler延迟任务没有销毁门控"
+      ]
+    },
+    {
+      "feature": "MultiRecallFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/multirecall/MultiRecallFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/multirecall/MultiRecallFeature.kt: 安装、释放、Hook回调和缓存引用链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口共享schedule读取可变hooker，没有销毁链",
+        "多选创建/点击Hook没有scope及关闭门控；批量revoke循环没有关闭边界，UI回调需核查"
+      ]
+    },
+    {
+      "feature": "DisableHotUpdateFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/hotupdate/DisableHotUpdateFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/hotupdate/DisableHotUpdateFeature.kt",
+        "app/src/main/java/t/mma/ModuleEntry.java:282"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "ModuleEntry.java:282-297调用installEarly/install，属于早期进程共享Hook；不能直接按单Feature关闭",
+        "多处Hook注册及静态去重需核查全局清理/重装闭环",
+        "FeatureManager.kt:94-107已确认destroyAll最终unhookAll；需复核静态去重状态重置及早期进程共享安装代际"
+      ]
+    },
+    {
+      "feature": "ProfileIdFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/profileid/ProfileIdFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "38: registerSettingsProvider(ProfileIdSettingsProvider())",
+        "39: registerSettingsProvider(ProfileGroupInfoSettingsProvider()) {",
+        "47: override fun onFeatureInstall(context: FeatureContext) {",
+        "63: override fun onFeatureDestroy(context: FeatureContext) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "Feature销毁移除Provider，但群资料页Hook和companion installed未释放/重置；destroyAll后重装跳过",
+        "decor.postDelayed重试需页面销毁与功能代际门控",
+        "ProfileGroupInfoFeature虽然generation拒绝旧结果并shutdownNow，但executor()可在removeProvider后被在途schedule重建；旧finally还可能删除新代loadingGroups；cache/队列无总量界限"
+      ]
+    },
+    {
+      "feature": "HideChatMenuFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/hidemenu/HideChatMenuFeature.kt",
+      "status": "修复后定向验证通过；待整体集成/实机",
+      "evidence": [
+        "28: registerSettingsProvider(HideChatMenuSettingsProvider())",
+        "31: override fun onFeatureInstall(context: FeatureContext) {",
+        "33: scheduleInstall()",
+        "34: subscribe(Events.DexReady::class.java) { scheduleInstall() }",
+        "37: override fun onFeatureDestroy(context: FeatureContext) {",
+        "41: private fun scheduleInstall() {"
+      ],
+      "ownership": "ENABLE区间独占Runtime、Installation与Hook；作用域关闭撤销票据并精确解除句柄",
+      "cleanup": "onFeatureDestroy只置runtime=null；私有Hook没有句柄所有权及closed门；关闭不撤销安装票据",
+      "inFlight": null,
+      "lateCallbacks": "旧资源区间关闭后回调不执行；迟到句柄登记立即释放",
+      "bounds": null,
+      "tests": [
+        "test_hide_menu_lifecycle",
+        "test_monitor_sdk"
+      ]
+    },
+    {
+      "feature": "MessageMenuExtensionFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/messagemenuextension/MessageMenuExtensionFeature.kt",
+      "status": "安装区间修复并定向验证通过；Runtime内部清理异常/页面恢复待核查",
+      "evidence": [
+        "15: registerSettingsProvider(MessageMenuExtensionSettingsProvider())",
+        "17: override fun onFeatureInstall(context: FeatureContext) {",
+        "23: scheduleInstall()",
+        "24: subscribe(Events.DexReady::class.java) { scheduleInstall() }",
+        "26: private fun scheduleInstall() {",
+        "29: override fun onFeatureDestroy(context: FeatureContext) {"
+      ],
+      "ownership": "ENABLE区间独占Runtime和Installation；关闭销毁原实例并撤销票据",
+      "cleanup": "关闭状态启动时直接return，无监听故不能热开启；全局安装状态不能随runtime销毁重置；Frame原生view/owner需核查",
+      "inFlight": null,
+      "lateCallbacks": "安装闭包捕获原实例和scope，不引用新runtime；清除schedule前核对引用",
+      "bounds": null,
+      "tests": [
+        "test_monitor_sdk",
+        "test_menu_extension_lifecycle"
+      ]
+    },
+    {
+      "feature": "QuickContactEditFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/quickcontactedit/QuickContactEditFeature.kt",
+      "status": "已定位生命周期缺口；修复待完成",
+      "evidence": [
+        "46: registerSettingsProvider(QuickContactEditSettingsProvider())",
+        "49: override fun onFeatureInstall(context: FeatureContext) {",
+        "55: subscribe(Events.DexReady::class.java) { scheduleDexInstall() }",
+        "58: override fun onFeatureDestroy(context: FeatureContext) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "Runtime hook helper未记录Hook句柄；destroy未unhook及失活",
+        "Feature共享schedule回调读可变runtime；需要捕获原实例与独占Installation"
+      ]
+    },
+    {
+      "feature": "QuickGroupChatLabelFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/grouplabel/QuickGroupChatLabelFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/grouplabel/QuickGroupChatLabelFeature.kt: 入口及Runtime/Renderer释放与UI回调复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口独立Installation及scope，destroy卸载Hook并注销菜单扩展",
+        "showChoices/showMultiChoices/showTextInput未持有可关闭句柄；onConfirm及标签写入缺少关闭门控，销毁后仍可操作"
+      ]
+    },
+    {
+      "feature": "QuickMomentsFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/quickmoments/QuickMomentsFeature.kt",
+      "status": "已定位生命周期缺口；修复待完成",
+      "evidence": [
+        "41: registerSettingsProvider(QuickMomentsSettingsProvider())",
+        "44: override fun onFeatureInstall(context: FeatureContext) {",
+        "46: scheduleInstall()",
+        "47: subscribe(Events.DexReady::class.java) { scheduleInstall() }",
+        "50: override fun onFeatureDestroy(context: FeatureContext) {",
+        "55: private fun scheduleInstall() {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "Runtime hook helper未记录Hook句柄；destroy未unhook及失活",
+        "Feature共享schedule回调读可变runtime；需要捕获原实例与独占Installation"
+      ]
+    },
+    {
+      "feature": "QuickMarkReadFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/quickread/QuickMarkReadFeature.kt",
+      "status": "独占资源归属已修复；定向合成验证通过；共享依赖及整体集成待闭环",
+      "evidence": [
+        "32: registerSettingsProvider(QuickMarkReadSettingsProvider())",
+        "35: override fun onFeatureInstall(context: FeatureContext) {",
+        "37: subscribe(t.mma.event.Events.DexReady::class.java) { QuickMarkReadRuntime.requestPreparation() }",
+        "38: subscribe(t.mma.event.Events.NetworkDispatcherReady::class.java) { QuickMarkReadRuntime.requestPreparation() }"
+      ],
+      "ownership": "每代实例持有FeatureResourceScope；BaseFeature跟踪释放；语音时长和清引用使用独立Installation",
+      "cleanup": "关闭scope卸载Hook；快捷已读清空拖拽会话并隔离恢复异常；清引用清空弱引用及反射缓存",
+      "inFlight": null,
+      "lateCallbacks": "Hook回调检查scope关闭；清引用InputConnection包装入口同样检查关闭",
+      "bounds": null,
+      "tests": [
+        "scripts/test_quickread_voice_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "QuickMarkReadRuntime共享依赖的进程所有者及退出重装仍待闭环",
+        "拖拽销毁与主线程UI恢复并发仍需复核"
+      ]
+    },
+    {
+      "feature": "QuickTerminateFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/quickterminate/QuickTerminateFeature.kt",
+      "status": "入口容器已核实；关联页面/消费者另列待核查",
+      "evidence": [
+        "15: registerSettingsProvider(QuickTerminateSettingsProvider())",
+        "18: override fun onFeatureInstall(context: FeatureContext) = Unit"
+      ],
+      "ownership": "纯设置+用户显式调用terminateCurrentProcess，无安装资源",
+      "cleanup": "BaseFeature释放Provider；只读源码，不执行终止进程",
+      "inFlight": "入口无在途任务；不执行业务",
+      "lateCallbacks": "入口无异步安装",
+      "bounds": "入口无运行缓存或队列",
+      "tests": [
+        "源码Feature入口/BaseFeature登记核查；非设备验证"
+      ]
+    },
+    {
+      "feature": "AutoReplyFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyFeature.kt",
+      "status": "源码及Runtime生命周期已复核；既有定向回归通过；队列/缓存预算待深核",
+      "evidence": [
+        "17: registerSettingsProvider(AutoReplySettingsProvider())",
+        "19: override fun onFeatureInstall(context: FeatureContext) {",
+        "27: trackResource {",
+        "35: subscribe(Events.DexReady::class.java) { synchronized(this) { if (active) observeMessages?.invoke() } }",
+        "57: resources.register { subscription?.unsubscribe() }",
+        "66: resources.register { subscription.unsubscribe() }",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:90: @Synchronized fun stop() {",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:96: runCatching { old.worker.shutdown() }.onFailure { HLog.e(\"$TAG 关闭资源失败\", it) }",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:108: private fun isCurrent(owner: RuntimeGeneration?): Boolean = owner != null && owner.active && generation === owner",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:109: private fun canRun(): Boolean = isCurrent(processingGeneration.get())",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:112: if (!isCurrent(owner)) return",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:114: if (isCurrent(owner)) withOwner(owner, action)",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:120: try { if (isCurrent(owner)) action() }",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:966: if (!isCurrent(owner) || closed.get()) { webSocket.close(1000, \"stale generation\"); return }",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:972: if (!isCurrent(owner) || closed.get()) return",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:990: if (!isCurrent(owner) || closed.get()) return",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:1007: if (!isCurrent(owner)) { close(\"stale generation\"); return }",
+        "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyRuntime.kt:1010: if (!isCurrent(owner) || closed.get()) socketRef.getAndSet(null)?.cancel()"
+      ],
+      "ownership": "启用状态监听持有scope，scope拥有消息/好友订阅和RuntimeGeneration",
+      "cleanup": "stop将旧代际失活，清队列、timer、HTTP连接、WebSocket、TTS及历史；已进入宿主发送允许结束",
+      "inFlight": "宿主调用开始前检查运行状态；进入宿主后的操作不重复投递",
+      "lateCallbacks": "Feature回调检查scope，Runtime isCurrent校验代际",
+      "bounds": "启停清理已核实；全路径缓存与排队数量尚未逐项证明",
+      "tests": [
+        "test_auto_reply_lifecycle.py"
+      ]
+    },
+    {
+      "feature": "AutoMessageForwardFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/automessageforward/AutoMessageForwardFeature.kt",
+      "status": "源码及Runtime生命周期已复核；既有定向回归通过；队列/缓存预算待深核",
+      "evidence": [
+        "7: import t.mma.hooks.core.PreferenceRuntimeOwner",
+        "19: registerSettingsProvider(AutoMessageForwardSettingsProvider())",
+        "22: override fun onFeatureInstall(context: FeatureContext) {",
+        "25: val owner = PreferenceRuntimeOwner(prefs, setOf(AutoMessageForwardSettings.KEY_ENABLED),",
+        "33: resources.register { subscription?.unsubscribe() }",
+        "34: val recalled = context.eventBus().subscribe(Events.MessageRecalled::class.java, { event ->",
+        "37: resources.register { context.eventBus().unsubscribe(recalled) }",
+        "39: trackResource { owner.close() }",
+        "40: subscribe(Events.DexReady::class.java) { ready = true; owner.refresh() }",
+        "app/src/main/java/t/mma/hooks/items/automessageforward/AutoMessageForwardRuntime.kt:72: fun shutdown() {",
+        "app/src/main/java/t/mma/hooks/items/automessageforward/AutoMessageForwardRuntime.kt:78: executor.shutdown()"
+      ],
+      "ownership": "PreferenceRuntimeOwner持有独立Runtime、消息观察订阅及撤回订阅",
+      "cleanup": "shutdown标记closed并清待执行队列；串行追加状态清理后shutdown，已开始发送不打断",
+      "inFlight": "宿主调用开始前检查运行状态；进入宿主后的操作不重复投递",
+      "lateCallbacks": "scope检查与Runtime closed共同阻止迟到发送",
+      "bounds": "启停清理已核实；全路径缓存与排队数量尚未逐项证明",
+      "tests": [
+        "test_auto_forward_lifecycle.py"
+      ]
+    },
+    {
+      "feature": "ConversationGroupFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/conversationgroup/ConversationGroupFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "13: registerSettingsProvider(ConversationGroupSettingsProvider())",
+        "16: override fun onFeatureInstall(context: FeatureContext) {",
+        "22: override fun onFeatureDestroy(context: FeatureContext) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "Feature共享schedule未取消；destroy后迟到安装可重新激活全局Runtime",
+        "Runtime.destroy的3个unsubscribe缺少异常隔离，会阻断Hook/worker释放",
+        "Runtime使用可重置active布尔标记而非代际；旧worker循环/posted UI回调可在重启后观察到true；需逐项捕获generation",
+        "nativeGroupLongClickListeners.clear未证明恢复宿主原监听，队列/映射预算仍需核查"
+      ]
+    },
+    {
+      "feature": "GroupBarFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/groupbar/GroupBarFeature.kt",
+      "status": "安装竞态修复并定向验证通过；Runtime线程及UI销毁链待进一步核查",
+      "evidence": [
+        "17: override fun onFeatureInit(context: FeatureContext) { registerSettingsProvider(GroupBarSettingsProvider()) }",
+        "18: override fun onFeatureInstall(context: FeatureContext) {",
+        "31: override fun onFeatureDestroy(context: FeatureContext) { runtime?.destroy(); runtime = null }"
+      ],
+      "ownership": "Feature独占Installation；安装与销毁同锁，关闭后旧回调不创建新实例",
+      "cleanup": "全局schedule迟到回调可重新创建runtime；私有worker无空闲退出；destroy逐项异常可能跳过后续释放；Session值反向引用弱键View需要核查",
+      "inFlight": null,
+      "lateCallbacks": "worker入队捕获RejectedExecutionException；已开始查询检查destroyed后发布结果",
+      "bounds": null,
+      "tests": [
+        "test_monitor_sdk",
+        "test_groupbar_install_lifecycle"
+      ]
+    },
+    {
+      "feature": "ConversationAnalysisFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/conversationanalysis/ConversationAnalysisFeature.kt",
+      "status": "菜单Hook释放及独占票据已修复；SDK/报告页测试通过；菜单行为测试待补",
+      "evidence": [
+        "21: registerSettingsProvider(ConversationAnalysisSettingsProvider())",
+        "27: override fun onFeatureInstall(context: FeatureContext) {",
+        "34: subscribe(Events.DexReady::class.java) { scheduleMessageMenuInstall() }",
+        "50: override fun onFeatureDestroy(context: FeatureContext) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [
+        "test_monitor_sdk.py",
+        "test_analysis_page_lifecycle.py"
+      ],
+      "openFindings": [
+        "消息菜单Hook销毁/重装行为尚未专门测试"
+      ]
+    },
+    {
+      "feature": "MessageAffixFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/messageaffix/MessageAffixFeature.kt",
+      "status": "源码入口及依赖已复核；共享服务待闭环",
+      "evidence": [
+        "21: registerSettingsProvider(MessageAffixSettingsProvider())",
+        "24: override fun onFeatureInstall(context: FeatureContext) {",
+        "68: subscribe(Events.DexReady::class.java) {"
+      ],
+      "ownership": "Decorator订阅由BaseFeature trackSubscription归属；shared:send_button与脚本等消费者共用",
+      "cleanup": "Decorator unsubscribe按entry身份移除，不会删除相同ID的新代entry；ThreadLocal通过finally恢复",
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "OutgoingMessageStatsRepository持有全局worker/数据库订阅，当前无shutdown，需要进程共享所有者闭环",
+        "OutgoingTextDecoratorRegistry CopyOnWrite快照中的在途Decorator可能在unsubscribe后继续一次；需明确边界及必要门控",
+        "不能从本功能关闭共享发送按钮及统计服务"
+      ]
+    },
+    {
+      "feature": "TypingReportBlockFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/typingreport/TypingReportBlockFeature.kt",
+      "status": "修复后定向验证通过；待整体集成",
+      "evidence": [
+        "24: registerSettingsProvider(TypingReportBlockSettingsProvider())",
+        "27: override fun onFeatureInstall(context: FeatureContext) {",
+        "30: scheduleInstall()",
+        "32: subscribe(Events.DexReady::class.java) {",
+        "33: scheduleInstall()",
+        "37: private fun scheduleInstall() {"
+      ],
+      "ownership": "每次安装捕获独立hooker和Installation；BaseFeature持有销毁闭包",
+      "cleanup": "先关闭安装票据，再同步destroy关闭FeatureResourceScope释放Hook",
+      "inFlight": null,
+      "lateCallbacks": "install与回调均检查resources.isClosed；新实例独立重装",
+      "bounds": "每实例最多一个Hook，无线程及轮询",
+      "tests": [
+        "scripts/test_block_hook_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "无实机业务验证；整体冻结回归待完成"
+      ]
+    },
+    {
+      "feature": "PatBlockFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/patblock/PatBlockFeature.kt",
+      "status": "修复后定向验证通过；待整体集成",
+      "evidence": [
+        "25: registerSettingsProvider(PatBlockSettingsProvider())",
+        "28: override fun onFeatureInstall(context: FeatureContext) {",
+        "31: scheduleInstall()",
+        "33: subscribe(Events.DexReady::class.java) {",
+        "34: scheduleInstall()",
+        "38: private fun scheduleInstall() {"
+      ],
+      "ownership": "每次安装捕获独立hooker和Installation；BaseFeature持有销毁闭包",
+      "cleanup": "先关闭安装票据，再同步destroy关闭FeatureResourceScope释放Hook",
+      "inFlight": null,
+      "lateCallbacks": "install与回调均检查resources.isClosed；新实例独立重装",
+      "bounds": "每实例最多一个Hook，无线程及轮询",
+      "tests": [
+        "scripts/test_block_hook_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "无实机业务验证；整体冻结回归待完成"
+      ]
+    },
+    {
+      "feature": "AutoOriginalImageFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/autooriginal/AutoOriginalImageFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/autooriginal/AutoOriginalImageFeature.kt: 安装/销毁/资源注册及相关异步入口复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "onDestroy仅runtime=null；Runtime未提供destroy",
+        "两个图片页面onCreate Hook无作用域句柄和关闭门控；并发install去重区间未同步"
+      ]
+    },
+    {
+      "feature": "AutoViewOriginalFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/autovieworiginal/AutoViewOriginalFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/autovieworiginal/AutoViewOriginalFeature.kt: 安装/销毁/资源注册及相关异步入口复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "destroy仅移除pendingTasks并清页面映射；生命周期和翻页Hook没有释放或关闭门控",
+        "弱键pendingTasks的Runnable需要核查是否反向强持有Activity；部分安装失败后onResume Hook可能重复安装"
+      ]
+    },
+    {
+      "feature": "RemoveForwardLimitFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/forwardlimit/RemoveForwardLimitFeature.kt",
+      "status": "生命周期修复已应用；定向测试/扩大编译记录见当前验证；待整体集成",
+      "evidence": [
+        "29: registerSettingsProvider(RemoveForwardLimitSettingsProvider())",
+        "32: override fun onFeatureInstall(context: FeatureContext) {",
+        "41: override fun onFeatureDestroy(context: FeatureContext) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [
+        "scripts/test_forward_ringtone_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "最新冻结回归待完成；无实机业务测试",
+        "原问题修复记录见当前git diff；仍需其余依赖与并发链逐项证明"
+      ]
+    },
+    {
+      "feature": "AtAllNotificationBlockFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/atallnotify/AtAllNotificationBlockFeature.kt",
+      "status": "源码入口及依赖已复核；发现待闭环项",
+      "evidence": [
+        "6: import t.mma.hooks.core.PreferenceRuntimeOwner",
+        "18: registerSettingsProvider(AtAllNotificationBlockSettingsProvider())",
+        "21: override fun onFeatureInstall(context: FeatureContext) {",
+        "25: val owner = PreferenceRuntimeOwner(prefs, setOf(AtAllNotificationBlockSettings.KEY_ENABLE),",
+        "32: resources.register { subscription.unsubscribe() }",
+        "34: trackResource { owner.close() }",
+        "36: subscribe(Events.DexReady::class.java) { CustomNotificationRuntime.install(context); dexReady = true; owner.refresh() }",
+        "38: override fun onFeatureDestroy(context: FeatureContext) {"
+      ],
+      "ownership": "PreferenceRuntimeOwner按启用区间注册消息订阅并关闭门控；通知基础Hook属于共享CustomNotificationRuntime",
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "onFeatureDestroy在BaseFeature关闭owner前clear，已进入的record可能在clear之后重新写入；需明确关闭顺序及在途边界",
+        "pending阈值128仅触发TTL清理，无硬容量；并发短时洪峰仍无界",
+        "共享CustomNotificationRuntime需进程所有者闭环，不可被本消费者直接销毁"
+      ]
+    },
+    {
+      "feature": "CallMediaLimitFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/callmedialimit/CallMediaLimitFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/callmedialimit/CallMediaLimitFeature.kt: 安装/销毁/资源注册及相关异步入口复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule读取可变hooker；onDestroy只清引用，Hook句柄未归属",
+        "多方法安装中途失败没有回滚或逐方法去重；重试可能重复安装occupy及dispatch Hook",
+        "voicePlaybackGuardDepth ThreadLocal前后配对需要保留销毁时已进入调用的清理；不能仅在after加入关闭返回"
+      ]
+    },
+    {
+      "feature": "CallRingtoneBlockFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/callmedialimit/CallRingtoneBlockFeature.kt",
+      "status": "生命周期修复已应用；定向测试/扩大编译记录见当前验证；待整体集成",
+      "evidence": [
+        "26: registerSettingsProvider(CallRingtoneBlockSettingsProvider())",
+        "29: override fun onFeatureInstall(context: FeatureContext) {",
+        "33: scheduleInstall()",
+        "34: subscribe(Events.DexReady::class.java) { scheduleInstall() }",
+        "37: override fun onFeatureDestroy(context: FeatureContext) {",
+        "41: private fun scheduleInstall() {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [
+        "scripts/test_forward_ringtone_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "最新冻结回归待完成；无实机业务测试",
+        "原问题修复记录见当前git diff；仍需其余依赖与并发链逐项证明"
+      ]
+    },
+    {
+      "feature": "CustomNotificationFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/customnotify/CustomNotificationFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/customnotify/CustomNotificationFeature.kt: 入口、关联Runtime资源及销毁链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "消息订阅有PreferenceRuntimeOwner；共享Runtime安装仍为进程级单例",
+        "Runtime持有sharedHooks/installed/偏好监听/广播接收器/双执行器/Handler/铃声但无shutdown；需进程所有者统一释放和重装代际"
+      ]
+    },
+    {
+      "feature": "KeywordNotificationFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/keywordnotify/KeywordNotificationFeature.kt",
+      "status": "源码及Runtime生命周期已复核；既有定向回归通过；队列/缓存预算待深核",
+      "evidence": [
+        "7: import t.mma.hooks.core.PreferenceRuntimeOwner",
+        "17: registerSettingsProvider(KeywordNotificationSettingsProvider())",
+        "20: override fun onFeatureInstall(context: FeatureContext) {",
+        "23: val owner = PreferenceRuntimeOwner(prefs, setOf(KeywordNotificationSettings.KEY_ENABLE),",
+        "32: resources.register { messageSubscription?.unsubscribe() }",
+        "33: val blocked = context.eventBus().subscribe(Events.MessageBlocked::class.java, { event ->",
+        "36: resources.register { context.eventBus().unsubscribe(blocked) }",
+        "38: trackResource { owner.close() }",
+        "39: subscribe(Events.DexReady::class.java) { ready = true; owner.refresh() }",
+        "app/src/main/java/t/mma/hooks/items/keywordnotify/KeywordNotificationRuntime.kt:79: fun stop() {",
+        "app/src/main/java/t/mma/hooks/items/keywordnotify/KeywordNotificationRuntime.kt:92: private fun isCurrentGeneration(generation: Long): Boolean =",
+        "app/src/main/java/t/mma/hooks/items/keywordnotify/KeywordNotificationRuntime.kt:98: if (!isCurrentGeneration(generation)) return@post",
+        "app/src/main/java/t/mma/hooks/items/keywordnotify/KeywordNotificationRuntime.kt:111: if (!isCurrentGeneration(generation)) return",
+        "app/src/main/java/t/mma/hooks/items/keywordnotify/KeywordNotificationRuntime.kt:120: if (!isCurrentGeneration(generation)) return",
+        "app/src/main/java/t/mma/hooks/items/keywordnotify/KeywordNotificationRuntime.kt:123: if (!isCurrentGeneration(generation)) return@execute",
+        "app/src/main/java/t/mma/hooks/items/keywordnotify/KeywordNotificationRuntime.kt:525: if (isCurrentGeneration(generation)) stopRingtone(ringtone)"
+      ],
+      "ownership": "PreferenceRuntimeOwner拥有消息/拦截事件订阅和通知Runtime代际",
+      "cleanup": "stop失活代际、清Handler/头像缓存并shutdownNow专用worker",
+      "inFlight": "宿主调用开始前检查运行状态；进入宿主后的操作不重复投递",
+      "lateCallbacks": "消息回调检查scope，异步通知检查notifyGeneration",
+      "bounds": "启停清理已核实；全路径缓存与排队数量尚未逐项证明",
+      "tests": [
+        "test_keyword_notification_lifecycle.py"
+      ]
+    },
+    {
+      "feature": "TextSpeechFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/textspeech/TextSpeechFeature.kt",
+      "status": "生命周期修复已应用；定向测试/扩大编译记录见当前验证；待整体集成",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/textspeech/TextSpeechFeature.kt"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [
+        "scripts/test_text_speech_shutdown.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "最新冻结回归待完成；无实机业务测试",
+        "原问题修复记录见当前git diff；仍需其余依赖与并发链逐项证明"
+      ]
+    },
+    {
+      "feature": "TextVoiceFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/textvoice/TextVoiceFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/textvoice/TextVoiceFeature.kt: 入口及Runtime/Renderer释放与UI回调复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "PreferenceRuntimeOwner持有Runtime、发送处理器订阅和独立Installation；destroy隔离网络/TTS取消并关闭scope/执行器",
+        "shared:send_button安装仍无进程所有者；main.post播放器释放与新实例播放代际、迟到文件/恢复输入回调待闭环"
+      ]
+    },
+    {
+      "feature": "ZombieCheckFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/zombiecheck/ZombieCheckFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/zombiecheck/ZombieCheckFeature.kt: 入口及Runtime/Renderer释放与UI回调复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口独立Runtime/Hooker/Installation并绑定Controller；Hooker scope和destroyed门控完整",
+        "Runtime.close先persistLocked，持久化异常会阻断WakeLock/通知/双执行器释放及Controller.detach；需finally和逐项隔离"
+      ]
+    },
+    {
+      "feature": "WeChatKeepAliveFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/keepalive/WeChatKeepAliveFeature.kt",
+      "status": "源码入口及依赖已复核；发现待闭环项",
+      "evidence": [
+        "12: registerSettingsProvider(WeChatKeepAliveSettingsProvider())",
+        "15: override fun onFeatureInstall(context: FeatureContext) {",
+        "19: override fun onFeatureDestroy(context: FeatureContext) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "Feature调用Runtime.stop释放WakeLock并停服务；Service.onDestroy移除keepAliveTask已确认",
+        "Runtime.acquire/releaseWakeLock未串行，apply与stop并发可能迟到获取；heartbeatTick每次新Thread，无在途取消或单飞门控",
+        "HttpURLConnection.disconnect未放finally，异常路径可能不释放；Root进程设置具有持久副作用，应记录生效/恢复边界，当前未执行这些操作"
+      ]
+    },
+    {
+      "feature": "QuoteDeleteClearFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/quoteclear/QuoteDeleteClearFeature.kt",
+      "status": "独占资源归属已修复；定向合成验证通过；共享依赖及整体集成待闭环",
+      "evidence": [
+        "32: registerSettingsProvider(QuoteDeleteClearSettingsProvider())",
+        "35: override fun onFeatureInstall(context: FeatureContext) {",
+        "37: scheduleInstall()",
+        "38: subscribe(Events.DexReady::class.java) {",
+        "39: scheduleInstall()",
+        "43: private fun scheduleInstall() {"
+      ],
+      "ownership": "每代实例持有FeatureResourceScope；BaseFeature跟踪释放；语音时长和清引用使用独立Installation",
+      "cleanup": "关闭scope卸载Hook；快捷已读清空拖拽会话并隔离恢复异常；清引用清空弱引用及反射缓存",
+      "inFlight": null,
+      "lateCallbacks": "Hook回调检查scope关闭；清引用InputConnection包装入口同样检查关闭",
+      "bounds": null,
+      "tests": [
+        "scripts/test_quote_clear_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "关闭与已进入回调的并发行为仍需核查；尚无实机验证"
+      ]
+    },
+    {
+      "feature": "SwipeQuoteFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/swipequote/SwipeQuoteFeature.kt",
+      "status": "新定位资源遗漏并修复；定向SDK编译通过；行为测试待补",
+      "evidence": [
+        "62: trackResource { current.destroy(); if (adapter === current) adapter = null }",
+        "65: trackResource { swipeTicket.close() }",
+        "66: trackResource { repeatTicket.close() }",
+        "92: resources.register { HookRegistry.get().unhook(handle) }",
+        "94: @Synchronized fun destroy() {"
+      ],
+      "ownership": "每次安装持有独立SwipeQuoteAdapter与两个Installation；Adapter拥有Hook scope与专用语音线程",
+      "cleanup": "销毁关闭票据与Hook、清空主线程任务及菜单映射、关闭语音worker、恢复滑动行",
+      "inFlight": "关闭后阻止待处理语音准备和主线程发送；已进入宿主发送不撤销",
+      "lateCallbacks": "Hook捕获原scope；旧安装闭包捕获原Adapter",
+      "bounds": "映射与反射缓存随Adapter回收；启用区间及队列上限仍待补核",
+      "tests": [
+        "test_monitor_sdk.py"
+      ]
+    },
+    {
+      "feature": "AudioTransformFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/audiotransform/AudioTransformFeature.kt",
+      "status": "入口容器已核实；关联页面/消费者另列待核查",
+      "evidence": [
+        "12: registerSettingsProvider(AudioTransformSettingsProvider())",
+        "15: override fun onFeatureInstall(context: FeatureContext) {"
+      ],
+      "ownership": "功能入口仅注册设置、onFeatureInstall为空；页面实际转换需继续独立核查",
+      "cleanup": "仅入口容器核实，不把页面任务判为已完成",
+      "inFlight": "入口无在途任务；不执行业务",
+      "lateCallbacks": "入口无异步安装",
+      "bounds": "入口无运行缓存或队列",
+      "tests": [
+        "源码Feature入口/BaseFeature登记核查；非设备验证"
+      ]
+    },
+    {
+      "feature": "FakeVoiceDurationFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/fakevoiceduration/FakeVoiceDurationFeature.kt",
+      "status": "独占资源归属已修复；定向合成验证通过；共享依赖及整体集成待闭环",
+      "evidence": [
+        "25: registerSettingsProvider(FakeVoiceDurationSettingsProvider())",
+        "28: override fun onFeatureInstall(context: FeatureContext) {",
+        "30: scheduleInstall()",
+        "31: subscribe(Events.DexReady::class.java) {",
+        "32: scheduleInstall()",
+        "36: private fun scheduleInstall() {"
+      ],
+      "ownership": "每代实例持有FeatureResourceScope；BaseFeature跟踪释放；语音时长和清引用使用独立Installation",
+      "cleanup": "关闭scope卸载Hook；快捷已读清空拖拽会话并隔离恢复异常；清引用清空弱引用及反射缓存",
+      "inFlight": null,
+      "lateCallbacks": "Hook回调检查scope关闭；清引用InputConnection包装入口同样检查关闭",
+      "bounds": null,
+      "tests": [
+        "scripts/test_quickread_voice_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "关闭与已进入回调的并发行为仍需核查；尚无实机验证"
+      ]
+    },
+    {
+      "feature": "ChatTimeStyleFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt: 入口、释放、渲染回调与缓存复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule捕获可变runtime；destroy注销监听、清部分缓存并post恢复，没有关闭标记或Hook释放",
+        "旧Hook可在销毁后继续绑定；view.post恢复没有代际校验；反射缓存和清理异常隔离待闭环"
+      ]
+    },
+    {
+      "feature": "InputHintFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/inputhint/InputHintFeature.kt",
+      "status": "生命周期修复已应用；定向测试/扩大编译记录见当前验证；待整体集成",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/inputhint/InputHintFeature.kt"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [
+        "scripts/test_input_hint_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "最新冻结回归待完成；无实机业务测试",
+        "原问题修复记录见当前git diff；仍需其余依赖与并发链逐项证明"
+      ]
+    },
+    {
+      "feature": "MessageBubbleFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/messagebubble/MessageBubbleFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/messagebubble/MessageBubbleFeature.kt: 入口、释放、渲染回调与缓存复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule读取可变renderer，无destroy及Hook作用域",
+        "bindStates前后配对ThreadLocal销毁需要保留已进入after恢复；View样式、MessageBubbleStore共享预加载资源和反射缓存待闭环"
+      ]
+    },
+    {
+      "feature": "MessageTextColorFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/messagetextcolor/MessageTextColorFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/messagetextcolor/MessageTextColorFeature.kt: 入口、释放、渲染回调与缓存复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule捕获可变renderer；无destroy链或Hook作用域",
+        "appliedBindingStates原样式恢复及shader/View tag清理待闭环；多组反射/颜色缓存无清理与容量证明"
+      ]
+    },
+    {
+      "feature": "MentionHighlightFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/mentionhighlight/MentionHighlightFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/mentionhighlight/MentionHighlightFeature.kt: 入口、释放、渲染回调与缓存复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule每次执行创建新Runtime，失败重试可遗留部分Hook；无destroy或scope",
+        "bindStates前后配对ThreadLocal、触摸gestures、Lru渲染缓存及ClickableSpan/Activity引用需要完整释放链；已有96/128缓存上限不代表销毁闭环"
+      ]
+    },
+    {
+      "feature": "MentionNoticeFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/mentionextension/MentionNoticeFeature.kt",
+      "status": "启用区间修复；SDK、入口启停及既有时间/文本测试通过；Runtime并发行为待验证",
+      "evidence": [
+        "107: resources.register { HookRegistry.get().unhook(hook) }",
+        "147: val owner = PreferenceRuntimeOwner(prefs, setOf(MentionNoticeSettings.ENABLE),",
+        "154: resources.register { if (schedule === install) schedule = null }",
+        "155: resources.register { ticket.close() }",
+        "158: trackResource { owner.close() }",
+        "176: init { resources.register { worker.shutdownNow() } }",
+        "197: resources.register { subscription?.unsubscribe() }"
+      ],
+      "ownership": "每次启用创建MentionNoticeRuntime，区间持有独立安装票据、256队列worker、数据库订阅和渲染Hook",
+      "cleanup": "区间关闭撤销票据、unsubscribe、unhook及shutdownNow；重新启用新建worker和方法去重集合",
+      "inFlight": "任务开始及持久化写入前检查资源关闭；已进入宿主插入调用不回滚",
+      "lateCallbacks": "旧安装与渲染回调检查原scope，迟到登记立即释放",
+      "bounds": "单worker、256排队上限；持久化_seen键暂无淘汰，仍需核查",
+      "tests": [
+        "test_monitor_sdk.py",
+        "test_mention_notice_lifecycle.py",
+        "test_mention_notice_order.py",
+        "test_mention_notice_span_bounds.py"
+      ]
+    },
+    {
+      "feature": "HomeTextColorFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/hometextcolor/HomeTextColorFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/hometextcolor/HomeTextColorFeature.kt: 入口、释放、渲染回调与缓存复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule捕获可变runtime；destroy有destroyed和UI恢复，但Hook句柄未归属",
+        "监听注销及逐View恢复异常会阻断后续缓存清理；异步恢复与新实例样式应用之间代际待闭环"
+      ]
+    },
+    {
+      "feature": "HideChatAvatarFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/hideavatar/HideChatAvatarFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/hideavatar/HideChatAvatarFeature.kt: 安装、释放、Hook回调和缓存引用链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule捕获可变runtime；onDestroy仅置null",
+        "绑定Hook句柄未归属、没有关闭门控；originalMaskWidths未在销毁恢复，holder缓存未清理"
+      ]
+    },
+    {
+      "feature": "MessageBlockFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/messageblock/MessageBlockFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "27: registerSettingsProvider(MessageBlockSettingsProvider())",
+        "30: override fun onFeatureInstall(context: FeatureContext) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "功能字段installed和AddMsg Hook无销毁重置/句柄归属；共享schedule未撤销",
+        "多类多方法安装中途失败无逐方法去重/回滚，重试可能重复Hook；需故障注入验证",
+        "回调持有parser/context且无实例关闭门控；与KeywordNotificationRuntime共用允许落库逻辑需保留依赖边界"
+      ]
+    },
+    {
+      "feature": "FakeLocationFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/fakelocation/FakeLocationFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/fakelocation/FakeLocationFeature.kt: 入口、关联Runtime资源及销毁链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule读取可变hooker；onDestroy仅置null",
+        "FakeLocationProcessHooker静态hookedCallbacks/hookedGetters及拒绝类缓存无释放重置；主/子进程Hook归属需分开"
+      ]
+    },
+    {
+      "feature": "GameEmojiFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/gameemoji/GameEmojiFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "27: registerSettingsProvider(GameEmojiSettingsProvider())",
+        "30: override fun onFeatureInstall(context: FeatureContext) {",
+        "32: scheduleInstall()",
+        "33: subscribe(Events.DexReady::class.java) { scheduleInstall() }",
+        "36: override fun onFeatureDestroy(context: FeatureContext) {",
+        "40: private fun scheduleInstall() {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "onFeatureDestroy仅置runtime=null；发送Hook、mainHandler及弹窗无释放入口",
+        "共享schedule引用可变runtime；需独占Installation和捕获实例",
+        "PendingSend被UI/选择回调持有，replay无关闭检查；销毁后旧选择仍可重新发送，需定义关闭时取消及弹窗清理"
+      ]
+    },
+    {
+      "feature": "FakeMiniProgramBaseLibFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/miniprogrambaselib/FakeMiniProgramBaseLibFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "27: registerSettingsProvider(FakeMiniProgramBaseLibSettingsProvider())",
+        "30: override fun onFeatureInstall(context: FeatureContext) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "主进程共享schedule与launchConstructor Hook缺少Feature销毁归属",
+        "ModuleEntry.java:221调用installAppBrandProcessHook，小程序进程独立全局Hook需分开核查，不能混用主进程所有者"
+      ]
+    },
+    {
+      "feature": "SkipMiniProgramVideoAdsFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/miniprogramvideoad/SkipMiniProgramVideoAdsFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/miniprogramvideoad/SkipMiniProgramVideoAdsFeature.kt: 安装、销毁和Hook/异步资源复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "静态installedLoaders与Hook句柄没有进程所有者释放；全局unhook后重装被静态标记跳过",
+        "主进程Feature和子进程静态install调用点需分别绑定生命周期"
+      ]
+    },
+    {
+      "feature": "SkipGlobalMiniProgramSplashAdsFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/miniprogramsplashad/SkipGlobalMiniProgramSplashAdsFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/miniprogramsplashad/SkipGlobalMiniProgramSplashAdsFeature.kt: 安装、销毁和Hook/异步资源复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "主进程共享schedule捕获可变runtime，Runtime无destroy；hookSplashAdCheckMethod句柄没有归属",
+        "子进程静态installedLoaders与共享schedule缺少重装代际，需明确独立进程所有者"
+      ]
+    },
+    {
+      "feature": "QQMusicOrderFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/musicorder/QQMusicOrderFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/musicorder/QQMusicOrderFeature.kt: 入口及Runtime/Renderer释放与UI回调复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "启用区间scope持有Runtime和订阅；Runtime active门控并shutdownNow",
+        "入口释放先unregister监听后stopRuntime，注销异常可跳过资源关闭；shared:send_button进程归属和执行中请求取消待闭环"
+      ]
+    },
+    {
+      "feature": "MomentsAutoLikeFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/MomentsAutoLikeFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/MomentsAutoLikeFeature.kt: 入口、释放、调度和回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "PreferenceRuntimeOwner捕获Runtime；销毁隔离监听与订阅注销，取消pending并关闭worker；states上限4096",
+        "start未与destroy同步或检查destroyed，迟到观察订阅可能注册在销毁之后；pending调度队列和successfulIds预算需证明"
+      ]
+    },
+    {
+      "feature": "MomentsAutoCommentFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/MomentsAutoCommentFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/MomentsAutoCommentFeature.kt: 入口、释放、调度和回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "PreferenceRuntimeOwner捕获Runtime；销毁隔离监听与订阅注销，取消pending并关闭worker；states上限4096",
+        "start与destroy并发及迟到订阅归属需闭环；pendingComments队列/成功集合预算与已提交评论边界待核查"
+      ]
+    },
+    {
+      "feature": "MomentsAutoForwardFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/MomentsAutoForwardFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/MomentsAutoForwardFeature.kt: 入口、关联Runtime资源及销毁链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "PreferenceRuntimeOwner、generation/lifecycleLock、取消PendingForward和worker.shutdown已有",
+        "start订阅与destroy同步边界、prepare执行中文件清理、pending队列上限和成功记录预算需深核"
+      ]
+    },
+    {
+      "feature": "MomentsAutoRefreshFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/MomentsAutoRefreshFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/MomentsAutoRefreshFeature.kt: onFeatureInstall / Runtime.install / destroy或shutdown及异步回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "启停由PreferenceRuntimeOwner控制，独立Installation；destroy注销监听并finally关闭scheduler",
+        "tick初始检查destroyed后调用共享snsApi，执行中销毁仍可能提交刷新；结果写回前有destroyed门控；需确定执行中操作边界"
+      ]
+    },
+    {
+      "feature": "MomentsKeywordBlockFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/MomentsKeywordBlockFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/MomentsKeywordBlockFeature.kt: onFeatureInstall / Runtime.install / destroy或shutdown及异步回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口主线程refresh及stopRuntime使用可变runtime与featureClosed布尔，跨销毁重装代际可能由旧post关闭新runtime",
+        "Runtime已有scope、Hook关闭门控、监听与数据库订阅资源归属；UI恢复、缓存预算及清理异常隔离待深核"
+      ]
+    },
+    {
+      "feature": "MomentsContactFilterFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/MomentsContactFilterFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "40: registerSettingsProvider(MomentsContactFilterSettingsProvider())",
+        "43: override fun onFeatureInstall(context: FeatureContext) {",
+        "57: override fun onFeatureDestroy(context: FeatureContext) {",
+        "85: trackResource { HookRegistry.get().unhook(handle) }"
+      ],
+      "ownership": "Hook句柄由BaseFeature释放，偏好监听注销，菜单UI主线程恢复",
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "onFeatureDestroy后台post cleanup读取实例共享installedMenus/timelineActivities；重装早于旧cleanup执行时可清新代菜单",
+        "closed布尔在重装重置false，旧在途Hook/UI任务无区间代际，需捕获独立owner或generation",
+        "既有test_moments_filter_owner不能直接证明所有重装交错路径"
+      ]
+    },
+    {
+      "feature": "MomentsBottomDetailFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/MomentsBottomDetailFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/MomentsBottomDetailFeature.kt: 安装、销毁和Hook/异步资源复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "三组共享schedule读取可变runtime；onDestroy仅置null",
+        "时间/分组/主页Hook句柄未归属；profileInfoByAdapter ThreadLocal弱键值缓存需明确线程退出和容量边界"
+      ]
+    },
+    {
+      "feature": "MomentsPostNotificationFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/MomentsPostNotificationFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/MomentsPostNotificationFeature.kt: 入口、关联Runtime资源及销毁链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "Runtime start/destroy同步，Atomic active、订阅注销隔离、Handler/worker/头像缓存释放已有",
+        "newSingleThreadExecutor无界队列；事件洪峰预算和运行中URL下载关闭后结果门控需复核；同Runtime销毁后start可重启active但执行器已关闭"
+      ]
+    },
+    {
+      "feature": "OriginalMomentsUploadFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/OriginalMomentsUploadFeature.kt",
+      "status": "独占Hook及安装归属修复；定向合成测试/SDK编译通过；待最新冻结回归与执行中边界复核",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/OriginalMomentsUploadFeature.kt: onFeatureInstall / Runtime.install / destroy或shutdown及异步回调源码复核"
+      ],
+      "ownership": "BaseFeature跟踪独占scope；原图上传和上传尾巴另持有独占Installation，订阅捕获installed实例",
+      "cleanup": "destroy关闭scope释放Hook；原图上传清空convert方法引用；去广告移除静态installedLoaders",
+      "inFlight": null,
+      "lateCallbacks": "回调检查scope关闭；新实例可独立重装；部分成功方法通过实例安装标记避免重试重复注册",
+      "bounds": null,
+      "tests": [
+        "scripts/test_sns_upload_ownership.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "执行中回调与销毁边界仍需复核；无实机验证"
+      ]
+    },
+    {
+      "feature": "MomentsUploadTailFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/MomentsUploadTailFeature.kt",
+      "status": "独占Hook及安装归属修复；定向合成测试/SDK编译通过；待最新冻结回归与执行中边界复核",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/MomentsUploadTailFeature.kt: onFeatureInstall / Runtime.install / destroy或shutdown及异步回调源码复核"
+      ],
+      "ownership": "BaseFeature跟踪独占scope；原图上传和上传尾巴另持有独占Installation，订阅捕获installed实例",
+      "cleanup": "destroy关闭scope释放Hook；原图上传清空convert方法引用；去广告移除静态installedLoaders",
+      "inFlight": null,
+      "lateCallbacks": "回调检查scope关闭；新实例可独立重装；部分成功方法通过实例安装标记避免重试重复注册",
+      "bounds": null,
+      "tests": [
+        "scripts/test_sns_tail_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "执行中回调与销毁边界仍需复核；无实机验证"
+      ]
+    },
+    {
+      "feature": "SnsAntiRecallFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/SnsAntiRecallFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/SnsAntiRecallFeature.kt: 安装、销毁和Hook/异步资源复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口首次直接安装，DexReady共享schedule读取可变hooker；onDestroy仅置null",
+        "数据库写入/查询Hook没有scope及关闭代际；internalQuery ThreadLocal与游标/备份持久化链需深核"
+      ]
+    },
+    {
+      "feature": "MomentsFakeInteractionFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/momentsfake/MomentsFakeInteractionFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/momentsfake/MomentsFakeInteractionFeature.kt: 入口、关联Runtime资源及销毁链复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "独立Installation但任务读取可变runtime/codec/resolver/forwardRuntime；跨重装可能访问新实例",
+        "onDestroy串行注销菜单/订阅/destroy无异常隔离；dialogs没有销毁归属；共享SnsContextMenuDispatcher所有者待闭环"
+      ]
+    },
+    {
+      "feature": "GroupChatLabelFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/grouplabel/GroupChatLabelFeature.kt",
+      "status": "入口容器已核实；关联页面/消费者另列待核查",
+      "evidence": [
+        "12: registerSettingsProvider(GroupChatLabelSettingsProvider())",
+        "15: override fun onFeatureInstall(context: FeatureContext) = Unit"
+      ],
+      "ownership": "纯设置容器，onFeatureInstall=Unit；实际消费另属于快速群标签/菜单链",
+      "cleanup": "BaseFeature释放Provider；容器无需伪造Runtime",
+      "inFlight": "入口无在途任务；不执行业务",
+      "lateCallbacks": "入口无异步安装",
+      "bounds": "入口无运行缓存或队列",
+      "tests": [
+        "源码Feature入口/BaseFeature登记核查；非设备验证"
+      ]
+    },
+    {
+      "feature": "GroupLeaveMonitorFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/groupleave/GroupLeaveMonitorFeature.kt",
+      "status": "修复后定向验证通过；待整体集成/实机",
+      "evidence": [
+        "6: import t.mma.hooks.core.PreferenceRuntimeOwner",
+        "16: registerSettingsProvider(GroupLeaveMonitorSettingsProvider())",
+        "19: override fun onFeatureInstall(context: FeatureContext) {",
+        "23: val owner = PreferenceRuntimeOwner(prefs, setOf(",
+        "37: trackResource { owner.close() }",
+        "39: subscribe(Events.DexReady::class.java) { owner.refresh(); current.get()?.install() }"
+      ],
+      "ownership": "启用区间独占 runtime、订阅、PendingNoticeTasks；共享历史消息链接 Hook 不归单消费者",
+      "cleanup": "任一主能力开启保留；全部关闭或 Feature destroy 退订、关闭队列、清空运行快照；不删除持久邀请计数",
+      "inFlight": "待办取消，已开始操作不线程中断；每次后续宿主调用检查旧实例 closed",
+      "lateCallbacks": "关闭/安装/观察回调串行；旧实例永久关闭；postVoice与destroy同实例锁，主线程执行再次检查canReply；真实主线程交错待设备验证",
+      "bounds": "每实例最多256项等待；单工作线程；成员快照与昵称缓存未设置固定容量，不能宣称全部有界",
+      "tests": [
+        "test_pending_notice_tasks",
+        "test_group_monitor_lifecycle",
+        "SDK/现有ABI定向编译第二次退出0；第一次夹具使用过期FeatureContext失败，原日志保留"
+      ]
+    },
+    {
+      "feature": "GroupRenameMonitorFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/grouprename/GroupRenameMonitorFeature.kt",
+      "status": "修复后定向验证通过；待整体集成/实机",
+      "evidence": [
+        "6: import t.mma.hooks.core.PreferenceRuntimeOwner",
+        "17: registerSettingsProvider(GroupRenameMonitorSettingsProvider())",
+        "20: override fun onFeatureInstall(context: FeatureContext) {",
+        "24: val owner = PreferenceRuntimeOwner(prefs, setOf(",
+        "35: trackResource { owner.close() }",
+        "37: subscribe(Events.DexReady::class.java) { owner.refresh(); current.get()?.install() }"
+      ],
+      "ownership": "启用区间独占 runtime、订阅、PendingNoticeTasks；共享历史消息链接 Hook 不归单消费者",
+      "cleanup": "任一主能力开启保留；全部关闭或 Feature destroy 退订、关闭队列、清空运行快照；不删除持久邀请计数",
+      "inFlight": "待办取消，已开始操作不线程中断；每次后续宿主调用检查旧实例 closed",
+      "lateCallbacks": "关闭/安装/观察回调串行；旧实例永久关闭；主线程语音投递仍需核查入队与销毁交错",
+      "bounds": "每实例最多256项等待；单工作线程；成员快照与昵称缓存未设置固定容量，不能宣称全部有界",
+      "tests": [
+        "test_pending_notice_tasks",
+        "test_group_monitor_lifecycle",
+        "SDK/现有ABI定向编译第二次退出0；第一次夹具使用过期FeatureContext失败，原日志保留"
+      ]
+    },
+    {
+      "feature": "RemoveMomentsAdsFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/moments/RemoveMomentsAdsFeature.kt",
+      "status": "独占Hook及安装归属修复；定向合成测试/SDK编译通过；待最新冻结回归与执行中边界复核",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/moments/RemoveMomentsAdsFeature.kt: onFeatureInstall / Runtime.install / destroy或shutdown及异步回调源码复核"
+      ],
+      "ownership": "BaseFeature跟踪独占scope；原图上传和上传尾巴另持有独占Installation，订阅捕获installed实例",
+      "cleanup": "destroy关闭scope释放Hook；原图上传清空convert方法引用；去广告移除静态installedLoaders",
+      "inFlight": null,
+      "lateCallbacks": "回调检查scope关闭；新实例可独立重装；部分成功方法通过实例安装标记避免重试重复注册",
+      "bounds": null,
+      "tests": [
+        "scripts/test_sns_upload_ownership.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "执行中回调与销毁边界仍需复核；无实机验证"
+      ]
+    },
+    {
+      "feature": "EditMessageFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/editmsg/EditMessageFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/editmsg/EditMessageFeature.kt: 安装/销毁/资源注册及相关异步入口复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule读取可变hooker，无onFeatureDestroy",
+        "菜单Hook没有scope，菜单分组与反射缓存缺少关闭清理；编辑弹窗及runOnUiThread回调无代际门控"
+      ]
+    },
+    {
+      "feature": "EmojiSaveFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/emojisave/EmojiSaveFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/emojisave/EmojiSaveFeature.kt: onFeatureInstall / Runtime.install / destroy或shutdown及异步回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口共享schedule捕获可变runtime；destroy只清bindings",
+        "菜单Hook句柄未归属且无关闭门控；每次保存新建原始Thread，无并发上限、取消或迟到UI门控"
+      ]
+    },
+    {
+      "feature": "VoicePreviewFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/voicepreview/VoicePreviewFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/voicepreview/VoicePreviewFeature.kt: onFeatureInstall / Runtime.install / destroy或shutdown及异步回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口共享schedule捕获可变runtime；destroy未关闭安装票据",
+        "Runtime.destroy仅清绑定并投递弹窗清理，Hook句柄未归属、无关闭门控；迟到点击可重新显示弹窗",
+        "转码任务只检查dismissed，未检查运行时代际；messageIdMethodCache/messagesByMenuGroup预算待核查"
+      ]
+    },
+    {
+      "feature": "VoiceToTextFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/voicetotext/VoiceToTextFeature.kt",
+      "status": "修复后定向验证通过；待整体集成/实机",
+      "evidence": [
+        "14: import t.mma.hooks.core.PreferenceRuntimeOwner",
+        "27: registerSettingsProvider(object : SimpleFeatureSettingsProvider(",
+        "31: override fun onFeatureInstall(context: FeatureContext) {",
+        "35: val owner = PreferenceRuntimeOwner(prefs, setOf(ENABLE),",
+        "43: trackResource { owner.close() }",
+        "45: subscribe(Events.DexReady::class.java) { owner.refresh(); current.get()?.schedule() }"
+      ],
+      "ownership": "每启用区间独占runtime、Hook、安装票据、Handler与候选队列",
+      "cleanup": "PreferenceRuntimeOwner关闭实例；关闭/安装同锁；主线程清理旧实例队列和行绑定",
+      "inFlight": "不取消已进入原生转换的请求",
+      "lateCallbacks": "closed拒绝旧Hook；AtomicReference清除仅compareAndSet旧实例；清理闭包只访问旧实例",
+      "bounds": "候选pending16、attempted512、行绑定弱键；不增加滚动轮询",
+      "tests": [
+        "test_voice_to_text",
+        "test_preference_runtime_owner"
+      ]
+    },
+    {
+      "feature": "VoiceForwardFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/voiceforward/VoiceForwardFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/voiceforward/VoiceForwardFeature.kt: onFeatureInstall / Runtime.install / destroy或shutdown及异步回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口已有PreferenceRuntimeOwner、独立Installation和Hook scope；shutdown有closed/stopSignal并清理部分缓存",
+        "forwardExecutor为无界singleThreadExecutor；saveVoice逐次新建Thread；队列/保存线程预算及关闭后结果投递待闭环",
+        "shutdown没有关闭已显示对话框，部分反射缓存及seenDialogs等容器未清理；需核查UI句柄归属"
+      ]
+    },
+    {
+      "feature": "SelectedMessagesFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/selectedmessages/SelectedMessagesFeature.kt",
+      "status": "发送器及Feature关闭链已补修；新增2项生产方法合成与扩大SDK编译通过；剩余边界未验收",
+      "evidence": [
+        "43: registerSettingsProvider(SelectedMessagesSettingsProvider())",
+        "46: override fun onFeatureInstall(context: FeatureContext) {",
+        "48: scheduleInstall()",
+        "49: subscribe(Events.DexReady::class.java) { scheduleInstall() }",
+        "52: override fun onFeatureDestroy(context: FeatureContext) {",
+        "57: private fun scheduleInstall() {",
+        "最后六入口复核：入口安装、调度、Runtime.destroy/detach 与 Hook 注册链；未据此判定验收通过"
+      ],
+      "ownership": "Feature局部hooker与安装票据；Hook句柄纳入资源scope；联系人预热/加载使用同一有界私有worker；共享TTL联系人缓存保留给转发消费者",
+      "cleanup": "Module/Official admissions、队列、active与Handler释放；Official解除Hook；自定义worker协作停止；对话框逐项异常隔离",
+      "inFlight": "shutdown不finish重发Activity、不native-cancel已提交scene；自定义worker不interrupt宿主发送",
+      "lateCallbacks": "closed门；Handler拒绝admission回滚；运行时发布与shutdown锁一致；晚到dialog立即释放",
+      "bounds": "Custom发送等待队列16；联系人等待队列4；15秒核心线程超时；Module/Official批次队列和待受理计数仍需预算",
+      "tests": [
+        "scripts/test_selected_senders_shutdown.py",
+        "scripts/test_selected_feature_detach.py",
+        "scripts/test_manual_send_shutdown.py",
+        "scripts/test_pending_send_stop.py",
+        "scripts/test_runtime_install_ownership.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "Module/Official批次和admissions尚无容量预算；Handler关闭投递拒绝后的主线程资源释放边界待验证。",
+        "官方EMOJI/语音准备、联系人宿主查询执行中退出、完整本地/官方回调交错待合成及集成验证。",
+        "81项新冻结进行中，不能复用旧78项快照覆盖本次源码，不能标记全功能或109项完成。"
+      ],
+      "resolvedFindings": [
+        "detach 调用协调器脱离和两个 sender.shutdown。",
+        "共享 schedule 读取可变 hooker；Hook 句柄没有局部所有者，回调及 Handler 缺关闭门控；OfficialMassSendSender 没有 shutdown，异步发送及对话框需完整关闭。",
+        "追加核查：CustomMassSendSender.kt 的私有单线程队列无界；SelectedMessageModuleSender.shutdown 仅异步投递且无closed门；OfficialMassSendSender 无shutdown；SelectedMessagesFeature.kt:490 每次联系人加载新建Thread，多个选择/日期/时间/加载对话框没有完整持有并关闭。"
+      ]
+    },
+    {
+      "feature": "MessageForwardFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/messageforward/MessageForwardFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "27: import t.mma.hooks.core.PreferenceRuntimeOwner",
+        "62: registerSettingsProvider(MessageForwardSettingsProvider())",
+        "65: override fun onFeatureInstall(context: FeatureContext) {",
+        "70: val owner = PreferenceRuntimeOwner(prefs, keys,",
+        "90: trackResource { owner.close() }",
+        "92: subscribe(Events.DexReady::class.java) { owner.refresh(); schedule?.invoke() }",
+        "最后六入口复核：入口安装、调度、Runtime.destroy/detach 与 Hook 注册链；未据此判定验收通过"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "PreferenceRuntimeOwner 持有独立安装票据及 Runtime；destroy 关闭 scope、停止发送并清理 Handler。",
+        "单线程执行器使用无界队列；成组 ticket.close/Runtime.destroy 后字段清理缺异常隔离，UI 销毁与发送竞态及共享依赖仍待闭环。"
+      ]
+    },
+    {
+      "feature": "ScheduledTaskFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/scheduledtask/ScheduledTaskFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/scheduledtask/ScheduledTaskFeature.kt: 安装/销毁/资源注册及相关异步入口复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "入口捕获installed并detach/shutdown；executionWorker有2线程/32队列；shutdown保留已接受发送完成，避免重发",
+        "shutdown的cancelAll异常会阻断executor.shutdown；需隔离取消异常",
+        "started=false之后start可再置true但执行器已shutdown；shutdown与start同步性、accepted发送跨新实例去重及缓存预算待核查"
+      ]
+    },
+    {
+      "feature": "FakeScanCameraFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/fakescancamera/FakeScanCameraFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "app/src/main/java/t/mma/hooks/items/fakescancamera/FakeScanCameraFeature.kt: 入口、释放、调度和回调源码复核"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "共享schedule捕获可变hooker，没有destroy；Hook句柄无scope且回调无关闭门控",
+        "qbarStringHandlerInstalled在任一候选成功即置true，部分失败后不会补装其余入口；需逐方法去重重试"
+      ]
+    },
+    {
+      "feature": "ProtobufPacketFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/protobuf/ProtobufPacketFeature.kt",
+      "status": "安装/销毁遗漏已修复并定向验证；共享保留有依据；缓存清理待进一步核查",
+      "evidence": [
+        "16: registerSettingsProvider(ProtobufPacketSettingsProvider())",
+        "19: override fun onFeatureInstall(context: FeatureContext) {",
+        "20: scheduleInstall(context)",
+        "21: subscribe(Events.DexReady::class.java) {",
+        "22: scheduleInstall(context)",
+        "26: private fun scheduleInstall(context: FeatureContext) {"
+      ],
+      "ownership": "ProtobufRuntime.send供联系人编辑及脚本调用，抓包KEY_ENABLE不代表共享发送服务关闭；每Feature一实例与私有安装票据",
+      "cleanup": "失败安装回滚已装Hook；解除失败留句柄并阻止重复安装；Feature销毁精确detach原实例、清待办、graceful shutdown与清缓存",
+      "inFlight": "已进入宿主发送不强中断；capture队列取消只影响观察任务，不删除goAsync或业务回调；response代理始终向原回调转发",
+      "lateCallbacks": "安装与关闭同锁；Hook闭门；记快照/去重/入队与close同锁防关闭后回填；detach仅清相同实例",
+      "bounds": "capture队列64、单包1MiB；快照约60项含request/reqPbObj、TTL只在查找时过滤尚未主动移除；待修复不可标全部有界",
+      "tests": [
+        "test_protobuf_lifecycle",
+        "test_monitor_sdk：含完整生产Java编译退出0"
+      ]
+    },
+    {
+      "feature": "StatusTextLimitFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/statuslimit/StatusTextLimitFeature.kt",
+      "status": "生命周期修复已应用；定向测试/扩大编译记录见当前验证；待整体集成",
+      "evidence": [
+        "18: registerSettingsProvider(StatusTextLimitSettingsProvider())",
+        "21: override fun onFeatureInstall(context: FeatureContext) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [
+        "scripts/test_status_limit_lifecycle.py",
+        "scripts/test_monitor_sdk.py"
+      ],
+      "openFindings": [
+        "最新冻结回归待完成；无实机业务测试",
+        "原问题修复记录见当前git diff；仍需其余依赖与并发链逐项证明"
+      ]
+    },
+    {
+      "feature": "FinderMediaDownloadFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/shortvideo/FinderMediaDownloadFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "40: registerSettingsProvider(FinderMediaDownloadSettingsProvider())",
+        "48: override fun onFeatureInstall(context: FeatureContext) {",
+        "50: scheduleInstall(context)",
+        "51: subscribe(Events.DexReady::class.java) {",
+        "52: scheduleInstall(context)",
+        "56: private fun scheduleInstall(context: FeatureContext) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "菜单Hook无销毁入口及句柄归属；共享schedule读取可变hooker",
+        "shared:finder_feed_detail由脚本及下载共同使用，需保持共享生命周期；独占菜单应使用独立票据与scope",
+        "Handler/媒体下载任务回调及图标缓存需继续核查"
+      ]
+    },
+    {
+      "feature": "HchatExtraFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt",
+      "status": "源码入口及释放链已复核；发现待闭环项",
+      "evidence": [
+        "75: registerSettingsProvider(MessageDetailsSettingsProvider())",
+        "76: registerSettingsProvider(GroupMemberHistorySettingsProvider())",
+        "77: registerSettingsProvider(RedPacketDetailsSettingsProvider())",
+        "78: registerSettingsProvider(SkipWebRiskSettingsProvider())",
+        "81: override fun onFeatureInstall(context: FeatureContext) {",
+        "83: scheduleInstall()",
+        "84: subscribe(Events.DexReady::class.java) {",
+        "85: scheduleInstall()",
+        "89: override fun onFeatureDestroy(context: FeatureContext) {",
+        "94: private fun scheduleInstall() {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "HchatExtraFeature.scheduleInstall的3个共享任务读取可变hooker；缺少独占票据及捕获实例",
+        "HchatExtraHooker.destroy未释放自身直接Hook，多个View listener集合只clear未逐项remove；监听注销/子runtime异常可阻断剩余清理",
+        "1492行list.postDelayed(timeout,1550L)及消息布局/颜色/位置监听需逐一核查实际移除链"
+      ]
+    },
+    {
+      "feature": "ScriptPluginFeature",
+      "source": "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt",
+      "status": "已定位生命周期缺口；修复/归属闭环待完成",
+      "evidence": [
+        "17: registerSettingsProvider(ScriptPluginSettingsProvider())",
+        "20: override fun onFeatureInstall(context: FeatureContext) {",
+        "24: subscribe(Events.DexReady::class.java) {"
+      ],
+      "ownership": null,
+      "cleanup": null,
+      "inFlight": null,
+      "lateCallbacks": null,
+      "bounds": null,
+      "tests": [],
+      "openFindings": [
+        "ScriptPluginFeature.kt: 未实现onFeatureDestroy；菜单及消息等安装任务归属需核实",
+        "ScriptPluginRuntime.kt: 根目录及插件目录FileObserver在startPluginObservers启动，Feature销毁无对应入口",
+        "插件卸载资源scope测试不等于全局目录观察器和宿主入口已验证",
+        "追加核查：ScriptPluginRuntime.kt:2248-2325 根目录/子目录观察器回调、reloadTasks 和新建reload线程均需进程代际关闭；多个有界executor为object常量，关闭后重建策略须一并设计。"
+      ]
+    }
+  ],
+  "latestFrozenRegression": {
+    "output": "/tmp/pl-resource-regression-header-recovery-78",
+    "total": 78,
+    "failed": 0,
+    "sourceStable": true,
+    "limitation": "78个唯一测试与清单完全一致，结束时源码哈希一致；不覆盖随后群发修改，不代表109项闭环"
+  }
+}

@@ -5,7 +5,6 @@ import t.mma.hooks.api.model.WeChatContact
 import t.mma.ui.miuix.VoiceForwardMiuixDialog
 import t.mma.ui.miuix.pickerDisplayName
 import java.util.Locale
-import java.util.concurrent.atomic.AtomicBoolean
 
 internal object SelectedMessageContactRepository {
     @Volatile
@@ -14,7 +13,6 @@ internal object SelectedMessageContactRepository {
     @Volatile
     private var friendContacts: CachedContacts? = null
 
-    private val warming = AtomicBoolean(false)
 
     fun cached(friendsOnly: Boolean): List<VoiceForwardMiuixDialog.ContactItem>? {
         val all = allContacts?.takeIf { it.valid() }
@@ -28,14 +26,6 @@ internal object SelectedMessageContactRepository {
         val loaded = loadFresh(friendsOnly)
         cache(loaded, friendsOnly)
         return loaded
-    }
-
-    fun warm() {
-        if (allContacts?.valid() == true || !warming.compareAndSet(false, true)) return
-        Thread({
-            runCatching { load(friendsOnly = false) }
-            warming.set(false)
-        }, "Hchat-SelectedMessageContactsWarmup").start()
     }
 
     private fun loadFresh(friendsOnly: Boolean): List<VoiceForwardMiuixDialog.ContactItem> {

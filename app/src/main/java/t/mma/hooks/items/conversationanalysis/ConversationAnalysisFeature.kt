@@ -29,9 +29,13 @@ class ConversationAnalysisFeature : BaseFeature() {
         val installed = ConversationAnalysisRuntime(context, ::logRuntimeError)
         runtime = installed
         installed.install()
-        messageMenuRuntime = ConversationAnalysisMessageMenuRuntime(context, ::logRuntimeError)
-        scheduleMessageMenuInstall()
-        subscribe(Events.DexReady::class.java) { scheduleMessageMenuInstall() }
+        val menu = ConversationAnalysisMessageMenuRuntime(context, ::logRuntimeError)
+        messageMenuRuntime = menu
+        val ticket = DexInstallScheduler.installation(ID, "群聊分析消息菜单")
+        trackResource { ticket.close() }
+        fun schedule() { ticket.schedule { menu.install() } }
+        schedule()
+        subscribe(Events.DexReady::class.java) { schedule() }
         logInfo(
             if (ConversationAnalysisSettings.isEnabled(context.hostContext())) {
                 "功能已启用，已调度消息菜单 Hook"
@@ -39,12 +43,6 @@ class ConversationAnalysisFeature : BaseFeature() {
                 "功能当前关闭，已安装受开关控制的消息菜单 Hook"
             }
         )
-    }
-
-    private fun scheduleMessageMenuInstall() {
-        DexInstallScheduler.schedule(ID, "群聊分析消息菜单") {
-            messageMenuRuntime?.install() == true
-        }
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {

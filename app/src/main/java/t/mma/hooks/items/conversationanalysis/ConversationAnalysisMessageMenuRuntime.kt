@@ -23,6 +23,7 @@ internal class ConversationAnalysisMessageMenuRuntime(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("群聊分析菜单资源释放失败", it) }
     private data class Binding(val nativeMessage: Any, val talker: String)
 
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
@@ -32,17 +33,18 @@ internal class ConversationAnalysisMessageMenuRuntime(
 
     @Synchronized
     fun install(): Boolean {
+        if (resources.isClosed()) return true
         val createCount = SingleMessageMenuLocator.menuCreateMethods(context, logger).count { method ->
             hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    addAnalysisMenu(param)
+                    if (!resources.isClosed()) addAnalysisMenu(param)
                 }
             })
         }
         val clickCount = SingleMessageMenuLocator.menuClickMethods(context, logger).count { method ->
             hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    handleAnalysisClick(param)
+                    if (!resources.isClosed()) handleAnalysisClick(param)
                 }
             })
         }
@@ -51,7 +53,9 @@ internal class ConversationAnalysisMessageMenuRuntime(
         return createCount > 0 && clickCount > 0
     }
 
-    fun destroy() {
+    @Synchronized fun destroy() {
+        resources.close()
+        hookedMethods.clear(); messageIdMethods.clear()
         clearBindings()
     }
 
@@ -59,7 +63,8 @@ internal class ConversationAnalysisMessageMenuRuntime(
         if (Modifier.isAbstract(method.modifiers) || method.declaringClass.isInterface) return false
         if (!hookedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            val handle = HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            resources.register { HookRegistry.get().unhook(handle) }
             true
         }.getOrElse {
             hookedMethods.remove(method)
@@ -93,6 +98,7 @@ internal class ConversationAnalysisMessageMenuRuntime(
         val activity = WeChatApis.currentActivity()?.currentActivity() ?: return
         if (activity.isFinishing || activity.isDestroyed) return
         activity.runOnUiThread {
+            if (resources.isClosed()) return@runOnUiThread
             if (!activity.isFinishing && !activity.isDestroyed) {
                 ConversationAnalysisReportDialog.show(activity, binding.talker, logger)
             }

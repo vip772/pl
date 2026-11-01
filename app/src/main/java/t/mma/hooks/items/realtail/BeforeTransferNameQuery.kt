@@ -16,6 +16,12 @@ class BeforeTransferNameQuery(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var closed = false
+    private var ownedHook: XC_MethodHook.Unhook? = null
+    @Synchronized fun destroy() {
+        closed = true
+        try { HookRegistry.get().unhook(ownedHook) } finally { ownedHook = null; pending.clear() }
+    }
     fun interface Callback {
         fun onResult(maskedName: String)
     }
@@ -30,6 +36,7 @@ class BeforeTransferNameQuery(
     fun ensureReady(): Boolean = DexInstallScheduler.queryDexKit { ensureReadyLocked() }
     @Synchronized
     private fun ensureReadyLocked(): Boolean {
+        if (closed) return false
         if (initialized && sceneCtor != null && callbackMethod != null) return true
         return runCatching {
             locateScene()
@@ -42,8 +49,8 @@ class BeforeTransferNameQuery(
         }
     }
 
-    fun query(wxid: String, roomId: String, callback: Callback): Boolean {
-        if (!RealNameTailStore.isSupportedQueryId(wxid)) return false
+    @Synchronized fun query(wxid: String, roomId: String, callback: Callback): Boolean {
+        if (closed || !RealNameTailStore.isSupportedQueryId(wxid)) return false
         if (!ensureReady()) return false
         val ctor = sceneCtor ?: return false
         return runCatching {
@@ -126,8 +133,10 @@ class BeforeTransferNameQuery(
 
     private fun setupCallbackHook() {
         val method = callbackMethod ?: return
-        HookRegistry.get().hook(method, object : XC_MethodHook() {
+        if (closed || ownedHook != null) return
+        ownedHook = HookRegistry.get().hook(method, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
+                if (closed) return
                 val scene = param.thisObject ?: return
                 val callback = pending.remove(scene) ?: return
                 val maskedName = extractMaskedName(scene)

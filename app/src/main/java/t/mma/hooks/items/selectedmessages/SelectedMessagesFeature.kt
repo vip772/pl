@@ -18,6 +18,7 @@ import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.core.FeatureResourceScope
 import t.mma.hooks.items.scheduledtask.ScheduledTaskContentItem
 import t.mma.hooks.items.scheduledtask.ScheduledTaskRuntimeCoordinator
 import t.mma.hooks.items.scheduledtask.ScheduledTaskSettings
@@ -44,22 +45,15 @@ class SelectedMessagesFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        hooker = SelectedMessagesHooker(context, ::logFeatureError).also { it.attach() }
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
+        val current = SelectedMessagesHooker(context, ::logFeatureError)
+        hooker = current
+        trackResource { current.detach(); if (hooker === current) hooker = null }
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { ticket.close() }
+        current.attach()
+        ticket.schedule { current.install() }
+        subscribe(Events.DexReady::class.java) { ticket.schedule { current.install() } }
     }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        hooker?.detach()
-        hooker = null
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            hooker?.install() == true
-        }
-    }
-
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -73,6 +67,16 @@ private class SelectedMessagesHooker(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var closed = false
+    private val resources = FeatureResourceScope { error ->
+        try { logger("群发助手资源释放失败", error) } catch (_: Throwable) { }
+    }
+    private val dialogs = ArrayList<VoiceForwardMiuixDialog.DialogHandle>()
+    private val nativeDialogs = ArrayList<android.app.Dialog>()
+    private val contactWorker = java.util.concurrent.ThreadPoolExecutor(1, 1, 15L,
+        java.util.concurrent.TimeUnit.SECONDS, java.util.concurrent.ArrayBlockingQueue<Runnable>(4),
+        java.util.concurrent.ThreadFactory { work -> Thread(work, "Hchat-SelectedMessageContacts").apply { isDaemon = true } }
+    ).apply { allowCoreThreadTimeOut(true) }
     private val main = Handler(Looper.getMainLooper())
     private val settings = HchatStorage.preferences(context.hostContext(), SelectedMessagesSettings.PREFS_NAME)
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
@@ -81,35 +85,76 @@ private class SelectedMessagesHooker(
     private val customModuleSender = CustomMassSendModuleSender(context.hostContext(), logger)
     private val officialSender = OfficialMassSendSender(context, logger)
 
+    @Synchronized
     fun attach() {
+        if (closed) return
         SelectedMessagesRuntimeCoordinator.attach(customModuleSender, moduleSender, officialSender)
-        SelectedMessageContactRepository.warm()
+        try {
+            contactWorker.execute {
+                if (!closed) runCatching { SelectedMessageContactRepository.load(friendsOnly = false) }
+            }
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            // Optional warmup; interactive loading retries through the owned worker.
+        }
     }
 
+    @Synchronized
     fun detach() {
-        SelectedMessagesRuntimeCoordinator.detach(customModuleSender)
-        moduleSender.shutdown()
-        customModuleSender.shutdown()
+        if (closed) return
+        closed = true
+        resources.close()
+        hookedMethods.clear()
+        releaseSafely { SelectedMessagesRuntimeCoordinator.detach(customModuleSender) }
+        releaseSafely { moduleSender.shutdown() }
+        releaseSafely { officialSender.shutdown() }
+        releaseSafely { customModuleSender.shutdown() }
+        releaseSafely { contactWorker.queue.clear() }
+        releaseSafely { contactWorker.shutdown() }
+        releaseSafely { main.removeCallbacksAndMessages(null) }
+        val closeDialogs = {
+            dialogs.toList().forEach { dialog -> releaseSafely { dialog.close() } }
+            dialogs.clear()
+            nativeDialogs.toList().forEach { dialog -> releaseSafely { dialog.dismiss() } }
+            nativeDialogs.clear()
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) closeDialogs() else main.post { closeDialogs() }
     }
-
+    private fun trackDialog(dialog: VoiceForwardMiuixDialog.DialogHandle) {
+        if (closed) { releaseSafely { dialog.close() }; return }
+        dialogs.removeAll { !it.isShowing() }
+        dialogs.add(dialog)
+    }
+    private fun trackNativeDialog(dialog: android.app.Dialog) {
+        if (closed) { releaseSafely { dialog.dismiss() }; return }
+        nativeDialogs.removeAll { !it.isShowing }
+        nativeDialogs.add(dialog)
+    }
+    private fun releaseSafely(action: () -> Unit) {
+        try { action() } catch (error: Throwable) {
+            try { logger("群发助手释放失败", error) } catch (_: Throwable) { }
+        }
+    }
+    @Synchronized
     fun install(): Boolean {
+        if (closed) return false
         val menuCreate = MultiSelectMessageMenuLocator.menuCreateMethod(context, logger)
         val menuClick = MultiSelectMessageMenuLocator.menuClickMethod(context, logger)
         val exitMethod = menuClick?.let { MultiSelectMessageMenuLocator.multiSelectExitMethod(context, it, logger) }
         val createHooked = menuCreate != null && exitMethod != null && hook(menuCreate, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
-                addMenu(param)
+                if (!closed) addMenu(param)
             }
         })
         val clickHooked = menuClick != null && exitMethod != null && hook(menuClick, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                handleMenuClick(param, exitMethod)
+                if (!closed) handleMenuClick(param, exitMethod)
             }
         })
         val doneMethods = locateRetransmitDoneMethods()
         val doneHooked = doneMethods.isNotEmpty() && doneMethods.all { method ->
             hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (closed) return
                     val activity = param.thisObject as? Activity ?: return
                     if (moduleSender.handleRetransmitDone(activity)) param.result = null
                 }
@@ -163,6 +208,7 @@ private class SelectedMessagesHooker(
             return
         }
         main.post {
+            if (closed) return@post
             if (activity.isFinishing) return@post
             when (action) {
                 MenuAction.MASS_SEND -> chooseMassSendChannel(activity, snapshots, exitTarget)
@@ -176,6 +222,7 @@ private class SelectedMessagesHooker(
         snapshots: List<SelectedMessageSnapshot>,
         exitTarget: MultiSelectMessageUi.ExitTarget
     ) {
+        if (closed) return
         VoiceForwardMiuixDialog.showChoices(
             activity = activity,
             title = "选择定时转发通道",
@@ -185,7 +232,7 @@ private class SelectedMessagesHooker(
                 "微信原生群发助手" to "仅选择好友并按原生队列发送"
             ),
             onSelected = { index ->
-                if (activity.isFinishing) return@showChoices
+                if (closed || activity.isFinishing) return@showChoices
                 val channel = if (index == 1) {
                     SelectedMessagesRuntimeCoordinator.CHANNEL_OFFICIAL
                 } else {
@@ -198,7 +245,7 @@ private class SelectedMessagesHooker(
                 chooseScheduleTargets(activity, snapshots, exitTarget, channel)
             },
             onDismiss = {}
-        )
+        ).also(::trackDialog)
     }
 
     private fun chooseScheduleTargets(
@@ -281,6 +328,7 @@ private class SelectedMessagesHooker(
         planTime: Long,
         onPicked: (repeatType: Int, repeatDays: Set<Int>) -> Unit
     ) {
+        if (closed) return
         VoiceForwardMiuixDialog.showChoices(
             activity = activity,
             title = "选择重复方式",
@@ -291,6 +339,7 @@ private class SelectedMessagesHooker(
                 "每周" to ""
             ),
             onSelected = { index ->
+                if (closed) return@showChoices
                 when (index) {
                     1 -> onPicked(ScheduledTaskSettings.REPEAT_DAILY, emptySet())
                     2 -> showScheduleWeekdayPicker(activity, planTime, onPicked)
@@ -298,7 +347,7 @@ private class SelectedMessagesHooker(
                 }
             },
             onDismiss = {}
-        )
+        ).also(::trackDialog)
     }
 
     private fun showScheduleWeekdayPicker(
@@ -325,13 +374,14 @@ private class SelectedMessagesHooker(
             choices = weekdays.map { it.second to "" },
             initialSelected = initialSelected,
             onConfirm = { selected ->
+                if (closed) return@showMultiChoices
                 val days = selected.mapNotNull { weekdays.getOrNull(it)?.first }.toSet()
                 if (days.isNotEmpty()) {
                     onPicked(ScheduledTaskSettings.REPEAT_WEEKLY, days)
                 }
             },
             onDismiss = {}
-        )
+        ).also(::trackDialog)
     }
 
     private fun chooseMassSendChannel(
@@ -339,6 +389,7 @@ private class SelectedMessagesHooker(
         snapshots: List<SelectedMessageSnapshot>,
         exitTarget: MultiSelectMessageUi.ExitTarget
     ) {
+        if (closed) return
         VoiceForwardMiuixDialog.showChoices(
             activity = activity,
             title = "选择群发通道",
@@ -348,7 +399,7 @@ private class SelectedMessagesHooker(
                 "微信原生群发助手" to "按微信当前人数上限自动分批"
             ),
             onSelected = { index ->
-                if (activity.isFinishing) return@showChoices
+                if (closed || activity.isFinishing) return@showChoices
                 if (index == 0) {
                     chooseModuleTargets(activity, snapshots, exitTarget)
                 } else {
@@ -356,7 +407,7 @@ private class SelectedMessagesHooker(
                 }
             },
             onDismiss = {}
-        )
+        ).also(::trackDialog)
     }
 
     private fun chooseModuleTargets(
@@ -375,10 +426,11 @@ private class SelectedMessagesHooker(
                     onDismiss = { if (!finishing.get()) sendHandle?.cancel() },
                     title = "模块群发",
                     message = "正在发送..."
-                )
+                ).also(::trackDialog)
             }
             sendHandle = moduleSender.enqueueMassSend(snapshots, targets.map { it.id }) { success, total, canceled ->
                 main.post {
+            if (closed) return@post
                     finishing.set(true)
                     progress?.close()
                     val message = when {
@@ -425,10 +477,11 @@ private class SelectedMessagesHooker(
                     onDismiss = { if (!finishing.get()) sendHandle?.cancel() },
                     title = "微信原生群发助手",
                     message = "正在发送..."
-                )
+                ).also(::trackDialog)
             }
             sendHandle = officialSender.enqueue(snapshots, targets.map { it.id }) { success, total, canceled ->
                 main.post {
+            if (closed) return@post
                     finishing.set(true)
                     progress?.close()
                     val message = when {
@@ -457,20 +510,21 @@ private class SelectedMessagesHooker(
         confirmText: String,
         onSelected: (List<VoiceForwardMiuixDialog.ContactItem>) -> Unit
     ) {
+        if (closed) return
         val showLoaded: (List<VoiceForwardMiuixDialog.ContactItem>) -> Unit = showLoaded@ { contacts ->
-            if (activity.isFinishing || activity.isDestroyed) return@showLoaded
+            if (closed || activity.isFinishing || activity.isDestroyed) return@showLoaded
             if (contacts.isEmpty()) {
                 toast(activity, "没有可用联系人")
             } else {
                 VoiceForwardMiuixDialog.showContacts(
                     activity = activity,
                     contacts = contacts,
-                    onConfirm = onSelected,
+                    onConfirm = { contacts -> if (!closed) onSelected(contacts) },
                     onDismiss = {},
                     title = title,
                     confirmText = confirmText,
                     showGroupFilter = !friendsOnly
-                )
+                ).also(::trackDialog)
             }
         }
         SelectedMessageContactRepository.cached(friendsOnly)?.let {
@@ -486,17 +540,19 @@ private class SelectedMessagesHooker(
             },
             title = title,
             message = "正在载入联系人..."
-        )
-        Thread({
+        ).also(::trackDialog)
+        try { contactWorker.execute {
+            if (closed) return@execute
             val result = runCatching { SelectedMessageContactRepository.load(friendsOnly) }
             main.post {
+            if (closed) return@post
                 if (canceled.get()) return@post
                 closingForTransition.set(true)
                 loading.close()
                 val decor = activity.window?.decorView
                 if (activity.isFinishing || activity.isDestroyed || decor == null) return@post
                 decor.postOnAnimation {
-                    if (canceled.get() || activity.isFinishing || activity.isDestroyed) return@postOnAnimation
+                    if (closed || canceled.get() || activity.isFinishing || activity.isDestroyed) return@postOnAnimation
                     result.onSuccess { contacts ->
                         showLoaded(contacts)
                     }.onFailure {
@@ -505,17 +561,24 @@ private class SelectedMessagesHooker(
                     }
                 }
             }
-        }, "Hchat-SelectedMessageContacts").start()
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            canceled.set(true)
+            loading.close()
+            if (!closed) toast(activity, "联系人加载繁忙，请稍后重试")
+        }
     }
 
     private fun showDateTimePicker(activity: Activity, onPicked: (Long) -> Unit) {
+        if (closed) return
         val initial = Calendar.getInstance().apply { add(Calendar.MINUTE, 5) }
         DatePickerDialog(
             activity,
             { _, year, month, day ->
+                if (closed) return@DatePickerDialog
                 TimePickerDialog(
                     activity,
                     { _, hour, minute ->
+                        if (closed) return@TimePickerDialog
                         showSecondPicker(activity, initial.get(Calendar.SECOND)) { second ->
                             val picked = Calendar.getInstance().apply {
                                 set(year, month, day, hour, minute, second)
@@ -527,28 +590,29 @@ private class SelectedMessagesHooker(
                     initial.get(Calendar.HOUR_OF_DAY),
                     initial.get(Calendar.MINUTE),
                     true
-                ).show()
+                ).also(::trackNativeDialog).show()
             },
             initial.get(Calendar.YEAR),
             initial.get(Calendar.MONTH),
             initial.get(Calendar.DAY_OF_MONTH)
-        ).show()
+        ).also(::trackNativeDialog).show()
     }
 
     private fun showSecondPicker(activity: Activity, initialSecond: Int, onPicked: (Int) -> Unit) {
-        val showDialog: () -> Unit = {
+        val showDialog: () -> Unit = showDialog@ {
+            if (closed) return@showDialog
             VoiceForwardMiuixDialog.showNumberInput(
                 activity = activity,
                 title = "设置秒数",
                 initialValue = initialSecond,
                 minValue = 0,
                 maxValue = 59,
-                onConfirm = onPicked,
+                onConfirm = { second -> if (!closed) onPicked(second) },
                 onDismiss = {}
-            )
+            ).also(::trackDialog)
         }
         activity.window?.decorView?.postOnAnimation {
-            if (!activity.isFinishing && !activity.isDestroyed) showDialog()
+            if (!closed && !activity.isFinishing && !activity.isDestroyed) showDialog()
         } ?: showDialog()
     }
 
@@ -587,10 +651,13 @@ private class SelectedMessagesHooker(
             method.parameterTypes.contentEquals(arrayOf(String::class.java))
     }
 
+    @Synchronized
     private fun hook(method: Method, callback: XC_MethodHook): Boolean {
+        if (closed) return false
         if (!hookedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            val handle = HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            resources.register { HookRegistry.get().unhook(handle) }
             true
         }.onFailure {
             hookedMethods.remove(method)
@@ -604,11 +671,11 @@ private class SelectedMessagesHooker(
 
     private fun toast(activity: Activity?, message: String) {
         val target = activity?.takeUnless { it.isFinishing } ?: currentActivity() ?: return
-        main.post { Toast.makeText(target, message, Toast.LENGTH_SHORT).show() }
+        main.post { if (!closed) Toast.makeText(target, message, Toast.LENGTH_SHORT).show() }
     }
 
     private fun isEnabled(): Boolean {
-        return settings.getBoolean(SelectedMessagesSettings.KEY_ENABLE, SelectedMessagesSettings.DEFAULT_ENABLE)
+        return !closed && settings.getBoolean(SelectedMessagesSettings.KEY_ENABLE, SelectedMessagesSettings.DEFAULT_ENABLE)
     }
 
     companion object {

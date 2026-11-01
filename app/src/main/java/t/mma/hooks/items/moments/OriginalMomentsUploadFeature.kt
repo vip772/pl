@@ -17,7 +17,6 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 class OriginalMomentsUploadFeature : BaseFeature() {
-    private var hooker: OriginalMomentsUploadHooker? = null
 
     override fun featureId(): String = ID
 
@@ -28,21 +27,13 @@ class OriginalMomentsUploadFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        hooker = OriginalMomentsUploadHooker(context)
-        if (hooker?.install(allowDexSearch = false) != true) {
-            scheduleInstall()
-        }
-        subscribe(Events.DexReady::class.java) {
-            scheduleInstall()
-        }
+        val installed = OriginalMomentsUploadHooker(context)
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { installed.destroy() }
+        trackResource { ticket.close() }
+        if (!installed.install(allowDexSearch = false)) ticket.schedule { installed.install(allowDexSearch = true) }
+        subscribe(Events.DexReady::class.java) { ticket.schedule { installed.install(allowDexSearch = true) } }
     }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            hooker?.install(allowDexSearch = true) == true
-        }
-    }
-
     companion object {
         const val ID = "original_moments_upload"
     }
@@ -54,6 +45,15 @@ private class OriginalMomentsUploadHooker(
     private val prefs = HchatStorage.preferences(context.hostContext(), OriginalMomentsUploadSettings.PREFS_NAME)
     private val methodPrefs = DexMethodCache.prefs(context.hostContext(), CACHE_PREFS)
 
+    private val resources = t.mma.hooks.core.FeatureResourceScope { HLog.e("$TAG 资源释放失败", it) }
+    @Synchronized fun destroy() {
+        resources.close()
+        convertImg2WxamMethod = null
+    }
+    private fun hookOwned(method: Method, callback: XC_MethodHook) {
+        val handle = HookRegistry.get().hook(method, callback)
+        resources.register { HookRegistry.get().unhook(handle) }
+    }
     @Volatile
     private var imagePreviewInstalled = false
 
@@ -65,18 +65,19 @@ private class OriginalMomentsUploadHooker(
 
     @Synchronized
     fun install(allowDexSearch: Boolean): Boolean {
+        if (resources.isClosed()) return false
         locateSnsConvertImgMethod(allowDexSearch)?.let { convertImg2WxamMethod = it }
         if (!imagePreviewInstalled) {
             locateImagePreviewSendMethod(allowDexSearch)?.let { method ->
                 try {
-                    HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    hookOwned(method, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: MethodHookParam) {
-                            if (!isEnabled()) return
+                            if (resources.isClosed() || !isEnabled()) return
                             patchGalleryTimelineArgs(param.args)
                         }
 
                         override fun afterHookedMethod(param: MethodHookParam) {
-                            if (!isEnabled()) return
+                            if (resources.isClosed() || !isEnabled()) return
                             patchGalleryResultIntent(param.args)
                         }
                     })
@@ -89,9 +90,9 @@ private class OriginalMomentsUploadHooker(
         if (!createPicInstalled) {
             locateSnsCreatePicMethod(allowDexSearch)?.let { method ->
                 try {
-                    HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    hookOwned(method, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: MethodHookParam) {
-                            if (!isEnabled()) return
+                            if (resources.isClosed() || !isEnabled()) return
                             bypassImageReencode(param)
                         }
                     })

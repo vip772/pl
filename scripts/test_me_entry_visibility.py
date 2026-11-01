@@ -12,6 +12,11 @@ fun main(){
  runtime.attempt();check(KavaReflector.lookups==1)
  runtime.installed=true;runtime.attempt();check(KavaReflector.lookups==1)
  runtime.installed=false;runtime.destroyed=true;runtime.attempt();check(KavaReflector.lookups==1)
+ KavaReflector.ready=true;val retry=Runtime();retry.requestedMeHiddenKeys=setOf("x")
+ HookRegistry.failAt=2;retry.attempt();check(!retry.installed && HookRegistry.handles.none{it.active})
+ HookRegistry.failAt=0;retry.attempt();check(retry.installed && HookRegistry.handles.count{it.active}==2)
+ retry.resources.close();check(HookRegistry.handles.none{it.active})
+ println("PASS partial hook rollback/retry and scope close")
  println("PASS no hooks/lookup when all off; enabled install attempt; installed/destroyed guard")
  val entries=MeEntryVisibility.Entry.values()
  check(MeEntryVisibility.hiddenKeys{false}.isEmpty())
@@ -34,25 +39,35 @@ import java.util.*
 class Bundle
 open class XC_MethodHook {
  class MethodHookParam(val thisObject:Any)
- class Unhook
+ class Unhook {var active=true}
  open fun beforeHookedMethod(param:MethodHookParam){}
  open fun afterHookedMethod(param:MethodHookParam){}
 }
 object KavaReflector {
  var lookups=0
- fun loadClass(n:String,l:ClassLoader):Class<*>? {lookups++;return null}
- fun findMethod(c:Class<*>,n:String,vararg p:Class<*>):java.lang.reflect.Method?=null
+ var ready=false;fun loadClass(n:String,l:ClassLoader):Class<*>? {lookups++;return if(ready) Host::class.java else null}
+ fun findMethod(c:Class<*>,n:String,vararg p:Class<*>):java.lang.reflect.Method?=Host::class.java.getDeclaredMethod("q")
  fun findMethodRecursive(c:Class<*>,n:String,vararg p:Class<*>):java.lang.reflect.Method?=null
- fun findFieldRecursive(c:Class<*>,n:String):java.lang.reflect.Field?=null
+ fun findFieldRecursive(c:Class<*>,n:String):java.lang.reflect.Field?=Host::class.java.getDeclaredField("g")
  fun readField(f:java.lang.reflect.Field,o:Any):Any?=null
  fun invokeOrThrow(m:java.lang.reflect.Method,o:Any):Any?=null
 }
-object HookRegistry {fun get()=this;fun hook(m:java.lang.reflect.Method,c:XC_MethodHook)=XC_MethodHook.Unhook()}
+class Host { @JvmField var g=0;fun q(){} }
+object HookRegistry {
+ var calls=0;var failAt=0;val handles=mutableListOf<XC_MethodHook.Unhook>()
+ fun get()=this
+ fun hook(m:java.lang.reflect.Method,c:XC_MethodHook):XC_MethodHook.Unhook {
+  calls++;if(calls==failAt)error("hook failed")
+  return XC_MethodHook.Unhook().also{handles+=it}
+ }
+ fun unhook(h:XC_MethodHook.Unhook){h.active=false}
+}
 object HLog {fun e(s:String,t:Throwable){}}
 class Ctx {fun hostClassLoader()=javaClass.classLoader}
 class Prefs {fun getBoolean(k:String,d:Boolean)=d}
 object WeChatApis {fun version()=this;fun versionName()="8.0.78"}
-class Runtime {
+internal class Runtime {
+ val resources=t.mma.hooks.core.FeatureResourceScope {throw it}
  val context=Ctx(); val prefs=Prefs();val ownedHooks=mutableListOf<XC_MethodHook.Unhook>()
  val meEntryAdapters=Collections.newSetFromMap(WeakHashMap<Any,Boolean>())
  val meEntryOverlays=IdentityHashMap<Any,Set<String>>()
@@ -64,5 +79,5 @@ class Runtime {
 with tempfile.TemporaryDirectory() as td:
  p=Path(td);(p/'Main.kt').write_text(main);(p/'Runtime.kt').write_text(stub)
  jar=p/'test.jar'
- subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(jar),str(p/'Main.kt'),str(p/'Runtime.kt'),str(r/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/MeEntryVisibility.kt')],check=True,timeout=60)
+ subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(jar),str(p/'Main.kt'),str(p/'Runtime.kt'),str(r/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/MeEntryVisibility.kt'),str(r/'app/src/main/java/t/mma/hooks/core/FeatureResourceScope.kt')],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{jar}:{std}','t.mma.hooks.items.backgroundbeauty.MainKt'],check=True,timeout=30)

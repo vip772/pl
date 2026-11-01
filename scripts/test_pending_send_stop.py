@@ -10,7 +10,7 @@ for filename,klass in [('OfficialMassSendSender.kt','Official'),('SelectedMessag
  class Main {fun post(action:()->Unit)=action();fun removeCallbacks(r:Runnable){}}
  data class SendBatch(val id:String,var stopRequested:Boolean=false,val total:Int=4,var success:Int=1,
  val snapshots:List<Int> = listOf(1,2),val targets:List<Int> = listOf(1,2),val onComplete:((Int,Int,Boolean)->Unit)?=null)
- val main=Main();val batches=java.util.ArrayDeque<SendBatch>();var activeBatch:SendBatch?=null
+ var closed=false;val main=Main();val batches=java.util.ArrayDeque<SendBatch>();var activeBatch:SendBatch?=null
  var activeScene:Any?=null;var activeInfo:Any?=null;var activeToken="";var activeRetransmitTargets=listOf<String>()
  var timeoutRunnable:Runnable?=null;var nextCalls=0
  fun startNextBatch(){nextCalls++}

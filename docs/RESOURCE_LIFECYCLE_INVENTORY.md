@@ -1,5 +1,23 @@
 # Hchat 全功能资源所有权清单（持续核查）
 
+## 接续核查工作记录（基线 2f8fb6c，尚未最终交付）
+- 逐功能当前对账见 `RESOURCE_LIFECYCLE_FEATURE_AUDIT.json`：109 个注册入口（包含 Java 的 WechatApiFeature）均已完成首轮入口/释放链复核，待核查入口为 0；仍有已记录的 openFindings 未闭环。首轮覆盖率为 100%，不等于修复或整体交付完成率。
+- 本轮在已有语音转文字修复基础上，追加群改名、进退群监控、步数倍增及 Protobuf 的明确缺口修复。群提醒改为最多 256 项延迟待办、独占单线程，取消等待不线程中断在途宿主调用；分步顺序及间隔保持原链路，主线程语音入队与销毁同锁。
+- Protobuf 共享发送被联系人编辑及脚本依赖，不能按抓包开关撤销；现一 Feature 一实例重试、失败精确回滚 Hook、保留解除失败句柄阻止重复安装、销毁精确 detach，抓包线程可空闲退出。快照 TTL 主动释放、缓存持有对象仍需进一步核查，不能宣称这项全部完成。
+- 步数倍增改为每启用区间独占票据和 Hook，旧代闭门、迟到登记立即释放；保留8.0.78版本约束、1至10倍及溢出限幅。未执行实际微信运动上报。
+- 新脚本查询 API + ScriptDexKitBridge 的完整便捷辅助链通过受保护惰性结果 JVM fixture：多锚点回退、Class/Member/String 结果出锁遍历不再访问受保护 Data；真实 DexKit ABI 另由既有测试验证。该测试不证明 Agent 全返回链或 native 释放量。
+- 定向证据：生产 PendingNoticeTasks、群监控分步/销毁/语音迟到回调、步数生产 Feature 启停/失败/迟到Hook、Protobuf 安装回滚/解除失败/不打断在途测试通过。`test_monitor_sdk.py` 直接 Kotlin+Java/SDK/既有ABI 编译成功（`/tmp/pl-sdk-protobuf-01.exit`=0）；初始过期夹具/终端中断记录保留，不改写为首次全通过。
+- 最新已完成冻结证据为 `/tmp/pl-resource-regression-sns-73/DONE.json`：73 项、0 失败、sourceStable=true。追加首页扩展/悬浮标题栏/共用scope异常隔离后，75 项冻结回归在 `/tmp/pl-resource-regression-header-home-75` 执行；以最终 DONE.json 为准。
+- 仍需闭环：其余逐功能调用链、GroupBar/昵称宽度/艾特提醒等新发现候选、内部 DexKit 与 Agent 全返回链、缓存与队列持有边界、最终冻结回归、提交推送和对应 Actions/APK。已有 aac00e1 APK 不能作为本轮未提交源码的交付。
+
+
+## 2026-11-01 首轮入口复核收尾（尚未最终交付）
+- 最后六入口已写入审计 JSON：首页扩展、悬浮快捷菜单、悬浮标题栏、自定义底栏、群发助手、转发。入口复核 109/109，不代表 109 项已验收。
+- 首页扩展：统一由启用区间所有者释放；逐项隔离订阅/偏好/Hook/Session/日志清理异常，释放读队列并请求私有读线程停止；头像等待队列上限32，提交拒绝时清除请求并回告失败。网络截止、联系人/日历队列及旧Session回调仍待闭环。
+- 悬浮标题栏：独占 Installation 捕获本代 Runtime，before/after Hook句柄归scope；关闭门拒绝旧回调，视图恢复主线程执行并逐项隔离。旧代恢复与新代重装交错、原始overlay恢复及Capsule依赖仍待闭环。
+- FeatureResourceScope：定向测试发现onError再次抛异常会中断后续释放，已隔离错误处理器异常；新增普通清理/迟到登记/错误处理器同时失败测试。
+- 首页扩展与标题栏定向生产方法合成测试、扩大整文件SDK/已有ABI编译通过；75项冻结回归未结束前不得写为全部通过。未执行实机业务测试、本地Gradle、提交、推送或最终构建。
+
 ## 当前核查结论（2026-10-31，以本节为准）
 
 以下历史阶段段落保留追溯，不能将其中旧的“未自动关闭”“尚未修复”或局部测试数量当作当前结论。设备验收仍未执行；不宣称所有功能都实现关闭即卸载，也不声称已证明全进程无泄漏。
@@ -142,3 +160,49 @@
 - 透明、圆角、自定义头像的 Hook 句柄登记到私有 FeatureResourceScope；销毁解除自身 Hook，不调用全局 unhookAll。迟到登记即时释放，旧回调检查 destroyed；自定义菜单扩展注册同时登记反注册。
 - 三项主开关拥有运行时、设置监听、Dex 安装重试票据；关闭取消重试和资源，重开创建新实例。圆角 Bitmap 弱缓存清空，不 recycle 仍可能被通知使用的 Bitmap。
 - 本次验证包括整文件 SDK 编译、生产资源作用域并发/失败测试；当前屏幕已有头像是否立即刷新仍需统一实机观察，不能由 Hook 释放测试推断。
+本轮续修：隐藏长按菜单按启用区间管理私有Hook/票据，合成启停/失败重试/迟到句柄释放通过；消息菜单扩展按区间持有Runtime与票据，行为测试待补。分组横栏安装销毁同锁并撤销旧票据，worker关闭入队捕获拒绝；昵称宽度增加代际门控。上述改动直接SDK/既有ABI编译通过；横栏安装测试与昵称现有测试结果待核实，完整代际测试仍待补。前次54项通过记录不覆盖这些新增改动；未提交/未推送/未构建最终APK。
+
+补核结果：横栏安装竞态测试与昵称宽度现有测试已通过；消息菜单扩展启停测试已通过（停用启动、关闭重开、旧安装闭包隔离、同一Feature重装、监听/票据/Runtime释放）。回归入口现58项，尚未执行新冻结全集；95项待核查，艾特提醒仍待修复，昵称代际测试及菜单Runtime内部清理仍未闭环。
+
+### 后续核查进行中
+
+- 艾特提醒：补充每启用区间worker、安装票据、数据库订阅、Renderer Hook所有权；SDK/既有ABI编译和入口启停、排序、span测试通过。持久化_seen预算与Runtime并发行为仍未闭环。
+- 滑动手势：发现专用语音线程和Hook未释放，已增加Adapter销毁与两个独占票据、旧回调门控；定向SDK编译通过，行为验证待补。
+- 分组横栏和消息菜单扩展：逐项释放，单个unhook失败不阻断其他释放。
+- 109入口已进行资源关键词扫描，该扫描只用于定位，不能替代逐项源码及依赖核查。待核查状态保留。
+
+- 冻结验证：/tmp/pl-resource-regression-frozen-61/DONE.json 记录 total=61, failed=0, sourceStable=true。此冻结记录早于随后群聊分析和实名尾字修改，不覆盖这两组后续修改。
+- 实名尾字调度器：新增test_realtail_scheduler_lifecycle.py通过；查询Hook/预取器/调度器均已补销毁入口，完整依赖编译和并发竞态仍待确认。
+
+
+## 2026-11-01 接续核实：75 项冻结回归
+- HEAD：2f8fb6cd9e5bb33cc0e0e981bed89030fbc74d98。
+- /tmp/pl-resource-regression-header-home-75b/DONE.json：total=75，failed=0，sourceStable=true，resumed=true。
+- summary.json 中 75 个唯一测试与执行清单完全一致；接续核查时所有 source-sha256.json 文件哈希一致。
+- 保留 75 首轮 ownership 旧断言失败、75b 等待超时中断、22 项保留及 53 项补跑记录，详见 RESUMED.json；不改写为首次全通过。
+- 这是当前修改前快照的合成回归和直接 SDK/ABI 编译证据，不是 109 项全部闭环、Android/R8 全构建或实机验收。
+
+
+## 2026-11-01 标题栏恢复链补修（78项冻结进行中）
+- Capsule.restore/destroy逐项隔离观察器、视觉、视图、worker、Handler、cache及日志异常；清理点击闭包和头像引用，销毁幂等。
+- 私有头像池改为单worker、16项等待队列、15秒核心线程回收；拒绝时复位loading。下载增加8秒检查式预算，阻塞读仍受4秒readTimeout约束；不声称严格8秒终止。
+- overlay先读取并记录isInOverlayMode，后set；禁用/销毁恢复原值。背景各层反射claim/restore隔离。
+- 旧代主线程恢复登记并在新apply前排空；普通布局用volatile快速门控。attach/layout闭包增加closed门。
+- 实际发现共享卡片遗漏backgroundTintList/backgroundTintMode恢复；增加原值归属和逐属性异常隔离。内容卡片恢复translation时补背景恢复，headerZone销毁不再错误依赖已清空headers映射。
+- 新增test_header_capsule_shutdown、test_header_visual_recovery、test_header_card_restore，均提取生产方法；本轮78项冻结中前三项已退出0。Hook定向退出0。此前直接SDK/ABI编译通过，但最终以78项快照内test_monitor_sdk为准。
+- visual_recovery首次测试桩遗漏TAG编译失败，保留/tmp/pl-header-visual-verify/test_header_visual_recovery.log；修正桩后retry通过，不能记录首次全过。
+- 当前冻结目录/tmp/pl-resource-regression-header-recovery-78；日志/tmp/pl-header-recovery-78.log。冻结未结束前不修改app/src或scripts。
+- 仍未验收：真实Android UI交错、网络/DNS截止、拒绝后的重试时序以及全部109入口依赖闭环。未执行业务操作、本地Gradle、提交推送或Actions。
+
+2026-11-01：78项冻结结束，total=78，failed=0，sourceStable=true；78个唯一测试与清单一致，结束后所有源码哈希一致。含最新标题栏/共享卡片直接SDK编译。证据：/tmp/pl-resource-regression-header-recovery-78。之后群发修改另行验证。
+
+## 2026-11-01 群发与设置入口续修（不是全项目完成）
+- 修复群发测试生成语法及提取锚点；首次失败保留在/tmp/pl-selected-senders-recovery/targeted.initial-failure.log；定向retry和补锁后测试通过。
+- 群发新增生产admission/shutdown合成、Feature.detach/dialog异常注入合成；同测主线程/非主线程、回调及logger失败、拒绝回滚、晚到资源与幂等。最新六项定向confirm.exit全部0，未调用真实宿主发送。
+- 联系人预热不再另起无归属Thread，进入Feature自有队列4的worker；共享TTL缓存为MessageForward消费者保留，不全局清理。
+- 扩大直接SDK/ABI编译发现并修复两个shutdown重复@Synchronized；通过记录/tmp/pl-selected-senders-recovery/sdk.retry.exit=0。
+- 设置Feature改为BaseFeature持有3个Provider；SettingsInjector全路径Hook局部持有、私有Handler、关闭门及弱引用原listener/tag恢复；生产Java提取合成通过。
+- 设置定向测试桩首次遗漏implements AutoCloseable失败，保留initial-failure日志；扩大编译先暴露旧ABI缺managed，再补当前SettingsDexFinder/DexKitBridgeManager源到javac，最终/tmp/pl-settings-owner/sdk.final.exit=0。
+- 设置恢复投递前清空自身绑定图，安装/标题Hook/adapter增量取得与close互斥；不得以合成关闭通过等同原生设置页面移除验收。
+- 81项新冻结目录/tmp/pl-resource-regression-selected-settings-81，日志/tmp/pl-selected-settings-81.log；进行中，冻结期间不改app/src和scripts。旧78项快照不覆盖本次修改。
+- 尚未完成109入口：群发队列预算、退出投递拒绝、官方准备与回调交错；设置原生页面；公共API进程所有者/观察订阅/全局HookRegistry异常；脚本全局可重建关闭以及审计中的其他openFindings。未执行业务、Gradle、提交推送或Actions。

@@ -9,6 +9,8 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.model.WeChatMessage
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
+import t.mma.hooks.core.FeatureResourceScope
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.FeatureContext
 import t.mma.preferences.HchatStorage
 import t.mma.utils.HLog
@@ -65,9 +67,9 @@ object MentionNoticeSettings {
             }
         }
     }
-    private val renderMethods = HashSet<java.lang.reflect.Method>()
     @Synchronized
-    fun installRenderer(context: FeatureContext): Boolean {
+    internal fun installRenderer(context: FeatureContext, resources: FeatureResourceScope, renderMethods: MutableSet<java.lang.reflect.Method>): Boolean {
+        if (resources.isClosed()) return true
         val classes = listOfNotNull(
             KavaReflector.loadClass("com.tencent.mm.view.x2c.X2CTextView", context.hostClassLoader()),
             KavaReflector.loadClass("com.tencent.neattextview.textview.view.NeatTextView", context.hostClassLoader()),
@@ -87,6 +89,7 @@ object MentionNoticeSettings {
                     if (method in renderMethods) continue
                     val hook = HookRegistry.get().hook(method, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: MethodHookParam) {
+                            if (resources.isClosed()) return
                             val input = param.args?.getOrNull(0) as? CharSequence ?: return
                             // Exact module prefix only; ordinary messages and timestamps pass unchanged.
                             if (!known(input.toString())) return
@@ -99,7 +102,10 @@ object MentionNoticeSettings {
                             }
                         }
                     })
-                    if (hook != null) renderMethods.add(method) else return false
+                    if (hook != null) {
+                        renderMethods.add(method)
+                        resources.register { HookRegistry.get().unhook(hook) }
+                    } else return false
                 }
                 current = current.superclass
             }
@@ -134,51 +140,67 @@ object MentionNoticeSettings {
 class MentionNoticeFeature : BaseFeature() {
     override fun featureId() = "mention_notice"
     override fun name() = "艾特提醒"
+    override fun onFeatureInstall(context: FeatureContext) {
+        if (context.loadPackageParam().processName != context.loadPackageParam().packageName) return
+        val prefs = HchatStorage.preferences(context.hostContext(), MentionNoticeSettings.PREFS)
+        var schedule: (() -> Unit)? = null
+        val owner = PreferenceRuntimeOwner(prefs, setOf(MentionNoticeSettings.ENABLE),
+            enabled = { prefs.getBoolean(MentionNoticeSettings.ENABLE, false) },
+            create = { resources ->
+                val runtime = MentionNoticeRuntime(context, resources)
+                val ticket = DexInstallScheduler.installation(featureId(), name())
+                val install = { ticket.schedule { runtime.install() } }
+                schedule = install
+                resources.register { if (schedule === install) schedule = null }
+                resources.register { ticket.close() }
+                install()
+            }, onError = { logError("艾特提醒启停失败", it) })
+        trackResource { owner.close() }
+        owner.start()
+        subscribe(Events.DexReady::class.java) { schedule?.invoke() }
+    }
+}
+
+private class MentionNoticeRuntime(
+    private val featureContext: FeatureContext,
+    private val resources: FeatureResourceScope
+) {
     private var observing = false
-    @Volatile private var observingSince = 0L
+    private val renderMethods = HashSet<java.lang.reflect.Method>()
     private val pending = HashSet<String>()
     private val worker = java.util.concurrent.ThreadPoolExecutor(
         1, 1, 30, java.util.concurrent.TimeUnit.SECONDS,
         java.util.concurrent.ArrayBlockingQueue<Runnable>(256),
         java.util.concurrent.ThreadFactory { task -> Thread(task, "Hchat-MentionNotice").apply { isDaemon = true } }
     ).apply { allowCoreThreadTimeOut(true) }
-    override fun onFeatureInstall(context: FeatureContext) {
-        if (context.loadPackageParam().processName != context.loadPackageParam().packageName) return
-        subscribe(Events.DexReady::class.java) {
-            DexInstallScheduler.schedule(featureId(), name()) {
-                if (!MentionNoticeSettings.installRenderer(context)) return@schedule false
-                val local = WeChatApis.localMessages() ?: return@schedule false
-                local.ensureReady()
-                val changes = WeChatApis.messageChanges() ?: return@schedule false
-                if (!local.isAvailable() || !changes.isInstalled()) return@schedule false
-                if (!observing) {
-                    observingSince = System.currentTimeMillis()
-                    trackSubscription(changes.subscribe { change ->
-                        // The existing DB observer already owns the stored snapshot. Do not
-                        // consume add_msg's second-resolution transient timestamp here.
-                        val msg = change.message
-                        if (MentionNoticeSettings.enabled(context.hostContext()) &&
-                            msg != null && MentionNoticeOrder.accepts(change.isInsert(), msg,
-                                observingSince, System.currentTimeMillis())) {
-                            try { worker.execute { handle(context.hostContext(), msg) } }
-                            catch (error: java.util.concurrent.RejectedExecutionException) {
-                                HLog.e("[Hchat:艾特提醒] 消息处理队列已满或关闭", error)
-                            }
-                        }
-                    })
-                    observing = true
+    init { resources.register { worker.shutdownNow() } }
+    @Synchronized fun install(): Boolean {
+        if (resources.isClosed()) return true
+        if (!MentionNoticeSettings.installRenderer(featureContext, resources, renderMethods)) return false
+        val local = WeChatApis.localMessages() ?: return false
+        local.ensureReady()
+        val changes = WeChatApis.messageChanges() ?: return false
+        if (!local.isAvailable() || !changes.isInstalled()) return false
+        if (!observing) {
+            val observingSince = System.currentTimeMillis()
+            val subscription = changes.subscribe { change ->
+                val msg = change.message
+                if (!resources.isClosed() && msg != null &&
+                    MentionNoticeOrder.accepts(change.isInsert(), msg, observingSince, System.currentTimeMillis())) {
+                    try { worker.execute {
+                        if (!resources.isClosed()) handle(featureContext.hostContext(), msg)
+                    } } catch (error: java.util.concurrent.RejectedExecutionException) {
+                        if (!resources.isClosed()) HLog.e("[Hchat:艾特提醒] 消息处理队列已满", error)
+                    }
                 }
-                true
             }
+            resources.register { subscription?.unsubscribe() }
+            observing = true
         }
-    }
-    override fun onFeatureDestroy(context: FeatureContext) {
-        worker.shutdownNow()
-        observing = false
-        observingSince = 0L
+        return true
     }
     private fun handle(context: Context, msg: WeChatMessage) {
-        if (!MentionNoticeSettings.enabled(context)) return
+        if (resources.isClosed() || !MentionNoticeSettings.enabled(context)) return
         if (!msg.isIncoming() || !msg.isGroupChat()) return
         val noticeTime = MentionNoticeOrder.after(msg.createTime) ?: return
         val self = WeChatApis.account()?.selfWxId().orEmpty()
@@ -204,7 +226,7 @@ class MentionNoticeFeature : BaseFeature() {
                 .ifBlank { contacts?.getDisplayName(sender).orEmpty() }.ifBlank { sender }
                 .replace('\n', ' ').replace('\r', ' ')
             val suffix = if (type == WeChatMessage.AtMentionType.AT_ALL) "艾特了所有人" else "艾特了你"
-            if (Thread.currentThread().isInterrupted || !MentionNoticeSettings.enabled(context) || WeChatApis.account()?.selfWxId() != self) return
+            if (resources.isClosed() || Thread.currentThread().isInterrupted || !MentionNoticeSettings.enabled(context) || WeChatApis.account()?.selfWxId() != self) return
             // Reserve persistently before insertion: process restart must not duplicate a notice.
             if (!store.edit().putBoolean(key, true).commit()) return
             val notice = MentionNoticeSettings.MARKER + name + " " + suffix

@@ -38,7 +38,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     private val main = Handler(Looper.getMainLooper())
     private val worker = t.mma.hooks.core.IdleSerialExecutor.create("Hchat-HomeExtension")
     private val avatarWorker = java.util.concurrent.ThreadPoolExecutor(
-        3, 3, 30L, java.util.concurrent.TimeUnit.SECONDS, java.util.concurrent.LinkedBlockingQueue<Runnable>(),
+        3, 3, 30L, java.util.concurrent.TimeUnit.SECONDS, java.util.concurrent.ArrayBlockingQueue<Runnable>(32),
         java.util.concurrent.ThreadFactory { Thread(it, "Hchat-HomeAvatar").apply { isDaemon = true } }
     ).apply { allowCoreThreadTimeOut(true) }
     // Accessed only on main; repeated requests share a single download.
@@ -52,13 +52,16 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
     }
     @Volatile private var destroyed = false
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == null || key !in musicDataKeys) main.post { sessions.values.toList().forEach { it.safeRender() } }
+        if (!destroyed && (key == null || key !in musicDataKeys)) main.post {
+            if (!destroyed) sessions.values.toList().forEach { it.safeRender() }
+        }
     }
     private var changeSubscription: t.mma.hooks.api.conversation.WeChatConversationChangeApi.Subscription? = null
     private val updateRecent = Runnable { if (!destroyed && !prefs.getBoolean(HomeExtensionSettings.FAVORITES, false)) sessions.values.toList().forEach { it.invalidateContacts() } }
     fun install() {
+        if (destroyed) return
         changeSubscription = WeChatApis.conversationChanges()?.subscribe {
-            if (prefs.getBoolean(HomeExtensionSettings.ENABLE, false) &&
+            if (!destroyed && prefs.getBoolean(HomeExtensionSettings.ENABLE, false) &&
                 !prefs.getBoolean(HomeExtensionSettings.FAVORITES, false) &&
                 prefs.getBoolean(HomeExtensionSettings.RECENT, true)) {
                 main.removeCallbacks(updateRecent)
@@ -70,6 +73,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         KavaReflector.findMethodRecursive(owner, "setAdapter", ListAdapter::class.java)?.let { method ->
             hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val list = param.thisObject as? ListView ?: return
                     if (owner.isInstance(list)) scheduleAttach(list)
                 }
@@ -78,6 +82,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         KavaReflector.findMethodRecursive(owner, "onAttachedToWindow")?.let { method ->
             hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (destroyed) return
                     val list = param.thisObject as? ListView ?: return
                     if (owner.isInstance(list)) scheduleAttach(list)
                 }
@@ -87,7 +92,8 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         if (launcher != null) KavaReflector.findMethodRecursive(launcher, "onResume")?.let { method ->
             hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (param.thisObject is Activity) main.post { sessions.values.toList().forEach { it.safeRender() } }
+                    if (destroyed) return
+                    if (param.thisObject is Activity) main.post { if (!destroyed) sessions.values.toList().forEach { it.safeRender() } }
                 }
             })
         }
@@ -132,6 +138,7 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         if (method in guardedAdapters) return
         val unhook = HookRegistry.get().hook(method, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
+                if (destroyed) return
                 val recycled = param.args.getOrNull(1) as? View ?: return
                 // Module headers must never enter WeChat's conversation ViewHolder binding.
                 if (HomeExtensionSurface.contains(recycled)) param.args[1] = null
@@ -140,30 +147,43 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
         hooks += unhook
         guardedAdapters += method
     }
+    private fun releaseSafely(action: () -> Unit) {
+        try { action() } catch (error: Throwable) {
+            runCatching { HLog.e("[Hchat:HomeExtension] 资源释放失败", error) }
+        }
+    }
     fun destroy() {
         if (Looper.myLooper() != Looper.getMainLooper()) { main.post { destroy() }; return }
         if (destroyed) return
         destroyed = true
-        changeSubscription?.unsubscribe(); changeSubscription = null
-        prefs.unregisterOnSharedPreferenceChangeListener(listener)
-        hooks.forEach { HookRegistry.get().unhook(it) }
+        val subscription = changeSubscription
+        changeSubscription = null
+        releaseSafely { subscription?.unsubscribe() }
+        releaseSafely { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+        val ownedHooks = hooks.toList()
         hooks.clear()
+        ownedHooks.forEach { hook -> releaseSafely { HookRegistry.get().unhook(hook) } }
         guardedAdapters.clear()
-        main.removeCallbacksAndMessages(null)
-        sessions.toList().forEach { (list, session) -> session.dispose(); list.removeHeaderView(session.root) }
+        releaseSafely { main.removeCallbacksAndMessages(null) }
+        val ownedSessions = sessions.toList()
         sessions.clear()
-        worker.queue.clear(); worker.shutdown()
-        avatarWorker.queue.clear(); avatarWorker.shutdown()
+        ownedSessions.forEach { (list, session) ->
+            releaseSafely { session.dispose() }
+            releaseSafely { list.removeHeaderView(session.root) }
+        }
+        releaseSafely { worker.queue.clear(); worker.shutdownNow() }
+        releaseSafely { avatarWorker.queue.clear(); avatarWorker.shutdownNow() }
         pendingAttach.clear()
         avatarRequests.clear()
-        avatars.evictAll()
+        releaseSafely { avatars.evictAll() }
     }
     private fun requestAvatar(url: String, callback: (Bitmap?) -> Unit) {
         if (destroyed) return
         avatars.get(url)?.let { callback(it); return }
         avatarRequests[url]?.let { it.add(callback); return }
         avatarRequests[url] = mutableListOf(callback)
-        avatarWorker.execute {
+        try { avatarWorker.execute {
+            if (destroyed) return@execute
             val started = SystemClock.uptimeMillis()
             val result = runCatching {
                 val disk = java.io.File(avatarDisk, java.security.MessageDigest.getInstance("SHA-256").digest(url.toByteArray()).joinToString("") { "%02x".format(it) } + ".jpg")
@@ -198,8 +218,16 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
                 if (!destroyed) {
                     result.getOrNull()?.let { avatars.put(url, it) }
                     result.exceptionOrNull()?.let { HLog.e("[Hchat:HomeExtension] 头像加载失败，耗时=${SystemClock.uptimeMillis() - started}ms", it) }
-                    callbacks.forEach { it(result.getOrNull()) }
+                    callbacks.forEach { callback ->
+                        runCatching { callback(result.getOrNull()) }
+                            .onFailure { HLog.e("[Hchat:HomeExtension] 头像回调失败", it) }
+                    }
                 }
+            }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            val callbacks = avatarRequests.remove(url).orEmpty()
+            if (!destroyed) callbacks.forEach { callback ->
+                runCatching { callback(null) }
             }
         }
     }
@@ -280,12 +308,23 @@ internal class HomeExtensionRuntime(private val context: FeatureContext) {
             refreshContactsIfNeeded()
             retryMissingAvatars()
         }
-        fun dispose() { stopContactVisibility(); clearMedia(); cardCache.clear() }
+        fun dispose() {
+            releaseSafely { stopContactVisibility() }
+            releaseSafely { clearMedia() }
+            cardCache.clear()
+            activeAvatarTargets.clear()
+            missingAvatars.clear()
+            avatarTargets.clear()
+            contactsPanel = null
+            cache = emptyList()
+        }
         private fun clearMedia() {
-            scrollListener?.let { callback -> scrollObserver?.takeIf { it.isAlive }?.removeOnScrollChangedListener(callback) }
+            releaseSafely { scrollListener?.let { callback -> scrollObserver?.takeIf { it.isAlive }?.removeOnScrollChangedListener(callback) } }
             scrollListener = null; scrollObserver = null; playbackFrame = null
             media?.onPlaybackRequirementChanged = null
-            media?.dispose(); media = null
+            val ownedMedia = media
+            media = null
+            releaseSafely { ownedMedia?.dispose() }
             photoHolder = null; photoSignature = null
         }
         fun invalidateContacts() { loadedAt = 0L; safeRender() }

@@ -57,24 +57,22 @@ class SwipeQuoteFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        adapter = SwipeQuoteAdapter(context, ::logFeatureError)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) {
-            scheduleInstall()
+        val current = SwipeQuoteAdapter(context, ::logFeatureError)
+        adapter = current
+        trackResource { current.destroy(); if (adapter === current) adapter = null }
+        val swipeTicket = DexInstallScheduler.installation(ID, name())
+        val repeatTicket = DexInstallScheduler.installation(REPEAT_MENU_INSTALL_KEY, "长按菜单复读")
+        trackResource { swipeTicket.close() }
+        trackResource { repeatTicket.close() }
+        fun schedule() {
+            swipeTicket.schedule { current.install() }
+            repeatTicket.schedule { current.installRepeatMenu() }
         }
+        schedule()
+        subscribe(Events.DexReady::class.java) { schedule() }
     }
-
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            adapter?.install() == true
-        }
-        DexInstallScheduler.schedule(REPEAT_MENU_INSTALL_KEY, "长按菜单复读") {
-            adapter?.installRepeatMenu() == true
-        }
     }
 
     companion object {
@@ -87,6 +85,25 @@ private class SwipeQuoteAdapter(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("滑动手势资源释放失败", it) }
+    private fun hook(method: Method, callback: XC_MethodHook) {
+        if (resources.isClosed()) return
+        val handle = HookRegistry.get().hook(method, callback)
+        resources.register { HookRegistry.get().unhook(handle) }
+    }
+    @Synchronized fun destroy() {
+        if (resources.isClosed()) return
+        resources.close()
+        mainHandler.removeCallbacksAndMessages(null)
+        repeatVoiceExecutor.shutdownNow()
+        synchronized(recyclerStates) {
+            val rows = recyclerStates.values.mapNotNull { it.visualRow }
+            mainHandler.post { rows.forEach { clearSwipeVisual(it) } }
+            recyclerStates.clear()
+        }
+        rootTargets.clear(); repeatMenuTargets.clear(); repeatMenuTargetsByGroup.clear()
+        repeatMenuHookedMethods.clear(); lastFooterRef.clear()
+    }
     private val messageIdAccessors = MessageIdAccessors()
     private val itemMethodCache = ConcurrentHashMap<Class<*>, Method>()
     private val itemListFieldCache = ConcurrentHashMap<Class<*>, Field>()
@@ -117,6 +134,7 @@ private class SwipeQuoteAdapter(
 
     @Synchronized
     fun install(): Boolean {
+        if (resources.isClosed()) return true
         val adapterOk = installAdapterBindHook()
         val touchOk = installRecyclerDispatchHook()
         val footerOk = installFooterLifecycleHook()
@@ -126,6 +144,7 @@ private class SwipeQuoteAdapter(
 
     @Synchronized
     fun installRepeatMenu(): Boolean {
+        if (resources.isClosed()) return true
         val menuMethods = SingleMessageMenuLocator.menuCreateMethods(context, logger)
         val clickMethods = SingleMessageMenuLocator.menuClickMethods(context, logger)
         var menuHooked = 0
@@ -146,12 +165,14 @@ private class SwipeQuoteAdapter(
         if (Modifier.isAbstract(method.modifiers) || method.declaringClass.isInterface) return false
         if (!repeatMenuHookedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                     if (menuCreate) addRepeatMenu(param)
                 }
 
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                     if (!menuCreate) handleRepeatMenuClick(param)
                 }
             })
@@ -336,8 +357,9 @@ private class SwipeQuoteAdapter(
             return false
         }
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                     bindMessageRoot(param)
                 }
             })
@@ -373,8 +395,9 @@ private class SwipeQuoteAdapter(
         val onAttached = KavaReflector.findMethodRecursive(footerClass, "onAttachedToWindow") ?: return false
         val onDetached = KavaReflector.findMethodRecursive(footerClass, "onDetachedFromWindow")
         return runCatching {
-            HookRegistry.get().hook(onAttached, object : XC_MethodHook() {
+            hook(onAttached, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                     val footer = param.thisObject
                     if (footer is View) {
                         lastFooterRef = WeakReference(footer)
@@ -382,8 +405,9 @@ private class SwipeQuoteAdapter(
                 }
             })
             if (onDetached != null) {
-                HookRegistry.get().hook(onDetached, object : XC_MethodHook() {
+                hook(onDetached, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                         if (lastFooterRef.get() === param.thisObject) {
                             lastFooterRef = WeakReference(null)
                         }
@@ -405,8 +429,9 @@ private class SwipeQuoteAdapter(
         for (method in methods) {
             val accessible = KavaReflector.accessible(method) ?: continue
             runCatching {
-                HookRegistry.get().hook(accessible, object : XC_MethodHook() {
+                hook(accessible, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                         val activity = param.thisObject as? android.app.Activity ?: return
                         if (!activity.intent.getBooleanExtra(EXTRA_HCHAT_SILENT_REPEAT, false)) return
                         val targets = ArrayList<String>()
@@ -476,8 +501,9 @@ private class SwipeQuoteAdapter(
             MotionEvent::class.java
         )?.takeIf { it.declaringClass.name == recyclerViewClass.name } ?: return false
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                     val view = param.thisObject as? View ?: return
                     val event = param.args?.getOrNull(0) as? MotionEvent ?: return
                     if (!isEnabled()) return
@@ -770,7 +796,9 @@ private class SwipeQuoteAdapter(
         if (talker.isBlank()) return false
         val voices = WeChatApis.media()?.voices() ?: return false
         if (!voices.canSendSilently()) return false
-        repeatVoiceExecutor.execute {
+        if (resources.isClosed()) return false
+        try { repeatVoiceExecutor.execute {
+            if (resources.isClosed()) return@execute
             runCatching {
                 val candidates = voiceMessageCandidates(message, durationCandidates)
                 val fileName = candidates.asSequence()
@@ -780,12 +808,17 @@ private class SwipeQuoteAdapter(
                 val path = voices.resolvePath(fileName).takeIf { it.isNotBlank() } ?: return@runCatching
                 val duration = resolveVoiceDuration(candidates, nativeSource, fileName)
                 mainHandler.post {
+                    if (resources.isClosed()) return@post
                     runCatching { voices.send(talker, path, duration) }
                         .onFailure { logger("复读语音发送失败", it) }
                 }
             }.onFailure {
                 logger("复读语音准备失败", it)
             }
+        }
+        } catch (error: java.util.concurrent.RejectedExecutionException) {
+            if (!resources.isClosed()) logger("复读语音入队失败", error)
+            return false
         }
         return true
     }

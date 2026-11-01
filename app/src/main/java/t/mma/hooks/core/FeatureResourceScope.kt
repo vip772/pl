@@ -21,6 +21,8 @@ internal class FeatureResourceScope(private val onError: (Throwable) -> Unit) {
         pending.forEach(::releaseSafely)
     }
     private fun releaseSafely(release: () -> Unit) {
-        try { release() } catch (error: Throwable) { onError(error) }
+        try { release() } catch (error: Throwable) {
+            try { onError(error) } catch (_: Throwable) { /* Continue releasing other owned resources. */ }
+        }
     }
 }

@@ -14,7 +14,6 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 class TypingReportBlockFeature : BaseFeature() {
-    private var hooker: TypingReportBlockHooker? = null
 
     override fun featureId(): String = ID
 
@@ -25,18 +24,15 @@ class TypingReportBlockFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        hooker = TypingReportBlockHooker(context, ::logFeatureError)
-        if (hooker?.install(allowDexSearch = false) != true) {
-            scheduleInstall()
+        val installed = TypingReportBlockHooker(context, ::logFeatureError)
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { installed.destroy() }
+        trackResource { ticket.close() }
+        if (!installed.install(allowDexSearch = false)) {
+            ticket.schedule { installed.install(allowDexSearch = true) }
         }
         subscribe(Events.DexReady::class.java) {
-            scheduleInstall()
-        }
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            hooker?.install(allowDexSearch = true) == true
+            ticket.schedule { installed.install(allowDexSearch = true) }
         }
     }
 
@@ -64,19 +60,28 @@ private class TypingReportBlockHooker(
 
     @Volatile
     private var installed = false
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("输入上报资源释放失败", it) }
+
+    @Synchronized
+    fun destroy() {
+        resources.close()
+        installed = false
+    }
 
     @Synchronized
     fun install(allowDexSearch: Boolean): Boolean {
+        if (resources.isClosed()) return false
         if (installed) return true
         val method = locateSendTypingMethod(allowDexSearch) ?: return false
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (isEnabled()) {
+                    if (!resources.isClosed() && isEnabled()) {
                         param.result = null
                     }
                 }
             })
+            resources.register { HookRegistry.get().unhook(handle) }
             installed = true
             true
         }.getOrElse {

@@ -13,6 +13,7 @@ import t.mma.hooks.api.model.WeChatMessage
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.core.FeatureResourceScope
 import t.mma.hooks.items.scheduledtask.ScheduledTaskContentItem
 import t.mma.hooks.items.scheduledtask.ScheduledTaskSettings
 import t.mma.utils.KavaReflector
@@ -31,9 +32,14 @@ class OfficialMassSendSender(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var closed = false
+    private val resources = FeatureResourceScope { error ->
+        try { logger("原生群发Hook释放失败", error) } catch (_: Throwable) { }
+    }
     private val main = Handler(Looper.getMainLooper())
     private val methodPrefs = DexMethodCache.prefs(context.hostContext(), PREFS_NAME)
     private val batches = ArrayDeque<SendBatch>()
+    private val admissions = java.util.concurrent.ConcurrentHashMap<String, SendBatch>()
     @Volatile private var runtime: MassSendRuntime? = null
     private var activeBatch: SendBatch? = null
     private var activeScene: Any? = null
@@ -41,16 +47,19 @@ class OfficialMassSendSender(
     private var timeoutRunnable: Runnable? = null
     @Volatile private var callbackHookInstalled = false
 
+    @Synchronized
     fun install(): Boolean {
+        if (closed) return false
         val resolved = locateRuntime() ?: return false
         runtime = resolved
         if (callbackHookInstalled) return true
         return runCatching {
-            HookRegistry.get().hook(resolved.sceneEndMethod, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(resolved.sceneEndMethod, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     handleSceneEnd(param.thisObject, param.args)
                 }
             })
+            resources.register { HookRegistry.get().unhook(handle) }
             callbackHookInstalled = true
             true
         }.onFailure {
@@ -65,7 +74,11 @@ class OfficialMassSendSender(
         itemIntervalSeconds: Int = 0,
         onComplete: ((success: Int, total: Int, canceled: Boolean) -> Unit)? = null
     ): SelectedMessageSendHandle? {
-        val resolved = runtime ?: locateRuntime()?.also { runtime = it } ?: return null
+        if (closed) return null
+        val resolved = synchronized(this) {
+            if (closed) return null
+            runtime ?: locateRuntime()?.also { runtime = it }
+        } ?: return null
         val targets = targetIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         if (snapshots.isEmpty() || targets.isEmpty()) return null
         if (snapshots.any { !isSupported(it, resolved) }) return null
@@ -107,14 +120,23 @@ class OfficialMassSendSender(
                 globalItemIntervalSeconds
             ) * 1000L
         )
-        main.post {
-            batches.addLast(batch)
-            if (activeBatch == null) startNextBatch()
+        synchronized(this) {
+            if (closed) return null
+            admissions[batch.id] = batch
+            if (!main.post {
+                if (admissions.remove(batch.id) == null) return@post
+                if (closed) { notifyStopped(batch); return@post }
+                batches.addLast(batch)
+                if (activeBatch == null) startNextBatch()
+            }) {
+                admissions.remove(batch.id)
+                return null
+            }
         }
         return SelectedMessageSendHandle { cancel(batch.id) }.withStopPending { stopPending(batch.id) }
     }
 
-    fun isAvailable(): Boolean = runtime != null && callbackHookInstalled
+    fun isAvailable(): Boolean = !closed && runtime != null && callbackHookInstalled
 
     fun enqueueCustom(
         items: List<ScheduledTaskContentItem>,
@@ -210,13 +232,13 @@ class OfficialMassSendSender(
     }
 
     private fun startNextBatch() {
-        if (activeBatch != null) return
+        if (closed || activeBatch != null) return
         activeBatch = batches.pollFirst()
         activeBatch?.let(::sendCurrent)
     }
 
     private fun sendCurrent(batch: SendBatch) {
-        if (activeBatch !== batch) return
+        if (closed || activeBatch !== batch) return
         if (batch.stopRequested) { finishStopped(batch); return }
         if (batch.index >= batch.jobs.size) {
             val success = batch.success
@@ -266,7 +288,7 @@ class OfficialMassSendSender(
             return
         }
         timeoutRunnable = Runnable {
-            if (activeScene === scene) {
+            if (!closed && activeScene === scene) {
                 logger("微信原生群发助手等待发送完成超时: type=${job.snapshot.type}", null)
                 activeScene = null
                 activeInfo = null
@@ -276,11 +298,11 @@ class OfficialMassSendSender(
     }
 
     private fun handleSceneEnd(scene: Any?, args: Array<Any?>?) {
-        if (scene == null) return
+        if (closed || scene == null) return
         val errType = (args?.getOrNull(1) as? Number)?.toInt() ?: -1
         val errCode = (args?.getOrNull(2) as? Number)?.toInt() ?: -1
         main.post {
-            if (scene !== activeScene) return@post
+            if (closed || scene !== activeScene) return@post
             val batch = activeBatch ?: return@post
             if (errType == 0 && errCode == 0) {
                 val status = activeInfo?.let { info ->
@@ -297,6 +319,7 @@ class OfficialMassSendSender(
     }
 
     private fun completeCurrent(batch: SendBatch, success: Boolean) {
+        if (closed || activeBatch !== batch) return
         timeoutRunnable?.let(main::removeCallbacks)
         timeoutRunnable = null
         activeScene = null
@@ -319,7 +342,9 @@ class OfficialMassSendSender(
     }
 
     private fun stopPending(batchId: String) {
+        if (closed) return
         main.post {
+            if (closed) return@post
             val active = activeBatch
             if (active?.id == batchId) {
                 active.stopRequested = true
@@ -347,7 +372,9 @@ class OfficialMassSendSender(
         startNextBatch()
     }
     private fun cancel(batchId: String) {
+        if (closed) return
         main.post {
+            if (closed) return@post
             val active = activeBatch
             if (active?.id == batchId) {
                 timeoutRunnable?.let(main::removeCallbacks)
@@ -371,6 +398,33 @@ class OfficialMassSendSender(
         }
     }
 
+    private fun notifyStopped(batch: SendBatch) {
+        try { batch.onComplete?.invoke(batch.success, batch.total, true) }
+        catch (error: Throwable) { try { logger("原生群发关闭回调失败", error) } catch (_: Throwable) { } }
+    }
+    @Synchronized
+    fun shutdown() {
+        if (closed) return
+        closed = true
+        resources.close()
+        callbackHookInstalled = false
+        runtime = null
+        val cleanup = {
+            main.removeCallbacksAndMessages(null)
+            timeoutRunnable = null
+            val stopped = batches.toList() + admissions.values.toList()
+            batches.clear()
+            admissions.clear()
+            val active = activeBatch
+            activeBatch = null
+            // Host owns an already submitted scene; never native-cancel here.
+            activeScene = null
+            activeInfo = null
+            active?.let(::notifyStopped)
+            stopped.forEach(::notifyStopped)
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) cleanup() else main.post { cleanup() }
+    }
     private fun isSupported(snapshot: SelectedMessageSnapshot, runtime: MassSendRuntime): Boolean {
         if (!MassSendContentPolicy.supportsOfficial(snapshot)) return false
         return when (snapshot.type and 0xffff) {

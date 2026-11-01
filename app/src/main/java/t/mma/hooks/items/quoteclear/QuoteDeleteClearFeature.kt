@@ -22,7 +22,6 @@ import java.lang.reflect.Modifier
 import java.util.concurrent.ConcurrentHashMap
 
 class QuoteDeleteClearFeature : BaseFeature() {
-    private var runtime: QuoteDeleteClearRuntime? = null
 
     override fun featureId(): String = ID
 
@@ -33,19 +32,13 @@ class QuoteDeleteClearFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = QuoteDeleteClearRuntime(context, ::logFeatureError)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) {
-            scheduleInstall()
-        }
+        val installed = QuoteDeleteClearRuntime(context, ::logFeatureError)
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { installed.destroy() }
+        trackResource { ticket.close() }
+        ticket.schedule { installed.install() }
+        subscribe(Events.DexReady::class.java) { ticket.schedule { installed.install() } }
     }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            runtime?.install() == true
-        }
-    }
-
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -70,8 +63,30 @@ private class QuoteDeleteClearRuntime(
     @Volatile private var quoteClearMethod: Method? = null
     @Volatile private var quoteClearMethodResolved = false
 
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("删除键清引用资源释放失败", it) }
+    private val hookedMethods = HashSet<Method>()
+    @Synchronized
+    fun destroy() {
+        resources.close()
+        hookedMethods.clear()
+        currentFooterRef.clear()
+        footerFieldCache.clear()
+        supportOnKeyMethod = null
+        quoteClearMethod = null
+    }
+    private fun hookOwned(method: Method, callback: XC_MethodHook) {
+        if (resources.isClosed() || !hookedMethods.add(method)) return
+        try {
+            val handle = HookRegistry.get().hook(method, callback)
+            resources.register { HookRegistry.get().unhook(handle) }
+        } catch (error: Throwable) {
+            hookedMethods.remove(method)
+            throw error
+        }
+    }
     @Synchronized
     fun install(): Boolean {
+        if (resources.isClosed()) return false
         if (installed) return true
         val footerOk = installFooterLifecycleHook()
         val inputOk = installInputConnectionHook()
@@ -87,8 +102,9 @@ private class QuoteDeleteClearRuntime(
         val onAttached = KavaReflector.findMethodRecursive(footerClass, "onAttachedToWindow") ?: return false
         val onDetached = KavaReflector.findMethodRecursive(footerClass, "onDetachedFromWindow")
         return runCatching {
-            HookRegistry.get().hook(onAttached, object : XC_MethodHook() {
+            hookOwned(onAttached, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                     val footer = param.thisObject
                     if (footer is View) {
                         currentFooterRef = WeakReference(footer)
@@ -96,8 +112,9 @@ private class QuoteDeleteClearRuntime(
                 }
             })
             if (onDetached != null) {
-                HookRegistry.get().hook(onDetached, object : XC_MethodHook() {
+                hookOwned(onDetached, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                         if (currentFooterRef.get() === param.thisObject) {
                             currentFooterRef = WeakReference(null)
                         }
@@ -120,8 +137,9 @@ private class QuoteDeleteClearRuntime(
             EditorInfo::class.java
         ) ?: return false
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            hookOwned(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                     val input = param.thisObject as? TextView ?: return
                     val footer = footerForInput(input) ?: return
                     val target = param.result as? InputConnection ?: return
@@ -146,8 +164,9 @@ private class QuoteDeleteClearRuntime(
             return false
         }
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            hookOwned(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                     if (handleOnKeyDelete(param)) {
                         param.setResult(true)
                     }
@@ -171,6 +190,7 @@ private class QuoteDeleteClearRuntime(
     }
 
     private fun clearQuoteByInputDelete(input: TextView, footerRef: WeakReference<Any>): Boolean {
+        if (resources.isClosed()) return false
         if (!isEnabled()) return false
         if (!input.text.isNullOrEmpty()) return false
         val footer = footerRef.get()?.takeIf { isAttachedFooter(it) }

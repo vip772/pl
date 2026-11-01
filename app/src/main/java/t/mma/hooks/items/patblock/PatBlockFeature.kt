@@ -15,7 +15,6 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
 class PatBlockFeature : BaseFeature() {
-    private var hooker: PatBlockHooker? = null
 
     override fun featureId(): String = ID
 
@@ -26,21 +25,17 @@ class PatBlockFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        hooker = PatBlockHooker(context, ::logFeatureError)
-        if (hooker?.install(allowDexSearch = false) != true) {
-            scheduleInstall()
+        val installed = PatBlockHooker(context, ::logFeatureError)
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { installed.destroy() }
+        trackResource { ticket.close() }
+        if (!installed.install(allowDexSearch = false)) {
+            ticket.schedule { installed.install(allowDexSearch = true) }
         }
         subscribe(Events.DexReady::class.java) {
-            scheduleInstall()
+            ticket.schedule { installed.install(allowDexSearch = true) }
         }
     }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            hooker?.install(allowDexSearch = true) == true
-        }
-    }
-
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -65,19 +60,27 @@ private class PatBlockHooker(
 
     @Volatile
     private var installed = false
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("拍一拍资源释放失败", it) }
+    @Synchronized
+    fun destroy() {
+        resources.close()
+        installed = false
+    }
 
     @Synchronized
     fun install(allowDexSearch: Boolean): Boolean {
+        if (resources.isClosed()) return false
         if (installed) return true
         val method = locateAvatarDoubleClickMethod(allowDexSearch) ?: return false
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (isEnabled()) {
+                    if (!resources.isClosed() && isEnabled()) {
                         param.result = true
                     }
                 }
             })
+            resources.register { HookRegistry.get().unhook(handle) }
             installed = true
             true
         }.getOrElse {

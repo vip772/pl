@@ -4,7 +4,7 @@ import os, subprocess, tempfile
 root = Path(__file__).resolve().parents[1]
 source = (root/'app/src/main/java/t/mma/hooks/items/mentionextension/MentionNoticeFeature.kt').read_text()
 start = source.index('    private fun style(')
-end = source.index('    private val renderMethods', start)
+end = source.index('    @Synchronized', start)
 style = source[start:end].replace('private fun style(', 'fun style(', 1).replace('android.text.style.ForegroundColorSpan', 'ForegroundColorSpan')
 assert 'MentionNoticeSettings.highlight' not in (root/'app/src/main/java/t/mma/hooks/items/groupleave/GroupLeaveMonitorHighlighter.kt').read_text()
 assert 'verticalArrangement = Arrangement.spacedBy(10.dp)' in (root/'app/src/main/java/t/mma/ui/miuix/MentionExtensionMiuixPage.kt').read_text()

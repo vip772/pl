@@ -42,22 +42,15 @@ class QuickMomentsFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = QuickMomentsMenuRuntime(context, ::logFeatureError)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
+        val current = QuickMomentsMenuRuntime(context, ::logFeatureError)
+        runtime = current
+        trackResource { current.destroy(); if (runtime === current) runtime = null }
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { ticket.close() }
+        fun schedule() { ticket.schedule { current.install() } }
+        schedule()
+        subscribe(Events.DexReady::class.java) { schedule() }
     }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            runtime?.install() == true
-        }
-    }
-
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -116,6 +109,7 @@ private class QuickMomentsMenuRuntime(
     private data class MenuTarget(val activity: Activity, val talker: String)
 
     private val main = Handler(Looper.getMainLooper())
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("快捷菜单资源释放失败", it) }
     private val hookedMethods = ConcurrentHashMap.newKeySet<Method>()
     private val bindings = Collections.synchronizedMap(WeakHashMap<MenuItem, MenuTarget>())
     private val conversationMenuExtension = object : ConversationMenuExtension {
@@ -125,11 +119,13 @@ private class QuickMomentsMenuRuntime(
         override fun title(target: ConversationMenuExtensionTarget): String = MENU_TITLE
 
         override fun isVisible(target: ConversationMenuExtensionTarget): Boolean {
+            if (resources.isClosed()) return false
             return QuickMomentsRuntime.isEnabled(target.activity) &&
                 QuickMomentsRuntime.canOpen(target.talker)
         }
 
         override fun onClick(target: ConversationMenuExtensionTarget) {
+            if (resources.isClosed()) return
             openTarget(target.activity, target.talker)
         }
     }
@@ -140,15 +136,20 @@ private class QuickMomentsMenuRuntime(
 
     @Synchronized
     fun install(): Boolean {
+        if (resources.isClosed()) return true
         val create = ConversationMenuLocator.menuCreateMethod(context, logger) ?: return false
         return hook(create, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
+                if (resources.isClosed()) return
                 addMenuItem(param)
             }
         })
     }
 
-    fun destroy() {
+    @Synchronized fun destroy() {
+        if (resources.isClosed()) return
+        resources.close()
+        hookedMethods.clear()
         ConversationMenuExtensionRegistry.unregister(conversationMenuExtension)
         bindings.clear()
     }
@@ -188,6 +189,7 @@ private class QuickMomentsMenuRuntime(
             } ?: return false
         return hook(method, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
+                if (resources.isClosed()) return
                 val item = param.args?.getOrNull(0) as? MenuItem ?: return
                 if (item.itemId != MENU_ITEM_ID) return
                 val target = bindings.remove(item) ?: return
@@ -256,7 +258,8 @@ private class QuickMomentsMenuRuntime(
         if (Modifier.isAbstract(method.modifiers) || method.declaringClass.isInterface) return false
         if (!hookedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            val handle = HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            resources.register { HookRegistry.get().unhook(handle) }
             true
         }.getOrElse {
             hookedMethods.remove(method)

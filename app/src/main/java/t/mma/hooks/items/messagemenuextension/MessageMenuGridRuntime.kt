@@ -271,7 +271,9 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
         try { block() } catch (error: Throwable) { HLog.e("$TAG stage=$stage native fallback", error) }
     }
     @Synchronized fun destroy() {
-        active = false; hooks.forEach { HookRegistry.get().unhook(it) }; hooks.clear(); frames.remove(); installed = false
+        active = false
+        hooks.toList().forEach { hook -> attempt("destroy hook") { HookRegistry.get().unhook(hook) } }
+        hooks.clear(); frames.remove(); installed = false
     }
     companion object {
         private const val TAG = "[Hchat:消息菜单扩展]"

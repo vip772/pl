@@ -18,7 +18,10 @@ import java.lang.ref.WeakReference
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.WeakHashMap
-import java.util.concurrent.Executors
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.RejectedExecutionException
 
 /** Presentation only: native children keep parents, IDs and click listeners. */
 internal class FloatingChatHeaderCapsule {
@@ -47,7 +50,11 @@ internal class FloatingChatHeaderCapsule {
         }
     }
     private val main = Handler(Looper.getMainLooper())
-    private val worker by lazy { Executors.newSingleThreadExecutor() }
+    private val worker by lazy {
+        ThreadPoolExecutor(1, 1, 15L, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(16)).apply {
+            allowCoreThreadTimeOut(true)
+        }
+    }
     private var workerStarted = false
     private val cache = object : android.util.LruCache<String, Bitmap>(2 * 1024 * 1024) {
         override fun sizeOf(key: String, value: Bitmap) = value.byteCount
@@ -217,6 +224,7 @@ internal class FloatingChatHeaderCapsule {
         return state
     }
     private fun loadAvatar(header: ViewGroup, state: State, talker: String) {
+        if (closed) return
         cache.get(talker)?.let {
             if (!it.isRecycled) {
                 if ((state.avatar.drawable as? BitmapDrawable)?.bitmap !== it) state.avatar.setImageBitmap(it)
@@ -231,7 +239,7 @@ internal class FloatingChatHeaderCapsule {
         val token = state.generation
         val weakHeader = WeakReference(header); val weakState = WeakReference(state)
         workerStarted = true
-        worker.execute {
+        try { worker.execute {
             var bitmap: Bitmap? = null
             try {
                 val contacts = WeChatApis.contact().contacts()
@@ -267,12 +275,16 @@ internal class FloatingChatHeaderCapsule {
                     }, 2_000)
                 }
             }
+        } } catch (_: RejectedExecutionException) {
+            state.loading = false
         }
     }
     private fun download(address: String): Bitmap? {
+        if (closed || Thread.currentThread().isInterrupted) return null
         val url = URL(address)
         if (url.protocol !in listOf("http", "https")) return null
         val conn = url.openConnection() as HttpURLConnection
+        val deadline = SystemClock.elapsedRealtime() + 8_000L
         try {
             conn.connectTimeout = 4000; conn.readTimeout = 4000
             if (conn.responseCode !in 200..299) {
@@ -281,13 +293,15 @@ internal class FloatingChatHeaderCapsule {
             }
             val bytes = conn.inputStream.use { input ->
                 val out = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
-                while (!closed && !Thread.currentThread().isInterrupted) {
+                while (true) {
+                    if (closed || Thread.currentThread().isInterrupted || SystemClock.elapsedRealtime() >= deadline) return null
                     val count = input.read(buffer); if (count < 0) break
                     if (out.size() + count > 2 * 1024 * 1024) return null
                     out.write(buffer, 0, count)
                 }
                 out.toByteArray()
             }
+            if (closed || Thread.currentThread().isInterrupted || SystemClock.elapsedRealtime() >= deadline) return null
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
             if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
@@ -296,19 +310,40 @@ internal class FloatingChatHeaderCapsule {
             return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
         } finally { conn.disconnect() }
     }
+    private fun releaseSafely(action: () -> Unit) {
+        try { action() } catch (error: Throwable) {
+            try { HLog.e("[Hchat:悬浮标题栏] 释放胶囊资源失败", error) } catch (_: Throwable) { }
+        }
+    }
     fun restore(header: ViewGroup) {
         val state = states.remove(header) ?: return
         state.generation++
-        state.focusListener?.let { if (header.viewTreeObserver.isAlive) header.viewTreeObserver.removeOnWindowFocusChangeListener(it) }
-        listOf(header, state.row, state.back, state.more, state.center, state.avatar).forEach(FloatingChatCardVisuals::releasePresentation)
-        header.removeView(state.row); header.background = state.background
-        state.hidden.forEach { (view, old) -> view.alpha = old.alpha; view.importantForAccessibility = old.accessibility }
+        releaseSafely { state.focusListener?.let { if (header.viewTreeObserver.isAlive) header.viewTreeObserver.removeOnWindowFocusChangeListener(it) } }
+        state.focusListener = null
+        listOf(header, state.row, state.back, state.more, state.center, state.avatar).forEach { view ->
+            releaseSafely { FloatingChatCardVisuals.releasePresentation(view) }
+        }
+        releaseSafely { header.removeView(state.row) }
+        releaseSafely { header.background = state.background }
+        state.hidden.toMap().forEach { (view, old) ->
+            releaseSafely { view.alpha = old.alpha }
+            releaseSafely { view.importantForAccessibility = old.accessibility }
+        }
         state.hidden.clear()
+        state.backTarget = null; state.moreTarget = null; state.titleTarget = null
+        releaseSafely { state.back.setOnClickListener(null) }
+        releaseSafely { state.more.setOnClickListener(null) }
+        releaseSafely { state.center.setOnClickListener(null) }
+        releaseSafely { state.avatar.setImageDrawable(null) }
     }
     fun destroy() {
-        closed = true; states.keys.toList().forEach(::restore)
-        if (workerStarted) worker.shutdownNow()
-        main.removeCallbacksAndMessages(null); cache.evictAll()
+        if (closed) return
+        closed = true
+        states.keys.toList().forEach { header -> releaseSafely { restore(header) } }
+        states.clear()
+        if (workerStarted) releaseSafely { worker.shutdownNow() }
+        releaseSafely { main.removeCallbacksAndMessages(null) }
+        releaseSafely { cache.evictAll() }
         hostVersionName = null
         resourceIds.clear()
     }

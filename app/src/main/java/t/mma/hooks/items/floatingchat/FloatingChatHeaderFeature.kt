@@ -19,6 +19,7 @@ import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
+import t.mma.hooks.core.FeatureResourceScope
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.utils.KavaReflector
@@ -32,7 +33,8 @@ class FloatingChatHeaderFeature : BaseFeature() {
     // Install lifecycle hooks even while disabled; runtime checks gate mutations.
     override fun isEnabled(context: FeatureContext): Boolean = true
     override fun onConfigChanged(context: FeatureContext, key: String?) {
-        android.os.Handler(android.os.Looper.getMainLooper()).post { runtime?.refreshVisible() }
+        val current = runtime ?: return
+        current.refreshVisibleOnMain()
     }
     override fun featureId(): String = ID
     override fun name(): String = "悬浮标题栏"
@@ -40,22 +42,26 @@ class FloatingChatHeaderFeature : BaseFeature() {
         registerSettingsProvider(FloatingChatHeaderSettingsProvider())
     }
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = HeaderRuntime(context)
-        DexInstallScheduler.schedule(ID, name()) { runtime?.install() == true }
-    }
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
+        val current = HeaderRuntime(context)
+        runtime = current
+        trackResource { current.destroy(); if (runtime === current) runtime = null }
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { ticket.close() }
+        ticket.schedule { current.install() }
     }
     companion object { const val ID = "floating_chat_header" }
 }
 
 private class HeaderRuntime(private val context: FeatureContext) {
+    private val resources = FeatureResourceScope { HLog.e("[Hchat:$TAG] Hook释放失败", it) }
+    @Volatile private var closed = false
+
     private val livePrefs = t.mma.preferences.HchatStorage.preferences(context.hostContext(), "Hchat_global_config")
     private var backgroundTransparency = livePrefs.getInt("floating_chat_header_transparency", -1)
     private val configHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val liveListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == "floating_chat_header_enabled" || key == "floating_chat_header_transparency") configHandler.post {
+            if (closed) return@post
             backgroundTransparency = livePrefs.getInt("floating_chat_header_transparency", -1)
             refreshVisible()
         }
@@ -101,7 +107,11 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val headerClass = "androidx.appcompat.widget.ActionBarContainer"
     private val layoutClass = "com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout"
 
+    fun refreshVisibleOnMain() {
+        if (!closed) configHandler.post { if (!closed) refreshVisible() }
+    }
     fun refreshVisible() {
+        if (closed) return
         layoutTrackers.keys.toList().forEach { if (isEnabled()) scheduleApply(it) else restore(it) }
         val root = t.mma.hooks.api.core.WeChatApis.currentActivity()?.currentActivity()?.window?.decorView ?: return
         fun visit(view: View) {
@@ -110,7 +120,9 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
         visit(root)
     }
+    @Synchronized
     fun install(): Boolean {
+        if (closed) return false
         if (installed) return true
         val clazz = KavaReflector.loadClass(layoutClass, context.hostClassLoader())
         if (clazz == null) {
@@ -191,21 +203,24 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun ensureTipsAttachListener(group: View) {
-        if (tipsAttachListeners[group] != null) return
+        if (closed || tipsAttachListeners[group] != null) return
         val listener = object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(view: View) {
+                if (closed) return
                 val sourceLayout = findAncestorLayout(view) ?: visibleChatLayoutFromRoot(view) ?: return
                 val layout = visibleChatLayout(sourceLayout) ?: return
                 tipsGroups[layout] = view
                 scheduleApply(layout)
             }
             override fun onViewDetachedFromWindow(view: View) {
+                if (closed) return
                 tipsGroups.entries.removeAll { it.value === view }
             }
         }
         tipsAttachListeners[group] = listener
         group.addOnAttachStateChangeListener(listener)
         val layoutListener = View.OnLayoutChangeListener { view, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            if (closed) return@OnLayoutChangeListener
             // Native positioning may be restored even when all four bounds stay equal.
             val sourceLayout = findAncestorLayout(view) ?: visibleChatLayoutFromRoot(view) ?: return@OnLayoutChangeListener
             val layout = visibleChatLayout(sourceLayout) ?: return@OnLayoutChangeListener
@@ -232,33 +247,42 @@ private class HeaderRuntime(private val context: FeatureContext) {
         return visibleChatLayout(source)
     }
 
+    @Synchronized
     private fun hookBefore(method: Member, before: (XC_MethodHook.MethodHookParam) -> Unit): Int {
+        if (closed) return 0
         if (!hooked.add(method)) return 1
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (closed) return
                     runCatching { before(param) }
                         .onFailure { HLog.e("[Hchat:$TAG] 背景更新失败", it) }
                 }
             })
+            resources.register { HookRegistry.get().unhook(handle) }
             1
         }.getOrElse { hooked.remove(method); HLog.e("[Hchat:$TAG] Hook 安装失败", it); 0 }
     }
 
+    @Synchronized
     private fun hook(method: Member, after: (XC_MethodHook.MethodHookParam) -> Unit): Int {
+        if (closed) return 0
         if (!hooked.add(method)) return 1
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                    if (closed) return
                     runCatching { after(param) }
                         .onFailure { HLog.e("[Hchat:$TAG] 布局更新失败", it) }
                 }
             })
+            resources.register { HookRegistry.get().unhook(handle) }
             1
         }.getOrElse { hooked.remove(method); HLog.e("[Hchat:$TAG] Hook 安装失败", it); 0 }
     }
 
     private fun scheduleApply(layout: ViewGroup) {
+        if (closed) return
         // Inherited ViewGroup lifecycle hooks can receive unrelated page instances.
         if (layout.javaClass.name != layoutClass) return
         val tracker = layoutTrackers.getOrPut(layout) { HeaderLayoutTracker() }
@@ -266,6 +290,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         val observer = layout.viewTreeObserver
         val listener = object : android.view.ViewTreeObserver.OnPreDrawListener {
             override fun onPreDraw(): Boolean {
+                if (closed) return true
                 if (observer.isAlive) observer.removeOnPreDrawListener(this)
                 if (tracker.preDraw === this) tracker.preDraw = null
                 if (layout.isAttachedToWindow && layout.isShown) apply(layout) else restore(layout)
@@ -293,6 +318,8 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun apply(sourceLayout: ViewGroup) {
+        if (closed) return
+        drainPendingRestores()
         if (!isEnabled()) {
             restore(sourceLayout)
             visibleChatLayout(sourceLayout)?.takeIf { it !== sourceLayout }?.let(::restore)
@@ -381,18 +408,28 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun enableWindowOverlay(header: View) {
+        if (closed) return
         var current = header.parent as? View
         while (current != null) {
-            if (current.javaClass.name == "androidx.appcompat.widget.ActionBarOverlayLayout") {
-                if (windowOverlayStates[current] != true) {
+            val overlay = current
+            if (overlay.javaClass.name == "androidx.appcompat.widget.ActionBarOverlayLayout") {
+                if (!windowOverlayStates.containsKey(overlay)) {
                     runCatching {
-                        current.javaClass.getMethod("setOverlayMode", Boolean::class.javaPrimitiveType).invoke(current, true)
-                        windowOverlayStates[current] = true
+                        val original = overlay.javaClass.getMethod("isInOverlayMode").invoke(overlay) as? Boolean
+                            ?: return@runCatching
+                        // Save before mutating: even a throwing setter may partially apply.
+                        windowOverlayStates[overlay] = original
+                        overlay.javaClass.getMethod("setOverlayMode", Boolean::class.javaPrimitiveType).invoke(overlay, true)
                     }
                 }
                 return
             }
-            current = current.parent as? View
+            current = overlay.parent as? View
+        }
+    }
+    private fun restoreWindowOverlays() {
+        releaseEntries(windowOverlayStates) { overlay, original ->
+            overlay.javaClass.getMethod("setOverlayMode", Boolean::class.javaPrimitiveType).invoke(overlay, original)
         }
     }
 
@@ -818,25 +855,28 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun restore(layout: ViewGroup) {
-        restoreChatListTopInset(layout)
-        restoreChatTopInset(layout)
-        restoreChatStatusWrapper(layout)
-        headersByLayout.remove(layout)?.let(::restoreView)
+        releaseSafely { restoreChatListTopInset(layout) }
+        releaseSafely { restoreChatTopInset(layout) }
+        releaseSafely { restoreChatStatusWrapper(layout) }
+        headersByLayout.remove(layout)?.let { header -> releaseSafely { restoreView(header) } }
         headerZoneStates.remove(layout)?.originalMargins?.forEach { (view, margins) ->
-            val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
-            lp.leftMargin = margins[0]
-            lp.topMargin = margins[1]
-            lp.rightMargin = margins[2]
-            lp.bottomMargin = margins[3]
-            view.layoutParams = lp
-            FloatingChatCardVisuals.restore(view)
+            releaseSafely {
+                val lp = view.layoutParams as? ViewGroup.MarginLayoutParams
+                if (lp != null) {
+                    lp.leftMargin = margins[0]; lp.topMargin = margins[1]
+                    lp.rightMargin = margins[2]; lp.bottomMargin = margins[3]
+                    view.layoutParams = lp
+                }
+            }
+            releaseSafely { FloatingChatCardVisuals.restore(view) }
         }
+        if (!isEnabled()) restoreWindowOverlays()
     }
     private fun restoreView(view: View) {
-        (view as? ViewGroup)?.let(capsule::restore)
-        FloatingChatActionBarBackgrounds.restore(view)
+        releaseSafely { (view as? ViewGroup)?.let(capsule::restore) }
+        releaseSafely { FloatingChatActionBarBackgrounds.restore(view) }
         val state = states.remove(view) ?: return
-        runCatching {
+        releaseSafely {
             if (state.reparented) {
                 (view.parent as? ViewGroup)?.removeView(view)
                 state.originalParent.addView(
@@ -847,36 +887,66 @@ private class HeaderRuntime(private val context: FeatureContext) {
             } else {
                 view.layoutParams = copyLayoutParams(state.originalLayoutParams)
             }
-            view.elevation = state.elevation
-            view.outlineProvider = state.outlineProvider
-            view.clipToOutline = state.clipToOutline
-            FloatingChatCardVisuals.restore(view)
-            view.invalidateOutline()
-        }.onFailure { HLog.e("[Hchat:$TAG] 恢复微信标题栏结构失败", it) }
+        }
+        releaseSafely { view.elevation = state.elevation }
+        releaseSafely { view.outlineProvider = state.outlineProvider }
+        releaseSafely { view.clipToOutline = state.clipToOutline }
+        releaseSafely { FloatingChatCardVisuals.restore(view) }
+        releaseSafely { view.invalidateOutline() }
     }
+    private fun releaseSafely(action: () -> Unit) {
+        try { action() } catch (error: Throwable) {
+            runCatching { HLog.e("[Hchat:$TAG] 恢复标题栏资源失败", error) }
+        }
+    }
+    private fun <K, V> releaseEntries(map: MutableMap<K, V>, restore: (K, V) -> Unit) {
+        val entries = map.entries.map { it.key to it.value }
+        entries.forEach { (key, value) -> releaseSafely { restore(key, value) } }
+        map.clear()
+    }
+    @Synchronized
     fun destroy() {
-        livePrefs.unregisterOnSharedPreferenceChangeListener(liveListener)
-        configHandler.removeCallbacksAndMessages(null)
-        capsule.destroy()
-        chatTopPaddings.keys.toList().forEach(::restoreChatTopInset)
-        states.keys.toList().forEach(::restoreView)
-        headerZoneStates.keys.toList().forEach { layout -> restore(layout as? ViewGroup ?: return@forEach) }
-        statusWrapperBackgrounds.entries.toList().forEach { (view, background) ->
-            view.background = background
-            statusWrapperColors.remove(view)?.let { originalColor ->
-                if (originalColor != null) invokeStatusBarColor(view, originalColor)
+        if (closed) return
+        closed = true
+        resources.close()
+        hooked.clear()
+        installed = false
+        releaseSafely { livePrefs.unregisterOnSharedPreferenceChangeListener(liveListener) }
+        releaseSafely { configHandler.removeCallbacksAndMessages(null) }
+        synchronized(pendingRestores) { pendingRestores.add(this); hasPendingRestores = true }
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) drainPendingRestores()
+        else configHandler.post { drainPendingRestores() }
+    }
+    private fun restoreOwnedViews() {
+        releaseSafely { capsule.destroy() }
+        chatTopPaddings.keys.toList().forEach { view -> releaseSafely { restoreChatTopInset(view) } }
+        chatTopPaddings.clear()
+        states.keys.toList().forEach { view -> releaseSafely { restoreView(view) } }
+        states.clear()
+        releaseEntries(headerZoneStates) { _, state ->
+            state.originalMargins.forEach { (view, margins) ->
+                releaseSafely {
+                    val lp = view.layoutParams as? ViewGroup.MarginLayoutParams
+                    if (lp != null) {
+                        lp.leftMargin = margins[0]; lp.topMargin = margins[1]
+                        lp.rightMargin = margins[2]; lp.bottomMargin = margins[3]
+                        view.layoutParams = lp
+                    }
+                }
+                releaseSafely { FloatingChatCardVisuals.restore(view) }
             }
         }
-        statusWrapperBackgrounds.clear()
-        statusWrapperColors.clear()
+        releaseEntries(statusWrapperBackgrounds) { view, background -> view.background = background }
+        releaseEntries(statusWrapperColors) { view, color -> if (color != null) invokeStatusBarColor(view, color) }
         statusWrappersByLayout.clear()
         headersByLayout.clear()
-        contentCardTranslations.forEach { (view, translation) -> view.translationY = translation }
-        contentCardTranslations.clear()
-        chatListPaddings.keys.toList().forEach(::restoreChatListTopInset)
+        releaseEntries(contentCardTranslations) { view, translation ->
+            releaseSafely { view.translationY = translation }
+            releaseSafely { FloatingChatCardVisuals.restore(view) }
+        }
+        chatListPaddings.keys.toList().forEach { view -> releaseSafely { restoreChatListTopInset(view) } }
         chatListPaddings.clear()
-
-        tipsCardStates.forEach { (view, state) ->
+        releaseEntries(tipsCardStates) { view, state ->
             view.elevation = state.elevation
             view.outlineProvider = state.outlineProvider
             view.clipToOutline = state.clipToOutline
@@ -884,48 +954,44 @@ private class HeaderRuntime(private val context: FeatureContext) {
             FloatingChatCardVisuals.restore(view)
             view.invalidateOutline()
         }
-        tipsCardStates.clear()
-        tipsDimStates.forEach { (view, state) ->
+        releaseEntries(tipsDimStates) { view, state ->
             view.visibility = state.visibility
             view.alpha = state.alpha
             view.background = state.background
         }
-        tipsDimStates.clear()
-        tipsGroupElevations.forEach { (view, elevation) -> view.elevation = elevation }
-        tipsGroupElevations.clear()
-        tipsRecyclerMargins.forEach { (view, margins) ->
-            val lp = view.layoutParams as? ViewGroup.MarginLayoutParams ?: return@forEach
-            lp.leftMargin = margins[0]
-            lp.topMargin = margins[1]
-            lp.rightMargin = margins[2]
-            lp.bottomMargin = margins[3]
-            view.layoutParams = lp
-        }
-        tipsRecyclerMargins.clear()
-        tipsRecyclerRules.forEach { (view, rules) ->
-            val lp = view.layoutParams as? RelativeLayout.LayoutParams ?: return@forEach
-            for (verb in lp.rules.indices) lp.removeRule(verb)
-            rules.forEachIndexed { verb, anchor -> if (anchor != 0) lp.addRule(verb, anchor) }
-            view.layoutParams = lp
-        }
-        tipsRecyclerRules.clear()
-        tipsRecyclerBackgrounds.forEach { (view, background) -> view.background = background }
-        tipsRecyclerBackgrounds.clear()
-        tipsContentBackgrounds.forEach { (view, background) -> view.background = background }
-        tipsContentBackgrounds.clear()
-        layoutTrackers.forEach { (layout, tracker) ->
-            tracker.preDraw?.let { listener ->
-                runCatching { layout.viewTreeObserver.removeOnPreDrawListener(listener) }
+        releaseEntries(tipsGroupElevations) { view, elevation -> view.elevation = elevation }
+        releaseEntries(tipsRecyclerMargins) { view, margins ->
+            val lp = view.layoutParams as? ViewGroup.MarginLayoutParams
+            if (lp != null) {
+                lp.leftMargin = margins[0]; lp.topMargin = margins[1]
+                lp.rightMargin = margins[2]; lp.bottomMargin = margins[3]
+                view.layoutParams = lp
             }
         }
-        layoutTrackers.clear()
+        releaseEntries(tipsRecyclerRules) { view, rules ->
+            val lp = view.layoutParams as? RelativeLayout.LayoutParams
+            if (lp != null) {
+                for (verb in lp.rules.indices) lp.removeRule(verb)
+                rules.forEachIndexed { verb, anchor -> if (anchor != 0) lp.addRule(verb, anchor) }
+                view.layoutParams = lp
+            }
+        }
+        releaseEntries(tipsRecyclerBackgrounds) { view, background -> view.background = background }
+        releaseEntries(tipsContentBackgrounds) { view, background -> view.background = background }
+        releaseEntries(layoutTrackers) { layout, tracker ->
+            tracker.preDraw?.let { listener ->
+                val observer = layout.viewTreeObserver
+                if (observer.isAlive) observer.removeOnPreDrawListener(listener)
+            }
+        }
         tipsCardBottoms.clear()
-        tipsAttachListeners.forEach { (view, listener) -> view.removeOnAttachStateChangeListener(listener) }
-        tipsLayoutListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
-        tipsAttachListeners.clear()
-        tipsLayoutListeners.clear()
+        releaseEntries(tipsAttachListeners) { view, listener -> view.removeOnAttachStateChangeListener(listener) }
+        releaseEntries(tipsLayoutListeners) { view, listener -> view.removeOnLayoutChangeListener(listener) }
         tipsGroups.clear()
         raisedTipsGroups.clear()
+        restoreWindowOverlays()
+        initializedStatusWrappers.clear()
+        resourceIds.clear()
     }
     private fun statusBarInset(layout: View): Int {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return 0
@@ -1009,6 +1075,17 @@ private class HeaderRuntime(private val context: FeatureContext) {
             value * view.resources.displayMetrics.density
     }
     companion object {
+        // Main-thread UI mutations drain retired generations before taking a new
+        // snapshot. A delayed old destroy therefore cannot restore over a new UI.
+        private val pendingRestores = LinkedHashSet<HeaderRuntime>()
+        @Volatile private var hasPendingRestores = false
+        private fun drainPendingRestores() {
+            if (!hasPendingRestores) return
+            val retired = synchronized(pendingRestores) {
+                pendingRestores.toList().also { pendingRestores.clear(); hasPendingRestores = false }
+            }
+            retired.forEach { runtime -> runtime.releaseSafely { runtime.restoreOwnedViews() } }
+        }
         private const val TAG = "悬浮标题栏"
         private const val SIDE_MARGIN_DP = 12
         private const val TOP_GAP_DP = 4

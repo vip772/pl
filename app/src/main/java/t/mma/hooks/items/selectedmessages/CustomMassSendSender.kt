@@ -15,7 +15,9 @@ import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
-import java.util.concurrent.Executors
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -25,9 +27,10 @@ internal class CustomMassSendModuleSender(
 ) {
     @Volatile private var closed = false
     private val main = Handler(Looper.getMainLooper())
-    private val executor = Executors.newSingleThreadExecutor { runnable ->
-        Thread(runnable, "Hchat-CustomMassSend").apply { isDaemon = true }
-    }
+    private val executor = ThreadPoolExecutor(1, 1, 15L, TimeUnit.SECONDS,
+        ArrayBlockingQueue<Runnable>(16), java.util.concurrent.ThreadFactory { runnable ->
+            Thread(runnable, "Hchat-CustomMassSend").apply { isDaemon = true }
+        }).apply { allowCoreThreadTimeOut(true) }
     private val operations = ConcurrentHashMap<String, SendOperation>()
 
     @Synchronized
@@ -49,7 +52,7 @@ internal class CustomMassSendModuleSender(
         val effectiveItemIntervalSeconds = maxOf(itemIntervalSeconds, globalIntervalSeconds)
         val operation = SendOperation(UUID.randomUUID().toString())
         operations[operation.id] = operation
-        executor.execute {
+        try { executor.execute {
             if (closed || operation.canceled.get()) { operations.remove(operation.id); return@execute }
             val messageApi = WeChatApis.message().sender() ?: WeChatApis.messages()
             val mediaApi = WeChatApis.media()
@@ -76,6 +79,11 @@ internal class CustomMassSendModuleSender(
                 onComplete?.invoke(success, contents.size * targets.size, operation.canceled.get())
             }
         }
+        } catch (_: RejectedExecutionException) {
+            operations.remove(operation.id)
+            cancel(operation)
+            return null
+        }
         return SelectedMessageSendHandle { cancel(operation.id) }
     }
 
@@ -87,6 +95,7 @@ internal class CustomMassSendModuleSender(
         operations.values.forEach { cancel(it) }
         operations.clear()
         // Cancellation signals wake pacing waits; never interrupt an in-flight host send.
+        executor.queue.clear()
         executor.shutdown()
     }
 

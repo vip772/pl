@@ -39,14 +39,15 @@ internal class MeEntryVisibilityRuntime(private val context: FeatureContext) {
     private val prefs = HchatStorage.preferences(context.hostContext(), BackgroundBeautySettings.PREFS_NAME)
     private val main = Handler(Looper.getMainLooper())
     private val ownedHooks = mutableListOf<XC_MethodHook.Unhook>()
+    private val resources = t.mma.hooks.core.FeatureResourceScope { HLog.e("$TAG 资源释放失败", it) }
     private val meEntryAdapters = Collections.newSetFromMap(WeakHashMap<Any, Boolean>())
     private val meEntryOverlays = IdentityHashMap<Any, Set<String>>()
     @Volatile private var requestedMeHiddenKeys = MeEntryVisibility.hiddenKeys { prefs.getBoolean(it, false) }
     private var installed = false
-    private var destroyed = false
+    @Volatile private var destroyed = false
     private var meEntryFailureLogged = false
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == null || MeEntryVisibility.Entry.values().any { it.key == key }) {
+        if (!destroyed && (key == null || MeEntryVisibility.Entry.values().any { it.key == key })) {
             requestedMeHiddenKeys = MeEntryVisibility.hiddenKeys { prefs.getBoolean(it, false) }
             main.post {
                 if (!destroyed) {
@@ -56,14 +57,19 @@ internal class MeEntryVisibilityRuntime(private val context: FeatureContext) {
             }
         }
     }
+    @Synchronized
     fun install() {
+        if (destroyed) return
         prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
+        resources.register { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
         installMeEntryVisibility()
     }
+    @Synchronized
     fun destroy() {
+        if (destroyed) return
         destroyed = true
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        ownedHooks.forEach { runCatching { HookRegistry.get().unhook(it) } }
+        resources.close()
+        main.removeCallbacksAndMessages(null)
         ownedHooks.clear()
         meEntryAdapters.toList().forEach { refreshMeEntries(it, restoring = true) }
         meEntryAdapters.clear()
@@ -71,6 +77,7 @@ internal class MeEntryVisibilityRuntime(private val context: FeatureContext) {
     }
     // Verified 8.0.78: MoreTabUI.s -> g0; q() builds visible rows from e/f minus g,
     // then merges empty categories. Only adapters owned by MoreTabUI are filtered.
+    @Synchronized
     private fun installMeEntryVisibility() {
         if (installed || destroyed || requestedMeHiddenKeys.isEmpty()) return
         if (WeChatApis.version()?.versionName() != "8.0.78") return
@@ -84,7 +91,9 @@ internal class MeEntryVisibilityRuntime(private val context: FeatureContext) {
             KavaReflector.findMethod(fragmentClass, "onResume")
         ).distinct()
         if (lifecycleMethods.isEmpty()) return
-        ownedHooks.add(HookRegistry.get().hook(rebuild, object : XC_MethodHook() {
+        val attempt = mutableListOf<XC_MethodHook.Unhook>()
+        try {
+        attempt.add(HookRegistry.get().hook(rebuild, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 if (destroyed || requestedMeHiddenKeys.isEmpty() || param.thisObject !in meEntryAdapters) return
                 try {
@@ -103,7 +112,7 @@ internal class MeEntryVisibilityRuntime(private val context: FeatureContext) {
             }
         }))
         lifecycleMethods.forEach { method ->
-            ownedHooks.add(HookRegistry.get().hook(method, object : XC_MethodHook() {
+            attempt.add(HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     if (destroyed || !fragmentClass.isInstance(param.thisObject)) return
                     val adapter = KavaReflector.readField(adapterField, param.thisObject)
@@ -114,7 +123,13 @@ internal class MeEntryVisibilityRuntime(private val context: FeatureContext) {
                 }
             }))
         }
+        attempt.forEach { handle -> resources.register { HookRegistry.get().unhook(handle) } }
+        ownedHooks.addAll(attempt)
         installed = true
+        } catch (error: Throwable) {
+            attempt.forEach { handle -> runCatching { HookRegistry.get().unhook(handle) } }
+            logMeEntryFailure(error)
+        }
     }
     private fun refreshMeEntries(adapter: Any, restoring: Boolean = false) {
         try {

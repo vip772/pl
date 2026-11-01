@@ -228,11 +228,14 @@ class TextSpeechRuntime(context: Context) {
     fun shutdown() {
         if (destroyed) return
         destroyed = true
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        mainHandler.removeCallbacksAndMessages(null)
+        fun release(block: () -> Unit) {
+            try { block() } catch (error: Throwable) { HLog.e("文字播报资源释放失败", error) }
+        }
+        release { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
+        release { mainHandler.removeCallbacksAndMessages(null) }
         val cleanup = {
-            stopAndClear()
-            safeShutdownTts()
+            release { stopAndClear() }
+            release { safeShutdownTts() }
         }
         if (Looper.myLooper() == Looper.getMainLooper()) cleanup() else mainHandler.post { cleanup() }
     }

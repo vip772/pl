@@ -17,7 +17,7 @@ object ForwardSendPolicy {const val MIN_SEND_INTERVAL_MS=60000L}
 class Owner {
  @Volatile private var closed=false
  private val main=Main()
- private val executor=Executors.newSingleThreadExecutor()
+ private val executor=ThreadPoolExecutor(1,1,0L,TimeUnit.SECONDS,LinkedBlockingQueue<Runnable>())
  private val operations=ConcurrentHashMap<String,SendOperation>()
 '''+stop+cancel+'''
  @Synchronized fun submit(id:String,job:()->Unit):Boolean {

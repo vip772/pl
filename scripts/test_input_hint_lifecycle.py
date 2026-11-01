@@ -90,7 +90,7 @@ var isAttachedToWindow=true
 val listeners=mutableListOf<OnLayoutChangeListener>()
 fun interface OnLayoutChangeListener {fun onLayoutChange(v:View,l:Int,t:Int,r:Int,b:Int,ol:Int,ot:Int,or:Int,ob:Int)}
 fun addOnLayoutChangeListener(l:OnLayoutChangeListener){listeners+=l}
-fun removeOnLayoutChangeListener(l:OnLayoutChangeListener){listeners-=l}
+var failRemove=false;fun removeOnLayoutChangeListener(l:OnLayoutChangeListener){if(failRemove)error("remove failed");listeners-=l}
 fun layoutEvent(){listeners.toList().forEach{it.onLayoutChange(this,0,0,1,1,0,0,0,0)}}
 fun post(f:()->Unit){android.os.Handler.queue.add(f)}
 }

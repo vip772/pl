@@ -24,7 +24,7 @@ internal object FloatingChatActionBarBackgrounds {
         }
         originals[view] = layers
         writing = true
-        try { layers.keys.forEach { it.invoke(view, null) } } finally { writing = false }
+        try { layers.keys.forEach { method -> runCatching { method.invoke(view, null) } } } finally { writing = false }
     }
 
     // Called BEFORE the native setter: save its requested value, then let the
@@ -40,6 +40,11 @@ internal object FloatingChatActionBarBackgrounds {
     fun restore(view: View) {
         val layers = originals.remove(view) ?: return
         writing = true
-        try { layers.forEach { (method, drawable) -> method.invoke(view, drawable) } } finally { writing = false }
+        try {
+            layers.forEach { (method, drawable) ->
+                // A failed native layer must not strand the other backgrounds.
+                runCatching { method.invoke(view, drawable) }
+            }
+        } finally { writing = false }
     }
 }

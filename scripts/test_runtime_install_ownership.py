@@ -10,7 +10,12 @@ for name in files:
  block=s[a:z]
  assert not re.search(r'runtime = [^\n]+\.also',block),name
  assert block.index('val installed =') < block.index('runtime = installed') < re.search(r'installed\.(install|start)',block).start(),name
- assert 'runtime?.destroy()' in s[z:],name
+ if name == 'homeextension/HomeExtensionFeature.kt':
+  assert 'resources.register {' in block and 'installed.destroy()' in block,name
+  assert 'runtimeOwner?.close()' in s[z:],name
+  assert 'runtime?.destroy()' not in s[z:],name
+ else:
+  assert 'runtime?.destroy()' in s[z:],name
 base=(r/'app/src/main/java/t/mma/hooks/core/BaseFeature.kt').read_text()
 assert 'try { onFeatureInstall(context) } catch (error: Throwable)' in base
 assert 'onDestroy(context)' in base

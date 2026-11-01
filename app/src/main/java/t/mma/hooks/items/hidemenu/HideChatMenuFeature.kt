@@ -14,49 +14,48 @@ import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
-import java.util.Collections
-import java.util.concurrent.ConcurrentHashMap
+import t.mma.hooks.core.PreferenceRuntimeOwner
+import t.mma.hooks.core.FeatureResourceScope
 
 class HideChatMenuFeature : BaseFeature() {
-    private var runtime: HideChatMenuRuntime? = null
-
     override fun featureId(): String = ID
-
     override fun name(): String = "隐藏长按菜单"
-
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(HideChatMenuSettingsProvider())
     }
-
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = HideChatMenuRuntime(context)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
+        val prefs = HchatStorage.preferences(context.hostContext(), HideChatMenuSettings.PREFS_NAME)
+        var schedule: (() -> Unit)? = null
+        val owner = PreferenceRuntimeOwner(prefs, setOf(HideChatMenuSettings.KEY_ENABLE),
+            enabled = { prefs.getBoolean(HideChatMenuSettings.KEY_ENABLE, HideChatMenuSettings.DEFAULT_ENABLE) },
+            create = { resources ->
+                val runtime = HideChatMenuRuntime(context, resources)
+                val ticket = DexInstallScheduler.installation(ID, name())
+                val install = { ticket.schedule { runtime.install() } }
+                schedule = install
+                resources.register { if (schedule === install) schedule = null }
+                resources.register { ticket.close() }
+                install()
+            }, onError = { logError("隐藏菜单启停失败", it) })
+        trackResource { owner.close() }
+        owner.start()
+        subscribe(Events.DexReady::class.java) { schedule?.invoke() }
     }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime = null
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            runtime?.install() == true
-        }
-    }
-
     companion object {
         const val ID = "hide_chat_menu"
     }
 }
 
 private class HideChatMenuRuntime(
-    private val context: FeatureContext
+    private val context: FeatureContext,
+    private val resources: FeatureResourceScope
 ) {
     private val prefs = HchatStorage.preferences(context.hostContext(), HideChatMenuSettings.PREFS_NAME)
-    private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
+    private val hookedMethods = HashSet<Method>()
 
     @Synchronized
     fun install(): Boolean {
+        if (resources.isClosed()) return true
         val methods = SingleMessageMenuLocator.menuCreateMethods(context) { message, throwable ->
             HLog.e("$TAG $message", throwable)
         }
@@ -80,11 +79,12 @@ private class HideChatMenuRuntime(
             return false
         }
         return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
+            val handle = HookRegistry.get().hook(method, object : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    hideConfiguredItems(param.args?.getOrNull(0))
+                    if (!resources.isClosed()) hideConfiguredItems(param.args?.getOrNull(0))
                 }
             })
+            resources.register { HookRegistry.get().unhook(handle) }
             true
         }.getOrElse {
             hookedMethods.remove(method)

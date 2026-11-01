@@ -17,32 +17,34 @@ class ProtobufPacketFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        scheduleInstall(context)
-        subscribe(Events.DexReady::class.java) {
-            scheduleInstall(context)
-        }
-    }
-
-    private fun scheduleInstall(context: FeatureContext) {
-        DexInstallScheduler.schedule(ID, name(), stage = DexInstallScheduler.Stage.WARMUP) {
-            try {
-                val prefs = HchatStorage.preferences(context.hostContext(), ProtobufPacketSettings.PREFS_NAME)
-                val hook = ProtobufPacketHook(
-                    context.hostClassLoader(),
-                    context.dexFinder(),
-                    prefs,
-                    ProtobufPacketFileLogger(context.hostContext())
-                ) { message -> XposedBridge.log("[Hchat:Protobuf] $message") }
-                val ok = hook.install()
-                if (ok) ProtobufPacketRuntime.install(hook)
-                ok
-            } catch (e: Throwable) {
-                logError("Protobuf 安装失败", e)
-                false
+        val prefs = HchatStorage.preferences(context.hostContext(), ProtobufPacketSettings.PREFS_NAME)
+        val hook = ProtobufPacketHook(context.hostClassLoader(), context.dexFinder(), prefs,
+            ProtobufPacketFileLogger(context.hostContext())) { message -> XposedBridge.log("[Hchat:Protobuf] $message") }
+        val lock = Any()
+        var closed = false
+        val ticket = DexInstallScheduler.installation(ID, name(), DexInstallScheduler.Stage.WARMUP)
+        trackResource {
+            synchronized(lock) {
+                closed = true
+                ticket.close()
+                ProtobufPacketRuntime.detach(hook)
+                hook.close()
             }
         }
+        fun schedule() {
+            ticket.schedule {
+                synchronized(lock) {
+                    if (closed) true else try {
+                        val ok = hook.install()
+                        if (ok) ProtobufPacketRuntime.install(hook)
+                        ok
+                    } catch (error: Throwable) { logError("Protobuf 安装失败", error); false }
+                }
+            }
+        }
+        schedule()
+        subscribe(Events.DexReady::class.java) { schedule() }
     }
-
     companion object {
         const val ID = "protobuf_packet"
     }

@@ -27,22 +27,28 @@ class RealNameTailFeature : BaseFeature() {
         val nicknameColorStore = GroupNicknameColorStore(context.hostContext())
         store = localStore
         val query = BeforeTransferNameQuery(context, ::logFeatureError)
+        trackResource { query.destroy() }
+        var ownedRenderer: RealNameTailRenderer? = null
         val scheduler = RealNameTailScheduler(localStore, query, ::logFeatureError) { wxid ->
-            renderer?.applyForSender(wxid)
+            ownedRenderer?.applyForSender(wxid)
         }
         val prefetcher = ContactProfilePrefetcher(context, ::logFeatureError) { wxid ->
-            renderer?.applyForSender(wxid)
+            ownedRenderer?.applyForSender(wxid)
         }
+        trackResource { scheduler.destroy() }
+        trackResource { prefetcher.destroy(); if (profilePrefetcher === prefetcher) profilePrefetcher = null }
         profilePrefetcher = prefetcher
         renderer = RealNameTailRenderer(context, localStore, nicknameColorStore, scheduler, ::logFeatureError).also {
             it.profilePrefetcher = prefetcher
         }
         val installedRenderer = renderer!!
-        trackResource { installedRenderer.destroy(); if (renderer === installedRenderer) renderer = null }
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) {
-            scheduleInstall()
-        }
+        ownedRenderer = installedRenderer
+        trackResource { try { installedRenderer.destroy() } finally { ownedRenderer = null; if (renderer === installedRenderer) renderer = null; if (store === localStore) store = null } }
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { ticket.close() }
+        fun schedule() { ticket.schedule { installedRenderer.install() } }
+        schedule()
+        subscribe(Events.DexReady::class.java) { schedule() }
         val observer = WeChatApis.message().observe() ?: return
         trackSubscription(observer.subscribe { message ->
             if (!localStore.isEnabled() || !localStore.messageQueryEnabled()) return@subscribe
@@ -51,7 +57,7 @@ class RealNameTailFeature : BaseFeature() {
             val sender = message.sender
             if (sender.isBlank() || isSelf(sender)) return@subscribe
             scheduler.onMessage(roomId, sender)
-            if (localStore.hasTail(sender)) renderer?.applyForSender(sender)
+            if (localStore.hasTail(sender)) installedRenderer.applyForSender(sender)
         })
     }
 
@@ -59,13 +65,7 @@ class RealNameTailFeature : BaseFeature() {
         logError(message, throwable)
     }
 
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            renderer?.install() == true
-        }
-    }
-
-    private fun isSelf(wxid: String): Boolean {
+private fun isSelf(wxid: String): Boolean {
         val self = WeChatApis.account()?.selfWxId().orEmpty()
         return self.isNotEmpty() && self == wxid
     }

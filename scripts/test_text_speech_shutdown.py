@@ -3,16 +3,19 @@ from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1];s=(r/'app/src/main/java/t/mma/hooks/items/textspeech/TextSpeechRuntime.kt').read_text()
 a=s.index('    @Synchronized\n    fun shutdown()');b=s.index('    private fun settings()',a);shutdown=s[a:b]
-code='''object Looper{var main=true;fun myLooper()=if(main)1 else 2;fun getMainLooper()=1}
+code='''object HLog{var errors=0;fun e(s:String,t:Throwable){errors++}}
+object Looper{var main=true;fun myLooper()=if(main)1 else 2;fun getMainLooper()=1}
 class Handler{val pending=mutableListOf<()->Unit>();fun post(r:()->Unit){pending+=r};fun removeCallbacksAndMessages(v:Any?){pending.clear()};fun drain(){pending.toList().also{pending.clear()}.forEach{it()}}}
-class Prefs{var removed=0;fun unregisterOnSharedPreferenceChangeListener(l:Any){removed++}}
-class Runtime{var destroyed=false;val prefs=Prefs();val preferenceListener=Any();val mainHandler=Handler();var stopped=0;var closed=0
- fun stopAndClear(){stopped++};fun safeShutdownTts(){closed++}
+class Prefs{var removed=0;var fail=false;fun unregisterOnSharedPreferenceChangeListener(l:Any){removed++;if(fail)error("unregister")}}
+class Runtime{var destroyed=false;val prefs=Prefs();val preferenceListener=Any();val mainHandler=Handler();var stopped=0;var closed=0;var failStop=false
+ fun stopAndClear(){stopped++;if(failStop)error("stop")};fun safeShutdownTts(){closed++}
 '''+shutdown+'''}
 fun main(){
  val main=Runtime();main.mainHandler.post{error("old work ran")};main.shutdown();main.shutdown();main.mainHandler.drain();check(main.destroyed&&main.stopped==1&&main.closed==1&&main.prefs.removed==1)
  Looper.main=false;val background=Runtime();background.mainHandler.post{error("old background work ran")};background.shutdown();background.shutdown();check(background.destroyed&&background.closed==0&&background.mainHandler.pending.size==1)
  background.mainHandler.drain();check(background.stopped==1&&background.closed==1&&background.prefs.removed==1)
+ Looper.main=true;val failing=Runtime();failing.prefs.fail=true;failing.failStop=true
+ failing.mainHandler.post{error("stale work")};failing.shutdown();check(failing.closed==1 && failing.mainHandler.pending.isEmpty() && HLog.errors==2)
  println("PASS speech shutdown: immediate main cleanup, posted background cleanup, old callbacks removed, duplicate shutdown ignored")
 }
 '''

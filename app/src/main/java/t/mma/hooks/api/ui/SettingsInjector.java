@@ -51,7 +51,7 @@ import t.mma.utils.KavaReflector;
  * 4. hookLauncherPlusMenu(): LauncherUI 右上角加号菜单入口
  * 5. hookLauncherPlusLongPress(): LauncherUI 右上角加号长按入口
  */
-public class SettingsInjector {
+public class SettingsInjector implements AutoCloseable {
 
     private static final String TAG = "[Hchat:SettingsInjector]";
     private static final String PREFS_KEY = "Hchat_settings";
@@ -78,6 +78,83 @@ public class SettingsInjector {
     private final SettingsEntrySettings entrySettings;
     private final File dexCacheDir;
     private final HashSet<Class<?>> plusMenuAdapterViewHookedClasses = new HashSet<>();
+    private volatile boolean closed;
+    private final OwnedHooks ownedHooks = new OwnedHooks();
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final java.util.WeakHashMap<View, LongPressBinding> longPressBindings = new java.util.WeakHashMap<>();
+    private static final class LongPressBinding {
+        final View.OnLongClickListener original;
+        final View.OnLongClickListener installed;
+        final Object tag;
+        final boolean longClickable;
+        LongPressBinding(View.OnLongClickListener original, View.OnLongClickListener installed,
+                         Object tag, boolean longClickable) {
+            this.original = original; this.installed = installed; this.tag = tag;
+            this.longClickable = longClickable;
+        }
+    }
+    private static final class OwnedHooks implements AutoCloseable {
+        private boolean closed;
+        private final java.util.ArrayList<XC_MethodHook.Unhook> handles = new java.util.ArrayList<>();
+        synchronized XC_MethodHook.Unhook hook(java.lang.reflect.Member method, XC_MethodHook callback) {
+            if (closed) return null;
+            XC_MethodHook.Unhook handle = HookRegistry.get().hook(method, callback);
+            if (handle != null) handles.add(handle);
+            return handle;
+        }
+        synchronized void add(XC_MethodHook.Unhook handle) {
+            if (handle == null) return;
+            if (closed) { release(handle); return; }
+            HookRegistry.get().add(handle);
+            handles.add(handle);
+        }
+        private void release(XC_MethodHook.Unhook handle) {
+            try { HookRegistry.get().unhook(handle); } catch (Throwable ignored) { }
+        }
+        @Override public void close() {
+            java.util.ArrayList<XC_MethodHook.Unhook> pending;
+            synchronized (this) {
+                if (closed) return;
+                closed = true; pending = new java.util.ArrayList<>(handles); handles.clear();
+            }
+            for (XC_MethodHook.Unhook handle : pending) release(handle);
+        }
+    }
+    @Override public void close() {
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+            contextGetStringUnhook = null;
+            modernLocationParentClass = null;
+            modernLocationFrontClass = null;
+            plusMenuAdapterViewHookedClasses.clear();
+        }
+        ownedHooks.close();
+        main.removeCallbacksAndMessages(null);
+        final java.util.ArrayList<Map.Entry<View, LongPressBinding>> bindings;
+        synchronized (this) {
+            bindings = new java.util.ArrayList<>(longPressBindings.entrySet());
+            longPressBindings.clear();
+        }
+        Runnable restore = () -> {
+            for (Map.Entry<View, LongPressBinding> entry : bindings) {
+                View view = entry.getKey(); LongPressBinding binding = entry.getValue();
+                try {
+                    Object info = KavaReflector.readField(view, "mListenerInfo");
+                    Object current = info == null ? null : KavaReflector.readField(info, "mOnLongClickListener");
+                    if (current == binding.installed) {
+                        view.setOnLongClickListener(binding.original);
+                        view.setLongClickable(binding.longClickable);
+                    }
+                } catch (Throwable ignored) { }
+                try {
+                    if (Boolean.TRUE.equals(view.getTag(HCHAT_PLUS_LONG_PRESS_TAG)))
+                        view.setTag(HCHAT_PLUS_LONG_PRESS_TAG, binding.tag);
+                } catch (Throwable ignored) { }
+            }
+        };
+        if (Looper.myLooper() == Looper.getMainLooper()) restore.run(); else main.post(restore);
+    }
     private XC_MethodHook.Unhook contextGetStringUnhook;
     private volatile Class<?> modernLocationParentClass;
     private volatile Class<?> modernLocationFrontClass;
@@ -97,7 +174,8 @@ public class SettingsInjector {
     /**
      * 安装全部注入 Hook（对应 WeKit onEnable）。
      */
-    public void hookSettings() {
+    public synchronized void hookSettings() {
+        if (closed) return;
         logDetail("hookSettings start");
         injectLegacy();         // 旧版 SettingsUI
         injectModernMethod2();  // 新版 MainSettingsUI (>= 8.0.49)
@@ -164,10 +242,11 @@ public class SettingsInjector {
 
         try {
             // Hook SettingsUI.initView()
-            HookRegistry.get().add(XposedHelpers.findAndHookMethod(dex.settingsUIClass, "initView",
+            ownedHooks.add(XposedHelpers.findAndHookMethod(dex.settingsUIClass, "initView",
                     new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                             Activity activity = (Activity) param.thisObject;
                             try {
                                 Constructor<?> ctor = KavaReflector.findConstructor(
@@ -199,9 +278,10 @@ public class SettingsInjector {
             }
             if (targetTreeClick != null) {
                 final Method finalTarget = targetTreeClick;
-                HookRegistry.get().hook(finalTarget, new XC_MethodHook() {
+                ownedHooks.hook(finalTarget, new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                         try {
                             // WeKit: if (args.size < 2) return; val preference = args[1]
                             if (param.args.length < 2) return;
@@ -407,9 +487,10 @@ public class SettingsInjector {
             // hook proxy class 构造函数，确保 handler 被设置
             Constructor<?> proxyConstructor = KavaReflector.findConstructor(proxyClass, activityClass);
             final Constructor<?> finalProxyConstructor = proxyConstructor;
-            HookRegistry.get().hook(proxyConstructor, new XC_MethodHook() {
+            ownedHooks.hook(proxyConstructor, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                     ProxyBuilder.setInvocationHandler(param.thisObject, handler);
                 }
             });
@@ -422,10 +503,11 @@ public class SettingsInjector {
             // 找到返回 SettingLocation 的方法
             for (Method m : KavaReflector.declaredMethods(childSettingItemClass)) {
                 if (m.getReturnType() == dex.settingLocationClass) {
-                    HookRegistry.get().hook(m, new XC_MethodHook(
+                    ownedHooks.hook(m, new XC_MethodHook(
                             de.robv.android.xposed.callbacks.XCallback.PRIORITY_HIGHEST) {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                             try {
                                 Object oldLocation = param.getResult();
                                 Class<?> parentClass = readSettingLocationClass(oldLocation, 0, groupSettingItemClass);
@@ -433,8 +515,11 @@ public class SettingsInjector {
                                 if (frontClass == proxyClass) {
                                     return;
                                 }
-                                modernLocationParentClass = parentClass;
-                                modernLocationFrontClass = frontClass;
+                                synchronized (SettingsInjector.this) {
+                                    if (closed) return;
+                                    modernLocationParentClass = parentClass;
+                                    modernLocationFrontClass = frontClass;
+                                }
                                 logDetail("[Modern] 接入设置入口链: front="
                                         + frontClass.getName());
                                 Object location = newSettingLocation(parentClass, proxyClass);
@@ -455,9 +540,10 @@ public class SettingsInjector {
             if (providerMethod == null) {
                 logDetail("[Modern] ClassesProvider 方法未找到，跳过 Provider 注入");
             } else {
-                HookRegistry.get().hook(providerMethod, new XC_MethodHook() {
+                ownedHooks.hook(providerMethod, new XC_MethodHook() {
                     @Override
                     protected void afterHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                         try {
                             Map<?, ?> map = (Map<?, ?>) param.getResult();
                             if (map == null) return;
@@ -572,9 +658,10 @@ public class SettingsInjector {
             return;
         }
 
-        HookRegistry.get().hook(superImportMethod, new XC_MethodHook() {
+        ownedHooks.hook(superImportMethod, new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                 try {
                     if (mainOnly
                             && dex.mainSettingsUIClass != null
@@ -598,19 +685,20 @@ public class SettingsInjector {
                 + ownerClass.getName());
     }
 
-    private void hookTitleStringResource() {
-        if (contextGetStringUnhook != null) return;
+    private synchronized void hookTitleStringResource() {
+        if (closed || contextGetStringUnhook != null) return;
         contextGetStringUnhook = XposedHelpers.findAndHookMethod(
                 Context.class, "getString", int.class,
                 new XC_MethodHook() {
                     @Override
                     protected void beforeHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                         if ((int) param.args[0] == HCHAT_SETTING_ITEM_NAME_RES_ID) {
                             param.setResult(PREFS_TITLE);
                         }
                     }
                 });
-        HookRegistry.get().add(contextGetStringUnhook);
+        ownedHooks.add(contextGetStringUnhook);
         logDetail("[Modern] Context.getString 标题资源 Hook 已安装");
     }
 
@@ -687,16 +775,17 @@ public class SettingsInjector {
             if (launcherClass == null) return;
 
             // Hook onCreate
-            HookRegistry.get().add(XposedHelpers.findAndHookMethod(launcherClass, "onCreate",
+            ownedHooks.add(XposedHelpers.findAndHookMethod(launcherClass, "onCreate",
                     android.os.Bundle.class,
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                             try {
                                 Activity activity = (Activity) param.thisObject;
                                 Intent intent = activity.getIntent();
                                 if (intent != null && intent.hasExtra(MODULE_TAG)) {
-                                    new Handler(Looper.getMainLooper()).postDelayed(
+                                    main.postDelayed(
                                             () -> showModuleSettingsPage(activity), 500);
                                 }
                             } catch (Throwable ignored) {}
@@ -704,11 +793,12 @@ public class SettingsInjector {
                     }));
 
             // Hook onNewIntent
-            HookRegistry.get().add(XposedHelpers.findAndHookMethod(launcherClass, "onNewIntent",
+            ownedHooks.add(XposedHelpers.findAndHookMethod(launcherClass, "onNewIntent",
                     Intent.class,
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                             try {
                                 Activity activity = (Activity) param.thisObject;
                                 Intent intent = (Intent) param.args[0];
@@ -751,6 +841,7 @@ public class SettingsInjector {
                     new XC_MethodHook() {
                         @Override
                         protected void afterHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                             try {
                                 markPlusView(resolvePlusActionRealView(param.thisObject));
                             } catch (Throwable e) {
@@ -758,7 +849,7 @@ public class SettingsInjector {
                             }
                         }
                     })) {
-                HookRegistry.get().add(unhook);
+                ownedHooks.add(unhook);
             }
             return true;
         } catch (Throwable e) {
@@ -767,15 +858,22 @@ public class SettingsInjector {
         }
     }
 
-    private void markPlusView(View plusView) {
-        if (plusView == null) return;
-        if (isMarkedPlusView(plusView)) return;
-        plusView.setTag(HCHAT_PLUS_LONG_PRESS_TAG, Boolean.TRUE);
-        plusView.setOnLongClickListener(view -> {
+    private synchronized void markPlusView(View plusView) {
+        if (closed || plusView == null || isMarkedPlusView(plusView)) return;
+        Object info = KavaReflector.readField(plusView, "mListenerInfo");
+        Object listener = info == null ? null : KavaReflector.readField(info, "mOnLongClickListener");
+        View.OnLongClickListener original = listener instanceof View.OnLongClickListener
+                ? (View.OnLongClickListener) listener : null;
+        View.OnLongClickListener installed = view -> {
+            if (closed) return original != null && original.onLongClick(view);
             return openPlusLongPressSettings(view);
-        });
+        };
+        LongPressBinding binding = new LongPressBinding(original, installed,
+                plusView.getTag(HCHAT_PLUS_LONG_PRESS_TAG), plusView.isLongClickable());
+        longPressBindings.put(plusView, binding);
+        plusView.setTag(HCHAT_PLUS_LONG_PRESS_TAG, Boolean.TRUE);
+        plusView.setOnLongClickListener(installed);
     }
-
     private boolean isMarkedPlusView(View view) {
         return view != null && Boolean.TRUE.equals(view.getTag(HCHAT_PLUS_LONG_PRESS_TAG));
     }
@@ -833,9 +931,10 @@ public class SettingsInjector {
         }
 
         try {
-            HookRegistry.get().hook(dex.plusSubMenuAdapterMethod, new XC_MethodHook() {
+            ownedHooks.hook(dex.plusSubMenuAdapterMethod, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                     try {
                         BaseAdapter adapter = param.getResult() instanceof BaseAdapter
                                 ? (BaseAdapter) param.getResult()
@@ -847,9 +946,10 @@ public class SettingsInjector {
                 }
             });
 
-            HookRegistry.get().hook(dex.plusSubMenuOnItemClickMethod, new XC_MethodHook() {
+            ownedHooks.hook(dex.plusSubMenuOnItemClickMethod, new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                     try {
                         if (param.args == null || param.args.length < 3) return;
                         int position = (int) param.args[2];
@@ -1199,16 +1299,17 @@ public class SettingsInjector {
         return KavaReflector.newInstanceByArgs(wrapperClass, new Object[] { item });
     }
 
-    private void ensurePlusMenuAdapterViewHook(BaseAdapter adapter) {
-        if (adapter == null) return;
+    private synchronized void ensurePlusMenuAdapterViewHook(BaseAdapter adapter) {
+        if (closed || adapter == null) return;
         Class<?> adapterClass = adapter.getClass();
         synchronized (plusMenuAdapterViewHookedClasses) {
             if (plusMenuAdapterViewHookedClasses.contains(adapterClass)) return;
             Method getViewMethod = findAdapterGetViewMethod(adapterClass);
             if (getViewMethod == null) return;
-            HookRegistry.get().hook(getViewMethod, new XC_MethodHook() {
+            ownedHooks.hook(getViewMethod, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                     try {
                         if (param.args == null || param.args.length < 1) return;
                         Object result = param.getResult();
@@ -1285,9 +1386,10 @@ public class SettingsInjector {
         HashSet<Method> methods = new HashSet<>();
         for (Method populateMethod : findPlusMenuPopulateMethods(helperClass)) {
             if (!methods.add(populateMethod)) continue;
-            HookRegistry.get().hook(populateMethod, new XC_MethodHook() {
+            ownedHooks.hook(populateMethod, new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                     appendPlusMenuItemSafely(param.thisObject);
                 }
             });
@@ -1295,9 +1397,10 @@ public class SettingsInjector {
 
         for (Method showMethod : findPlusMenuBaseShowMethods(helperClass)) {
             if (!methods.add(showMethod)) continue;
-            HookRegistry.get().hook(showMethod, new XC_MethodHook() {
+            ownedHooks.hook(showMethod, new XC_MethodHook() {
                 @Override
                 protected void beforeHookedMethod(MethodHookParam param) {
+                        if (closed) return;
                     appendPlusMenuItemSafely(param.thisObject);
                 }
             });
@@ -1421,10 +1524,12 @@ public class SettingsInjector {
     // ========================================================================
 
     private void showModuleSettingsPage(Context context) {
+        if (closed) return;
         SettingsUI.show(context);
     }
 
     private void showScriptPluginAgentPage(Context context) {
+        if (closed) return;
         SettingsUI.showScriptPluginAgent(context);
     }
 

@@ -155,18 +155,25 @@ private class InputHintRuntime(
     fun destroy() {
         if (!active) return
         active = false
-        mainHandler.removeCallbacksAndMessages(null)
+        fun release(block: () -> Unit) {
+            try { block() } catch (error: Throwable) { logger("输入框提示资源释放失败", error) }
+        }
+        release { mainHandler.removeCallbacksAndMessages(null) }
         ownedHooks.forEach { runCatching { HookRegistry.get().unhook(it) } }; ownedHooks.clear()
-        footerListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
+        footerListeners.forEach { (view, listener) -> release { view.removeOnLayoutChangeListener(listener) } }
         footerListeners.clear(); queuedFooters.clear()
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
+        release { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
         val inputs = synchronized(inputBindings) {
             inputBindings.entries.map { it.key to it.value }.also { inputBindings.clear() }
         }
         inputs.forEach { (input, binding) ->
-            postToInput(input) {
-                if (binding.appliedHint != null && TextUtils.equals(readHint(input), binding.appliedHint)) {
-                    writeHint(input, binding.originalHint)
+            release {
+                postToInput(input) {
+                    release {
+                        if (binding.appliedHint != null && TextUtils.equals(readHint(input), binding.appliedHint)) {
+                            writeHint(input, binding.originalHint)
+                        }
+                    }
                 }
             }
         }

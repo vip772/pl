@@ -357,7 +357,8 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
     private fun loadContacts() {
         if (loadingContacts || contactsLoaded || destroyed) return
         loadingContacts = true
-        worker.execute {
+        try { worker.execute {
+            if (destroyed) return@execute
             val result = runCatching {
                 val contacts = WeChatApis.contact().contacts() ?: error("Contacts not ready")
                 contacts.getPickerContacts().mapTo(HashSet()) { it.wxId } to contacts.getPickerOfficialAccounts().mapTo(HashSet()) { it.wxId }
@@ -370,6 +371,9 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     if (changed) { updateFilter(); if (enabled && selected in setOf("friends", "official")) reload() }
                 }
             }
+        } } catch (error: java.util.concurrent.RejectedExecutionException) {
+            loadingContacts = false
+            if (!destroyed) HLog.e("[Hchat:GroupBar] 联系人加载队列已关闭", error)
         }
     }
     private inner class Session(view: View, parent: RelativeLayout, val adapter: Any, private val reset: Method) {
@@ -849,13 +853,22 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         }
         private fun dp(value: Int) = (value * bar.resources.displayMetrics.density + .5f).toInt()
     }
-    fun destroy() {
+    @Synchronized fun destroy() {
+        if (destroyed) return
         destroyed = true; enabled = false; filter = GroupBarFilter(null)
-        if (installed) prefs.unregisterOnSharedPreferenceChangeListener(listener)
-        querySubscription?.unsubscribe(); changes?.unsubscribe()
-        hooks.forEach { HookRegistry.get().unhook(it) }; hooks.clear()
-        main.removeCallbacksAndMessages(null)
-        sessions.values.toList().forEach { it.reload(); it.dispose() }; sessions.clear(); sources.clear()
-        worker.shutdownNow(); synchronized(sqlCache) { sqlCache.clear() }
+        fun release(block: () -> Unit) {
+            try { block() } catch (error: Throwable) { HLog.e("[Hchat:GroupBar] 资源释放失败", error) }
+        }
+        release { if (installed) prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+        release { querySubscription?.unsubscribe() }; querySubscription = null
+        release { changes?.unsubscribe() }; changes = null
+        hooks.toList().forEach { hook -> release { HookRegistry.get().unhook(hook) } }; hooks.clear()
+        release { main.removeCallbacksAndMessages(null) }
+        sessions.values.toList().forEach { session ->
+            release { session.reload() }; release { session.dispose() }
+        }
+        sessions.clear(); sources.clear()
+        release { worker.shutdownNow() }
+        synchronized(sqlCache) { sqlCache.clear() }
     }
 }

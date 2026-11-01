@@ -13,10 +13,18 @@ class ContactProfilePrefetcher(
     private val logger: (String, Throwable?) -> Unit,
     private val onProfileUpdated: (String) -> Unit
 ) {
+    private val taskPrefix = "real_tail_profile_${java.util.UUID.randomUUID()}_"
+    @Volatile private var closed = false
+    @Synchronized fun destroy() {
+        closed = true
+        lastRequestAt.keys.toList().forEach { WeChatApis.tasks()?.cancel("${taskPrefix}$it") }
+        lastRequestAt.clear(); sceneClass = null
+    }
     private val lastRequestAt = ConcurrentHashMap<String, Long>()
     @Volatile private var sceneClass: Class<*>? = null
 
-    fun requestIfMissing(wxid: String?) {
+    @Synchronized fun requestIfMissing(wxid: String?) {
+        if (closed) return
         val id = wxid?.trim().orEmpty()
         if (!RealNameTailStore.isValidWxid(id)) return
         if (!profileMissing(id)) return
@@ -33,11 +41,15 @@ class ContactProfilePrefetcher(
     }
 
     private fun requestProfile(wxid: String) {
+        if (closed) return
         try {
             val sent = requestViaGetContactService(wxid) || requestViaNativeScene(wxid)
             if (!sent) return
-            WeChatApis.tasks()?.runOnMainDelayed("real_tail_profile_refresh_$wxid", REFRESH_DELAY_MS) {
-                onProfileUpdated(wxid)
+            synchronized(this) {
+                if (closed) return
+                WeChatApis.tasks()?.runOnMainDelayed("${taskPrefix}$wxid", REFRESH_DELAY_MS) {
+                    if (!closed) onProfileUpdated(wxid)
+                }
             }
         } catch (t: Throwable) {
             logger("联系人资料预取失败", t)

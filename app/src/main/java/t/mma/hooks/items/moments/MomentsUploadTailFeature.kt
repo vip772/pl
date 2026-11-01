@@ -11,8 +11,6 @@ import t.mma.utils.KavaReflector
 import java.lang.reflect.Modifier
 
 class MomentsUploadTailFeature : BaseFeature() {
-    private var hooker: MomentsUploadTailHooker? = null
-
     override fun featureId(): String = ID
 
     override fun name(): String = "朋友圈上传尾巴"
@@ -22,23 +20,12 @@ class MomentsUploadTailFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        hooker = MomentsUploadTailHooker(context, ::logError)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(
-            ID,
-            name(),
-            DexInstallScheduler.Stage.WARMUP
-        ) {
-            hooker?.install() == true
-        }
-    }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        hooker = null
+        val installed = MomentsUploadTailHooker(context, ::logError)
+        val ticket = DexInstallScheduler.installation(ID, name(), DexInstallScheduler.Stage.WARMUP)
+        trackResource { installed.destroy() }
+        trackResource { ticket.close() }
+        ticket.schedule { installed.install() }
+        subscribe(Events.DexReady::class.java) { ticket.schedule { installed.install() } }
     }
 
     companion object {
@@ -54,11 +41,14 @@ private class MomentsUploadTailHooker(
         context.hostContext(),
         MomentsUploadTailSettings.PREFS_NAME
     )
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("朋友圈上传尾巴资源释放失败", it) }
+    @Synchronized fun destroy() { resources.close() }
     @Volatile
     private var installed = false
 
     @Synchronized
     fun install(): Boolean {
+        if (resources.isClosed()) return false
         if (installed) return true
         val finder = context.dexFinder()
         runCatching { finder.resolveSnsUploadApi() }.onFailure {
@@ -69,8 +59,9 @@ private class MomentsUploadTailHooker(
         val sdkAppName = finder.snsSetSdkAppNameMethod ?: return false
         if (Modifier.isAbstract(commit.modifiers) || commit.declaringClass.isInterface) return false
         return runCatching {
-            HookRegistry.get().hook(commit, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(commit, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (resources.isClosed()) return
                     if (!prefs.getBoolean(
                             MomentsUploadTailSettings.KEY_ENABLE,
                             MomentsUploadTailSettings.DEFAULT_ENABLE
@@ -89,6 +80,7 @@ private class MomentsUploadTailHooker(
                     KavaReflector.invoke(sdkAppName, param.thisObject, name)
                 }
             })
+            resources.register { HookRegistry.get().unhook(handle) }
             installed = true
             true
         }.onFailure {

@@ -47,28 +47,20 @@ class QuickContactEditFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = QuickContactEditRuntime(context, ::logFeatureError)
-        if (runtime?.installSnsAvatarHook() != true) {
-            logFeatureError("好友朋友圈头像长按 Hook 未安装", null)
+        val current = QuickContactEditRuntime(context, ::logFeatureError)
+        runtime = current
+        trackResource { current.destroy(); if (runtime === current) runtime = null }
+        val menu = DexInstallScheduler.installation(ID, name())
+        val avatar = DexInstallScheduler.installation("$ID:sns_avatar_menu", "${name()}朋友圈头像菜单")
+        trackResource { menu.close() }; trackResource { avatar.close() }
+        if (!current.installSnsAvatarHook()) logFeatureError("好友朋友圈头像长按 Hook 未安装", null)
+        fun schedule() {
+            menu.schedule { current.installConversationMenuHook() }
+            avatar.schedule { current.installSnsAvatarMenuHook() }
         }
-        scheduleDexInstall()
-        subscribe(Events.DexReady::class.java) { scheduleDexInstall() }
+        schedule()
+        subscribe(Events.DexReady::class.java) { schedule() }
     }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
-    }
-
-    private fun scheduleDexInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            runtime?.installConversationMenuHook() == true
-        }
-        DexInstallScheduler.schedule("$ID:sns_avatar_menu", "${name()}朋友圈头像菜单") {
-            runtime?.installSnsAvatarMenuHook() == true
-        }
-    }
-
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -92,6 +84,7 @@ private class QuickContactEditRuntime(
 
     private val prefs = HchatStorage.preferences(context.hostContext(), QuickContactEditSettings.PREFS_NAME)
     private val main = Handler(Looper.getMainLooper())
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("快捷菜单资源释放失败", it) }
     private val hookedMethods = ConcurrentHashMap.newKeySet<Method>()
     private val bindings = Collections.synchronizedMap(WeakHashMap<MenuItem, MenuTarget>())
     private val snsMenuBindings = Collections.synchronizedMap(WeakHashMap<MenuItem, MenuTarget>())
@@ -116,10 +109,12 @@ private class QuickContactEditRuntime(
         }
 
         override fun isVisible(target: ConversationMenuExtensionTarget): Boolean {
+            if (resources.isClosed()) return false
             return enabled() && conversationTarget(target.activity, target.talker) != null
         }
 
         override fun onClick(target: ConversationMenuExtensionTarget) {
+            if (resources.isClosed()) return
             conversationTarget(target.activity, target.talker)?.let(::showActions)
         }
     }
@@ -138,9 +133,11 @@ private class QuickContactEditRuntime(
 
     @Synchronized
     fun installConversationMenuHook(): Boolean {
+        if (resources.isClosed()) return true
         val create = ConversationMenuLocator.menuCreateMethod(context, logger)
         val createInstalled = create != null && hook(create, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
+                if (resources.isClosed()) return
                 addMenuItem(param)
             }
         })
@@ -148,7 +145,11 @@ private class QuickContactEditRuntime(
         return createInstalled
     }
 
-    fun destroy() {
+    @Synchronized fun destroy() {
+        if (resources.isClosed()) return
+        resources.close()
+        main.removeCallbacksAndMessages(null)
+        hookedMethods.clear()
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         ConversationMenuExtensionRegistry.unregister(conversationMenuExtension)
         bindings.clear()
@@ -159,10 +160,12 @@ private class QuickContactEditRuntime(
 
     @Synchronized
     fun installSnsAvatarMenuHook(): Boolean {
+        if (resources.isClosed()) return true
         val methods = SnsAvatarMenuLocator.locate(context, logger)
         val createInstalled = methods.createMethods.count { method ->
             hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
+                if (resources.isClosed()) return
                     addSnsAvatarMenuItem(param)
                 }
             })
@@ -170,6 +173,7 @@ private class QuickContactEditRuntime(
         val clickInstalled = methods.clickMethods.count { method ->
             hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                if (resources.isClosed()) return
                     handleSnsAvatarMenuClick(param, method)
                 }
             })
@@ -277,6 +281,7 @@ private class QuickContactEditRuntime(
 
     @Synchronized
     fun installSnsAvatarHook(): Boolean {
+        if (resources.isClosed()) return true
         val headerClass = KavaReflector.loadClass(SNS_HEADER_CLASS, context.hostClassLoader())
             ?: return false
         val method = KavaReflector.findMethodRecursive(
@@ -286,6 +291,7 @@ private class QuickContactEditRuntime(
         ) ?: return false
         return hook(method, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
+                if (resources.isClosed()) return
                 bindSnsAvatar(param.thisObject, param.args?.getOrNull(0) as? View.OnClickListener)
             }
         })
@@ -385,7 +391,8 @@ private class QuickContactEditRuntime(
         if (Modifier.isAbstract(method.modifiers) || method.declaringClass.isInterface) return false
         if (!hookedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            val handle = HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            resources.register { HookRegistry.get().unhook(handle) }
             true
         }.getOrElse {
             hookedMethods.remove(method)
@@ -427,6 +434,7 @@ private class QuickContactEditRuntime(
             } ?: return false
         return hook(method, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
+                if (resources.isClosed()) return
                 handleMenuClick(param)
             }
         })
@@ -698,6 +706,7 @@ private class QuickContactEditRuntime(
     }
 
     private fun enabled(): Boolean {
+        if (resources.isClosed()) return false
         return prefs.getBoolean(QuickContactEditSettings.KEY_ENABLE, QuickContactEditSettings.DEFAULT_ENABLE)
     }
 

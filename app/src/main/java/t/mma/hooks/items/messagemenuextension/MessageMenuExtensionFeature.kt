@@ -15,19 +15,24 @@ class MessageMenuExtensionFeature : BaseFeature() {
         registerSettingsProvider(MessageMenuExtensionSettingsProvider())
     }
     override fun onFeatureInstall(context: FeatureContext) {
-        if (!MessageMenuExtensionSettings.preferences(context.hostContext())
-                .getBoolean(MessageMenuExtensionSettings.KEY_ENABLE, false)) {
-            return
-        }
-        runtime = MessageMenuGridRuntime(context)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
-    }
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(featureId(), name()) { runtime?.install() == true }
-    }
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
+        val prefs = MessageMenuExtensionSettings.preferences(context.hostContext())
+        var schedule: (() -> Unit)? = null
+        val owner = t.mma.hooks.core.PreferenceRuntimeOwner(prefs,
+            setOf(MessageMenuExtensionSettings.KEY_ENABLE),
+            enabled = { prefs.getBoolean(MessageMenuExtensionSettings.KEY_ENABLE, false) },
+            create = { resources ->
+                val next = MessageMenuGridRuntime(context)
+                runtime = next
+                resources.register { next.destroy(); if (runtime === next) runtime = null }
+                val ticket = DexInstallScheduler.installation(featureId(), name())
+                val install = { ticket.schedule { if (resources.isClosed()) true else next.install() } }
+                schedule = install
+                resources.register { if (schedule === install) schedule = null }
+                resources.register { ticket.close() }
+                install()
+            }, onError = { logError("消息菜单扩展启停失败", it) })
+        trackResource { owner.close() }
+        owner.start()
+        subscribe(Events.DexReady::class.java) { schedule?.invoke() }
     }
 }

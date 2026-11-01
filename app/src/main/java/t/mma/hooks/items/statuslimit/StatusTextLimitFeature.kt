@@ -19,7 +19,9 @@ class StatusTextLimitFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        install(context.hostContext(), context.hostClassLoader())
+        val scope = t.mma.hooks.core.FeatureResourceScope { HLog.e("$TAG 资源释放失败", it) }
+        trackResource { scope.close() }
+        installOwned(context.hostContext(), context.hostClassLoader(), scope)
     }
 
     companion object {
@@ -29,8 +31,6 @@ class StatusTextLimitFeature : BaseFeature() {
         private const val WECHAT_DEFAULT_LIMIT = 10
         private const val HCHAT_LIMIT = 2000
 
-        @Volatile
-        private var installed = false
 
         @JvmStatic
         fun isEnabled(context: Context?): Boolean {
@@ -39,32 +39,28 @@ class StatusTextLimitFeature : BaseFeature() {
             return sp.getBoolean(StatusTextLimitSettings.KEY_ENABLE, StatusTextLimitSettings.DEFAULT_ENABLE)
         }
 
-        @JvmStatic
-        fun install(context: Context?, classLoader: ClassLoader?) {
-            if (context == null || classLoader == null || installed) return
+        private fun installOwned(context: Context?, classLoader: ClassLoader?, scope: t.mma.hooks.core.FeatureResourceScope) {
+            if (context == null || classLoader == null || scope.isClosed()) return
             synchronized(this) {
-                if (installed) return
                 val activityClass = KavaReflector.loadClass(STATUS_ACTIVITY, classLoader)
                 if (activityClass == null) {
                     HLog.e("$TAG 未找到状态词编辑页类")
-                    installed = true
                     return
                 }
                 val constructors = KavaReflector.declaredConstructors(activityClass)
                 if (constructors.isEmpty()) {
                     HLog.e("$TAG 未找到状态词编辑页构造方法")
-                    installed = true
                     return
                 }
                 constructors.forEach { constructor ->
-                    HookRegistry.get().hook(constructor, object : XC_MethodHook() {
+                    val handle = HookRegistry.get().hook(constructor, object : XC_MethodHook() {
                         override fun afterHookedMethod(param: MethodHookParam) {
-                            if (!isEnabled(context)) return
+                            if (scope.isClosed() || !isEnabled(context)) return
                             expandLimit(param.thisObject)
                         }
                     })
+                    scope.register { HookRegistry.get().unhook(handle) }
                 }
-                installed = true
             }
         }
 

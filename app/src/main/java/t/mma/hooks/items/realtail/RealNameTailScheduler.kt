@@ -10,6 +10,20 @@ class RealNameTailScheduler(
     private val logger: (String, Throwable?) -> Unit,
     private val onTailSaved: (String) -> Unit
 ) {
+    private val taskPrefix = "real_tail_${java.util.UUID.randomUUID()}_"
+    @Volatile private var closed = false
+    fun destroy() {
+        closed = true
+        synchronized(lock) { queue.clear(); scheduled.clear(); running = false; busy = false }
+        val keys = (renderQueryPending.keys + retryUntil.keys + activeTokens.keys).toSet()
+        keys.forEach { key ->
+            WeChatApis.tasks()?.cancel("${taskPrefix}visible_$key")
+            WeChatApis.tasks()?.cancel("${taskPrefix}retry_$key")
+        }
+        WeChatApis.tasks()?.cancel("${taskPrefix}resume")
+        activeTokens.clear(); querying.clear(); retryCount.clear(); retryUntil.clear()
+        renderQueryTs.clear(); renderQueryPending.clear(); messageQueryTs.clear()
+    }
     private val lock = Any()
     private val queue = ArrayDeque<Pair<String, String>>()
     private val scheduled = HashSet<String>()
@@ -27,6 +41,7 @@ class RealNameTailScheduler(
     @Volatile private var tokenSeq = 0L
 
     fun onMessage(roomId: String?, wxid: String?) {
+        if (closed) return
         val room = roomId?.trim().orEmpty()
         val id = wxid?.trim().orEmpty()
         if (!isRoom(room) || !RealNameTailStore.isSupportedQueryId(id)) return
@@ -43,6 +58,7 @@ class RealNameTailScheduler(
     }
 
     fun onVisible(roomId: String?, wxid: String?) {
+        if (closed) return
         recoverStaleBusy()
         val room = roomId?.trim().orEmpty()
         val id = wxid?.trim().orEmpty()
@@ -60,12 +76,14 @@ class RealNameTailScheduler(
     }
 
     fun onVisibleSoon(roomId: String?, wxid: String?) {
+        if (closed) return
         val room = roomId?.trim().orEmpty()
         val id = wxid?.trim().orEmpty()
         if (!isRoom(room) || !RealNameTailStore.isSupportedQueryId(id) || isSelf(id)) return
         val key = taskKey(room, id)
         if (renderQueryPending.putIfAbsent(key, true) != null) return
-        WeChatApis.tasks()?.runOnMainDelayed("real_tail_visible_$key", VISIBLE_IMMEDIATE_QUERY_DELAY_MS) {
+        WeChatApis.tasks()?.runOnMainDelayed("${taskPrefix}visible_$key", VISIBLE_IMMEDIATE_QUERY_DELAY_MS) {
+            if (closed) return@runOnMainDelayed
             renderQueryPending.remove(key)
             if (!isRoom(room) || !RealNameTailStore.isSupportedQueryId(id) || isSelf(id)) return@runOnMainDelayed
             if (store.hasTail(id) || querying.contains(id) || inRetryCooldown(room, id)) return@runOnMainDelayed
@@ -75,11 +93,12 @@ class RealNameTailScheduler(
     }
 
     private fun enqueueQueryTask(roomId: String, wxid: String) {
+        if (closed) return
         if (!isRoom(roomId) || !RealNameTailStore.isSupportedQueryId(wxid)) return
         if (store.hasTail(wxid) || querying.contains(wxid) || inRetryCooldown(roomId, wxid)) return
         val key = taskKey(roomId, wxid)
         synchronized(lock) {
-            if (scheduled.contains(key)) return
+            if (closed || scheduled.contains(key)) return
             queue.addLast(roomId to wxid)
             scheduled.add(key)
         }
@@ -87,23 +106,25 @@ class RealNameTailScheduler(
     }
 
     private fun ensureScheduler() {
+        if (closed) return
         recoverStaleBusy()
         synchronized(lock) {
-            if (running) return
+            if (closed || running) return
             running = true
         }
         WeChatApis.tasks()?.runAsync { runSchedulerLoop() } ?: Thread { runSchedulerLoop() }.start()
     }
 
     private fun resumeSchedulerSoon() {
-        WeChatApis.tasks()?.runOnMainDelayed("real_tail_resume", nextQueryGapMs()) {
+        if (closed) return
+        WeChatApis.tasks()?.runOnMainDelayed("${taskPrefix}resume", nextQueryGapMs()) {
             ensureScheduler()
         }
     }
 
     private fun runSchedulerLoop() {
         try {
-            while (store.isEnabled()) {
+            while (!closed && store.isEnabled()) {
                 recoverStaleBusy()
                 synchronized(lock) {
                     if (busy) {
@@ -162,12 +183,14 @@ class RealNameTailScheduler(
     }
 
     private fun startQuery(roomId: String, wxid: String, fromImmediate: Boolean) {
+        if (closed) return
         val key = taskKey(roomId, wxid)
         querying.add(wxid)
         val token = beginToken(key)
         startWatchdog(roomId, wxid, token)
         val taskApi = WeChatApis.tasks()
         val run = Runnable {
+            if (closed) return@Runnable
             val sent = query.query(wxid, roomId) { maskedName ->
                 finishQuery(roomId, wxid, token, maskedName)
             }
@@ -236,7 +259,8 @@ class RealNameTailScheduler(
         if (count == 1) {
             val delay = RETRY_ONCE_MIN_MS + (Math.random() * RETRY_ONCE_JITTER_MS).toLong()
             retryUntil[key] = System.currentTimeMillis() + delay
-            WeChatApis.tasks()?.runOnMainDelayed("real_tail_retry_$key", delay) {
+            WeChatApis.tasks()?.runOnMainDelayed("${taskPrefix}retry_$key", delay) {
+                if (closed) return@runOnMainDelayed
                 retryUntil.remove(key)
                 if (!store.hasTail(wxid)) enqueueQueryTask(roomId, wxid)
             }
@@ -299,7 +323,7 @@ class RealNameTailScheduler(
         }
     }
 
-    private fun isActiveToken(key: String, token: Long): Boolean = activeTokens[key] == token
+    private fun isActiveToken(key: String, token: Long): Boolean = !closed && activeTokens[key] == token
 
     private fun clearToken(key: String, token: Long) {
         if (activeTokens[key] == token) activeTokens.remove(key)

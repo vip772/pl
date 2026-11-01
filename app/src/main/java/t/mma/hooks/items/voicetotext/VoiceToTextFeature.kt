@@ -11,6 +11,7 @@ import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.preferences.HchatStorage
 import t.mma.ui.FeatureSettingsProvider
 import t.mma.ui.SimpleFeatureSettingsProvider
@@ -18,7 +19,6 @@ import t.mma.utils.KavaReflector
 import java.lang.ref.WeakReference
 
 class VoiceToTextFeature : BaseFeature() {
-    private var runtime: VoiceToTextRuntime? = null
     override fun featureId() = ID
     override fun name() = "语音转文字"
     // Install the cheap setting observer even when the user toggle is off.
@@ -30,11 +30,20 @@ class VoiceToTextFeature : BaseFeature() {
     }
     override fun onFeatureInstall(context: FeatureContext) {
         if (context.loadPackageParam().processName != context.loadPackageParam().packageName) return
-        runtime = VoiceToTextRuntime(context)
-        runtime?.start()
-        subscribe(Events.DexReady::class.java) { runtime?.schedule() }
+        val prefs = HchatStorage.preferences(context.hostContext(), PREFS)
+        val current = java.util.concurrent.atomic.AtomicReference<VoiceToTextRuntime?>()
+        val owner = PreferenceRuntimeOwner(prefs, setOf(ENABLE),
+            enabled = { prefs.getBoolean(ENABLE, false) },
+            create = { resources ->
+                val next = VoiceToTextRuntime(context)
+                current.set(next)
+                resources.register { try { next.destroy() } finally { current.compareAndSet(next, null) } }
+                next.schedule()
+            }, onError = { logError("语音转文字启停失败", it) })
+        trackResource { owner.close() }
+        owner.start()
+        subscribe(Events.DexReady::class.java) { owner.refresh(); current.get()?.schedule() }
     }
-    override fun onFeatureDestroy(context: FeatureContext) { runtime?.destroy(); runtime = null }
     companion object {
         const val ID = "voice_to_text"
         const val PREFS = "Hchat_voice_to_text_config"
@@ -44,9 +53,7 @@ class VoiceToTextFeature : BaseFeature() {
 
 /** 8.0.78 verified incoming voice row -> native TransformComponent queue. */
 private class VoiceToTextRuntime(private val context: FeatureContext) {
-    private val prefs = HchatStorage.preferences(context.hostContext(), VoiceToTextFeature.PREFS)
     private val main = Handler(Looper.getMainLooper())
-    @Volatile private var enabled = prefs.getBoolean(VoiceToTextFeature.ENABLE, false)
     @Volatile private var closed = false
     private var unhook: XC_MethodHook.Unhook? = null
     private val gate = VoiceToTextGate()
@@ -55,16 +62,9 @@ private class VoiceToTextRuntime(private val context: FeatureContext) {
     private val boundIds = java.util.WeakHashMap<View, Long>()
     private var draining = false
     private var bridge: Bridge? = null
-    private val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == VoiceToTextFeature.ENABLE || key == null) {
-            enabled = prefs.getBoolean(VoiceToTextFeature.ENABLE, false)
-            if (enabled) schedule() else main.post { clear() }
-        }
-    }
-    fun start() { prefs.registerOnSharedPreferenceChangeListener(listener); if (enabled) schedule() }
+    private val installation = DexInstallScheduler.installation(VoiceToTextFeature.ID, "语音转文字")
     fun schedule() {
-        if (closed || !enabled) return
-        DexInstallScheduler.schedule(VoiceToTextFeature.ID, "语音转文字") { install() }
+        if (!closed) installation.schedule { install() }
     }
     private class Bridge(private val loader: ClassLoader) {
         private fun cls(name: String) = requireNotNull(KavaReflector.loadClass(name, loader)) { name }
@@ -97,14 +97,14 @@ private class VoiceToTextRuntime(private val context: FeatureContext) {
         }
     }
     @Synchronized private fun install(): Boolean {
-        if (closed || !enabled || unhook != null) return true
+        if (closed || unhook != null) return true
         // Descriptors are tied to the supplied 8.0.78 evidence; do not guess other versions.
         if (context.hostContext().packageManager.getPackageInfo("com.tencent.mm", 0).versionName != "8.0.78") return false
         return try {
             val b = bridge ?: Bridge(context.hostClassLoader()).also { bridge = it }
             unhook = HookRegistry.get().hook(b.binding, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (!enabled || closed || param.hasThrowable()) return
+                    if (closed || Looper.myLooper() != Looper.getMainLooper() || param.hasThrowable()) return
                     try {
                         val root = KavaReflector.readField(b.root, param.args[0]) as? View ?: return
                         val data = KavaReflector.readField(b.wrapperData, param.args[2]) ?: return
@@ -125,7 +125,7 @@ private class VoiceToTextRuntime(private val context: FeatureContext) {
     private val drain = object : Runnable {
         override fun run() {
             val item = queue.pollFirst()
-            if (closed || !enabled || item == null) { clear(); return }
+            if (closed || item == null) { clear(); return }
             try {
                 val b = bridge ?: return
                 val root = item.root.get()
@@ -143,7 +143,7 @@ private class VoiceToTextRuntime(private val context: FeatureContext) {
             } catch (error: Throwable) { report(error) }
             finally {
                 gate.finish(item.id)
-                if (!closed && enabled && queue.isNotEmpty()) main.postDelayed(this, 500)
+                if (!closed && queue.isNotEmpty()) main.postDelayed(this, 500)
                 else draining = false
             }
         }
@@ -153,9 +153,18 @@ private class VoiceToTextRuntime(private val context: FeatureContext) {
         if (!reported) { reported = true; t.mma.utils.HLog.e("[Hchat:语音转文字] 自动转换失败", error) }
     }
     private fun clear() { main.removeCallbacks(drain); queue.clear(); gate.clearPending(); draining = false }
-    fun destroy() {
-        closed = true; prefs.unregisterOnSharedPreferenceChangeListener(listener)
-        HookRegistry.get().unhook(unhook); unhook = null; main.removeCallbacksAndMessages(null)
-        queue.clear(); boundIds.clear(); gate.clear(); bridge = null
+    @Synchronized fun destroy() {
+        if (closed) return
+        closed = true
+        installation.close()
+        try { HookRegistry.get().unhook(unhook) }
+        finally {
+            unhook = null
+            // Queue and row bindings belong to the main thread and this runtime only.
+            main.removeCallbacksAndMessages(null)
+            val cleanup = Runnable { clear(); boundIds.clear(); gate.clear() }
+            if (Looper.myLooper() == Looper.getMainLooper()) cleanup.run() else main.post(cleanup)
+            bridge = null
+        }
     }
 }

@@ -15,10 +15,13 @@ public final class ProtobufPacketRuntime {
 
     private ProtobufPacketRuntime() {}
 
-    static void install(ProtobufPacketHook value) {
+    static synchronized void install(ProtobufPacketHook value) {
         hook = value;
     }
 
+    static synchronized void detach(ProtobufPacketHook expected) {
+        if (hook == expected) hook = null;
+    }
     public static boolean send(String uri, int cgiId, String json, Callback callback) {
         return send(uri, cgiId, 0, 0, json, callback);
     }

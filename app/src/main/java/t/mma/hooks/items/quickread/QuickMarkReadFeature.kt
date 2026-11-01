@@ -38,6 +38,7 @@ class QuickMarkReadFeature : BaseFeature() {
         subscribe(t.mma.event.Events.NetworkDispatcherReady::class.java) { QuickMarkReadRuntime.requestPreparation() }
         val controller = QuickMarkReadDragController(context.hostClassLoader(), ::logError)
         dragController = controller
+        trackResource { controller.destroy(); if (dragController === controller) dragController = null }
         controller.install()
     }
 
@@ -53,13 +54,24 @@ private class QuickMarkReadDragController(
     @Volatile private var installed = false
     private var pending: PendingDragSession? = null
     private var session: DragSession? = null
-
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("快捷已读资源释放失败", it) }
+    @Synchronized
+    fun destroy() {
+        resources.close()
+        val current = session
+        pending = null
+        session = null
+        try { current?.reset() } catch (error: Throwable) { logger("快捷已读拖拽恢复失败", error) }
+    }
+    @Synchronized
     fun install(): Boolean {
+        if (resources.isClosed()) return false
         if (installed) return true
         val methods = collectDispatchMethods()
         if (methods.isEmpty()) return false
         val callback = object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
+                if (resources.isClosed()) return
                 val activity = param.thisObject as? Activity ?: return
                 val event = param.args?.getOrNull(0) as? MotionEvent ?: return
                 if (handleTouch(activity, event)) {
@@ -71,7 +83,8 @@ private class QuickMarkReadDragController(
         var lastError: Throwable? = null
         for (method in methods) {
             runCatching {
-                HookRegistry.get().hook(method, callback)
+                val handle = HookRegistry.get().hook(method, callback)
+                resources.register { HookRegistry.get().unhook(handle) }
                 hookedCount++
             }.onFailure {
                 lastError = it
@@ -107,7 +120,9 @@ private class QuickMarkReadDragController(
         return methods
     }
 
+    @Synchronized
     private fun handleTouch(activity: Activity, event: MotionEvent): Boolean {
+        if (resources.isClosed()) return false
         if (!isLauncherUi(activity)) {
             clearGesture(resetActive = true)
             return false

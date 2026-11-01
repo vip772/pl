@@ -2,7 +2,7 @@
 from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1];lib=Path('/tmp/pl-kotlin-libs');std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
-s=(r/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt').read_text();a=s.index('    private fun updateBackgroundHooks()');z=s.index('    fun destroy()',a)
+s=(r/'app/src/main/java/t/mma/hooks/items/backgroundbeauty/BackgroundBeautyFeature.kt').read_text();a=s.index('    private fun updateBackgroundHooks()');z=s.index('    @Synchronized fun destroy()',a)
 main='''package t.mma.hooks.items.backgroundbeauty
 object BackgroundBeautyFeature {const val ID="background_beauty"}
 object BackgroundBeautyStore {val images=mutableSetOf<BackgroundBeautySettings.Slot>();fun hasImage(c:Any,s:BackgroundBeautySettings.Slot)=s in images}
@@ -22,6 +22,7 @@ class Runtime {
  fun installWechatVerifiedPaths()=true
  fun installChatChromeLifecycle(){}
  fun installChatBackgroundComponentHook(allowDexSearch:Boolean)=true
+ fun scheduleChatBackground(){installChatBackgroundComponentHook(true)}
  fun update()=updateBackgroundHooks()
 '''+s[a:z]+'''}
 fun main(){

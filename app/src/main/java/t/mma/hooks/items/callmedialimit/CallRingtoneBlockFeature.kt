@@ -16,7 +16,6 @@ import java.lang.reflect.Method
 import java.util.concurrent.ConcurrentHashMap
 
 class CallRingtoneBlockFeature : BaseFeature() {
-    private var hooker: CallRingtoneBlockHooker? = null
 
     override fun featureId(): String = ID
 
@@ -27,21 +26,14 @@ class CallRingtoneBlockFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        hooker = CallRingtoneBlockHooker(context) { message, throwable ->
+        val installed = CallRingtoneBlockHooker(context) { message, throwable ->
             if (throwable == null) logIneffective(message) else logRuntimeError(message, throwable)
         }
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
-    }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        hooker = null
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            hooker?.install() == true
-        }
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { installed.destroy() }
+        trackResource { ticket.close() }
+        ticket.schedule { installed.install() }
+        subscribe(Events.DexReady::class.java) { ticket.schedule { installed.install() } }
     }
 
     private fun logRuntimeError(message: String, throwable: Throwable?) {
@@ -70,9 +62,28 @@ private class CallRingtoneBlockHooker(
     private val coreAcknowledgeFailures = ConcurrentHashMap.newKeySet<String>()
 
     @Volatile private var installed = false
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("通话铃声资源释放失败", it) }
+    private val hookedMethods = java.util.concurrent.ConcurrentHashMap.newKeySet<Method>()
+    @Synchronized
+    fun destroy() {
+        resources.close()
+        hookedMethods.clear()
+        coreAcknowledgeFailures.clear()
+    }
+    private fun hook(method: Method, callback: XC_MethodHook) {
+        if (resources.isClosed() || !hookedMethods.add(method)) return
+        try {
+            val handle = HookRegistry.get().hook(method, callback)
+            resources.register { HookRegistry.get().unhook(handle) }
+        } catch (error: Throwable) {
+            hookedMethods.remove(method)
+            throw error
+        }
+    }
 
     @Synchronized
     fun install(): Boolean {
+        if (resources.isClosed()) return false
         if (installed) return true
         return runCatching {
             val directionMethods = locateDirectionMethods()
@@ -93,7 +104,7 @@ private class CallRingtoneBlockHooker(
                 hookDirectionMethod(method, MULTI_TALK_OUTGOING_ARGUMENT_INDEX)
             }
             coreAccesses.forEach { access ->
-                HookRegistry.get().hook(access.start, object : XC_MethodHook() {
+                hook(access.start, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
                         val roomRole = param.args?.getOrNull(3) as? Boolean ?: return
                         val outgoing = !roomRole
@@ -125,7 +136,7 @@ private class CallRingtoneBlockHooker(
     }
 
     private fun hookDirectionMethod(method: Method, outgoingArgumentIndex: Int) {
-        HookRegistry.get().hook(method, object : XC_MethodHook() {
+        hook(method, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
                 val outgoing = param.args?.getOrNull(outgoingArgumentIndex) as? Boolean ?: return
                 if (shouldBlock(outgoing)) param.result = null
@@ -407,6 +418,7 @@ private class CallRingtoneBlockHooker(
     }
 
     private fun shouldBlock(outgoing: Boolean): Boolean {
+        if (resources.isClosed()) return false
         return if (outgoing) {
             settingsPrefs.getBoolean(
                 CallMediaLimitSettings.KEY_BLOCK_OUTGOING_RINGTONE,

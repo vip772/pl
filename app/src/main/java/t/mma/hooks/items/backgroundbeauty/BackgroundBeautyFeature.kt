@@ -71,12 +71,10 @@ class BackgroundBeautyFeature : BaseFeature() {
         trackResource { installed.destroy(); if (runtime === installed) runtime = null }
         installed.install()
         WeChatApis.chatPage()?.let { api ->
-            trackSubscription(api.subscribe { event -> runtime?.onChatPageChanged(event.isEnter()) })
+            trackSubscription(api.subscribe { event -> installed.onChatPageChanged(event.isEnter()) })
         }
         subscribe(Events.DexReady::class.java) {
-            DexInstallScheduler.schedule("$ID:chat_background", name()) {
-                runtime?.installChatBackgroundComponentHook(allowDexSearch = true) == true
-            }
+            installed.scheduleChatBackground()
         }
     }
 
@@ -366,7 +364,14 @@ private class BackgroundBeautyRuntime(
         WeakHashMap<View, View.OnLayoutChangeListener>()
     )
     private val hookedMembers = ConcurrentHashMap.newKeySet<Member>()
-    private val ownedHooks = java.util.concurrent.CopyOnWriteArrayList<XC_MethodHook.Unhook>()
+    private val hookResources = t.mma.hooks.core.FeatureResourceScope { HLog.e("$TAG 资源释放失败", it) }
+    private val chatInstallation = DexInstallScheduler.installation("${BackgroundBeautyFeature.ID}:chat_background", "沉浸式背景")
+    fun scheduleChatBackground() {
+        if (!destroyed) chatInstallation.schedule { installChatBackgroundComponentHook(allowDexSearch = true) }
+    }
+    private fun ownHook(handle: XC_MethodHook.Unhook) {
+        hookResources.register { HookRegistry.get().unhook(handle) }
+    }
     private var surfaceMutationDepth = 0
     private val surfaceOwners = WeakValueMap<View, HostState>()
     private val listAdapters = WeakHashMap<View, Any>()
@@ -431,56 +436,60 @@ private class BackgroundBeautyRuntime(
             installSurfaceHooks() or installBackgroundWriteHook() or installWechatVerifiedPaths()
         installChatChromeLifecycle()
         installChatBackgroundComponentHook(allowDexSearch = false)
-        DexInstallScheduler.schedule("${BackgroundBeautyFeature.ID}:chat_background", "沉浸式背景") {
-            installChatBackgroundComponentHook(allowDexSearch = true)
-        }
+        scheduleChatBackground()
         if (!installed) HLog.e("$TAG 未安装任何页面 Hook")
     }
-    fun destroy() {
+    @Synchronized fun destroy() {
+        if (destroyed) return
         destroyed = true
+        fun release(block: () -> Unit) {
+            try { block() } catch (error: Throwable) { HLog.e("$TAG 资源恢复失败", error) }
+        }
+        release { chatInstallation.close() }
+        release { hookResources.close() }
+        release { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
+        release { main.removeCallbacksAndMessages(null) }
+        release { loader.shutdownNow() }
         preloadedHome = null
         decorUpdateDepth.clear()
-        wechatTitleBackdrops.keys.toList().forEach { it.invalidate() }
+        wechatTitleBackdrops.keys.toList().forEach { release { it.invalidate() } }
         wechatTitleBackdrops.clear()
-        restoreInitialStoryMuteViews()
-        wechatGlVisibility.keys.toList().forEach(::restoreWechatGl)
-        wechatGradientControllers.keys.toList().forEach { it.invalidate() }
+        release { restoreInitialStoryMuteViews() }
+        wechatGlVisibility.keys.toList().forEach { release { restoreWechatGl(it) } }
+        wechatGradientControllers.keys.toList().forEach { release { it.invalidate() } }
         wechatGradientControllers.clear()
         wechatTaskControllers.clear()
-        ownedHooks.toList().forEach { runCatching { HookRegistry.get().unhook(it) } }
-        ownedHooks.clear()
         hookedMembers.clear()
         suppressedDynamicContainers.keys.toList().forEach { view ->
-            if (view.isAttachedToWindow) {
-                KavaReflector.findMethodRecursive(view.javaClass, "a")?.let { KavaReflector.invoke(it, view) }
+            release {
+                if (view.isAttachedToWindow) {
+                    KavaReflector.findMethodRecursive(view.javaClass, "a")?.let { KavaReflector.invoke(it, view) }
+                }
             }
         }
         suppressedDynamicContainers.clear()
-        restoreBounceColors(null)
-        contactOverlays.toMap().forEach { (row, overlay) -> row.overlay.remove(overlay) }
+        release { restoreBounceColors(null) }
+        contactOverlays.toMap().forEach { (row, overlay) -> release { row.overlay.remove(overlay) } }
         contactOverlays.clear()
         homeLists.clear()
         listAdapters.clear()
         surfaceOwners.clear()
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        main.removeCallbacksAndMessages(null)
-        loader.shutdownNow()
         val activeStates = synchronized(states) { states.liveValues().also { states.clear() } }
         activeStates.forEach { state ->
-            state.activity.window.decorView.setTag(t.mma.R.id.hchat_background_host_state, null)
-            restoreState(state)
+            release { state.activity.window.decorView.setTag(t.mma.R.id.hchat_background_host_state, null) }
+            release { restoreState(state) }
         }
         synchronized(layoutListeners) {
-            layoutListeners.forEach { (view, listener) -> view.removeOnLayoutChangeListener(listener) }
+            layoutListeners.forEach { (view, listener) -> release { view.removeOnLayoutChangeListener(listener) } }
             layoutListeners.clear()
         }
         observedActivities.clear()
         synchronized(pendingLoads) {
-            pendingLoads.values.forEach(::cancelLoad)
+            pendingLoads.values.forEach { release { cancelLoad(it) } }
             pendingLoads.clear()
         }
         synchronized(pendingRefreshes) {
-            pendingRefreshes.forEach { (activity, task) -> activity.window.decorView.removeCallbacks(task) }
+            pendingRefreshes.forEach { (activity, task) -> release { activity.window.decorView.removeCallbacks(task) } }
             pendingRefreshes.clear()
         }
         fragmentRoots.clear()
@@ -708,7 +717,7 @@ private class BackgroundBeautyRuntime(
             ?.takeIf { it.type == Int::class.javaPrimitiveType } ?: return false
         if (!hookedMembers.add(draw)) return true
         return runCatching {
-            ownedHooks += HookRegistry.get().hook(draw, object : XC_MethodHook() {
+            ownHook(HookRegistry.get().hook(draw, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (destroyed || !backgroundRenderingEnabled) return
                     val list = param.thisObject as? View ?: return
@@ -731,7 +740,7 @@ private class BackgroundBeautyRuntime(
                     // Always restore, including host exceptions or a render gate changing mid-call.
                     KavaReflector.writeField(strength, param.thisObject, original)
                 }
-            })
+            }))
             true
         }.getOrElse {
             hookedMembers.remove(draw)
@@ -912,7 +921,7 @@ private class BackgroundBeautyRuntime(
         }
         val gradientClass = KavaReflector.loadClass("com.tencent.mm.dynamicbackground.view.GradientColorBackgroundView", context.hostClassLoader())
         findWechatVerifiedMethod(gradientClass, "onDraw", android.graphics.Canvas::class.java)?.let { method ->
-            ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+            ownHook(HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (destroyed || !backgroundRenderingEnabled) return
                     val view = param.thisObject as? View ?: return
@@ -931,7 +940,7 @@ private class BackgroundBeautyRuntime(
                     param.result = null
 
                 }
-            })
+            }))
             installed = true
         }
         val conversationClass = KavaReflector.loadClass("com.tencent.mm.ui.conversation.ConversationListView", context.hostClassLoader())
@@ -954,7 +963,7 @@ private class BackgroundBeautyRuntime(
         }
         findWechatVerifiedMethod(View::class.java, "setVisibility", Int::class.javaPrimitiveType!!)?.let { method ->
             // Independent callback: visibility is not covered by the background setter hooks.
-            ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+            ownHook(HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (destroyed || !backgroundRenderingEnabled || wechatGlMutation) return
                     val view = param.thisObject as? View ?: return
@@ -983,7 +992,7 @@ private class BackgroundBeautyRuntime(
                         else if (isConversationActivity(activity)) scheduleRefresh(activity, 1)
                     }
                 }
-            })
+            }))
             installed = true
         }
         val bottomClass = KavaReflector.loadClass("com.tencent.mm.plugin.taskbar.ui.TaskBarBottomView", context.hostClassLoader())
@@ -1825,9 +1834,10 @@ private class BackgroundBeautyRuntime(
         before: ((XC_MethodHook.MethodHookParam) -> Unit)? = null,
         after: ((XC_MethodHook.MethodHookParam) -> Unit)? = null
     ): Boolean {
+        if (destroyed) return false
         if (!hookedMembers.add(member)) return true
         return runCatching {
-            ownedHooks += HookRegistry.get().hook(member, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(member, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (!destroyed && backgroundRenderingEnabled) before?.invoke(param)
                 }
@@ -1836,6 +1846,7 @@ private class BackgroundBeautyRuntime(
                     if (!destroyed && backgroundRenderingEnabled) after?.invoke(param)
                 }
             })
+            hookResources.register { HookRegistry.get().unhook(handle) }
             true
         }.getOrElse {
             hookedMembers.remove(member)
@@ -2375,7 +2386,7 @@ private class BackgroundBeautyRuntime(
 
         val layoutClass = KavaReflector.loadClass("com.tencent.mm.pluginsdk.ui.chat.ChattingUILayout", context.hostClassLoader())
         findWechatVerifiedMethod(layoutClass, "dispatchDraw", Canvas::class.java)?.let { method ->
-            ownedHooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+            ownHook(HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (destroyed || !backgroundRenderingEnabled) return
                     val view = param.thisObject as? View ?: return
@@ -2393,7 +2404,7 @@ private class BackgroundBeautyRuntime(
                     val saved = param.getObjectExtra("Hchat:chatInsetPaint") as? Pair<Paint, Int> ?: return
                     saved.first.alpha = saved.second
                 }
-            })
+            }))
         }
         val baseConversation = KavaReflector.loadClass(BASE_CONVERSATION_ACTIVITY, context.hostClassLoader())
         findWechatVerifiedMethod(baseConversation, "closeChatting", Boolean::class.javaPrimitiveType!!)?.let { method ->

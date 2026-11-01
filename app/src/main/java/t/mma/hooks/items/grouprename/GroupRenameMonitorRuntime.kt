@@ -4,6 +4,7 @@ import android.content.SharedPreferences
 import t.mma.hooks.api.contact.WeChatChatroomChangeApi
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.FeatureContext
+import t.mma.hooks.core.PendingNoticeTasks
 import t.mma.hooks.items.groupleave.GroupLeaveMonitorLinks
 import t.mma.hooks.items.membertitle.MemberTitleStore
 import t.mma.hooks.items.realtail.RealNameTailStore
@@ -29,17 +30,33 @@ class GroupRenameMonitorRuntime(
     private val recentInserts = ConcurrentHashMap<String, Long>()
     private val atPattern = Regex("\\[AtWx=([^\\]]+)]")
 
-    fun install(track: (Any?) -> Unit) {
+    @Volatile private var closed = false
+    private var subscription: WeChatChatroomChangeApi.Subscription? = null
+    private val tasks = PendingNoticeTasks("Hchat-GroupRenameMonitor")
+
+    @Synchronized fun install() {
+        if (closed || subscription != null) return
         val changes = WeChatApis.contact().chatroomChanges() ?: WeChatApis.chatroomChanges()
-        if (changes == null) {
-            logger("群聊变更 API 未就绪", null)
-            return
-        }
-        track(changes.subscribe { change -> handleChatroomChange(change) })
+        if (changes == null) { logger("群聊变更 API 未就绪", null); return }
+        subscription = changes.subscribe { change -> handleChatroomChange(change) }
         preloadSnapshots()
     }
+    @Synchronized fun destroy() {
+        if (closed) return
+        closed = true
+        try { subscription?.unsubscribe() }
+        finally {
+            subscription = null
+            tasks.close()
+            memberSnapshots.clear(); memberNickSnapshots.clear()
+            memberSnapshotWarmups.clear(); recentInserts.clear()
+        }
+    }
+    private fun canSend(): Boolean = !closed && prefs.getBoolean(
+        GroupRenameMonitorSettings.KEY_SEND_ENABLE, GroupRenameMonitorSettings.DEFAULT_SEND_ENABLE)
 
-    fun preloadSnapshots() {
+    @Synchronized fun preloadSnapshots() {
+        if (closed) return
         runCatching {
             val chatrooms = WeChatApis.contact().chatrooms() ?: return
             for (room in chatrooms.getChatrooms()) {
@@ -62,7 +79,8 @@ class GroupRenameMonitorRuntime(
         }
     }
 
-    private fun handleChatroomChange(change: WeChatChatroomChangeApi.ChatroomChange) {
+    @Synchronized private fun handleChatroomChange(change: WeChatChatroomChangeApi.ChatroomChange) {
+        if (closed) return
         val memberListChanged = change.mayMemberListChanged()
         val roomDataChanged = change.mayRoomDataChanged()
         if (!memberListChanged && !roomDataChanged) return
@@ -224,40 +242,37 @@ class GroupRenameMonitorRuntime(
             )
         ) return
         if (groupId !in listenGroups()) return
-        Thread({
-            runCatching {
-                val template = replyTemplateFor(groupId)
-                if (template != null && !template.enabled) return@runCatching
-                val delaySeconds = (template?.delaySeconds ?: prefs.getInt(
-                    GroupRenameMonitorSettings.KEY_DELAY_SECONDS,
-                    GroupRenameMonitorSettings.DEFAULT_DELAY_SECONDS
-                )).coerceIn(0, 600)
-                sleepQuietly(delaySeconds * 1000L)
+        if (!canSend()) return
+        val template = replyTemplateFor(groupId)
+        if (template != null && !template.enabled) return
+        val delaySeconds = (template?.delaySeconds ?: prefs.getInt(
+            GroupRenameMonitorSettings.KEY_DELAY_SECONDS,
+            GroupRenameMonitorSettings.DEFAULT_DELAY_SECONDS)).coerceIn(0, 600)
+        val accepted = tasks.schedule(delaySeconds * 1000L) {
+            if (canSend()) runCatching {
                 val variables = replyVariables(groupId, rename)
                 val promptType = template?.promptType ?: promptTypeFor(groupId)
                 val textTask = { sendText(groupId, variables, template) }
                 val cardTask = { sendCard(groupId, variables, template) }
-                val tasks = when (promptType) {
+                val ordered = when (promptType) {
                     GroupRenameMonitorSettings.PROMPT_CARD -> listOf(cardTask)
                     GroupRenameMonitorSettings.PROMPT_BOTH -> {
-                        if ((template?.bothOrder ?: bothOrderFor(groupId)) == GroupRenameMonitorSettings.BOTH_CARD_FIRST) {
-                            listOf(cardTask, textTask)
-                        } else {
-                            listOf(textTask, cardTask)
-                        }
+                        if ((template?.bothOrder ?: bothOrderFor(groupId)) == GroupRenameMonitorSettings.BOTH_CARD_FIRST)
+                            listOf(cardTask, textTask) else listOf(textTask, cardTask)
                     }
                     else -> listOf(textTask)
                 }
-                tasks.forEachIndexed { index, task ->
-                    task()
-                    if (index < tasks.lastIndex) sleepQuietly(300L)
+                if (canSend()) ordered.first().invoke()
+                if (ordered.size > 1 && canSend()) {
+                    if (!tasks.schedule(300L) {
+                        if (canSend()) runCatching { ordered[1].invoke() }
+                            .onFailure { logger("改名提醒后续发送异常: $groupId/${rename.memberId}", it) }
+                    }) logger("改名提醒后续任务已停止或队列已满", null)
                 }
-            }.onFailure {
-                logger("改名提醒发送异常: $groupId/${rename.memberId}", it)
-            }
-        }, "Hchat-GroupRenameMonitor").start()
+            }.onFailure { logger("改名提醒发送异常: $groupId/${rename.memberId}", it) }
+        }
+        if (!accepted) logger("改名提醒已停止或队列已满", null)
     }
-
     private fun replyVariables(groupId: String, rename: MemberRename): ReplyVariables {
         val contacts = WeChatApis.contact().contacts()
         val contact = contacts?.getContact(rename.memberId)
@@ -281,6 +296,7 @@ class GroupRenameMonitorRuntime(
     }
 
     private fun sendText(groupId: String, variables: ReplyVariables, template: GroupRenameReplyTemplate?) {
+        if (!canSend()) return
         val source = template?.text
             ?: groupValue(groupId, GroupRenameMonitorSettings.KEY_TEXT, GroupRenameMonitorSettings.DEFAULT_TEXT)
         val text = applyVariables(pickTemplate(source), variables)
@@ -291,17 +307,19 @@ class GroupRenameMonitorRuntime(
             return
         }
         val parsed = parseAtContent(groupId, text)
+        if (!canSend()) return
         val sent = when {
             parsed == null -> sender.sendText(groupId, text)
             parsed.atList.isEmpty() -> sender.sendText(groupId, parsed.content)
             else -> sender.sendTextWithAtList(groupId, parsed.content, parsed.atList)
         }
-        if (!sent && parsed?.content?.isNotBlank() == true) {
+        if (!sent && canSend() && parsed?.content?.isNotBlank() == true) {
             sender.sendText(groupId, parsed.content)
         }
     }
 
     private fun sendCard(groupId: String, variables: ReplyVariables, template: GroupRenameReplyTemplate?) {
+        if (!canSend()) return
         val titleSource = template?.cardTitle
             ?: groupValue(groupId, GroupRenameMonitorSettings.KEY_CARD_TITLE, GroupRenameMonitorSettings.DEFAULT_CARD_TITLE)
         val descSource = template?.cardDesc
@@ -311,8 +329,9 @@ class GroupRenameMonitorRuntime(
         if (title.isBlank() && desc.isBlank()) return
         val avatarUrl = WeChatApis.contact().contacts()?.getAvatarUrl(variables.userWxid, true).orEmpty()
         val thumb = downloadBytes(avatarUrl)
+        if (!canSend()) return
         val sent = WeChatApis.media()?.shareWebpage(groupId, title, desc, avatarUrl, thumb, "") == true
-        if (!sent) {
+        if (!sent && canSend()) {
             (WeChatApis.message().sender() ?: WeChatApis.messages())?.sendText(
                 groupId,
                 listOf(title, desc).filter { it.isNotBlank() }.joinToString("\n")
@@ -464,17 +483,8 @@ class GroupRenameMonitorRuntime(
             connection.connectTimeout = 1200
             connection.readTimeout = 1200
             connection.requestMethod = "GET"
-            connection.inputStream.use { it.readBytes() }.also { connection.disconnect() }
+            try { connection.inputStream.use { it.readBytes() } } finally { connection.disconnect() }
         }.getOrNull()
-    }
-
-    private fun sleepQuietly(ms: Long) {
-        if (ms <= 0L) return
-        try {
-            Thread.sleep(ms)
-        } catch (_: InterruptedException) {
-            Thread.currentThread().interrupt()
-        }
     }
 
     private fun firstNotBlank(vararg values: String?): String {

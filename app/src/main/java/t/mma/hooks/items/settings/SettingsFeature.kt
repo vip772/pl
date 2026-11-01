@@ -1,11 +1,10 @@
 package t.mma.hooks.items.settings
-import t.mma.utils.HLog
 
 import t.mma.crash.CrashReportSettingsProvider
 import t.mma.dexkit.SettingsDexFinder
 import t.mma.hooks.api.ui.SettingsInjector
 import t.mma.hooks.core.DexInstallScheduler
-import t.mma.hooks.core.Feature
+import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.items.quickread.QuickMarkReadRuntime
 import t.mma.hooks.items.quickterminate.QuickTerminateRuntime
@@ -14,50 +13,47 @@ import t.mma.ui.FeatureSettingsProvider
 /**
  * 微信内设置入口注入功能。
  */
-class SettingsFeature : Feature {
+class SettingsFeature : BaseFeature() {
     override fun featureId(): String = ID
 
     override fun name(): String = "设置入口"
 
     @Throws(Throwable::class)
-    override fun onInit(context: FeatureContext) {
-        context.uiRegistry().registerProvider(SettingsEntryProvider())
-        context.uiRegistry().registerProvider(PluginAgentEntryProvider())
-        context.uiRegistry().registerProvider(CrashReportSettingsProvider())
+    override fun onFeatureInit(context: FeatureContext) {
+        registerSettingsProvider(SettingsEntryProvider())
+        registerSettingsProvider(PluginAgentEntryProvider())
+        registerSettingsProvider(CrashReportSettingsProvider())
     }
 
     @Throws(Throwable::class)
-    override fun install(context: FeatureContext) {
+    override fun onFeatureInstall(context: FeatureContext) {
         DexInstallScheduler.runDexKitTask {
             installSettingsHook(context)
         }
     }
 
     private fun installSettingsHook(context: FeatureContext) {
-        try {
-            val settingsDexFinder = SettingsDexFinder.managed(
-                context.dexKitManager(),
-                context.hostClassLoader(),
-                context.hostContext()
-            )
-            val entrySettings = SettingsEntrySettings(context.hostContext())
-            settingsDexFinder.resolveAll(
-                entrySettings.plusMenuEnabled() ||
-                    entrySettings.pluginAgentPlusMenuEnabled() ||
-                    QuickMarkReadRuntime.isPlusMenuEnabled(context.hostContext()) ||
-                    QuickTerminateRuntime.isEnabled(context.hostContext())
-            )
+        val settingsDexFinder = SettingsDexFinder.managed(
+            context.dexKitManager(),
+            context.hostClassLoader(),
+            context.hostContext()
+        )
+        val entrySettings = SettingsEntrySettings(context.hostContext())
+        settingsDexFinder.resolveAll(
+            entrySettings.plusMenuEnabled() ||
+                entrySettings.pluginAgentPlusMenuEnabled() ||
+                QuickMarkReadRuntime.isPlusMenuEnabled(context.hostContext()) ||
+                QuickTerminateRuntime.isEnabled(context.hostContext())
+        )
 
-            val injector = SettingsInjector(
-                context.hostContext(),
-                context.hostClassLoader(),
-                settingsDexFinder,
-                entrySettings
-            )
-            injector.hookSettings()
-        } catch (e: Throwable) {
-            HLog.e("[Hchat:Settings] 设置入口安装失败", e)
-        }
+        val injector = SettingsInjector(
+            context.hostContext(),
+            context.hostClassLoader(),
+            settingsDexFinder,
+            entrySettings
+        )
+        trackResource { injector.close() }
+        injector.hookSettings()
     }
 
     companion object {

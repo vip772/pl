@@ -15,8 +15,10 @@ class SelectedMessageModuleSender(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
 ) {
+    @Volatile private var closed = false
     private val main = Handler(Looper.getMainLooper())
     private val batches = ArrayDeque<SendBatch>()
+    private val admissions = java.util.concurrent.ConcurrentHashMap<String, SendBatch>()
     private var activeBatch: SendBatch? = null
     private var activeToken = ""
     private var activeRetransmitTargets = emptyList<String>()
@@ -61,7 +63,7 @@ class SelectedMessageModuleSender(
         itemIntervalSeconds: Int,
         onComplete: ((success: Int, total: Int, canceled: Boolean) -> Unit)?
     ): SelectedMessageSendHandle? {
-        if (snapshots.isEmpty()) return null
+        if (closed || snapshots.isEmpty()) return null
         val messages = snapshots.filter { it.retransmit != null || it.voicePath.isNotBlank() }
         val targets = targetIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
         if (messages.size != snapshots.size || targets.isEmpty()) return null
@@ -82,14 +84,24 @@ class SelectedMessageModuleSender(
             targetDelayMillis = targetDelayMillis,
             itemDelayMillis = itemDelayMillis
         )
-        main.post {
-            batches.addLast(batch)
-            if (activeBatch == null) startNextBatch()
+        synchronized(this) {
+            if (closed) return null
+            admissions[batch.id] = batch
+            if (!main.post {
+                if (admissions.remove(batch.id) == null) return@post
+                if (closed) { notifyStopped(batch); return@post }
+                batches.addLast(batch)
+                if (activeBatch == null) startNextBatch()
+            }) {
+                admissions.remove(batch.id)
+                return null
+            }
         }
         return SelectedMessageSendHandle { cancel(batch.id) }.withStopPending { stopPending(batch.id) }
     }
 
     fun handleRetransmitDone(activity: Activity): Boolean {
+        if (closed) return false
         val token = activity.intent?.getStringExtra(EXTRA_TOKEN).orEmpty()
         if (token.isBlank() || token != activeToken) return false
         val batch = activeBatch ?: return false
@@ -108,7 +120,7 @@ class SelectedMessageModuleSender(
     }
 
     private fun startNextBatch() {
-        if (activeBatch != null) return
+        if (closed || activeBatch != null) return
         activeBatch = batches.pollFirst()
         val batch = activeBatch ?: return
         batch.total = batch.snapshots.size * batch.targets.size
@@ -116,7 +128,7 @@ class SelectedMessageModuleSender(
     }
 
     private fun sendCurrent(batch: SendBatch) {
-        if (activeBatch !== batch) return
+        if (closed || activeBatch !== batch) return
         if (batch.stopRequested) { finishStopped(batch); return }
         if (batch.index >= batch.snapshots.size) {
             val callback = batch.onComplete
@@ -190,6 +202,7 @@ class SelectedMessageModuleSender(
     }
 
     private fun handleTimeout(token: String) {
+        if (closed) return
         if (token != activeToken) return
         logger("群发助手等待微信重发完成超时", null)
         (WeChatApis.currentActivity()?.currentActivity() as? Activity)
@@ -279,6 +292,7 @@ class SelectedMessageModuleSender(
     }
 
     private fun completeCurrentMessage(batch: SendBatch) {
+        if (closed || activeBatch !== batch) return
         if (batch.stopRequested) { finishStopped(batch); return }
         activeToken = ""
         activeRetransmitTargets = emptyList()
@@ -296,6 +310,7 @@ class SelectedMessageModuleSender(
     }
 
     private fun advanceTargets(batch: SendBatch, count: Int, delayMillis: Long) {
+        if (closed || activeBatch !== batch) return
         if (batch.stopRequested) { finishStopped(batch); return }
         activeToken = ""
         activeRetransmitTargets = emptyList()
@@ -310,7 +325,9 @@ class SelectedMessageModuleSender(
     }
 
     private fun stopPending(batchId: String) {
+        if (closed) return
         main.post {
+            if (closed) return@post
             val active = activeBatch
             if (active?.id == batchId) {
                 active.stopRequested = true
@@ -338,7 +355,9 @@ class SelectedMessageModuleSender(
         startNextBatch()
     }
     private fun cancel(batchId: String) {
+        if (closed) return
         main.post {
+            if (closed) return@post
             val active = activeBatch
             if (active?.id == batchId) {
                 val token = activeToken
@@ -365,26 +384,30 @@ class SelectedMessageModuleSender(
         }
     }
 
+    private fun notifyStopped(batch: SendBatch) {
+        try { batch.onComplete?.invoke(batch.success, batch.snapshots.size * batch.targets.size, true) }
+        catch (error: Throwable) { try { logger("群发助手关闭回调失败", error) } catch (_: Throwable) { } }
+    }
+    @Synchronized
     fun shutdown() {
-        main.post {
-            val active = activeBatch
-            val token = activeToken
-            timeoutRunnable?.let(main::removeCallbacks)
+        if (closed) return
+        closed = true
+        val cleanup = {
+            main.removeCallbacksAndMessages(null)
             timeoutRunnable = null
+            val stopped = batches.toList() + admissions.values.toList()
+            batches.clear()
+            admissions.clear()
+            val active = activeBatch
+            activeBatch = null
             activeToken = ""
             activeRetransmitTargets = emptyList()
-            (WeChatApis.currentActivity()?.currentActivity() as? Activity)
-                ?.takeIf { it.intent?.getStringExtra(EXTRA_TOKEN) == token }
-                ?.finish()
-            activeBatch = null
-            active?.onComplete?.invoke(active.success, active.total, true)
-            while (batches.isNotEmpty()) {
-                val pending = batches.removeFirst()
-                pending.onComplete?.invoke(0, pending.snapshots.size * pending.targets.size, true)
-            }
+            // Stop follow-up only; do not finish/cancel an entered host send.
+            active?.let(::notifyStopped)
+            stopped.forEach(::notifyStopped)
         }
+        if (Looper.myLooper() == Looper.getMainLooper()) cleanup() else main.post { cleanup() }
     }
-
     private data class SendBatch(
         val id: String,
         val snapshots: List<SelectedMessageSnapshot>,

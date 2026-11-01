@@ -8,7 +8,6 @@ import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
-import java.util.HashSet
 
 class RemoveMomentsAdsFeature : BaseFeature() {
     override fun featureId(): String = ID
@@ -20,14 +19,15 @@ class RemoveMomentsAdsFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        install(context.hostContext(), context.hostClassLoader())
+        val scope = t.mma.hooks.core.FeatureResourceScope { HLog.e("$TAG 资源释放失败", it) }
+        trackResource { scope.close() }
+        installOwned(context.hostContext(), context.hostClassLoader(), scope)
     }
 
     companion object {
         const val ID = "remove_moments_ads"
         private const val TAG = "[Hchat:MomentsAds]"
         private const val AD_INFO_CLASS = "com.tencent.mm.plugin.sns.storage.ADInfo"
-        private val installedLoaders = HashSet<String>()
 
         @JvmStatic
         fun isEnabled(context: Context?): Boolean {
@@ -39,12 +39,9 @@ class RemoveMomentsAdsFeature : BaseFeature() {
             )
         }
 
-        @JvmStatic
-        fun install(context: Context?, classLoader: ClassLoader?) {
-            if (context == null || classLoader == null) return
-            val key = "${classLoader.javaClass.name}@${System.identityHashCode(classLoader)}"
-            synchronized(installedLoaders) {
-                if (installedLoaders.contains(key)) return
+        private fun installOwned(context: Context?, classLoader: ClassLoader?, scope: t.mma.hooks.core.FeatureResourceScope) {
+            if (context == null || classLoader == null || scope.isClosed()) return
+            synchronized(this) {
                 val clazz = KavaReflector.loadClass(AD_INFO_CLASS, classLoader)
                 if (clazz == null) {
                     HLog.e("$TAG 未找到朋友圈广告信息类: $AD_INFO_CLASS")
@@ -56,13 +53,13 @@ class RemoveMomentsAdsFeature : BaseFeature() {
                     return
                 }
                 runCatching {
-                    HookRegistry.get().hook(constructor, object : XC_MethodHook() {
+                    val handle = HookRegistry.get().hook(constructor, object : XC_MethodHook() {
                         override fun beforeHookedMethod(param: MethodHookParam) {
-                            if (!isEnabled(context)) return
+                            if (scope.isClosed() || !isEnabled(context)) return
                             param.result = null
                         }
                     })
-                    installedLoaders.add(key)
+                    scope.register { HookRegistry.get().unhook(handle) }
                 }.onFailure {
                     HLog.e("$TAG Hook 朋友圈广告信息失败: ${it.message}", it)
                 }

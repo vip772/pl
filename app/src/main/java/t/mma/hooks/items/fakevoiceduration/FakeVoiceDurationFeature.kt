@@ -15,7 +15,6 @@ import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Method
 
 class FakeVoiceDurationFeature : BaseFeature() {
-    private var runtime: FakeVoiceDurationRuntime? = null
 
     override fun featureId(): String = ID
 
@@ -26,19 +25,13 @@ class FakeVoiceDurationFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = FakeVoiceDurationRuntime(context, ::logFeatureError)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) {
-            scheduleInstall()
-        }
+        val installed = FakeVoiceDurationRuntime(context, ::logFeatureError)
+        val ticket = DexInstallScheduler.installation(ID, name(), stage = DexInstallScheduler.Stage.BRIDGE)
+        trackResource { installed.destroy() }
+        trackResource { ticket.close() }
+        ticket.schedule { installed.install() }
+        subscribe(Events.DexReady::class.java) { ticket.schedule { installed.install() } }
     }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name(), stage = DexInstallScheduler.Stage.BRIDGE) {
-            runtime?.install() == true
-        }
-    }
-
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -81,18 +74,23 @@ private class FakeVoiceDurationRuntime(
         "Hchat_fake_voice_duration_recorder_method_cache"
     )
     @Volatile private var installed = false
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("语音时长资源释放失败", it) }
+    @Synchronized
+    fun destroy() { resources.close() }
 
     @Synchronized
     fun install(): Boolean {
+        if (resources.isClosed()) return false
         if (installed) return true
         return runCatching {
             val method = locateRecorderDurationMethod() ?: return false
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            val handle = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!FakeVoiceDurationFeature.isEnabled(context.hostContext())) return
+                    if (resources.isClosed() || !FakeVoiceDurationFeature.isEnabled(context.hostContext())) return
                     param.result = FakeVoiceDurationFeature.durationMillis(context.hostContext()).toLong()
                 }
             })
+            resources.register { HookRegistry.get().unhook(handle) }
             installed = true
             true
         }.getOrElse {

@@ -7,6 +7,7 @@ import t.mma.hooks.api.contact.WeChatChatroomChangeApi
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.message.WeChatMessageObserveApi
 import t.mma.hooks.core.FeatureContext
+import t.mma.hooks.core.PendingNoticeTasks
 import t.mma.hooks.items.membertitle.MemberTitleStore
 import t.mma.hooks.items.realtail.RealNameTailStore
 import t.mma.preferences.HchatStorage
@@ -34,27 +35,47 @@ class GroupLeaveMonitorRuntime(
     private val inviteCountLock = Any()
     private val atPattern = Regex("\\[AtWx=([^\\]]+)]")
 
-    fun install(track: (Any?) -> Unit) {
+    @Volatile private var closed = false
+    private val tasks = PendingNoticeTasks("Hchat-GroupMemberReply")
+    private val main = Handler(Looper.getMainLooper())
+    private var changeSubscription: WeChatChatroomChangeApi.Subscription? = null
+    private var messageSubscription: WeChatMessageObserveApi.Subscription? = null
+
+    @Synchronized fun install() {
+        if (closed) return
         val changeApi = WeChatApis.contact().chatroomChanges() ?: WeChatApis.chatroomChanges()
-        if (changeApi != null) {
-            track(changeApi.subscribe { change ->
-                handleChatroomChange(change)
-            })
-        } else {
-            logger("群聊变更 API 未就绪", null)
+        if (changeSubscription == null && changeApi != null) {
+            changeSubscription = changeApi.subscribe { change -> handleChatroomChange(change) }
         }
         val observeApi = runCatching { WeChatApis.messageObserve() }.getOrNull()
-        if (observeApi != null && observeApi.isAvailable()) {
-            runCatching { observeApi.install() }
-                .onFailure { logger("邀请详情消息监听安装失败", it) }
-            track(observeApi.subscribe { message ->
-                handleObservedMessage(message)
-            })
+        if (messageSubscription == null && observeApi != null && observeApi.isAvailable()) {
+            observeApi.install()
+            messageSubscription = observeApi.subscribe { message -> handleObservedMessage(message) }
         }
         preloadSnapshots()
     }
 
-    fun preloadSnapshots() {
+    @Synchronized fun destroy() {
+        if (closed) return
+        closed = true
+        try { changeSubscription?.unsubscribe() }
+        finally {
+            changeSubscription = null
+            try { messageSubscription?.unsubscribe() }
+            finally {
+                messageSubscription = null
+                tasks.close(); main.removeCallbacksAndMessages(null)
+                memberSnapshots.clear(); memberSnapshotWarmups.clear(); memberNameCache.clear()
+                observedMemberNames.clear(); recentInserts.clear(); pendingInviteDetails.clear()
+            }
+        }
+    }
+
+    private fun canReply(): Boolean = !closed && prefs.getBoolean(
+        GroupLeaveMonitorSettings.KEY_REPLY_ENABLE, GroupLeaveMonitorSettings.DEFAULT_REPLY_ENABLE)
+
+    @Synchronized fun preloadSnapshots() {
+        if (closed) return
         runCatching {
             val chatrooms = WeChatApis.contact().chatrooms() ?: return
             for (room in chatrooms.getChatrooms()) {
@@ -74,7 +95,8 @@ class GroupLeaveMonitorRuntime(
         }
     }
 
-    private fun handleChatroomChange(change: WeChatChatroomChangeApi.ChatroomChange) {
+    @Synchronized private fun handleChatroomChange(change: WeChatChatroomChangeApi.ChatroomChange) {
+        if (closed) return
         val now = System.currentTimeMillis()
         val memberListChanged = change.mayMemberListChanged()
         val roomDataChanged = change.mayRoomDataChanged()
@@ -214,7 +236,8 @@ class GroupLeaveMonitorRuntime(
         }
     }
 
-    private fun handleObservedMessage(message: WeChatMessageObserveApi.ObservedMessage) {
+    @Synchronized private fun handleObservedMessage(message: WeChatMessageObserveApi.ObservedMessage) {
+        if (closed) return
         if (!message.isSystem() || !message.isGroupChat()) return
         val groupId = message.getTalker().trim().ifBlank { message.talker.trim() }
         if (groupId.isEmpty()) return
@@ -567,31 +590,24 @@ class GroupLeaveMonitorRuntime(
             }
         }
 
-        Thread({
-            runCatching {
-                val delaySeconds = prefs.getInt(
-                    GroupLeaveMonitorSettings.KEY_DELAY_SECONDS,
-                    GroupLeaveMonitorSettings.DEFAULT_DELAY_SECONDS
-                ).coerceIn(0, 600)
-                sleepQuietly(delaySeconds * 1000L)
+        if (!canReply()) return
+        val delaySeconds = prefs.getInt(GroupLeaveMonitorSettings.KEY_DELAY_SECONDS,
+            GroupLeaveMonitorSettings.DEFAULT_DELAY_SECONDS).coerceIn(0, 600)
+        if (!tasks.schedule(delaySeconds * 1000L) {
+            if (canReply()) runCatching {
                 val display = resolveReplyMemberDisplay(type, groupId, memberId)
-                val variables = ReplyVariables(
-                    userWxid = memberId,
-                    userName = display.replyUserName(),
-                    groupNickname = display.primaryName(),
-                    realNameTail = realNameTailStore.displayTail(memberId),
-                    gender = memberGenderText(memberId),
-                    region = memberRegionText(memberId),
-                    groupName = groupDisplayName(groupId),
-                    time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
-                )
-                executeReplyChain(type, groupId, variables, template)
-            }.onFailure {
-                logger("进退群自动回复异常: $groupId/$memberId/$type", it)
-            }
-        }, "Hchat-GroupMemberReply").start()
+                if (canReply()) {
+                    val variables = ReplyVariables(
+                        userWxid = memberId, userName = display.replyUserName(),
+                        groupNickname = display.primaryName(), realNameTail = realNameTailStore.displayTail(memberId),
+                        gender = memberGenderText(memberId), region = memberRegionText(memberId),
+                        groupName = groupDisplayName(groupId),
+                        time = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date()))
+                    executeReplyChain(type, groupId, variables, template)
+                }
+            }.onFailure { logger("进退群自动回复异常: $groupId/$memberId/$type", it) }
+        }) logger("进退群自动回复已停止或队列已满", null)
     }
-
     private fun resolveReplyMemberDisplay(
         type: String,
         groupId: String,
@@ -600,7 +616,7 @@ class GroupLeaveMonitorRuntime(
         var display = memberDisplay(groupId, memberId)
         if (type != "join" || display.hasResolvedName()) return display
         val deadline = System.currentTimeMillis() + JOIN_NAME_RESOLVE_TIMEOUT_MS
-        while (System.currentTimeMillis() < deadline && !Thread.currentThread().isInterrupted) {
+        while (canReply() && System.currentTimeMillis() < deadline && !Thread.currentThread().isInterrupted) {
             sleepQuietly(JOIN_NAME_RETRY_INTERVAL_MS)
             display = memberDisplay(groupId, memberId)
             if (display.hasResolvedName()) break
@@ -623,14 +639,20 @@ class GroupLeaveMonitorRuntime(
             GroupLeaveMonitorSettings.MEDIA_AFTER -> promptTasks + mediaTasks
             else -> promptTasks
         }
-        for (task in tasks) {
-            sleepQuietly(task.delayMs)
-            runCatching { task.action() }
-                .onFailure { logger("进退群自动回复发送失败: $groupId/${task.type}", it) }
-            sleepQuietly(300L)
+        fun enqueue(index: Int) {
+            if (!canReply() || index >= tasks.size) return
+            val task = tasks[index]
+            val delay = task.delayMs + if (index == 0) 0L else 300L
+            if (!this.tasks.schedule(delay) {
+                if (canReply()) {
+                    runCatching { task.action() }
+                        .onFailure { logger("进退群自动回复发送失败: $groupId/${task.type}", it) }
+                    enqueue(index + 1)
+                }
+            }) logger("进退群后续回复已停止或队列已满", null)
         }
+        enqueue(0)
     }
-
     private fun promptTasks(
         type: String,
         groupId: String,
@@ -680,9 +702,7 @@ class GroupLeaveMonitorRuntime(
                 mediaPaths(groupId, type, GroupLeaveMonitorSettings.KEY_JOIN_VOICE_PATHS, GroupLeaveMonitorSettings.KEY_LEFT_VOICE_PATHS, template),
                 delayMsFor(groupId, GroupLeaveMonitorSettings.KEY_VOICE_DELAY_MS, GroupLeaveMonitorSettings.DEFAULT_MEDIA_DELAY_MS, template)
             ) { path ->
-                Handler(Looper.getMainLooper()).post {
-                    runCatching { WeChatApis.media()?.sendVoice(groupId, path) }
-                }
+                postVoice(groupId, path)
                 true
             },
             "emoji" to pathsReplyTask(
@@ -711,6 +731,14 @@ class GroupLeaveMonitorRuntime(
             .mapNotNull { tasks[it] }
     }
 
+    /** Serialize enqueue against destroy so an old task cannot refill a cleared Handler. */
+    @Synchronized private fun postVoice(groupId: String, path: String) {
+        if (!canReply()) return
+        main.post {
+            if (canReply()) runCatching { WeChatApis.media()?.sendVoice(groupId, path) }
+        }
+    }
+
     private fun pathsReplyTask(
         type: String,
         value: String,
@@ -721,6 +749,7 @@ class GroupLeaveMonitorRuntime(
         if (paths.isEmpty()) return null
         return ReplyTask(type, delay) {
             for (path in paths) {
+                if (!canReply()) break
                 runCatching { sender(path) }
             }
         }
@@ -744,6 +773,7 @@ class GroupLeaveMonitorRuntime(
             return
         }
         val parsed = parseAtContent(groupId, text)
+        if (!canReply()) return
         if (parsed == null) {
             sender.sendText(groupId, text)
             return
@@ -753,7 +783,7 @@ class GroupLeaveMonitorRuntime(
         } else {
             sender.sendTextWithAtList(groupId, parsed.content, parsed.atList)
         }
-        if (!sent && parsed.content.isNotBlank()) {
+        if (!sent && canReply() && parsed.content.isNotBlank()) {
             sender.sendText(groupId, parsed.content)
         }
     }
@@ -773,8 +803,9 @@ class GroupLeaveMonitorRuntime(
         if (title.isBlank() && desc.isBlank()) return
         val avatarUrl = WeChatApis.contact().contacts()?.getAvatarUrl(variables.userWxid, true).orEmpty()
         val thumb = downloadBytes(avatarUrl)
+        if (!canReply()) return
         val ok = WeChatApis.media()?.shareWebpage(groupId, title, desc, avatarUrl, thumb, "") == true
-        if (!ok && (title.isNotBlank() || desc.isNotBlank())) {
+        if (!ok && canReply() && (title.isNotBlank() || desc.isNotBlank())) {
             WeChatApis.messages()?.sendText(groupId, listOf(title, desc).filter { it.isNotBlank() }.joinToString("\n"))
         }
     }
@@ -1211,9 +1242,7 @@ class GroupLeaveMonitorRuntime(
             connection.connectTimeout = 1200
             connection.readTimeout = 1200
             connection.requestMethod = "GET"
-            connection.inputStream.use { it.readBytes() }.also {
-                connection.disconnect()
-            }
+            try { connection.inputStream.use { it.readBytes() } } finally { connection.disconnect() }
         }.getOrNull()
     }
 

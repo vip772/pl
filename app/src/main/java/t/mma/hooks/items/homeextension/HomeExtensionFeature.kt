@@ -91,7 +91,6 @@ class HomeExtensionFeature : BaseFeature() {
     override fun onFeatureDestroy(context: FeatureContext) {
         runtimeOwner?.close()
         runtimeOwner = null
-        runtime?.destroy()
         runtime = null
     }
     companion object { const val ID = "home_extension" }

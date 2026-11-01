@@ -12,11 +12,16 @@ object FloatingChatCardVisuals {
     private const val DARK_SURFACE_COLOR = 0xFF242424.toInt()
     private const val DARK_STROKE_COLOR = 0x24FFFFFF
 
-    private val originals = WeakHashMap<View, android.graphics.drawable.Drawable?>()
+    private data class Original(
+        val background: android.graphics.drawable.Drawable?,
+        val tint: android.content.res.ColorStateList?,
+        val tintMode: android.graphics.PorterDuff.Mode?
+    )
+    private val originals = WeakHashMap<View, Original>()
     private val applied = WeakHashMap<View, GradientDrawable>()
 
     fun apply(view: View, radiusDp: Int, transparency: Int = -1) {
-        if (!originals.containsKey(view)) originals[view] = view.background
+        if (!originals.containsKey(view)) originals[view] = Original(view.background, view.backgroundTintList, view.backgroundTintMode)
         val density = view.resources.displayMetrics.density
         val drawable = applied[view] ?: GradientDrawable().also { applied[view] = it }
         val radius = radiusDp * density
@@ -49,9 +54,16 @@ object FloatingChatCardVisuals {
     internal fun ownPresentation(view: View) { presentationOwners[view] = true }
     internal fun releasePresentation(view: View) { presentationOwners.remove(view) }
     fun contains(view: View): Boolean = applied.containsKey(view) || presentationOwners.containsKey(view)
+    private fun restoreSafely(action: () -> Unit) {
+        try { action() } catch (error: Throwable) {
+            try { t.mma.utils.HLog.e("[Hchat:悬浮标题栏] 恢复卡片样式失败", error) } catch (_: Throwable) { }
+        }
+    }
     fun restore(view: View) {
-        if (!originals.containsKey(view)) return
-        view.background = originals.remove(view)
+        val original = originals.remove(view) ?: return
         applied.remove(view)
+        restoreSafely { view.background = original.background }
+        restoreSafely { view.backgroundTintList = original.tint }
+        restoreSafely { view.backgroundTintMode = original.tintMode }
     }
 }

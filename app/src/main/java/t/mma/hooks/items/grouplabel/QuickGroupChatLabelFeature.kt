@@ -39,22 +39,15 @@ class QuickGroupChatLabelFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = QuickGroupChatLabelRuntime(context, ::logFeatureError)
-        scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
+        val current = QuickGroupChatLabelRuntime(context, ::logFeatureError)
+        runtime = current
+        trackResource { current.destroy(); if (runtime === current) runtime = null }
+        val ticket = DexInstallScheduler.installation(ID, name())
+        trackResource { ticket.close() }
+        fun schedule() { ticket.schedule { current.installConversationMenuHook() } }
+        schedule()
+        subscribe(Events.DexReady::class.java) { schedule() }
     }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            runtime?.installConversationMenuHook() == true
-        }
-    }
-
     private fun logFeatureError(message: String, throwable: Throwable?) {
         logError(message, throwable)
     }
@@ -78,6 +71,7 @@ private class QuickGroupChatLabelRuntime(
         QuickGroupChatLabelSettings.PREFS_NAME
     )
     private val main = Handler(Looper.getMainLooper())
+    private val resources = t.mma.hooks.core.FeatureResourceScope { logger("群标签菜单资源释放失败", it) }
     private val hookedMethods = ConcurrentHashMap.newKeySet<Method>()
     private val bindings = Collections.synchronizedMap(WeakHashMap<MenuItem, MenuTarget>())
     private val conversationMenuExtension = object : ConversationMenuExtension {
@@ -91,6 +85,7 @@ private class QuickGroupChatLabelRuntime(
         }
 
         override fun onClick(target: ConversationMenuExtensionTarget) {
+            if (resources.isClosed()) return
             showLabelActions(MenuTarget(target.activity, target.talker))
         }
     }
@@ -101,15 +96,21 @@ private class QuickGroupChatLabelRuntime(
 
     @Synchronized
     fun installConversationMenuHook(): Boolean {
+        if (resources.isClosed()) return true
         val create = ConversationMenuLocator.menuCreateMethod(context, logger) ?: return false
         return hook(create, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
+                if (resources.isClosed()) return
                 addMenuItem(param)
             }
         })
     }
 
-    fun destroy() {
+    @Synchronized fun destroy() {
+        if (resources.isClosed()) return
+        resources.close()
+        main.removeCallbacksAndMessages(null)
+        hookedMethods.clear()
         ConversationMenuExtensionRegistry.unregister(conversationMenuExtension)
         bindings.clear()
     }
@@ -146,6 +147,7 @@ private class QuickGroupChatLabelRuntime(
             } ?: return false
         return hook(method, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
+                if (resources.isClosed()) return
                 val item = param.args?.getOrNull(0) as? MenuItem ?: return
                 if (item.itemId != MENU_ITEM_ID) return
                 val target = bindings.remove(item) ?: return
@@ -307,6 +309,7 @@ private class QuickGroupChatLabelRuntime(
     }
 
     private fun enabled(): Boolean {
+        if (resources.isClosed()) return false
         return prefs.getBoolean(
             QuickGroupChatLabelSettings.KEY_ENABLE,
             QuickGroupChatLabelSettings.DEFAULT_ENABLE
@@ -344,7 +347,8 @@ private class QuickGroupChatLabelRuntime(
         if (Modifier.isAbstract(method.modifiers) || method.declaringClass.isInterface) return false
         if (!hookedMethods.add(method)) return true
         return runCatching {
-            HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            val handle = HookRegistry.get().hook(KavaReflector.accessible(method) ?: method, callback)
+            resources.register { HookRegistry.get().unhook(handle) }
             true
         }.getOrElse {
             hookedMethods.remove(method)

@@ -58,10 +58,12 @@ class NicknameWidthFeature : BaseFeature() {
     private var hook: XC_MethodHook.Unhook? = null
     @Volatile private var enabled = false
     @Volatile private var destroyed = false
+    @Volatile private var generation = 0L
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { preferences, key ->
         if (key == NicknameWidthSettings.ENABLE || key == null) {
             enabled = preferences.getBoolean(NicknameWidthSettings.ENABLE, false)
-            if (!enabled) main.post { if (!enabled) state.restoreAll() }
+            val epoch = generation
+            if (!enabled) main.post { if (generation == epoch && !enabled) state.restoreAll() }
         }
     }
     override fun featureId() = NicknameWidthSettings.ID
@@ -70,6 +72,8 @@ class NicknameWidthFeature : BaseFeature() {
         registerSettingsProvider(NicknameWidthSettingsProvider())
     }
     override fun onFeatureInstall(context: FeatureContext) {
+        val epoch = ++generation
+        destroyed = false
         val preferences = HchatStorage.preferences(context.hostContext(), NicknameWidthSettings.PREFS)
         prefs = preferences
         enabled = preferences.getBoolean(NicknameWidthSettings.ENABLE, false)
@@ -94,7 +98,7 @@ class NicknameWidthFeature : BaseFeature() {
             check(method.returnType == Void.TYPE)
             hook = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (destroyed || !enabled || Looper.myLooper() != Looper.getMainLooper()) return
+                    if (generation != epoch || destroyed || !enabled || Looper.myLooper() != Looper.getMainLooper()) return
                     try {
                         val view = field.get(param.args[0]) as? TextView ?: return
                         val room = talker.invoke(param.args[1]) as? String ?: ""
@@ -115,8 +119,12 @@ class NicknameWidthFeature : BaseFeature() {
         destroyed = true
         enabled = false
         prefs?.unregisterOnSharedPreferenceChangeListener(listener)
-        HookRegistry.get().unhook(hook)
-        hook = null
-        main.post { state.restoreAll() }
+        prefs = null
+        val epoch = generation
+        try { HookRegistry.get().unhook(hook) } finally {
+            hook = null
+            if (Looper.myLooper() == Looper.getMainLooper()) state.restoreAll()
+            else main.post { if (generation == epoch && destroyed) state.restoreAll() }
+        }
     }
 }
