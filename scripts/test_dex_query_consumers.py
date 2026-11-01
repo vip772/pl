@@ -37,6 +37,12 @@ fun main(){
  check(bridge.findClassList(listOf("anchor")).isEmpty())
  check(bridge.findMemberList(listOf("anchor")).isEmpty())
  check(bridge.findClassList(emptyList()).isEmpty())
+ // Accessing a managed holder must not require a native generation or pin.
+ val manager=t.mma.dexkit.DexKitBridgeManager()
+ val holder=t.mma.dexkit.DexBridgeHolder.managed(manager,t.mma.dexkit.DexFinder(),ClassLoader.getSystemClassLoader(),"fixture.apk")
+ val managed=ScriptDexKitBridge(null,holder,ClassLoader.getSystemClassLoader(),manager)
+ check(managed.holder()===holder && managed.holder()?.dexFinder===holder.dexFinder)
+ check(!manager.hasRawCompatibilityLease() && manager.currentGenerationId()==0L)
  val active=AtomicInteger();val max=AtomicInteger();val pool=Executors.newFixedThreadPool(6)
  val jobs=(0 until 120).map{index->pool.submit{
   val task={val n=active.incrementAndGet();max.updateAndGet{maxOf(n,it)};Thread.yield();active.decrementAndGet();42}
@@ -86,3 +92,27 @@ for file in ['tablet/WeChatTabletFeature.kt', 'hotupdate/DisableHotUpdateFeature
  assert source.index('queryDexKit { installLocked') < source.index('private fun installLocked'),file
 monet=(base/'monetgenerator/engine/MonetDexEvidenceCollector.kt').read_text()
 assert 'DexInstallScheduler.queryDexKit {\n        collectLocked(bridge, candidates)' in monet
+
+# Compatibility exposure remains process-pinned; appbrand has no DexKit service.
+context=(r/'app/src/main/java/t/mma/hooks/core/FeatureContext.kt').read_text()
+assert 'dexKitManager.rawCompatibilityBridge("legacy-feature-context")' in context
+assert 'manager.rawCompatibilityBridge("legacy-holder")' in holder.read_text()
+assert 'manager?.rawCompatibilityBridge("legacy-script")' in script.read_text()
+runtime=(base/'script/ScriptPluginRuntime.kt').read_text()
+for name, expression in {
+ 'dexKit': 'currentBridge.dexKit',
+ 'dexKitBridge': 'currentBridge.dexKit?.bridge()',
+ 'dexFinder': 'currentBridge.dexKit?.holder()?.dexFinder',
+ 'dexBridgeHolder': 'currentBridge.dexKit?.holder()'
+}.items():
+ assert f'set("{name}", {expression})' in runtime
+start=runtime.index('fun installAppBrandProcess(')
+end=runtime.index('        bridge = currentBridge',start)
+assert 'scriptDir(hostAppContext)' in runtime[start:end]
+assert 'ScriptDexKitBridge(' not in runtime[start:end]
+bridge_source=(base/'script/ScriptPluginBridge.kt').read_text()
+assert 'val dexKit: ScriptDexKitBridge? = null' in bridge_source
+for path in (r/'app/src/main/java').rglob('*'):
+ if path.suffix in ('.kt','.java'):
+  assert 'context.dexKitBridge()' not in path.read_text(), str(path)
+print('PASS compatibility boundaries: holder access without native generation/pin; raw getters pinned; appbrand four null globals; no internal context raw getter calls')

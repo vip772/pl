@@ -24,7 +24,9 @@ class ScriptDexKitBridge internal constructor(
     fun bridge(): DexKitBridge? = manager?.rawCompatibilityBridge("legacy-script") ?: dexKitBridge
 
     fun holder(): DexBridgeHolder? {
-        manager?.rawCompatibilityBridge("legacy-script-holder")
+        // Returning the managed holder does not expose its native bridge. The
+        // holder acquires the process-lifetime raw compatibility pin only if a
+        // legacy caller explicitly invokes getDexKitBridge().
         return dexBridgeHolder
     }
 
