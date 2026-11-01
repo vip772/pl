@@ -3927,6 +3927,26 @@
       ],
       "sharedRootCauseRefs": [
         "shared-schedule-mutable-runtime"
+      ],
+      "runtimeRepairProgress": [
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-mp-validate-final-20261101-225658",
+          "focusedTestsPassed": 8,
+          "sdkDirectCompileExit": 0,
+          "toggleGenerationIterations": 100,
+          "capacityLimits": {
+            "mainProcessGenerations": 1,
+            "appbrandProcessOwner": 1,
+            "dexInstallTicketsPerGeneration": 1,
+            "dexReadySubscriptionsPerGeneration": 1
+          },
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "Main process: PreferenceRuntimeOwner per enabled interval owning one MiniProgramCompatibilityRuntime, one DexInstallScheduler.Installation and one DexReady subscription registered in the feature resource scope; the launch constructor hook handle is held and released by the runtime, and the hook callback only snapshots the closed flag before reading settings. Appbrand process: MiniProgramAppBrandHooker owns the private-open-url hook per loader, destroyProcessHooks() releases it on disabled settings, unaccepted terms and loader replacement (old owner released before the new install attempt).",
+          "boundary": "Synthetic host regression over the complete production file plus direct Kotlin/Java/SDK/existing-ABI compilation, not Android/R8 and not device acceptance. The synthetic WeChat classes only reproduce the descriptor signatures the selectors check; real CgiLaunchWxaApp argument layout under multiple WeChat versions, real appbrand process spawn order, cross-process descriptor reuse against a live FastKV file and repeated rapid toggles during a live Dex warmup remain unverified. Base library version spoofing and update page interception semantics are unchanged by this repair. No memory or scrolling-smoothness data; deviceAcceptancePercent=0 and memoryBenefitProven=false."
+        }
       ]
     },
     {

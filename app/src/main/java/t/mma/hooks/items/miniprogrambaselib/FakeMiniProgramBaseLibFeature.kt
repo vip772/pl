@@ -4,9 +4,11 @@ import t.mma.utils.HLog
 import android.content.Context
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
+import t.mma.event.Events
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
@@ -17,21 +19,34 @@ import java.lang.reflect.Constructor
 import java.lang.reflect.Method
 
 class FakeMiniProgramBaseLibFeature : BaseFeature() {
-    private var runtime: MiniProgramCompatibilityRuntime? = null
-
     override fun featureId(): String = ID
-
     override fun name(): String = "兼容低版本小程序"
-
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(FakeMiniProgramBaseLibSettingsProvider())
     }
-
     override fun onFeatureInstall(context: FeatureContext) {
-        runtime = MiniProgramCompatibilityRuntime(context, ::logFeatureError)
-        DexInstallScheduler.schedule(ID, name(), stage = DexInstallScheduler.Stage.BRIDGE) {
-            runtime?.install() == true
-        }
+        val prefs = HchatStorage.preferences(
+            context.hostContext(),
+            FakeMiniProgramBaseLibSettings.PREFS_NAME
+        )
+        val runtime = PreferenceRuntimeOwner(
+            prefs, setOf(FakeMiniProgramBaseLibSettings.KEY_ENABLE),
+            enabled = { isEnabled(context.hostContext()) },
+            create = { resources ->
+                val owner = MiniProgramCompatibilityRuntime(context, ::logFeatureError)
+                resources.register { owner.close() }
+                val installation = DexInstallScheduler.installation(ID, name(), stage = DexInstallScheduler.Stage.BRIDGE)
+                resources.register { installation.close() }
+                installation.schedule { owner.install() }
+                val subscription = context.eventBus().subscribe(Events.DexReady::class.java, {
+                    if (!resources.isClosed()) installation.schedule { owner.install() }
+                })
+                resources.register { context.eventBus().unsubscribe(subscription) }
+            },
+            onError = { logFeatureError("兼容低版本小程序启停失败", it) }
+        )
+        trackResource { runtime.close() }
+        runtime.start()
     }
 
     private fun logFeatureError(message: String, throwable: Throwable?) {
@@ -44,7 +59,11 @@ class FakeMiniProgramBaseLibFeature : BaseFeature() {
         internal const val CACHE_PREFS_NAME =
             "Hchat_fake_mini_program_host_version_member_cache"
         internal const val CACHE_PRIVATE_OPEN_URL_METHOD = "private_open_url_method"
-        @Volatile private var appBrandProcessHookInstalled = false
+        private fun processLogger(message: String, throwable: Throwable?) {
+            HLog.e("$TAG $message", throwable)
+        }
+        private var appBrandHooker: MiniProgramAppBrandHooker? = null
+        private var appBrandLoader: ClassLoader? = null
 
         @JvmStatic
         fun isEnabled(context: Context?): Boolean {
@@ -56,10 +75,27 @@ class FakeMiniProgramBaseLibFeature : BaseFeature() {
                 )
         }
 
+        /** 小程序进程所有者释放；设置关闭、条款未接受或 loader 更换时调用。 */
+        @JvmStatic
+        @Synchronized
+        fun destroyProcessHooks() {
+            val old = appBrandHooker
+            appBrandHooker = null
+            appBrandLoader = null
+            old?.close()
+        }
+
         @JvmStatic
         @Synchronized
         fun installAppBrandProcessHook(context: Context, classLoader: ClassLoader): Boolean {
-            if (appBrandProcessHookInstalled) return true
+            if (!isEnabled(context)) {
+                destroyProcessHooks()
+                return false
+            }
+            val existing = appBrandHooker
+            if (existing != null && appBrandLoader === classLoader && existing.isInstalled()) return true
+            // loader 换代时先释放旧所有者，避免新安装失败后还留着旧进程 Hook。
+            if (appBrandLoader !== classLoader) destroyProcessHooks()
             val prefs = DexMethodCache.prefs(context, CACHE_PREFS_NAME)
             val runtimeKey = DexMethodCache.runtimeKey(context, classLoader)
             val privateOpenUrlMethod = DexMethodCache.loadCrossProcess(
@@ -68,15 +104,11 @@ class FakeMiniProgramBaseLibFeature : BaseFeature() {
                 classLoader,
                 CACHE_PRIVATE_OPEN_URL_METHOD
             )?.takeIf(::isPrivateOpenUrlMethod) ?: return false
-
-            return runCatching {
-                hookPrivateOpenUrlMethod(privateOpenUrlMethod, context)
-                appBrandProcessHookInstalled = true
-                true
-            }.getOrElse {
-                HLog.e("$TAG 小程序进程升级跳转Hook安装失败: ${it.message}", it)
-                false
+            val owner = appBrandHooker ?: MiniProgramAppBrandHooker(context, ::processLogger).also {
+                appBrandHooker = it
+                appBrandLoader = classLoader
             }
+            return owner.install(privateOpenUrlMethod)
         }
     }
 }
@@ -89,16 +121,38 @@ private class MiniProgramCompatibilityRuntime(
         context.hostContext(),
         FakeMiniProgramBaseLibFeature.CACHE_PREFS_NAME
     )
-    @Volatile private var installed = false
+    private var closed = false
+    private var installed = false
+    private var hook: XC_MethodHook.Unhook? = null
+
+    private fun report(message: String, error: Throwable?) {
+        runCatching { logger(message, error) }
+    }
+
+    @Synchronized
+    fun close() {
+        if (closed) return
+        closed = true
+        installed = false
+        val oldHook = hook
+        hook = null
+        runCatching { HookRegistry.get().unhook(oldHook) }
+            .onFailure { report("兼容低版本小程序 Hook 释放失败", it) }
+    }
 
     @Synchronized
     fun install(): Boolean {
+        if (closed) return false
         if (installed) return true
         return runCatching {
             val launchConstructor = locateLaunchConstructor() ?: return false
             locatePrivateOpenUrlMethod() ?: return false
-            HookRegistry.get().hook(launchConstructor, object : XC_MethodHook() {
+            hook = HookRegistry.get().hook(launchConstructor, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
+                    // 只取关闭状态快照；设置读取与参数改写不占 runtime 监视器。
+                    synchronized(this@MiniProgramCompatibilityRuntime) {
+                        if (closed) return
+                    }
                     if (!FakeMiniProgramBaseLibFeature.isEnabled(context.hostContext())) return
                     if (param.args.size <= LIB_VERSION_ARG_INDEX) return
                     param.args[LIB_VERSION_ARG_INDEX] = SPOOFED_LIB_VERSION
@@ -107,7 +161,8 @@ private class MiniProgramCompatibilityRuntime(
             installed = true
             true
         }.getOrElse {
-            logger("兼容低版本小程序Hook失败", it)
+            hook = null
+            report("兼容低版本小程序Hook失败", it)
             false
         }
     }
@@ -251,6 +306,60 @@ private class MiniProgramCompatibilityRuntime(
     }
 }
 
+/** 小程序(appbrand)进程私有网页跳转 Hook 的独立所有者。 */
+private class MiniProgramAppBrandHooker(
+    private val context: Context,
+    private val logger: (String, Throwable?) -> Unit
+) {
+    private var closed = false
+    private var installed = false
+    private var hook: XC_MethodHook.Unhook? = null
+
+    private fun report(message: String, error: Throwable?) {
+        runCatching { logger(message, error) }
+    }
+
+    @Synchronized
+    fun isInstalled(): Boolean = installed && !closed
+
+    @Synchronized
+    fun close() {
+        if (closed) return
+        closed = true
+        installed = false
+        val oldHook = hook
+        hook = null
+        runCatching { HookRegistry.get().unhook(oldHook) }
+            .onFailure { report("小程序进程升级跳转Hook释放失败", it) }
+    }
+
+    @Synchronized
+    fun install(method: Method): Boolean {
+        if (closed) return false
+        if (installed) return true
+        return runCatching {
+            hook = HookRegistry.get().hook(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    synchronized(this@MiniProgramAppBrandHooker) {
+                        if (closed) return
+                    }
+                    if (!FakeMiniProgramBaseLibFeature.isEnabled(context)) return
+                    val request = param.args.getOrNull(1) as? JSONObject ?: return
+                    val url = request.optString("url")
+                    if (!isWeChatUpdateUrl(url)) return
+                    request.put("url", "")
+                }
+            })
+            installed = true
+            true
+        }.getOrElse {
+            hook = null
+            report("小程序进程升级跳转Hook安装失败", it)
+            false
+        }
+    }
+}
+
 private fun isPrivateOpenUrlMethod(method: Method): Boolean {
     return !KavaReflector.isStatic(method) &&
         method.returnType == java.lang.Void.TYPE &&
@@ -258,18 +367,6 @@ private fun isPrivateOpenUrlMethod(method: Method): Boolean {
         method.parameterTypes[1] == JSONObject::class.java &&
         method.parameterTypes[2] == Integer.TYPE &&
         method.declaringClass.name.startsWith("com.tencent.mm.plugin.appbrand.jsapi.")
-}
-
-private fun hookPrivateOpenUrlMethod(method: Method, context: Context) {
-    HookRegistry.get().hook(method, object : XC_MethodHook() {
-        override fun beforeHookedMethod(param: MethodHookParam) {
-            if (!FakeMiniProgramBaseLibFeature.isEnabled(context)) return
-            val request = param.args.getOrNull(1) as? JSONObject ?: return
-            val url = request.optString("url")
-            if (!isWeChatUpdateUrl(url)) return
-            request.put("url", "")
-        }
-    })
 }
 
 private fun isWeChatUpdateUrl(url: String): Boolean {

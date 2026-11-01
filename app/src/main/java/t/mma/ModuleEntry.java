@@ -218,12 +218,16 @@ public class ModuleEntry implements IXposedHookLoadPackage {
                                             boolean applicationReady) {
         if (!TermsGate.INSTANCE.isAccepted(context)) {
             FakeLocationFeature.destroyProcessHooks();
+            FakeMiniProgramBaseLibFeature.destroyProcessHooks();
             return;
         }
         boolean failed = false;
-        if (FakeMiniProgramBaseLibFeature.isEnabled(context)
-                && !FakeMiniProgramBaseLibFeature.installAppBrandProcessHook(context, classLoader)) {
-            failed = true;
+        if (FakeMiniProgramBaseLibFeature.isEnabled(context)) {
+            if (!FakeMiniProgramBaseLibFeature.installAppBrandProcessHook(context, classLoader)) {
+                failed = true;
+            }
+        } else {
+            FakeMiniProgramBaseLibFeature.destroyProcessHooks();
         }
         if (SkipMiniProgramVideoAdsFeature.isEnabled(context)
                 && !SkipMiniProgramVideoAdsFeature.install(context, classLoader)) {
