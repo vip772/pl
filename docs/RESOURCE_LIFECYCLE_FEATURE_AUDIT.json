@@ -142,6 +142,29 @@
           "remainingOpen": true,
           "boundary": "dispatcher.send未与destroy互斥，可在清表后写moduleRequests或进入宿主；WeChatMessageApi静态两个执行器与PENDING_LOCAL_SENDS没有入口close所有权；Media聚合器无close；Sns.close仅关postObserver。SnsLivePhotoUploadRuntime实际是Method/Constructor/Field数据类，不是独立执行器，需治理API缓存及在途调用而非虚构线程释放。"
         }
+      ],
+      "runtimeRepairProgress": [
+        {
+          "evidence": "/tmp/pl-selected-api-repair-20261101-121841/verified-progress-v9.json",
+          "state": "in_progress",
+          "focusedTestsPassed": 10,
+          "sdkDirectCompileExit": 0,
+          "deviceAcceptancePercent": 0,
+          "openFindingsRetained": true
+        },
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-api-verified-20261101-134522",
+          "focusedTestsPassed": 16,
+          "additionalResolverQueueTestExit": 0,
+          "sdkDirectCompileExit": 0,
+          "sourceStable": true,
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "SelectedMessages and public API dependency ownership; contact sessions; generation draining; media/voice/favorite/SNS close; module-level Mars; sender callback admission",
+          "boundary": "Synthetic host tests and SDK/existing ABI compile only; not Android/R8 build or device acceptance."
+        }
       ]
     },
     {
@@ -4905,6 +4928,45 @@
           ],
           "remainingOpen": true,
           "boundary": "官方EMOJI preparationError、customSnapshot语音/表情路径及canPrepareMassSend分支确实存在；联系人worker在查询开始前检查closed，已经进入的宿主查询不强停。此源码核查未执行官方表情/语音完整合成、实机或所有回调交错验收，保留后续完整依赖测试责任。"
+        }
+      ],
+      "runtimeRepairProgress": [
+        {
+          "evidence": "/tmp/pl-selected-api-continuation-20261101-130400/verified-contact-progress.json",
+          "state": "in_progress",
+          "scope": "Shared contact sessions; last-owner cache release; API identity validation; 10000-item cache admission",
+          "deviceAcceptancePercent": 0,
+          "openFindingsRetained": true,
+          "sdkDirectCompileExit": 0
+        },
+        {
+          "evidence": "/tmp/pl-selected-api-continuation-20261101-130400/verified-contact-progress.json",
+          "state": "in_progress",
+          "scope": "Shared contact sessions; last-owner cache release; API identity validation; 10000-item cache admission",
+          "deviceAcceptancePercent": 0,
+          "openFindingsRetained": true,
+          "sdkDirectCompileExit": 0
+        },
+        {
+          "evidence": "/tmp/pl-selected-api-repair-20261101-121841/verified-progress-v9.json",
+          "state": "in_progress",
+          "focusedTestsPassed": 10,
+          "sdkDirectCompileExit": 0,
+          "deviceAcceptancePercent": 0,
+          "openFindingsRetained": true
+        },
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-api-verified-20261101-134522",
+          "focusedTestsPassed": 16,
+          "additionalResolverQueueTestExit": 0,
+          "sdkDirectCompileExit": 0,
+          "sourceStable": true,
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "SelectedMessages and public API dependency ownership; contact sessions; generation draining; media/voice/favorite/SNS close; module-level Mars; sender callback admission",
+          "boundary": "Synthetic host tests and SDK/existing ABI compile only; not Android/R8 build or device acceptance."
         }
       ]
     },

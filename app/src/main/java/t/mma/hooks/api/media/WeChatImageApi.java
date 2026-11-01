@@ -52,9 +52,29 @@ public final class WeChatImageApi {
     private final Logger logger;
     private static final ConcurrentMap<Class<?>, Boolean> marsHookedManagerClasses =
             new ConcurrentHashMap<>();
-    private static final ConcurrentMap<Class<?>, Object> marsCdnManagers =
+    private static final ConcurrentMap<Class<?>, java.lang.ref.WeakReference<Object>> marsCdnManagers =
             new ConcurrentHashMap<>();
 
+    private static boolean marsRuntimeClosed;
+    private static final java.util.Map<Class<?>, Object> marsHookIdentities = new java.util.HashMap<>();
+    private static final java.util.ArrayList<XC_MethodHook.Unhook> marsUnhooks = new java.util.ArrayList<>();
+    public static void openMarsRuntime() {
+        synchronized (marsHookedManagerClasses) { marsRuntimeClosed = false; }
+    }
+    public static void closeMarsRuntime() {
+        java.util.List<XC_MethodHook.Unhook> release;
+        synchronized (marsHookedManagerClasses) {
+            marsRuntimeClosed = true;
+            marsHookedManagerClasses.clear();
+            marsHookIdentities.clear();
+            marsCdnManagers.clear();
+            release = new java.util.ArrayList<>(marsUnhooks);
+            marsUnhooks.clear();
+        }
+        for (XC_MethodHook.Unhook handle : release) {
+            try { HookRegistry.get().unhook(handle); } catch (Throwable ignored) { }
+        }
+    }
     public WeChatImageApi(Context hostContext, DexFinder dexFinder, Logger logger) {
         this.hostContext = hostContext;
         this.dexFinder = dexFinder;
@@ -328,15 +348,23 @@ public final class WeChatImageApi {
     }
 
     public static void installMarsCdnManagerHook(Class<?> managerClass, Logger logger) {
-        if (managerClass == null
+        synchronized (marsHookedManagerClasses) {
+        if (marsRuntimeClosed || managerClass == null
+                || (marsHookedManagerClasses.size() >= 4 && !marsHookedManagerClasses.containsKey(managerClass))
                 || marsHookedManagerClasses.putIfAbsent(managerClass, Boolean.TRUE) != null) {
             return;
         }
+        int firstHandle = marsUnhooks.size();
+        final Object hookIdentity = new Object();
+        marsHookIdentities.put(managerClass, hookIdentity);
         try {
             XC_MethodHook captureConstructedManager = new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) {
-                    rememberMarsCdnManager(managerClass, param != null ? param.thisObject : null);
+                    synchronized (marsHookedManagerClasses) {
+                        if (marsHookIdentities.get(managerClass) != hookIdentity) return;
+                        rememberMarsCdnManager(managerClass, param != null ? param.thisObject : null);
+                    }
                 }
             };
             Set<XC_MethodHook.Unhook> unhooks = XposedBridge.hookAllConstructors(
@@ -344,6 +372,7 @@ public final class WeChatImageApi {
                     captureConstructedManager);
             for (XC_MethodHook.Unhook unhook : unhooks) {
                 HookRegistry.get().add(unhook);
+                marsUnhooks.add(unhook);
             }
             Set<XC_MethodHook.Unhook> startUnhooks = XposedBridge.hookAllMethods(
                     managerClass,
@@ -351,26 +380,33 @@ public final class WeChatImageApi {
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam param) {
-                            rememberMarsCdnManager(
-                                    managerClass,
-                                    param != null ? param.thisObject : null);
+                            synchronized (marsHookedManagerClasses) {
+                                if (marsHookIdentities.get(managerClass) != hookIdentity) return;
+                                rememberMarsCdnManager(managerClass, param != null ? param.thisObject : null);
+                            }
                         }
                     });
             for (XC_MethodHook.Unhook unhook : startUnhooks) {
                 HookRegistry.get().add(unhook);
+                marsUnhooks.add(unhook);
             }
-            resolveMarsCdnManager(managerClass);
         } catch (Throwable e) {
+            for (int i = marsUnhooks.size() - 1; i >= firstHandle; i--) {
+                XC_MethodHook.Unhook handle = marsUnhooks.remove(i);
+                try { HookRegistry.get().unhook(handle); } catch (Throwable ignored) { }
+            }
             marsHookedManagerClasses.remove(managerClass);
+            marsHookIdentities.remove(managerClass);
             logStatic(logger, "Mars CDN实例捕获Hook安装失败: " + e.getMessage());
         }
+            }
     }
-
     private static Object resolveMarsCdnManager(Class<?> managerClass) {
         if (managerClass == null) return null;
-        Object cached = marsCdnManagers.get(managerClass);
+        java.lang.ref.WeakReference<Object> reference = marsCdnManagers.get(managerClass);
+        Object cached = reference != null ? reference.get() : null;
         if (managerClass.isInstance(cached)) return cached;
-        if (cached != null) marsCdnManagers.remove(managerClass, cached);
+        if (cached != null) marsCdnManagers.remove(managerClass, reference);
 
         ClassLoader classLoader = managerClass.getClassLoader();
         Object manager = managerFromStaticMarsContext(managerClass, classLoader);
@@ -418,7 +454,10 @@ public final class WeChatImageApi {
 
     private static Object rememberMarsCdnManager(Class<?> managerClass, Object manager) {
         if (managerClass == null || !managerClass.isInstance(manager)) return null;
-        marsCdnManagers.put(managerClass, manager);
+        synchronized (marsHookedManagerClasses) {
+            if (marsRuntimeClosed || !marsHookedManagerClasses.containsKey(managerClass)) return manager;
+            marsCdnManagers.put(managerClass, new java.lang.ref.WeakReference<>(manager));
+        }
         return manager;
     }
 

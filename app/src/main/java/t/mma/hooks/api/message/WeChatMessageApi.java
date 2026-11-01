@@ -32,12 +32,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -48,7 +46,7 @@ import java.util.regex.Pattern;
  *
  * 基于微信 NetSceneSendMsg 构造请求，再交给模块内统一网络发包器发送。
  */
-public final class WeChatMessageApi {
+public final class WeChatMessageApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -88,24 +86,59 @@ public final class WeChatMessageApi {
     private static final int MAX_THUMB_BYTES = 512 * 1024;
     private static final int MAX_CACHED_THUMBS = 64;
     private static final long LOCAL_SEND_FALLBACK_DELAY_MS = 2500L;
-    private static final ConcurrentHashMap<String, byte[]> THUMB_DATA_CACHE =
-            new ConcurrentHashMap<>();
-    private static final Set<String> THUMB_PREFETCHING = ConcurrentHashMap.newKeySet();
-    private static final ExecutorService THUMB_PREFETCH_EXECUTOR =
-            Executors.newFixedThreadPool(2, r -> {
-                Thread thread = new Thread(r, "HchatXmlThumbPrefetch");
-                thread.setDaemon(true);
-                return thread;
-            });
-    private static final ScheduledExecutorService LOCAL_SEND_FALLBACK_EXECUTOR =
-            Executors.newSingleThreadScheduledExecutor(r -> {
-                Thread thread = new Thread(r, "HchatLocalSendFallback");
-                thread.setDaemon(true);
-                return thread;
-            });
+    private volatile boolean closed;
+    private final ConcurrentHashMap<String, byte[]> THUMB_DATA_CACHE = new ConcurrentHashMap<>();
+    private final Set<String> THUMB_PREFETCHING = ConcurrentHashMap.newKeySet();
+    private final java.util.concurrent.ThreadPoolExecutor THUMB_PREFETCH_EXECUTOR = boundedWorker(2, 16, "HchatXmlThumbPrefetch");
+    private final java.util.concurrent.ThreadPoolExecutor textSendExecutor = boundedWorker(1, 32, "HchatTextSender");
+    private final java.util.concurrent.ScheduledThreadPoolExecutor LOCAL_SEND_FALLBACK_EXECUTOR = fallbackWorker();
+    // Static cancellation entry is compatibility-only; each record belongs to one API generation.
     private static final ConcurrentHashMap<String, CopyOnWriteArrayList<PendingLocalSend>>
             PENDING_LOCAL_SENDS = new ConcurrentHashMap<>();
-
+    private int pendingFallbackCount; // guarded by PENDING_LOCAL_SENDS
+    private static java.util.concurrent.ThreadPoolExecutor boundedWorker(int threads, int capacity, String name) {
+        java.util.concurrent.ThreadPoolExecutor worker = new java.util.concurrent.ThreadPoolExecutor(
+                threads, threads, 15L, TimeUnit.SECONDS, new java.util.concurrent.ArrayBlockingQueue<Runnable>(capacity),
+                work -> { Thread t = new Thread(work, name); t.setDaemon(true); return t; });
+        worker.allowCoreThreadTimeOut(true);
+        return worker;
+    }
+    private static java.util.concurrent.ScheduledThreadPoolExecutor fallbackWorker() {
+        java.util.concurrent.ScheduledThreadPoolExecutor worker = new java.util.concurrent.ScheduledThreadPoolExecutor(1,
+                work -> { Thread t = new Thread(work, "HchatLocalSendFallback"); t.setDaemon(true); return t; });
+        worker.setRemoveOnCancelPolicy(true);
+        worker.setExecuteExistingDelayedTasksAfterShutdownPolicy(false);
+        worker.setKeepAliveTime(15L, TimeUnit.SECONDS);
+        worker.allowCoreThreadTimeOut(true);
+        return worker;
+    }
+    @Override public void close() {
+        List<Runnable> dropped = new ArrayList<>();
+        synchronized (this) {
+            if (closed) return;
+            closed = true;
+            networkHookInstalled = false;
+            THUMB_PREFETCH_EXECUTOR.getQueue().clear();
+            THUMB_PREFETCH_EXECUTOR.shutdown();
+            textSendExecutor.getQueue().drainTo(dropped);
+            textSendExecutor.shutdown();
+            THUMB_DATA_CACHE.clear();
+            THUMB_PREFETCHING.clear();
+        }
+        synchronized (PENDING_LOCAL_SENDS) {
+            for (Map.Entry<String, CopyOnWriteArrayList<PendingLocalSend>> entry : PENDING_LOCAL_SENDS.entrySet()) {
+                CopyOnWriteArrayList<PendingLocalSend> list = entry.getValue();
+                for (PendingLocalSend pending : list) {
+                    if (pending.owner != this) continue;
+                    if (list.remove(pending)) pendingFallbackCount--;
+                    if (pending.future != null) pending.future.cancel(false);
+                }
+                if (list.isEmpty()) PENDING_LOCAL_SENDS.remove(entry.getKey(), list);
+            }
+            LOCAL_SEND_FALLBACK_EXECUTOR.shutdown();
+        }
+        for (Runnable task : dropped) if (task instanceof AsyncTextSend) ((AsyncTextSend) task).reject();
+    }
     private final DexFinder dexFinder;
     private final WeChatNetworkDispatcher networkDispatcher;
     private final WeChatAccountApi accountApi;
@@ -116,11 +149,13 @@ public final class WeChatMessageApi {
     private volatile boolean networkHookInstalled;
 
     private static final class PendingLocalSend {
+        final WeChatMessageApi owner;
         final EventBus eventBus;
         final Events.MessageReceived event;
         volatile ScheduledFuture<?> future;
 
-        PendingLocalSend(EventBus eventBus, Events.MessageReceived event) {
+        PendingLocalSend(WeChatMessageApi owner, EventBus eventBus, Events.MessageReceived event) {
+            this.owner = owner;
             this.eventBus = eventBus;
             this.event = event;
         }
@@ -181,6 +216,7 @@ public final class WeChatMessageApi {
     }
 
     public boolean isAvailable() {
+        if (closed) return false;
         return dexFinder != null
                 && dexFinder.sendTextMsgClass != null
                 && (dexFinder.sendTextMsgCtorLong != null || dexFinder.sendTextMsgCtorObject != null)
@@ -188,13 +224,14 @@ public final class WeChatMessageApi {
     }
 
     public void installNetworkHook() {
-        if (networkHookInstalled || networkDispatcher == null || dexFinder == null) return;
+        if (closed || networkHookInstalled || networkDispatcher == null || dexFinder == null) return;
         if (dexFinder.netQueueClass == null && dexFinder.netQueueCandidateClasses.isEmpty()) return;
         networkDispatcher.hookNetworkQueue(dexFinder.netQueueClass, dexFinder.netQueueCandidateClasses);
         networkHookInstalled = true;
     }
 
     public boolean sendText(String talker, String text) {
+        if (closed) return false;
         if (TextUtils.isEmpty(talker) || TextUtils.isEmpty(text)) {
             log("发送文本失败: talker/text 为空");
             return false;
@@ -219,6 +256,7 @@ public final class WeChatMessageApi {
     }
 
     public boolean sendXml(String talker, String xml) {
+        if (closed) return false;
         String normalized = normalizeXmlContent(xml);
         if (TextUtils.isEmpty(talker) || TextUtils.isEmpty(normalized)) {
             log("发送XML失败: talker/xml 为空");
@@ -235,6 +273,7 @@ public final class WeChatMessageApi {
     }
 
     public boolean sendRaw(String talker, String content, int messageType) {
+        if (closed) return false;
         if (TextUtils.isEmpty(talker) || TextUtils.isEmpty(content)) {
             log("发送原始消息失败: talker/content 为空");
             return false;
@@ -266,6 +305,7 @@ public final class WeChatMessageApi {
     }
 
     public boolean sendQuote(String talker, long msgId, String content) {
+        if (closed) return false;
         if (TextUtils.isEmpty(talker)) {
             log("发送引用失败: talker为空");
             return false;
@@ -295,6 +335,7 @@ public final class WeChatMessageApi {
     }
 
     public boolean revoke(long msgId) {
+        if (closed) return false;
         if (msgId <= 0L) {
             log("撤回消息失败: msgId无效");
             return false;
@@ -342,6 +383,7 @@ public final class WeChatMessageApi {
     }
 
     public boolean revokeNative(Object nativeMessage) {
+        if (closed) return false;
         if (nativeMessage == null) {
             log("撤回消息失败: 原生消息对象为空");
             return false;
@@ -443,6 +485,7 @@ public final class WeChatMessageApi {
     }
 
     public boolean uploadDeviceStep(long step) {
+        if (closed) return false;
         if (step <= 0L) {
             log("上传步数失败: step无效");
             return false;
@@ -473,6 +516,7 @@ public final class WeChatMessageApi {
     }
 
     public boolean sendPat(String talker, String pattedUser) {
+        if (closed) return false;
         if (TextUtils.isEmpty(talker) || TextUtils.isEmpty(pattedUser)) {
             log("发送拍一拍失败: talker/pattedUser 为空");
             return false;
@@ -636,6 +680,7 @@ public final class WeChatMessageApi {
     }
 
     public boolean sendShareCard(String talker, String wxId) {
+        if (closed) return false;
         if (TextUtils.isEmpty(talker) || TextUtils.isEmpty(wxId)) {
             log("发送名片失败: talker/wxid 为空");
             return false;
@@ -676,6 +721,7 @@ public final class WeChatMessageApi {
                                 String longitude,
                                 String latitude,
                                 String scale) {
+        if (closed) return false;
         if (TextUtils.isEmpty(talker)
                 || TextUtils.isEmpty(longitude)
                 || TextUtils.isEmpty(latitude)) {
@@ -691,14 +737,17 @@ public final class WeChatMessageApi {
     }
 
     public boolean canSendAt() {
+        if (closed) return false;
         return isAvailable() && dexFinder.sendTextMsgCtorObject != null;
     }
 
     public boolean canSendXml() {
+        if (closed) return false;
         return dexFinder != null && dexFinder.sendXmlAppMsgMethod != null;
     }
 
     public boolean sendAt(String talker, String wxId, String text) {
+        if (closed) return false;
         if (TextUtils.isEmpty(wxId)) {
             log("发送@文本失败: wxId 为空");
             return false;
@@ -709,12 +758,14 @@ public final class WeChatMessageApi {
     }
 
     public boolean sendAtAll(String talker, String text) {
+        if (closed) return false;
         List<String> atList = new ArrayList<>();
         atList.add("notify@all");
         return sendTextWithAtList(talker, buildAtContent(talker, "notify@all", text), atList);
     }
 
     public boolean sendTextWithAtList(String talker, String text, List<String> atWxIds) {
+        if (closed) return false;
         if (TextUtils.isEmpty(talker) || TextUtils.isEmpty(text)) {
             log("发送@文本失败: talker/text 为空");
             return false;
@@ -753,23 +804,33 @@ public final class WeChatMessageApi {
         }
     }
 
-    public void sendTextAsync(final String talker, final String text, final SendCallback callback) {
-        new Thread(() -> {
-            Throwable error = null;
-            boolean success = false;
-            try {
-                success = sendText(talker, text);
-            } catch (Throwable e) {
-                error = e;
+    private final class AsyncTextSend implements Runnable {
+        final String talker, text;
+        final SendCallback callback;
+        final java.util.concurrent.atomic.AtomicBoolean completed = new java.util.concurrent.atomic.AtomicBoolean();
+        AsyncTextSend(String talker, String text, SendCallback callback) {this.talker=talker;this.text=text;this.callback=callback;}
+        void complete(boolean success, Throwable error) {
+            if (completed.compareAndSet(false, true) && callback != null) {
+                try { callback.onResult(success, error); } catch (Throwable ignored) { }
             }
-            if (callback != null) {
-                try {
-                    callback.onResult(success, error);
-                } catch (Throwable ignored) {}
-            }
-        }, "HchatTextSender").start();
+        }
+        void reject() { complete(false, new java.util.concurrent.RejectedExecutionException("Message API closed or busy")); }
+        @Override public void run() {
+            if (closed) { reject(); return; }
+            try { complete(sendText(talker, text), null); } catch (Throwable error) { complete(false, error); }
+        }
     }
-
+    public void sendTextAsync(final String talker, final String text, final SendCallback callback) {
+        AsyncTextSend task = new AsyncTextSend(talker, text, callback);
+        boolean accepted = false;
+        synchronized (this) {
+            if (!closed) {
+                try { textSendExecutor.execute(task); accepted = true; }
+                catch (java.util.concurrent.RejectedExecutionException ignored) { }
+            }
+        }
+        if (!accepted) task.reject();
+    }
     private Object newTextRequest(String talker, String text) throws Throwable {
         return newMessageRequest(talker, text, MESSAGE_TYPE_TEXT, SEND_FLAG_NORMAL, null);
     }
@@ -888,6 +949,7 @@ public final class WeChatMessageApi {
     }
     /** Real synchronous local ID only; asynchronous acceptance is not a replacement ID. */
     public long sendAppMsgXmlWithLocalId(String talker, String xml) {
+        if (closed) return -1L;
         Object result = sendAppMsgXmlResult(talker, xml);
         if (!isSuccessfulPair(result)) return -1L;
         Object id = ((Pair<?, ?>) result).second;
@@ -1072,7 +1134,7 @@ public final class WeChatMessageApi {
     }
 
     private void dispatchLocalSend(String talker, String content, int messageType, Object msgSource) {
-        if (eventBus == null || TextUtils.isEmpty(talker) || TextUtils.isEmpty(content)) return;
+        if (closed || eventBus == null || TextUtils.isEmpty(talker) || TextUtils.isEmpty(content)) return;
         try {
             Events.MessageReceived event = new Events.MessageReceived(
                     isAppMsgXml(content) ? content : "",
@@ -1095,40 +1157,44 @@ public final class WeChatMessageApi {
     public static boolean cancelPendingLocalSend(String talker, String content) {
         String key = pendingLocalSendKey(talker, content);
         if (TextUtils.isEmpty(key)) return false;
-        CopyOnWriteArrayList<PendingLocalSend> list = PENDING_LOCAL_SENDS.get(key);
-        if (list == null || list.isEmpty()) return false;
-        PendingLocalSend pending = list.remove(0);
-        ScheduledFuture<?> future = pending.future;
-        if (future != null) future.cancel(false);
-        if (list.isEmpty()) PENDING_LOCAL_SENDS.remove(key, list);
-        return true;
+        synchronized (PENDING_LOCAL_SENDS) {
+            CopyOnWriteArrayList<PendingLocalSend> list = PENDING_LOCAL_SENDS.get(key);
+            if (list == null || list.isEmpty()) return false;
+            PendingLocalSend pending = list.remove(0);
+            pending.owner.pendingFallbackCount--;
+            if (pending.future != null) pending.future.cancel(false);
+            if (list.isEmpty()) PENDING_LOCAL_SENDS.remove(key, list);
+            return true;
+        }
     }
-
-    private static void scheduleLocalSendFallback(String talker,
-                                                  String content,
-                                                  EventBus eventBus,
-                                                  Events.MessageReceived event) {
+    private void scheduleLocalSendFallback(String talker, String content, EventBus eventBus, Events.MessageReceived event) {
         String key = pendingLocalSendKey(talker, content);
         if (TextUtils.isEmpty(key)) return;
-        PendingLocalSend pending = new PendingLocalSend(eventBus, event);
-        PENDING_LOCAL_SENDS.computeIfAbsent(key, ignored -> new CopyOnWriteArrayList<>()).add(pending);
-        pending.future = LOCAL_SEND_FALLBACK_EXECUTOR.schedule(() -> {
-            if (!removePendingLocalSend(key, pending)) return;
+        synchronized (PENDING_LOCAL_SENDS) {
+            if (closed || pendingFallbackCount >= 256) return;
+            PendingLocalSend pending = new PendingLocalSend(this, eventBus, event);
+            PENDING_LOCAL_SENDS.computeIfAbsent(key, ignored -> new CopyOnWriteArrayList<>()).add(pending);
+            pendingFallbackCount++;
             try {
-                eventBus.post(event);
-            } catch (Throwable ignored) {
+                pending.future = LOCAL_SEND_FALLBACK_EXECUTOR.schedule(() -> {
+                    if (!removePendingLocalSend(key, pending) || closed) return;
+                    try { eventBus.postGuarded(event, this, () -> !closed); } catch (Throwable ignored) { }
+                }, LOCAL_SEND_FALLBACK_DELAY_MS, TimeUnit.MILLISECONDS);
+            } catch (java.util.concurrent.RejectedExecutionException ignored) {
+                removePendingLocalSend(key, pending);
             }
-        }, LOCAL_SEND_FALLBACK_DELAY_MS, TimeUnit.MILLISECONDS);
+        }
     }
-
     private static boolean removePendingLocalSend(String key, PendingLocalSend pending) {
-        CopyOnWriteArrayList<PendingLocalSend> list = PENDING_LOCAL_SENDS.get(key);
-        if (list == null) return false;
-        boolean removed = list.remove(pending);
-        if (list.isEmpty()) PENDING_LOCAL_SENDS.remove(key, list);
-        return removed;
+        synchronized (PENDING_LOCAL_SENDS) {
+            CopyOnWriteArrayList<PendingLocalSend> list = PENDING_LOCAL_SENDS.get(key);
+            if (list == null) return false;
+            boolean removed = list.remove(pending);
+            if (removed) pending.owner.pendingFallbackCount--;
+            if (list.isEmpty()) PENDING_LOCAL_SENDS.remove(key, list);
+            return removed;
+        }
     }
-
     private static String pendingLocalSendKey(String talker, String content) {
         if (TextUtils.isEmpty(talker) || TextUtils.isEmpty(content)) return "";
         return talker.trim() + '\n' + content.trim();
@@ -1403,26 +1469,27 @@ public final class WeChatMessageApi {
     }
 
     private void prefetchThumbData(String url) {
-        if (!THUMB_PREFETCHING.add(url)) return;
-        THUMB_PREFETCH_EXECUTOR.execute(() -> {
+        synchronized (this) {
+            if (closed || !THUMB_PREFETCHING.add(url)) return;
             try {
-                byte[] data = downloadBytes(url);
-                if (data == null || data.length == 0) return;
-                if (THUMB_DATA_CACHE.size() >= MAX_CACHED_THUMBS) {
-                    String firstKey = null;
-                    for (String key : THUMB_DATA_CACHE.keySet()) {
-                        firstKey = key;
-                        break;
-                    }
-                    if (firstKey != null) THUMB_DATA_CACHE.remove(firstKey);
-                }
-                THUMB_DATA_CACHE.put(url, data);
-            } finally {
-                THUMB_PREFETCHING.remove(url);
-            }
-        });
+                THUMB_PREFETCH_EXECUTOR.execute(() -> {
+                    try {
+                        if (closed) return;
+                        byte[] data = downloadBytes(url);
+                        if (data == null || data.length == 0) return;
+                        synchronized (WeChatMessageApi.this) {
+                            if (closed) return;
+                            if (THUMB_DATA_CACHE.size() >= MAX_CACHED_THUMBS) {
+                                java.util.Iterator<String> keys = THUMB_DATA_CACHE.keySet().iterator();
+                                if (keys.hasNext()) THUMB_DATA_CACHE.remove(keys.next());
+                            }
+                            THUMB_DATA_CACHE.put(url, data);
+                        }
+                    } finally { THUMB_PREFETCHING.remove(url); }
+                });
+            } catch (java.util.concurrent.RejectedExecutionException ignored) { THUMB_PREFETCHING.remove(url); }
+        }
     }
-
     private byte[] downloadBytes(String urlText) {
         StrictMode.ThreadPolicy oldPolicy = StrictMode.getThreadPolicy();
         HttpURLConnection connection = null;

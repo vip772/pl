@@ -68,6 +68,7 @@ private class SelectedMessagesHooker(
     private val logger: (String, Throwable?) -> Unit
 ) {
     @Volatile private var closed = false
+    private val contactSession = SelectedMessageContactRepository.openSession()
     private val resources = FeatureResourceScope { error ->
         try { logger("群发助手资源释放失败", error) } catch (_: Throwable) { }
     }
@@ -91,7 +92,7 @@ private class SelectedMessagesHooker(
         SelectedMessagesRuntimeCoordinator.attach(customModuleSender, moduleSender, officialSender)
         try {
             contactWorker.execute {
-                if (!closed) runCatching { SelectedMessageContactRepository.load(friendsOnly = false) }
+                if (!closed) runCatching { contactSession.load(friendsOnly = false) }
             }
         } catch (_: java.util.concurrent.RejectedExecutionException) {
             // Optional warmup; interactive loading retries through the owned worker.
@@ -102,7 +103,8 @@ private class SelectedMessagesHooker(
     fun detach() {
         if (closed) return
         closed = true
-        resources.close()
+        contactSession.close()
+        releaseSafely { resources.close() }
         hookedMethods.clear()
         releaseSafely { SelectedMessagesRuntimeCoordinator.detach(customModuleSender) }
         releaseSafely { moduleSender.shutdown() }
@@ -111,19 +113,24 @@ private class SelectedMessagesHooker(
         releaseSafely { contactWorker.queue.clear() }
         releaseSafely { contactWorker.shutdown() }
         releaseSafely { main.removeCallbacksAndMessages(null) }
+        val ownedDialogs = dialogs.toList()
+        val ownedNativeDialogs = nativeDialogs.toList()
+        dialogs.clear()
+        nativeDialogs.clear()
         val closeDialogs = {
-            dialogs.toList().forEach { dialog -> releaseSafely { dialog.close() } }
-            dialogs.clear()
-            nativeDialogs.toList().forEach { dialog -> releaseSafely { dialog.dismiss() } }
-            nativeDialogs.clear()
+            ownedDialogs.forEach { dialog -> releaseSafely { dialog.close() } }
+            ownedNativeDialogs.forEach { dialog -> releaseSafely { dialog.dismiss() } }
         }
-        if (Looper.myLooper() == Looper.getMainLooper()) closeDialogs() else main.post { closeDialogs() }
+        if (Looper.myLooper() == Looper.getMainLooper()) closeDialogs()
+        else if (!main.post { closeDialogs() }) closeDialogs()
     }
+    @Synchronized
     private fun trackDialog(dialog: VoiceForwardMiuixDialog.DialogHandle) {
         if (closed) { releaseSafely { dialog.close() }; return }
         dialogs.removeAll { !it.isShowing() }
         dialogs.add(dialog)
     }
+    @Synchronized
     private fun trackNativeDialog(dialog: android.app.Dialog) {
         if (closed) { releaseSafely { dialog.dismiss() }; return }
         nativeDialogs.removeAll { !it.isShowing }
@@ -527,7 +534,7 @@ private class SelectedMessagesHooker(
                 ).also(::trackDialog)
             }
         }
-        SelectedMessageContactRepository.cached(friendsOnly)?.let {
+        contactSession.cached(friendsOnly)?.let {
             showLoaded(it)
             return
         }
@@ -543,7 +550,7 @@ private class SelectedMessagesHooker(
         ).also(::trackDialog)
         try { contactWorker.execute {
             if (closed) return@execute
-            val result = runCatching { SelectedMessageContactRepository.load(friendsOnly) }
+            val result = runCatching { contactSession.load(friendsOnly) }
             main.post {
             if (closed) return@post
                 if (canceled.get()) return@post

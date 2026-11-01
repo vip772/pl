@@ -25,7 +25,7 @@ import java.lang.reflect.Constructor
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
-import java.util.ArrayDeque
+import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.UUID
 
 class OfficialMassSendSender(
@@ -33,15 +33,17 @@ class OfficialMassSendSender(
     private val logger: (String, Throwable?) -> Unit
 ) {
     @Volatile private var closed = false
+    private val sendBudget = SelectedSendBudget()
     private val resources = FeatureResourceScope { error ->
         try { logger("原生群发Hook释放失败", error) } catch (_: Throwable) { }
     }
     private val main = Handler(Looper.getMainLooper())
     private val methodPrefs = DexMethodCache.prefs(context.hostContext(), PREFS_NAME)
-    private val batches = ArrayDeque<SendBatch>()
+    private val batches = ConcurrentLinkedDeque<SendBatch>()
     private val admissions = java.util.concurrent.ConcurrentHashMap<String, SendBatch>()
+    private val retainedBatches = java.util.concurrent.ConcurrentHashMap<String, SendBatch>()
     @Volatile private var runtime: MassSendRuntime? = null
-    private var activeBatch: SendBatch? = null
+    @Volatile private var activeBatch: SendBatch? = null
     private var activeScene: Any? = null
     private var activeInfo: Any? = null
     private var timeoutRunnable: Runnable? = null
@@ -75,65 +77,85 @@ class OfficialMassSendSender(
         onComplete: ((success: Int, total: Int, canceled: Boolean) -> Unit)? = null
     ): SelectedMessageSendHandle? {
         if (closed) return null
-        val resolved = synchronized(this) {
-            if (closed) return null
-            runtime ?: locateRuntime()?.also { runtime = it }
-        } ?: return null
-        val targets = targetIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-        if (snapshots.isEmpty() || targets.isEmpty()) return null
-        if (snapshots.any { !isSupported(it, resolved) }) return null
-        val prepared = snapshots.map { snapshot ->
-            val type = snapshot.type and 0xffff
-            val emoji = if (type == 47) prepareEmojiPayload(snapshot) else null
-            val voice = if (type == 34) prepareVoicePayload(snapshot) else null
-            if (type == 47 && emoji == null) return null
-            if (type == 34 && voice == null) return null
-            PreparedSnapshot(snapshot, emoji, voice)
-        }
-        val jobs = targets.chunked(contactLimit(resolved)).flatMapIndexed { targetBatchIndex, contactBatch ->
-            prepared.map { item ->
-                SendJob(
-                    item.snapshot,
-                    contactBatch,
-                    item.emojiPayload,
-                    item.voicePayload,
-                    targetBatchIndex
-                )
+        val lease = sendBudget.acquire(snapshots.size, targetIds.size) ?: return null
+        var accepted = false
+        try {
+            val resolved = synchronized(this) {
+                if (closed) return null
+                runtime ?: locateRuntime()?.also { runtime = it }
+            } ?: return null
+            val targets = targetIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+            if (snapshots.isEmpty() || targets.isEmpty()) return null
+            if (snapshots.any { !isSupported(it, resolved) }) return null
+            val prepared = snapshots.map { snapshot ->
+                val type = snapshot.type and 0xffff
+                val emoji = if (type == 47) prepareEmojiPayload(snapshot) else null
+                val voice = if (type == 34) prepareVoicePayload(snapshot) else null
+                if (type == 47 && emoji == null) return null
+                if (type == 34 && voice == null) return null
+                PreparedSnapshot(snapshot, emoji, voice)
             }
-        }
-        if (jobs.isEmpty()) return null
-        val globalTargetIntervalSeconds =
-            SelectedMessagesSettings.officialIntervalMinutes(context.hostContext()) * 60L
-        val globalItemIntervalSeconds =
-            SelectedMessagesSettings.sendIntervalSeconds(context.hostContext()).toLong()
-        val batch = SendBatch(
-            id = UUID.randomUUID().toString(),
-            jobs = jobs,
-            total = snapshots.size * targets.size,
-            onComplete = onComplete,
-            targetBatchDelayMillis = maxOf(
-                targetIntervalSeconds.coerceIn(0, 3600).toLong(),
-                globalTargetIntervalSeconds
-            ) * 1000L,
-            itemDelayMillis = maxOf(
-                itemIntervalSeconds.coerceIn(0, 3600).toLong(),
-                globalItemIntervalSeconds
-            ) * 1000L
-        )
-        synchronized(this) {
-            if (closed) return null
-            admissions[batch.id] = batch
-            if (!main.post {
-                if (admissions.remove(batch.id) == null) return@post
-                if (closed) { notifyStopped(batch); return@post }
-                batches.addLast(batch)
-                if (activeBatch == null) startNextBatch()
-            }) {
-                admissions.remove(batch.id)
-                return null
+            val jobs = targets.chunked(contactLimit(resolved)).flatMapIndexed { targetBatchIndex, contactBatch ->
+                prepared.map { item ->
+                    SendJob(
+                        item.snapshot,
+                        contactBatch,
+                        item.emojiPayload,
+                        item.voicePayload,
+                        targetBatchIndex
+                    )
+                }
             }
+            if (jobs.isEmpty()) return null
+            val globalTargetIntervalSeconds =
+                SelectedMessagesSettings.officialIntervalMinutes(context.hostContext()) * 60L
+            val globalItemIntervalSeconds =
+                SelectedMessagesSettings.sendIntervalSeconds(context.hostContext()).toLong()
+            val batchId = UUID.randomUUID().toString()
+            val batch = SendBatch(
+                id = batchId,
+                jobs = jobs,
+                total = snapshots.size * targets.size,
+                onComplete = { success, total, canceled ->
+                    if (lease.release()) {
+                        retainedBatches.remove(batchId)
+                        try { onComplete?.invoke(success, total, canceled) }
+                        catch (error: Throwable) {
+                            try { logger("群发助手完成回调失败", error) } catch (_: Throwable) { }
+                        }
+                    }
+                },
+                targetBatchDelayMillis = maxOf(
+                    targetIntervalSeconds.coerceIn(0, 3600).toLong(),
+                    globalTargetIntervalSeconds
+                ) * 1000L,
+                itemDelayMillis = maxOf(
+                    itemIntervalSeconds.coerceIn(0, 3600).toLong(),
+                    globalItemIntervalSeconds
+                ) * 1000L
+            )
+            synchronized(this) {
+                if (closed) return null
+                retainedBatches[batch.id] = batch
+                admissions[batch.id] = batch
+                if (!main.post {
+                    synchronized(this) {
+                        if (admissions.remove(batch.id) == null) return@post
+                        if (closed) { notifyStopped(batch); return@post }
+                        batches.addLast(batch)
+                    }
+                    if (activeBatch == null) startNextBatch()
+                }) {
+                    admissions.remove(batch.id)
+                    retainedBatches.remove(batch.id)
+                    return null
+                }
+            }
+            accepted = true
+            return SelectedMessageSendHandle { cancel(batchId) }.withStopPending { stopPending(batchId) }
+        } finally {
+            if (!accepted) lease.release()
         }
-        return SelectedMessageSendHandle { cancel(batch.id) }.withStopPending { stopPending(batch.id) }
     }
 
     fun isAvailable(): Boolean = !closed && runtime != null && callbackHookInstalled
@@ -232,11 +254,12 @@ class OfficialMassSendSender(
     }
 
     private fun startNextBatch() {
-        if (closed || activeBatch != null) return
-        activeBatch = batches.pollFirst()
-        activeBatch?.let(::sendCurrent)
+        val batch = synchronized(this) {
+            if (closed || activeBatch != null) return
+            batches.pollFirst()?.also { activeBatch = it }
+        } ?: return
+        sendCurrent(batch)
     }
-
     private fun sendCurrent(batch: SendBatch) {
         if (closed || activeBatch !== batch) return
         if (batch.stopRequested) { finishStopped(batch); return }
@@ -276,8 +299,11 @@ class OfficialMassSendSender(
             completeCurrent(batch, false)
             return
         }
-        activeScene = scene
-        activeInfo = info
+        synchronized(this) {
+            if (closed || activeBatch !== batch) return
+            activeScene = scene
+            activeInfo = info
+        }
         val sent = runCatching { submitScene(resolved, scene) }
             .onFailure { logger("微信原生群发助手派发失败", it) }
             .getOrDefault(false)
@@ -287,37 +313,43 @@ class OfficialMassSendSender(
             completeCurrent(batch, false)
             return
         }
-        timeoutRunnable = Runnable {
-            if (!closed && activeScene === scene) {
-                logger("微信原生群发助手等待发送完成超时: type=${job.snapshot.type}", null)
-                activeScene = null
-                activeInfo = null
-                completeCurrent(batch, false)
+        synchronized(this) {
+            if (!closed && activeBatch === batch && activeScene === scene) {
+                timeoutRunnable = Runnable {
+                    if (!closed && activeScene === scene) {
+                        logger("微信原生群发助手等待发送完成超时: type=${job.snapshot.type}", null)
+                        activeScene = null
+                        activeInfo = null
+                        completeCurrent(batch, false)
+                    }
+                }.also { main.postDelayed(it, timeoutFor(job.snapshot)) }
             }
-        }.also { main.postDelayed(it, timeoutFor(job.snapshot)) }
+        }
     }
 
     private fun handleSceneEnd(scene: Any?, args: Array<Any?>?) {
         if (closed || scene == null) return
         val errType = (args?.getOrNull(1) as? Number)?.toInt() ?: -1
         val errCode = (args?.getOrNull(2) as? Number)?.toInt() ?: -1
-        main.post {
-            if (closed || scene !== activeScene) return@post
-            val batch = activeBatch ?: return@post
-            if (errType == 0 && errCode == 0) {
-                val status = activeInfo?.let { info ->
-                    KavaReflector.readField(runtime?.statusField, info) as? Number
-                }?.toInt()
-                if (status != MASS_SEND_STATUS_DONE) return@post
+        synchronized(this) {
+            if (closed) return
+            main.post {
+                if (closed || scene !== activeScene) return@post
+                val batch = activeBatch ?: return@post
+                if (errType == 0 && errCode == 0) {
+                    val status = activeInfo?.let { info ->
+                        KavaReflector.readField(runtime?.statusField, info) as? Number
+                    }?.toInt()
+                    if (status != MASS_SEND_STATUS_DONE) return@post
+                }
+                timeoutRunnable?.let(main::removeCallbacks)
+                timeoutRunnable = null
+                activeScene = null
+                activeInfo = null
+                completeCurrent(batch, errType == 0 && errCode == 0)
             }
-            timeoutRunnable?.let(main::removeCallbacks)
-            timeoutRunnable = null
-            activeScene = null
-            activeInfo = null
-            completeCurrent(batch, errType == 0 && errCode == 0)
         }
     }
-
     private fun completeCurrent(batch: SendBatch, success: Boolean) {
         if (closed || activeBatch !== batch) return
         timeoutRunnable?.let(main::removeCallbacks)
@@ -372,58 +404,41 @@ class OfficialMassSendSender(
         startNextBatch()
     }
     private fun cancel(batchId: String) {
-        if (closed) return
-        main.post {
-            if (closed) return@post
-            val active = activeBatch
-            if (active?.id == batchId) {
-                timeoutRunnable?.let(main::removeCallbacks)
-                timeoutRunnable = null
-                activeScene?.let { scene -> KavaReflector.invokeMethod(scene, "cancel") }
-                activeScene = null
-                activeInfo = null
-                activeBatch = null
-                active.onComplete?.invoke(active.success, active.total, true)
-                startNextBatch()
-                return@post
-            }
-            val iterator = batches.iterator()
-            while (iterator.hasNext()) {
-                val pending = iterator.next()
-                if (pending.id != batchId) continue
-                iterator.remove()
-                pending.onComplete?.invoke(0, pending.total, true)
-                break
-            }
-        }
+        stopPending(batchId)
     }
-
     private fun notifyStopped(batch: SendBatch) {
         try { batch.onComplete?.invoke(batch.success, batch.total, true) }
         catch (error: Throwable) { try { logger("原生群发关闭回调失败", error) } catch (_: Throwable) { } }
     }
-    @Synchronized
     fun shutdown() {
-        if (closed) return
-        closed = true
-        resources.close()
+        val stopped = synchronized(this) {
+            if (closed) return
+            closed = true
+            sendBudget.close()
+            // Snapshot the owner table, not a Handler transition between two containers.
+            retainedBatches.values.toList().also {
+                retainedBatches.clear()
+                admissions.clear()
+                batches.clear()
+            }
+        }
+        try { resources.close() } catch (error: Throwable) {
+            try { logger("原生群发Hook释放失败", error) } catch (_: Throwable) { }
+        }
         callbackHookInstalled = false
         runtime = null
         val cleanup = {
             main.removeCallbacksAndMessages(null)
             timeoutRunnable = null
-            val stopped = batches.toList() + admissions.values.toList()
-            batches.clear()
-            admissions.clear()
-            val active = activeBatch
             activeBatch = null
-            // Host owns an already submitted scene; never native-cancel here.
+            // Host owns an entered scene; only drop module references.
             activeScene = null
             activeInfo = null
-            active?.let(::notifyStopped)
-            stopped.forEach(::notifyStopped)
         }
-        if (Looper.myLooper() == Looper.getMainLooper()) cleanup() else main.post { cleanup() }
+        // Rejection means this Looper is exiting; do not retain the payload awaiting a dead queue.
+        if (Looper.myLooper() == Looper.getMainLooper()) cleanup()
+        else if (!main.post { cleanup() }) cleanup()
+        stopped.forEach(::notifyStopped)
     }
     private fun isSupported(snapshot: SelectedMessageSnapshot, runtime: MassSendRuntime): Boolean {
         if (!MassSendContentPolicy.supportsOfficial(snapshot)) return false

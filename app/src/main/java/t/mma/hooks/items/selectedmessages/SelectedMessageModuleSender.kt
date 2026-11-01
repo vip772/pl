@@ -8,7 +8,7 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.api.model.WeChatMessage
 import t.mma.hooks.core.FeatureContext
 import java.io.File
-import java.util.ArrayDeque
+import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.UUID
 
 class SelectedMessageModuleSender(
@@ -16,10 +16,12 @@ class SelectedMessageModuleSender(
     private val logger: (String, Throwable?) -> Unit
 ) {
     @Volatile private var closed = false
+    private val sendBudget = SelectedSendBudget()
     private val main = Handler(Looper.getMainLooper())
-    private val batches = ArrayDeque<SendBatch>()
+    private val batches = ConcurrentLinkedDeque<SendBatch>()
     private val admissions = java.util.concurrent.ConcurrentHashMap<String, SendBatch>()
-    private var activeBatch: SendBatch? = null
+    private val retainedBatches = java.util.concurrent.ConcurrentHashMap<String, SendBatch>()
+    @Volatile private var activeBatch: SendBatch? = null
     private var activeToken = ""
     private var activeRetransmitTargets = emptyList<String>()
     private var timeoutRunnable: Runnable? = null
@@ -64,40 +66,60 @@ class SelectedMessageModuleSender(
         onComplete: ((success: Int, total: Int, canceled: Boolean) -> Unit)?
     ): SelectedMessageSendHandle? {
         if (closed || snapshots.isEmpty()) return null
-        val messages = snapshots.filter { it.retransmit != null || it.voicePath.isNotBlank() }
-        val targets = targetIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
-        if (messages.size != snapshots.size || targets.isEmpty()) return null
-        val globalIntervalSeconds = SelectedMessagesSettings.sendIntervalSeconds(context.hostContext())
-        val targetDelayMillis = maxOf(
-            ForwardSendPolicy.MIN_SEND_INTERVAL_MS,
-            maxOf(targetIntervalSeconds, globalIntervalSeconds).coerceIn(0, 3600) * 1000L
-        )
-        val itemDelayMillis = maxOf(
-            NEXT_MESSAGE_DELAY_MS,
-            maxOf(itemIntervalSeconds, globalIntervalSeconds).coerceIn(0, 3600) * 1000L
-        )
-        val batch = SendBatch(
-            UUID.randomUUID().toString(),
-            messages,
-            targets,
-            onComplete,
-            targetDelayMillis = targetDelayMillis,
-            itemDelayMillis = itemDelayMillis
-        )
-        synchronized(this) {
-            if (closed) return null
-            admissions[batch.id] = batch
-            if (!main.post {
-                if (admissions.remove(batch.id) == null) return@post
-                if (closed) { notifyStopped(batch); return@post }
-                batches.addLast(batch)
-                if (activeBatch == null) startNextBatch()
-            }) {
-                admissions.remove(batch.id)
-                return null
+        val lease = sendBudget.acquire(snapshots.size, targetIds.size) ?: return null
+        var accepted = false
+        try {
+            val messages = snapshots.filter { it.retransmit != null || it.voicePath.isNotBlank() }
+            val targets = targetIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+            if (messages.size != snapshots.size || targets.isEmpty()) return null
+            val globalIntervalSeconds = SelectedMessagesSettings.sendIntervalSeconds(context.hostContext())
+            val targetDelayMillis = maxOf(
+                ForwardSendPolicy.MIN_SEND_INTERVAL_MS,
+                maxOf(targetIntervalSeconds, globalIntervalSeconds).coerceIn(0, 3600) * 1000L
+            )
+            val itemDelayMillis = maxOf(
+                NEXT_MESSAGE_DELAY_MS,
+                maxOf(itemIntervalSeconds, globalIntervalSeconds).coerceIn(0, 3600) * 1000L
+            )
+            val batchId = UUID.randomUUID().toString()
+            val batch = SendBatch(
+                batchId,
+                messages,
+                targets,
+                { success, total, canceled ->
+                    if (lease.release()) {
+                        retainedBatches.remove(batchId)
+                        try { onComplete?.invoke(success, total, canceled) }
+                        catch (error: Throwable) {
+                            try { logger("群发助手完成回调失败", error) } catch (_: Throwable) { }
+                        }
+                    }
+                },
+                targetDelayMillis = targetDelayMillis,
+                itemDelayMillis = itemDelayMillis
+            )
+            synchronized(this) {
+                if (closed) return null
+                retainedBatches[batch.id] = batch
+                admissions[batch.id] = batch
+                if (!main.post {
+                    synchronized(this) {
+                        if (admissions.remove(batch.id) == null) return@post
+                        if (closed) { notifyStopped(batch); return@post }
+                        batches.addLast(batch)
+                    }
+                    if (activeBatch == null) startNextBatch()
+                }) {
+                    admissions.remove(batch.id)
+                    retainedBatches.remove(batch.id)
+                    return null
+                }
             }
+            accepted = true
+            return SelectedMessageSendHandle { cancel(batchId) }.withStopPending { stopPending(batchId) }
+        } finally {
+            if (!accepted) lease.release()
         }
-        return SelectedMessageSendHandle { cancel(batch.id) }.withStopPending { stopPending(batch.id) }
     }
 
     fun handleRetransmitDone(activity: Activity): Boolean {
@@ -120,13 +142,13 @@ class SelectedMessageModuleSender(
     }
 
     private fun startNextBatch() {
-        if (closed || activeBatch != null) return
-        activeBatch = batches.pollFirst()
-        val batch = activeBatch ?: return
+        val batch = synchronized(this) {
+            if (closed || activeBatch != null) return
+            batches.pollFirst()?.also { activeBatch = it }
+        } ?: return
         batch.total = batch.snapshots.size * batch.targets.size
         sendCurrent(batch)
     }
-
     private fun sendCurrent(batch: SendBatch) {
         if (closed || activeBatch !== batch) return
         if (batch.stopRequested) { finishStopped(batch); return }
@@ -187,8 +209,12 @@ class SelectedMessageModuleSender(
         }
         runCatching { launchContext.startActivity(intent) }
             .onSuccess {
-                timeoutRunnable = Runnable { handleTimeout(token) }.also {
-                    main.postDelayed(it, SEND_TIMEOUT_MS)
+                synchronized(this) {
+                    if (!closed && activeBatch === batch && activeToken == token) {
+                        timeoutRunnable = Runnable { handleTimeout(token) }.also {
+                            main.postDelayed(it, SEND_TIMEOUT_MS)
+                        }
+                    }
                 }
             }
             .onFailure {
@@ -355,58 +381,35 @@ class SelectedMessageModuleSender(
         startNextBatch()
     }
     private fun cancel(batchId: String) {
-        if (closed) return
-        main.post {
-            if (closed) return@post
-            val active = activeBatch
-            if (active?.id == batchId) {
-                val token = activeToken
-                timeoutRunnable?.let(main::removeCallbacks)
-                timeoutRunnable = null
-                activeToken = ""
-                activeRetransmitTargets = emptyList()
-                (WeChatApis.currentActivity()?.currentActivity() as? Activity)
-                    ?.takeIf { it.intent?.getStringExtra(EXTRA_TOKEN) == token }
-                    ?.finish()
-                activeBatch = null
-                active.onComplete?.invoke(active.success, active.total, true)
-                startNextBatch()
-                return@post
-            }
-            val iterator = batches.iterator()
-            while (iterator.hasNext()) {
-                val pending = iterator.next()
-                if (pending.id != batchId) continue
-                iterator.remove()
-                pending.onComplete?.invoke(0, pending.snapshots.size * pending.targets.size, true)
-                break
-            }
-        }
+        stopPending(batchId)
     }
-
     private fun notifyStopped(batch: SendBatch) {
         try { batch.onComplete?.invoke(batch.success, batch.snapshots.size * batch.targets.size, true) }
         catch (error: Throwable) { try { logger("群发助手关闭回调失败", error) } catch (_: Throwable) { } }
     }
-    @Synchronized
     fun shutdown() {
-        if (closed) return
-        closed = true
+        val stopped = synchronized(this) {
+            if (closed) return
+            closed = true
+            sendBudget.close()
+            // Snapshot the owner table, not a Handler transition between two containers.
+            retainedBatches.values.toList().also {
+                retainedBatches.clear()
+                admissions.clear()
+                batches.clear()
+            }
+        }
         val cleanup = {
             main.removeCallbacksAndMessages(null)
             timeoutRunnable = null
-            val stopped = batches.toList() + admissions.values.toList()
-            batches.clear()
-            admissions.clear()
-            val active = activeBatch
             activeBatch = null
             activeToken = ""
             activeRetransmitTargets = emptyList()
-            // Stop follow-up only; do not finish/cancel an entered host send.
-            active?.let(::notifyStopped)
-            stopped.forEach(::notifyStopped)
         }
-        if (Looper.myLooper() == Looper.getMainLooper()) cleanup() else main.post { cleanup() }
+        // Rejection means this Looper is exiting; do not retain the payload awaiting a dead queue.
+        if (Looper.myLooper() == Looper.getMainLooper()) cleanup()
+        else if (!main.post { cleanup() }) cleanup()
+        stopped.forEach(::notifyStopped)
     }
     private data class SendBatch(
         val id: String,

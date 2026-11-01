@@ -43,6 +43,25 @@ public final class EventBus {
         }
     }
 
+    /** Lifecycle-owned sticky publication; subscriber calls stay outside the lifecycle lock. */
+    public <E> void postGuarded(E event, Object lifecycleLock, java.util.function.BooleanSupplier active) {
+        if (event == null) return;
+        Class<?> eventClass = event.getClass();
+        synchronized (lifecycleLock) {
+            if (!active.getAsBoolean()) return;
+            if (isStickyEvent(eventClass)) stickyEvents.put(eventClass, event);
+        }
+        List<HandlerEntry<?>> entries = handlers.get(eventClass);
+        if (entries == null) return;
+        for (HandlerEntry<?> entry : entries) {
+            synchronized (lifecycleLock) { if (!active.getAsBoolean()) return; }
+            dispatch(event, entry.handler);
+        }
+    }
+    public void removeSticky(Object event) {
+        if (event != null) stickyEvents.remove(event.getClass(), event);
+    }
+
     // ============ 订阅 ============
 
     /**

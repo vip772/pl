@@ -81,7 +81,7 @@ internal data class PreparedSnsForward(
 internal class SnsForwardContentResolver(
     private val context: FeatureContext,
     private val logger: (String, Throwable?) -> Unit
-) {
+) : AutoCloseable {
     private val client = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
@@ -100,6 +100,38 @@ internal class SnsForwardContentResolver(
             methods = SnsForwardNativeMediaLocator.locate(context, logger)
         }
         methods
+    }
+    private val lifecycleLock = Any()
+    @Volatile private var closed = false
+    private val pendingMain = linkedSetOf<MainCall>()
+    private inner class MainCall(var action: (() -> Boolean)?) : Runnable {
+        val done = CountDownLatch(1)
+        val result = AtomicBoolean(false)
+        override fun run() {
+            val admitted = synchronized(lifecycleLock) {
+                pendingMain.remove(this)
+                val work = if (closed) null else action
+                action = null
+                work
+            }
+            try { if (admitted != null) result.set(admitted()) } finally { done.countDown() }
+        }
+        fun discard() {
+            synchronized(lifecycleLock) {
+                if (!pendingMain.remove(this)) return
+                action = null
+                mainHandler.removeCallbacks(this)
+                done.countDown()
+            }
+        }
+    }
+    override fun close() {
+        synchronized(lifecycleLock) {
+            if (closed) return
+            closed = true
+            pendingMain.toList().forEach { it.discard() }
+        }
+        client.connectionPool.evictAll()
     }
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -478,7 +510,7 @@ internal class SnsForwardContentResolver(
         deadline: Long
     ): String? {
         while (SystemClock.elapsedRealtime() < deadline) {
-            if (canceled.get()) throw InterruptedException("已取消")
+            if (closed || canceled.get()) throw InterruptedException("已取消")
             resolveLocalImage(media, index, canceled)?.let { return it }
             SystemClock.sleep(NATIVE_POLL_INTERVAL_MS)
         }
@@ -492,7 +524,7 @@ internal class SnsForwardContentResolver(
     ): String? {
         val deadline = SystemClock.elapsedRealtime() + NATIVE_VIDEO_TIMEOUT_MS
         while (SystemClock.elapsedRealtime() < deadline) {
-            if (canceled.get()) throw InterruptedException("已取消")
+            if (closed || canceled.get()) throw InterruptedException("已取消")
             resolveLocalVideo(snsId, media, canceled)?.let { return it }
             SystemClock.sleep(NATIVE_POLL_INTERVAL_MS)
         }
@@ -513,20 +545,26 @@ internal class SnsForwardContentResolver(
     }
 
     private fun invokeOnMain(action: () -> Boolean): Boolean {
-        if (Looper.myLooper() == Looper.getMainLooper()) return action()
-        val result = AtomicBoolean(false)
-        val latch = CountDownLatch(1)
-        if (!mainHandler.post {
-                try {
-                    result.set(action())
-                } finally {
-                    latch.countDown()
-                }
+        val call = MainCall(action)
+        synchronized(lifecycleLock) {
+            if (closed || pendingMain.size >= 16) return false
+            pendingMain.add(call)
+            if (Looper.myLooper() != Looper.getMainLooper() && !mainHandler.post(call)) {
+                call.discard()
+                return false
             }
-        ) return false
-        return latch.await(NATIVE_INVOKE_TIMEOUT_MS, TimeUnit.MILLISECONDS) && result.get()
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) call.run()
+        return try {
+            val done = call.done.await(NATIVE_INVOKE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+            if (!done) call.discard()
+            done && call.result.get()
+        } catch (error: InterruptedException) {
+            call.discard()
+            Thread.currentThread().interrupt()
+            false
+        }
     }
-
     private fun accepts(method: java.lang.reflect.Method, value: Any): Boolean {
         return method.parameterTypes.singleOrNull()?.isInstance(value) == true
     }
@@ -587,7 +625,7 @@ internal class SnsForwardContentResolver(
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
         var total = 0L
         while (true) {
-            if (canceled.get()) throw InterruptedException("已取消")
+            if (closed || canceled.get()) throw InterruptedException("已取消")
             val read = input.read(buffer)
             if (read <= 0) break
             total += read
@@ -785,7 +823,7 @@ internal class SnsForwardContentResolver(
         val target = File(dir, "remote_v2_$safeKey.$extension")
         if (target.isFile && target.length() in 1..maxBytes) return target.absolutePath
         for (rawUrl in urls) {
-            if (canceled.get()) throw InterruptedException("已取消")
+            if (closed || canceled.get()) throw InterruptedException("已取消")
             val url = decodeUrl(rawUrl)
             if (!isHttpUrl(url)) continue
             val part = File(dir, "$safeKey.part")

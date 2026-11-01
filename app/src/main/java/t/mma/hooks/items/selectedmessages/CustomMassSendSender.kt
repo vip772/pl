@@ -74,9 +74,11 @@ internal class CustomMassSendModuleSender(
                 }
             }
             operations.remove(operation.id)
-            main.post {
-                if (closed) return@post
-                onComplete?.invoke(success, contents.size * targets.size, operation.canceled.get())
+            synchronized(this) {
+                if (!closed) main.post {
+                    if (closed) return@post
+                    onComplete?.invoke(success, contents.size * targets.size, operation.canceled.get())
+                }
             }
         }
         } catch (_: RejectedExecutionException) {
@@ -210,6 +212,7 @@ object SelectedMessagesRuntimeCoordinator {
     @Volatile
     private var state: State? = null
 
+    @Synchronized
     internal fun attach(
         moduleSender: CustomMassSendModuleSender,
         selectedModuleSender: SelectedMessageModuleSender,
@@ -218,6 +221,7 @@ object SelectedMessagesRuntimeCoordinator {
         state = State(moduleSender, selectedModuleSender, officialSender)
     }
 
+    @Synchronized
     internal fun detach(moduleSender: CustomMassSendModuleSender) {
         if (state?.moduleSender === moduleSender) state = null
     }

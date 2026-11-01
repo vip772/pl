@@ -114,51 +114,63 @@ public class WeChatNetworkDispatcher {
         }
     }
 
+    private static final class SendAdmission {
+        final Object dispatcher;
+        final Method method;
+        final int argCount;
+        SendAdmission(Object dispatcher, Method method, int argCount) {
+            this.dispatcher = dispatcher;
+            this.method = method;
+            this.argCount = argCount;
+        }
+    }
+    private synchronized SendAdmission admitSend(Object request) {
+        if (destroyed || dispatcherInstance == null || dispatcherMethod == null) return null;
+        // Diagnostic ownership only. Never hold the lifecycle monitor across a host call.
+        synchronized (moduleRequests) {
+            if (moduleRequests.size() >= 256) {
+                java.util.Iterator<Object> oldest = moduleRequests.keySet().iterator();
+                if (oldest.hasNext()) { oldest.next(); oldest.remove(); }
+            }
+            moduleRequests.put(request, SystemClock.elapsedRealtime());
+        }
+        return new SendAdmission(dispatcherInstance, dispatcherMethod, dispatcherArgCount);
+    }
     public boolean send(Object request) {
-        if (destroyed) return false;
-        if (request == null) return false;
+        if (destroyed || request == null) return false;
         Object realRequest = unwrapRequest(request);
         if (realRequest == null) return false;
-
-        if (dispatcherInstance == null || dispatcherMethod == null) {
+        Object candidate = dispatcherInstance;
+        Method candidateMethod = dispatcherMethod;
+        if (candidate == null || candidateMethod == null) {
             ensureReady(realRequest.getClass());
-        } else if (methodPriority(dispatcherMethod) < 100) {
-            tryCacheFromObject(dispatcherInstance, realRequest.getClass());
+        } else if (methodPriority(candidateMethod) < 100) {
+            tryCacheFromObject(candidate, realRequest.getClass());
         }
-
-        if (dispatcherInstance != null && dispatcherMethod != null) {
-            try {
-                moduleRequests.put(realRequest, SystemClock.elapsedRealtime());
-                Object result;
-                if (dispatcherArgCount == 2) {
-                    result = KavaReflector.invokeOrThrow(dispatcherMethod, dispatcherInstance, realRequest, 0);
-                } else {
-                    result = KavaReflector.invokeOrThrow(dispatcherMethod, dispatcherInstance, realRequest);
-                }
-                boolean accepted = normalizeSendResult(result);
-                if (!accepted) moduleRequests.remove(realRequest);
-                HLog.i("[Hchat:NetworkTrace] moduleSubmit scene=" + realRequest.getClass().getName()
-                        + " accepted=" + accepted + " queue=" + dispatcherMethod.toGenericString());
-                return accepted;
-            } catch (InvocationTargetException invokeErr) {
-                // Original code may already have submitted work before throwing. Never resubmit.
-                moduleRequests.remove(realRequest);
-                HLog.e("[Hchat:NetworkTrace] 模块请求原生入队异常 scene="
-                        + realRequest.getClass().getName(),
-                        invokeErr.getCause() != null ? invokeErr.getCause() : invokeErr);
-                return false;
-            } catch (Throwable invokeErr) {
-                moduleRequests.remove(realRequest);
-                HLog.e("[Hchat:NetworkTrace] 模块请求反射入队失败 scene=" + realRequest.getClass().getName(), invokeErr);
-                return false;
-            }
-        } else {
-            log("sendNetworkRequest 失败: dispatcher=" + (dispatcherInstance != null)
-                    + " method=" + (dispatcherMethod != null));
+        SendAdmission admission = admitSend(realRequest);
+        if (admission == null) return false;
+        // Successful admission belongs to this call even if destroy follows. Do not retry/cancel it.
+        try {
+            Object result = admission.argCount == 2
+                    ? KavaReflector.invokeOrThrow(admission.method, admission.dispatcher, realRequest, 0)
+                    : KavaReflector.invokeOrThrow(admission.method, admission.dispatcher, realRequest);
+            boolean accepted = normalizeSendResult(result);
+            if (!accepted) moduleRequests.remove(realRequest);
+            HLog.i("[Hchat:NetworkTrace] moduleSubmit scene=" + realRequest.getClass().getName()
+                    + " accepted=" + accepted + " queue=" + admission.method.toGenericString());
+            return accepted;
+        } catch (InvocationTargetException invokeErr) {
+            // The original may have submitted before throwing. Never resubmit.
+            moduleRequests.remove(realRequest);
+            HLog.e("[Hchat:NetworkTrace] 模块请求原生入队异常 scene=" + realRequest.getClass().getName(),
+                    invokeErr.getCause() != null ? invokeErr.getCause() : invokeErr);
+            return false;
+        } catch (Throwable invokeErr) {
+            moduleRequests.remove(realRequest);
+            HLog.e("[Hchat:NetworkTrace] 模块请求反射入队失败 scene=" + realRequest.getClass().getName(), invokeErr);
+            return false;
         }
-        return false;
     }
-
     /** Read-only: never intercept native completion or inspect message/response contents. */
     private void observeQueueCompletion(Class<?> queueClass) {
         for (Method method : KavaReflector.declaredMethods(queueClass)) {
@@ -212,7 +224,7 @@ public class WeChatNetworkDispatcher {
     }
 
     public boolean isReady() {
-        return dispatcherInstance != null && dispatcherMethod != null;
+        return !destroyed && dispatcherInstance != null && dispatcherMethod != null;
     }
 
     public boolean hasDispatcherInstance() {

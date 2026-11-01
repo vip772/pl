@@ -34,7 +34,7 @@ import java.util.concurrent.atomic.AtomicReference;
  * 走微信内部 voiceinfo + uploadvoice 链路，不经过录音 UI。
  * 发送链路按真实时长判断，微信显示时长按语音 UI 规则最多写 60 秒。
  */
-public final class WeChatVoiceApi {
+public final class WeChatVoiceApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -52,7 +52,54 @@ public final class WeChatVoiceApi {
     private final DexFinder dexFinder;
     private final Context hostContext;
     private final Logger logger;
-    private static final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
+    private final Handler MAIN_HANDLER = new Handler(Looper.getMainLooper());
+    private volatile boolean closed;
+    private final java.util.Set<MainTask> pendingMainTasks = new java.util.HashSet<>();
+    private final class MainTask implements Runnable {
+        private BooleanTask task;
+        private final CountDownLatch done = new CountDownLatch(1);
+        private volatile boolean result;
+        MainTask(BooleanTask task) { this.task = task; }
+        @Override public void run() {
+            BooleanTask admitted;
+            synchronized (pendingMainTasks) {
+                pendingMainTasks.remove(this);
+                admitted = closed ? null : task;
+                task = null;
+            }
+            try { if (admitted != null) result = admitted.run(); }
+            catch (Throwable error) { log("语音主线程任务执行异常: " + error.getMessage()); }
+            finally { done.countDown(); }
+        }
+        void cancelPending() {
+            synchronized (pendingMainTasks) {
+                if (!pendingMainTasks.remove(this)) return;
+                task = null;
+                MAIN_HANDLER.removeCallbacks(this);
+                done.countDown();
+            }
+        }
+    }
+    @Override public void close() {
+        synchronized (pendingMainTasks) {
+            if (closed) return;
+            closed = true;
+            for (MainTask task : new java.util.ArrayList<>(pendingMainTasks)) task.cancelPending();
+            MAIN_HANDLER.removeCallbacksAndMessages(null);
+        }
+        voiceInfoValuesMethod = null;
+        Object player;
+        synchronized (playbackLock) {
+            playbackGeneration++;
+            player = playbackPlayer;
+            playbackPlayer = null;
+            playbackListener = null;
+        }
+        if (player != null) {
+            if (Looper.myLooper() == Looper.getMainLooper()) stopPlaybackPlayer(player);
+            else if (!MAIN_HANDLER.post(() -> stopPlaybackPlayer(player))) stopPlaybackPlayer(player);
+        }
+    }
     private static final int LONG_VOICE_DURATION_MS = 60_000;
     private static final long NORMAL_VOICE_MAX_BYTES = 460_000L;
     private static final int SILK_SAMPLE_RATE = 24_000;
@@ -86,7 +133,7 @@ public final class WeChatVoiceApi {
     }
 
     public boolean canPrepareMassSend() {
-        return dexFinder != null
+        return !closed && dexFinder != null
                 && dexFinder.voiceStartRecordMethod != null
                 && dexFinder.voiceFullPathMethod != null
                 && dexFinder.voiceFinishRecordMethod != null;
@@ -216,38 +263,28 @@ public final class WeChatVoiceApi {
     }
 
     private boolean runOnMainThread(BooleanTask task) {
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            return task.run();
-        }
-        AtomicReference<Boolean> result = new AtomicReference<>(false);
-        CountDownLatch latch = new CountDownLatch(1);
-        boolean posted = MAIN_HANDLER.post(() -> {
-            try {
-                result.set(task.run());
-            } catch (Throwable e) {
-                log("语音主线程任务执行异常: " + e.getMessage());
-            } finally {
-                latch.countDown();
-            }
-        });
-        if (!posted) {
-            log("语音主线程任务投递失败");
-            return false;
-        }
-        try {
-            if (!latch.await(90, TimeUnit.SECONDS)) {
-                log("语音主线程任务执行超时");
+        MainTask pending = new MainTask(task);
+        synchronized (pendingMainTasks) {
+            if (closed || pendingMainTasks.size() >= 32) return false;
+            pendingMainTasks.add(pending);
+            if (Looper.myLooper() != Looper.getMainLooper() && !MAIN_HANDLER.post(pending)) {
+                pending.cancelPending();
                 return false;
             }
-        } catch (InterruptedException e) {
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) pending.run();
+        try {
+            if (!pending.done.await(90, TimeUnit.SECONDS)) {
+                pending.cancelPending();
+                return false;
+            }
+        } catch (InterruptedException error) {
+            pending.cancelPending();
             Thread.currentThread().interrupt();
-            log("语音主线程任务等待被中断");
             return false;
         }
-        Boolean value = result.get();
-        return value != null && value;
+        return pending.result;
     }
-
     public String resolvePath(String fileName) {
         if (TextUtils.isEmpty(fileName) || dexFinder == null || dexFinder.voiceFullPathMethod == null) {
             return "";
@@ -306,7 +343,7 @@ public final class WeChatVoiceApi {
 
     /** Returns whether WeChat's native SceneVoicePlayer was located. */
     public boolean canPlayOriginal() {
-        return dexFinder != null
+        return !closed && dexFinder != null
                 && dexFinder.voicePlaybackStartMethod != null
                 && dexFinder.voicePlaybackStopMethod != null;
     }
@@ -340,6 +377,7 @@ public final class WeChatVoiceApi {
     }
 
     private boolean playOriginalOnMain(String voicePath, PlaybackListener listener) {
+        if (closed) return false;
         stopOriginalPlaybackOnMain();
         Method start = dexFinder.voicePlaybackStartMethod;
         Class<?> playerClass = start != null ? start.getDeclaringClass() : null;
@@ -352,14 +390,22 @@ public final class WeChatVoiceApi {
 
         final long generation;
         synchronized (playbackLock) {
-            generation = ++playbackGeneration;
+            generation = closed ? -1L : ++playbackGeneration;
+            if (!closed) {
             playbackPlayer = player;
             playbackListener = listener;
+            }
         }
+        if (generation < 0L) { stopPlaybackPlayer(player); return false; }
         installPlaybackCallbacks(player, generation);
         try {
             Object result = KavaReflector.invokeOrThrow(start, player, voicePath, true, true, -1);
-            if (result instanceof Boolean && (Boolean) result) return true;
+            if (result instanceof Boolean && (Boolean) result) {
+                if (!closed) return true;
+                clearPlayback(generation);
+                stopPlaybackPlayer(player);
+                return false;
+            }
             clearPlayback(generation);
             stopPlaybackPlayer(player);
             log("播放原语音失败: 微信原生播放器拒绝播放");
@@ -455,7 +501,11 @@ public final class WeChatVoiceApi {
                 return null;
             }
             if (callbackName.equals(method.getName())) {
-                MAIN_HANDLER.post(() -> finishPlayback(generation, kind));
+                synchronized (pendingMainTasks) {
+                    if (!closed && !MAIN_HANDLER.post(() -> finishPlayback(generation, kind))) {
+                        clearPlayback(generation);
+                    }
+                }
             }
             return defaultValue(method.getReturnType());
         });
@@ -511,7 +561,9 @@ public final class WeChatVoiceApi {
         }
         for (Method method : KavaReflector.declaredMethods(voiceInfoClass)) {
             if (method.getParameterTypes().length != 0 || method.getReturnType() != ContentValues.class) continue;
-            voiceInfoValuesMethod = KavaReflector.accessible(method);
+            synchronized (pendingMainTasks) {
+                if (!closed) voiceInfoValuesMethod = KavaReflector.accessible(method);
+            }
             return voiceInfoValuesMethod;
         }
         return null;

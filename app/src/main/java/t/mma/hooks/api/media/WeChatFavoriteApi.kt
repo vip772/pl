@@ -24,7 +24,7 @@ class WeChatFavoriteApi(
     private val dexKitManager: DexKitBridgeManager?,
     private val currentActivityApi: WeChatCurrentActivityApi,
     private val logger: Logger?
-) {
+) : AutoCloseable {
     interface Logger {
         fun log(message: String)
     }
@@ -47,11 +47,25 @@ class WeChatFavoriteApi(
     @Volatile private var favoriteHeadMarker = ""
     private val pendingVoiceSends = ConcurrentHashMap.newKeySet<String>()
 
+    @Volatile private var closed = false
+    override fun close() {
+        synchronized(favoriteCacheLock) {
+            if (closed) return
+            closed = true
+            favoriteItems.clear()
+            favoriteCursor = 0L
+            favoriteHeadMarker = ""
+            favoriteHasMore = false
+        }
+        synchronized(nativeFavorites) { nativeFavorites.clear() }
+        synchronized(pendingVoiceSends) { pendingVoiceSends.clear() }
+    }
     fun isAvailable(): Boolean {
         return canList() || canSendSilently()
     }
 
     fun canList(): Boolean {
+        if (closed) return false
         dexFinder.resolveFavoriteApi()
         return canListNative()
     }
@@ -87,6 +101,7 @@ class WeChatFavoriteApi(
         val marker = favoriteMarker(headItems.firstOrNull())
         var changed = false
         synchronized(favoriteCacheLock) {
+            if (closed) return FavoritePage(emptyList(), false)
             val hasCachedItems = favoriteItems.isNotEmpty()
             if (hasCachedItems && marker == favoriteHeadMarker) {
                 return FavoritePage(favoriteItems.values.toList(), favoriteHasMore)
@@ -102,36 +117,34 @@ class WeChatFavoriteApi(
         return firstPage.copy(changed = changed)
     }
 
-    fun loadNextPage(): FavoritePage {
-        synchronized(favoriteCacheLock) {
+    private val pageLoadLock = Any()
+    fun loadNextPage(): FavoritePage = synchronized(pageLoadLock) {
+        val cursor = synchronized(favoriteCacheLock) {
+            if (closed) return FavoritePage(emptyList(), false)
             if (!favoriteHasMore) return FavoritePage(favoriteItems.values.toList(), false)
-            val nativeItems = queryFavoritePage(favoriteCursor) ?: run {
-                favoriteHasMore = false
-                return FavoritePage(favoriteItems.values.toList(), false)
-            }
-            if (nativeItems.isEmpty()) {
-                favoriteHasMore = false
-                return FavoritePage(favoriteItems.values.toList(), false)
-            }
-            val favorites = nativeItems.filterNotNull()
-            val tagNames = favoriteTagNames(favorites)
-            favorites.forEach { nativeItem ->
-                val item = favoriteFromNative(nativeItem, tagNames) ?: return@forEach
-                cacheNativeFavorite(item.localId, nativeItem)
+            favoriteCursor
+        }
+        val nativeItems = queryFavoritePage(cursor)
+        val favorites = nativeItems.orEmpty().filterNotNull()
+        val tagNames = favoriteTagNames(favorites)
+        val prepared = favorites.mapNotNull { native ->
+            favoriteFromNative(native, tagNames)?.let { it to native }
+        }
+        val nextCursor = if (nativeItems != null && nativeItems.size >= FAVORITE_PAGE_SIZE)
+            nextFavoriteCursor(nativeItems, cursor) else 0L
+        synchronized(favoriteCacheLock) {
+            if (closed) return FavoritePage(emptyList(), false)
+            if (favoriteCursor != cursor) return FavoritePage(favoriteItems.values.toList(), favoriteHasMore)
+            prepared.forEach { (item, native) ->
+                cacheNativeFavorite(item.localId, native)
                 favoriteItems[item.localId] = item
             }
-            favoriteHasMore = nativeItems.size >= FAVORITE_PAGE_SIZE
-            if (favoriteHasMore) {
-                favoriteCursor = nextFavoriteCursor(nativeItems, favoriteCursor)
-                if (favoriteCursor <= 0L) favoriteHasMore = false
-            }
-            if (favoriteHeadMarker.isBlank()) {
-                favoriteHeadMarker = favoriteMarker(favoriteItems.values.firstOrNull())
-            }
-            return FavoritePage(favoriteItems.values.toList(), favoriteHasMore)
+            favoriteHasMore = nextCursor > 0L
+            favoriteCursor = nextCursor
+            if (favoriteHeadMarker.isBlank()) favoriteHeadMarker = favoriteMarker(favoriteItems.values.firstOrNull())
+            FavoritePage(favoriteItems.values.toList(), favoriteHasMore)
         }
     }
-
     private fun queryFavoritePage(cursor: Long): List<*>? {
         dexFinder.resolveFavoriteApi()
         if (!canListNative()) return null
@@ -278,11 +291,16 @@ class WeChatFavoriteApi(
         }
         val tasks = WeChatApis.tasks() ?: return false
         val pendingKey = "$talker:$localId"
-        if (!pendingVoiceSends.add(pendingKey)) return true
-        tasks.runAsync {
+        synchronized(pendingVoiceSends) {
+            if (closed || pendingVoiceSends.size >= 32) return false
+            if (!pendingVoiceSends.add(pendingKey)) return true
+        }
+        try { tasks.runAsync {
             try {
                 repeat(FAVORITE_VOICE_DOWNLOAD_POLLS) {
+                    if (closed) return@runAsync
                     Thread.sleep(FAVORITE_VOICE_DOWNLOAD_POLL_MS)
+                    if (closed) return@runAsync
                     val source = resolveFavoriteVoice(favorite) ?: return@repeat
                     if (!sendResolvedFavoriteVoice(talker, source)) {
                         log("发送收藏语音失败: 下载完成后语音发送未成功")
@@ -293,6 +311,9 @@ class WeChatFavoriteApi(
             } finally {
                 pendingVoiceSends.remove(pendingKey)
             }
+        } } catch (_: java.util.concurrent.RejectedExecutionException) {
+            pendingVoiceSends.remove(pendingKey)
+            return false
         }
         return true
     }
@@ -311,7 +332,7 @@ class WeChatFavoriteApi(
         talker: String,
         source: FavoriteVoiceResolver.VoiceSource
     ): Boolean {
-        if (!File(source.path).isFile) return false
+        if (closed || !File(source.path).isFile) return false
         return runCatching {
             WeChatApis.media()?.voices()?.send(talker, source.path, source.durationMillis) == true
         }.getOrElse {
@@ -439,6 +460,7 @@ class WeChatFavoriteApi(
         firstNumberField(nativeItem, "field_localId", "localId", "id")?.toLong()
 
     private fun favoriteStorage(): Any? {
+        if (closed) return null
         dexFinder.resolveFavoriteApi()
         val resolver = dexFinder.favoriteServiceResolverMethod ?: return null
         val serviceClass = dexFinder.favoriteServiceClass ?: return null
@@ -448,15 +470,17 @@ class WeChatFavoriteApi(
     }
 
     private fun cacheNativeFavorite(localId: Long, favorite: Any) {
-        synchronized(nativeFavorites) { nativeFavorites[localId] = favorite }
+        synchronized(nativeFavorites) { if (!closed) nativeFavorites[localId] = favorite }
     }
 
     private fun ensureFavoriteItemReady(): Boolean {
+        if (closed) return false
         dexFinder.resolveFavoriteApi()
         return dexFinder.favoriteItemClass != null && dexFinder.favoriteGetMethod != null
     }
 
     private fun ensureFavoriteSendReady(): Boolean {
+        if (closed) return false
         dexFinder.resolveFavoriteApi()
         return ensureFavoriteItemReady() && dexFinder.favoriteSendMethod != null
     }

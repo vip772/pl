@@ -16,14 +16,14 @@ class Resources {var calls=0;fun close(){calls++}}
 class SelectedMessageSendHandle(val f:()->Unit){fun withStopPending(f:()->Unit)=this}
 class SendBatch(val id:String,val onComplete:((Int,Int,Boolean)->Unit)?){var success=2;val snapshots=listOf(1,2);val targets=listOf(1,2,3);val total=6}
 '''
-parts = [prelude]
+parts = [prelude, (base / 'SelectedSendBudget.kt').read_text().split('\n', 1)[1]]
 for name in ('SelectedMessageModuleSender', 'OfficialMassSendSender'):
     s = (base / (name + '.kt')).read_text()
-    a = s.index('        synchronized(this) {', s.index('fun enqueue'))
-    b = s.index('\n    }', a)
-    admission = 'fun admit(batch:SendBatch):SelectedMessageSendHandle? {\n' + s[a:b] + '\n}'
+    a = s.index('            synchronized(this) {', s.index('fun enqueue'))
+    b = s.index('\n            accepted = true', a)
+    admission = 'fun admit(batch:SendBatch):SelectedMessageSendHandle? {\n' + s[a:b] + '\nreturn SelectedMessageSendHandle { cancel(batch.id) }.withStopPending { stopPending(batch.id) }\n}'
     fields = '''
-var closed=false;val main=Handler();val batches=ArrayDeque<SendBatch>();val admissions=java.util.concurrent.ConcurrentHashMap<String,SendBatch>();var activeBatch:SendBatch?=null;var activeToken="token";var activeRetransmitTargets=listOf("x");var timeoutRunnable:Any?=Any();val resources=Resources();var callbackHookInstalled=true;var runtime:Any?=Any();var activeScene:Any?=Any();var activeInfo:Any?=Any();var starts=0
+private val sendBudget=SelectedSendBudget();var closed=false;val main=Handler();val batches=ArrayDeque<SendBatch>();val admissions=java.util.concurrent.ConcurrentHashMap<String,SendBatch>();val retainedBatches=java.util.concurrent.ConcurrentHashMap<String,SendBatch>();var activeBatch:SendBatch?=null;var activeToken="token";var activeRetransmitTargets=listOf("x");var timeoutRunnable:Any?=Any();val resources=Resources();var callbackHookInstalled=true;var runtime:Any?=Any();var activeScene:Any?=Any();var activeInfo:Any?=Any();var starts=0
 fun logger(s:String,e:Throwable?){error("logger failure")};fun cancel(s:String){};fun stopPending(s:String){};fun startNextBatch(){starts++}
 '''
     parts.extend(['class ' + name + ' {', fields, admission, method(s,'    fun shutdown()'), method(s,'    private fun notifyStopped('), '}'])
@@ -31,16 +31,17 @@ fun logger(s:String,e:Throwable?){error("logger failure")};fun cancel(s:String){
 fun testNAME(){
  val c=NAME();var calls=0
  val callback:(Int,Int,Boolean)->Unit={a,b,stopped->check(a==2&&b==6&&stopped);calls++}
- c.activeBatch=SendBatch("active",callback);c.batches.add(SendBatch("queued"){_,_,_->calls++;error("callback failure")})
+ c.activeBatch=SendBatch("active",callback);c.batches.add(SendBatch("queued"){_,_,_->calls++;error("callback failure")});c.retainedBatches["active"]=c.activeBatch!!;c.retainedBatches["queued"]=c.batches.first()
  check(c.admit(SendBatch("pending",callback))!=null);check(c.admissions.size==1)
  c.shutdown();check(c.closed&&c.activeBatch==null&&c.batches.isEmpty()&&c.admissions.isEmpty()&&c.main.queue.isEmpty());check(calls==3)
  c.shutdown();c.main.drain();check(calls==3&&c.starts==0);check(c.admit(SendBatch("late",callback))==null)
  Looper.mainThread=false;val off=NAME();var offCalls=0;off.admit(SendBatch("off"){_,_,_->offCalls++});off.shutdown();off.shutdown();off.main.drain();check(offCalls==1&&off.admissions.isEmpty()&&off.starts==0);Looper.mainThread=true
  val rejected=NAME();rejected.main.reject=true;check(rejected.admit(SendBatch("reject",callback))==null);check(rejected.admissions.isEmpty());rejected.shutdown()
+ Looper.mainThread=false;val dead=NAME();var deadCalls=0;dead.admit(SendBatch("accepted-before-rejection"){_,_,_->deadCalls++});dead.main.reject=true;dead.shutdown();check(deadCalls==1&&dead.retainedBatches.isEmpty()&&dead.admissions.isEmpty()&&dead.main.queue.isEmpty());Looper.mainThread=true
  val normal=NAME();normal.admit(SendBatch("accepted",callback));normal.main.drain();check(normal.admissions.isEmpty()&&normal.batches.size==1&&normal.starts==1);normal.shutdown();check(calls==4)
 }
 '''.replace('NAME',name))
-parts.append('fun main(){testSelectedMessageModuleSender();testOfficialMassSendSender();println("PASS production sender admission/shutdown: pending+active+queued release, callback/logger isolation, rejection rollback, late admission blocked, idempotence; no host send invoked")}')
+parts.append('fun main(){testSelectedMessageModuleSender();testOfficialMassSendSender();println("PASS production sender admission/shutdown: pending+active+queued release, callback/logger isolation, admission rejection rollback and off-main shutdown rejection fallback, late admission blocked, idempotence; no host send invoked")}')
 libs=Path('/tmp/pl-kotlin-libs'); std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
 with tempfile.TemporaryDirectory() as td:
     p=Path(td);(p/'Test.kt').write_text('\n'.join(parts))

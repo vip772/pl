@@ -7,7 +7,7 @@ cp=[r/'app/build/intermediates/built_in_kotlinc/debug/compileDebugKotlin/classes
 assert all(p.exists() for p in cp), 'Existing SDK/ABI fixtures required; do not invoke Gradle'
 cp += [r/'app/build/intermediates/compile_r_class_jar/debug/generateDebugRFile/R.jar']
 cp+=list(Path('/root/.gradle/caches/modules-2/files-2.1').glob('*/*/*/*/*.jar'))+list(Path('/root/.gradle/caches').glob('*/transforms/*/transformed/*/jars/classes.jar'))+list(libs.glob('*.jar'))
-sources=[r/'app/src/main/java/t/mma/hooks/core'/n for n in ['BaseFeature.kt','Feature.kt','FeatureContext.kt','FeatureResourceScope.kt','PreferenceRuntimeOwner.kt','IdleSerialExecutor.kt','PendingNoticeTasks.kt','DexInstallScheduler.kt','HookRegistry.kt']]
+sources=[r/'app/src/main/java/t/mma/hooks/core'/n for n in ['FeatureManager.kt','BaseFeature.kt','Feature.kt','FeatureContext.kt','FeatureResourceScope.kt','PreferenceRuntimeOwner.kt','IdleSerialExecutor.kt','PendingNoticeTasks.kt','DexInstallScheduler.kt','HookRegistry.kt']]
 sources+=[r/'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java']
 for folder in ['grouprename','groupleave','voicetotext','stepmultiplier','protobuf','hidemenu','messagemenuextension','groupbar','nicknamewidth','mentionextension','swipequote','backgroundbeauty','typingreport','patblock','inputhint','textspeech','forwardlimit','callmedialimit','statuslimit','quickread','fakevoiceduration','quoteclear']:
  sources+=list((r/'app/src/main/java/t/mma/hooks/items'/folder).glob('*.kt'))
@@ -31,6 +31,9 @@ sources += list((r/'app/src/main/java/t/mma/hooks/api/media').glob('*.kt'))
 java_sources += list((r/'app/src/main/java/t/mma/hooks/api/media').glob('*.java'))
 sources += [r/'app/src/main/java/t/mma/hooks/api/message/WeChatLocalMessageApi.kt']
 java_sources += [r/'app/src/main/java/t/mma/hooks/api/net/WeChatNetworkDispatcher.java']
+java_sources += [r/'app/src/main/java/t/mma/hooks/api/message/WeChatMessageApi.java']
+sources += list((r/'app/src/main/java/t/mma/hooks/items/messageforward').glob('*.kt'))
+java_sources += [r/'app/src/main/java/t/mma/event/EventBus.java']
 sources+=java_sources
 with tempfile.TemporaryDirectory() as td:
  # Generate compile-only ids from current declarations; cached R.jar may predate source.

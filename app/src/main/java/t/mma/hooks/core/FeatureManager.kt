@@ -26,6 +26,7 @@ class FeatureManager {
     fun installedFeatures(): List<Feature> = Collections.unmodifiableList(installedFeatures)
 
     fun installAll(context: FeatureContext) {
+        t.mma.hooks.api.media.WeChatImageApi.openMarsRuntime()
         HLog.i("[Hchat:FeatureManager] 开始加载功能，总数=${features.size}")
         val termsAccepted = TermsGate.isAccepted(context.configStore())
         if (initializedFeatures.isNotEmpty()) return
@@ -104,6 +105,7 @@ class FeatureManager {
         }
         installedFeatures.clear()
         initializedFeatures.clear()
+        t.mma.hooks.api.media.WeChatImageApi.closeMarsRuntime()
         HookRegistry.get().unhookAll()
     }
 

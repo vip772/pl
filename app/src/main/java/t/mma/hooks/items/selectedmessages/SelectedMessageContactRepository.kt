@@ -5,32 +5,61 @@ import t.mma.hooks.api.model.WeChatContact
 import t.mma.ui.miuix.VoiceForwardMiuixDialog
 import t.mma.ui.miuix.pickerDisplayName
 import java.util.Locale
+import java.lang.ref.WeakReference
+import t.mma.hooks.api.contact.WeChatContactApi
+import t.mma.hooks.api.conversation.WeChatConversationApi
 
 internal object SelectedMessageContactRepository {
-    @Volatile
+    // Both features share values, but each installation owns its query/publication permission.
+    private val lifecycleLock = Any()
+    private var sessions = 0
     private var allContacts: CachedContacts? = null
-
-    @Volatile
     private var friendContacts: CachedContacts? = null
-
-
-    fun cached(friendsOnly: Boolean): List<VoiceForwardMiuixDialog.ContactItem>? {
-        val all = allContacts?.takeIf { it.valid() }
+    class Session : AutoCloseable {
+        internal var closed = false // guarded by lifecycleLock
+        override fun close() {
+            synchronized(lifecycleLock) {
+                if (closed) return
+                closed = true
+                sessions--
+                if (sessions == 0) { allContacts = null; friendContacts = null }
+            }
+        }
+        fun cached(friendsOnly: Boolean): List<VoiceForwardMiuixDialog.ContactItem>? =
+            synchronized(lifecycleLock) { if (closed) null else cachedLocked(friendsOnly) }
+        fun load(friendsOnly: Boolean): List<VoiceForwardMiuixDialog.ContactItem> {
+            val api = synchronized(lifecycleLock) {
+                if (closed) return emptyList()
+                cachedLocked(friendsOnly)?.let { return it }
+                WeChatApis.contact().contacts()
+            } ?: return emptyList()
+            if (!api.isAvailable) return emptyList()
+            val conversations = WeChatApis.conversations()
+            val loaded = loadFresh(api, conversations, friendsOnly, this)
+            return synchronized(lifecycleLock) {
+                if (closed || WeChatApis.contact().contacts() !== api) return emptyList()
+                cache(loaded, friendsOnly, api)
+                loaded
+            }
+        }
+        internal fun active(): Boolean = synchronized(lifecycleLock) { !closed }
+    }
+    fun openSession(): Session = synchronized(lifecycleLock) { sessions++; Session() }
+    private fun cachedLocked(friendsOnly: Boolean): List<VoiceForwardMiuixDialog.ContactItem>? {
+        val source = WeChatApis.contact().contacts()
+        if (allContacts?.valid(source) != true) allContacts = null
+        if (friendContacts?.valid(source) != true) friendContacts = null
+        val all = allContacts
         if (!friendsOnly) return all?.items
-        if (all != null) return all.items.filter(::isFriend)
-        return friendContacts?.takeIf { it.valid() }?.items
+        return friendContacts?.items
     }
-
-    fun load(friendsOnly: Boolean): List<VoiceForwardMiuixDialog.ContactItem> {
-        cached(friendsOnly)?.let { return it }
-        val loaded = loadFresh(friendsOnly)
-        cache(loaded, friendsOnly)
-        return loaded
-    }
-
-    private fun loadFresh(friendsOnly: Boolean): List<VoiceForwardMiuixDialog.ContactItem> {
-        val api = WeChatApis.contact().contacts() ?: return emptyList()
-        if (!api.isAvailable) return emptyList()
+    private fun loadFresh(
+        api: WeChatContactApi,
+        conversations: WeChatConversationApi?,
+        friendsOnly: Boolean,
+        session: Session
+    ): List<VoiceForwardMiuixDialog.ContactItem> {
+        if (!session.active()) return emptyList()
         val labelsByUser = linkedMapOf<String, MutableList<String>>()
         runCatching { api.getContactLabelList() }.getOrDefault(emptyList()).forEach { label ->
             val labelName = label.labelName.ifBlank { label.labelId }
@@ -39,34 +68,40 @@ internal object SelectedMessageContactRepository {
                 if (wxId.isNotBlank()) labelsByUser.getOrPut(wxId) { arrayListOf() }.add(labelName)
             }
         }
+        if (!session.active()) return emptyList()
         if (friendsOnly) {
             return api.getPickerContacts()
                 .mapNotNull { contact -> contact.toPickerItem(false, labelsByUser[contact.wxId].orEmpty()) }
-                .sortedWith(conversationComparator())
+                .sortedWith(conversationComparator(conversations, session))
         }
         val result = ArrayList<VoiceForwardMiuixDialog.ContactItem>()
         result += api.getPickerContacts().mapNotNull { contact ->
             contact.toPickerItem(false, labelsByUser[contact.wxId].orEmpty())
         }
+        if (!session.active()) return emptyList()
         result += api.getPickerOfficialAccounts().mapNotNull { contact ->
             contact.toPickerItem(group = false, labels = emptyList(), official = true)
         }
+        if (!session.active()) return emptyList()
         result += api.getPickerGroups().mapNotNull { contact ->
             contact.toPickerItem(group = true, labels = emptyList())
         }
-        return result.distinctBy { it.id }.sortedWith(conversationComparator())
+        return result.distinctBy { it.id }.sortedWith(conversationComparator(conversations, session))
     }
 
     private fun cache(
         contacts: List<VoiceForwardMiuixDialog.ContactItem>,
-        friendsOnly: Boolean
+        friendsOnly: Boolean,
+        source: WeChatContactApi
     ) {
-        val cached = CachedContacts(contacts, System.currentTimeMillis())
+        // Large accounts remain queryable without retaining oversized shared snapshots.
+        if (contacts.size > MAX_CACHED_CONTACTS) return
+        val cached = CachedContacts(contacts, System.nanoTime(), WeakReference(source))
         if (friendsOnly) {
             friendContacts = cached
         } else {
             allContacts = cached
-            friendContacts = CachedContacts(contacts.filter(::isFriend), cached.savedAt)
+            friendContacts = CachedContacts(contacts.filter(::isFriend), cached.savedAt, cached.source)
         }
     }
 
@@ -74,8 +109,8 @@ internal object SelectedMessageContactRepository {
         return !item.group && !item.official
     }
 
-    private fun conversationComparator(): Comparator<VoiceForwardMiuixDialog.ContactItem> {
-        val conversationOrder = WeChatApis.conversations()
+    private fun conversationComparator(conversations: WeChatConversationApi?, session: Session): Comparator<VoiceForwardMiuixDialog.ContactItem> {
+        val conversationOrder = (if (session.active()) conversations else null)
             ?.getRecentConversationUsernames(10000)
             .orEmpty()
             .mapIndexed { index, username -> username to index }
@@ -107,10 +142,13 @@ internal object SelectedMessageContactRepository {
 
     private data class CachedContacts(
         val items: List<VoiceForwardMiuixDialog.ContactItem>,
-        val savedAt: Long
+        val savedAt: Long,
+        val source: WeakReference<WeChatContactApi>
     ) {
-        fun valid(): Boolean = items.isNotEmpty() && System.currentTimeMillis() - savedAt <= CONTACT_CACHE_MS
+        fun valid(current: WeChatContactApi?): Boolean = current != null && source.get() === current &&
+            items.isNotEmpty() && System.nanoTime() - savedAt in 0..CONTACT_CACHE_NANOS
     }
 
-    private const val CONTACT_CACHE_MS = 5 * 60_000L
+    private const val CONTACT_CACHE_NANOS = 5 * 60_000_000_000L
+    private const val MAX_CACHED_CONTACTS = 10_000
 }

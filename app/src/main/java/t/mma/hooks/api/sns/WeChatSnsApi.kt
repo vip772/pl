@@ -48,36 +48,67 @@ class WeChatSnsApi(
     }
 
     val isAvailable: Boolean
-        get() = hostContext != null && dexFinder?.hasSnsUploadApi() == true
+        get() = !closed && hostContext != null && dexFinder?.hasSnsUploadApi() == true
 
-    private val interactionLocator: SnsInteractionLocator? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        val context = hostContext ?: return@lazy null
-        val loader = classLoader ?: return@lazy null
-        SnsInteractionLocator(context, loader, dexKitManager, ::log)
-    }
-    private val postObserverDelegate = lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        val context = hostContext ?: return@lazy null
-        val loader = classLoader ?: return@lazy null
-        WeChatSnsPostObserver(context, loader, dexKitManager, ::log)
-    }
-    private val postObserver: WeChatSnsPostObserver? get() = postObserverDelegate.value
+    private val lifecycleLock = Any()
     @Volatile private var closed = false
-    @Synchronized override fun close() {
-        if (closed) return
-        closed = true
-        if (postObserverDelegate.isInitialized()) postObserverDelegate.value?.close()
-    }
-    private val cachedPostStorage: SnsCachedPostStorage? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        val context = hostContext ?: return@lazy null
-        val loader = classLoader ?: return@lazy null
-        val manager = dexKitManager ?: return@lazy null
-        SnsCachedPostStorage(context, loader, manager, ::log)
-    }
-    private val contentResolver: SnsForwardContentResolver? by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        val context = featureContext ?: return@lazy null
-        SnsForwardContentResolver(context) { message, throwable ->
-            log(if (throwable == null) message else "$message: ${throwable.message}")
+    private var interactionValue: SnsInteractionLocator? = null
+    private var observerValue: WeChatSnsPostObserver? = null
+    private var storageValue: SnsCachedPostStorage? = null
+    private var resolverValue: SnsForwardContentResolver? = null
+    private fun <T : Any> ownedValue(
+        read: () -> T?, write: (T) -> Unit, create: () -> T?, dispose: (T) -> Unit = {}
+    ): T? {
+        synchronized(lifecycleLock) {
+            if (closed) return null
+            read()?.let { return it }
         }
+        val candidate = create() ?: return null
+        val selected = synchronized(lifecycleLock) {
+            if (closed) null else read() ?: candidate.also(write)
+        }
+        if (selected !== candidate) dispose(candidate)
+        return selected
+    }
+    private val interactionLocator: SnsInteractionLocator? get() = ownedValue(
+        { interactionValue }, { interactionValue = it }, {
+            val context = hostContext ?: return@ownedValue null
+            val loader = classLoader ?: return@ownedValue null
+            SnsInteractionLocator(context, loader, dexKitManager, ::log)
+        })
+    private val postObserver: WeChatSnsPostObserver? get() = ownedValue(
+        { observerValue }, { observerValue = it }, {
+            val context = hostContext ?: return@ownedValue null
+            val loader = classLoader ?: return@ownedValue null
+            WeChatSnsPostObserver(context, loader, dexKitManager, ::log)
+        }, { it.close() })
+    private val cachedPostStorage: SnsCachedPostStorage? get() = ownedValue(
+        { storageValue }, { storageValue = it }, {
+            val context = hostContext ?: return@ownedValue null
+            val loader = classLoader ?: return@ownedValue null
+            val manager = dexKitManager ?: return@ownedValue null
+            SnsCachedPostStorage(context, loader, manager, ::log)
+        })
+    private val contentResolver: SnsForwardContentResolver? get() = ownedValue(
+        { resolverValue }, { resolverValue = it }, {
+            val context = featureContext ?: return@ownedValue null
+            SnsForwardContentResolver(context) { message, throwable ->
+                log(if (throwable == null) message else "$message: ${throwable.message}")
+            }
+        }, { it.close() })
+    override fun close() {
+        val owned = synchronized(lifecycleLock) {
+            if (closed) return
+            closed = true
+            val owned = observerValue to resolverValue
+            observerValue = null
+            interactionValue = null
+            storageValue = null
+            resolverValue = null
+            livePhotoUploadRuntime = null
+            owned
+        }
+        try { owned.first?.close() } finally { owned.second?.close() }
     }
     @Volatile
     private var livePhotoUploadRuntime: SnsLivePhotoUploadRuntime? = null
@@ -88,6 +119,7 @@ class WeChatSnsApi(
     fun warmupCachedPosts(): Boolean = cachedPostStorage?.warmup() == true
 
     internal fun warmupCachedPostReadWrite(): Boolean {
+        if (closed) return false
         return cachedPostStorage?.warmupReadWrite() == true
     }
 
@@ -98,6 +130,7 @@ class WeChatSnsApi(
     internal fun deleteCachedNativeSnsInfo(snsId: Long): Boolean = cachedPostStorage?.delete(snsId) == true
 
     fun warmupInteraction(): Boolean {
+        if (closed) return false
         val locator = interactionLocator ?: return false
         val likeReady = locator.nativeLikeMethod() != null
         val commentReady = locator.nativeCommentMethod() != null
@@ -161,6 +194,7 @@ class WeChatSnsApi(
         nativeInfo: Any?,
         notifyObservers: Boolean = true
     ): Boolean {
+        if (closed) return false
         val update = { cachedPostStorage?.update(nativeInfo) == true }
         return if (notifyObservers) update() else postObserver?.withoutDispatch(update) ?: update()
     }
@@ -175,12 +209,17 @@ class WeChatSnsApi(
     ): WeChatSnsPrepareResult {
         val normalizedId = snsId.orEmpty().trim()
         if (normalizedId.isEmpty()) return WeChatSnsPrepareResult.failure("", "朋友圈 ID 为空")
-        val lock = mediaPrepareLocks.compute(normalizedId) { _, existing ->
+        val lock = synchronized(lifecycleLock) {
+            if (closed) return WeChatSnsPrepareResult.failure(normalizedId, "API 已关闭")
+            if (mediaPrepareLocks.size >= 16 && !mediaPrepareLocks.containsKey(normalizedId))
+                return WeChatSnsPrepareResult.failure(normalizedId, "朋友圈媒体准备繁忙")
+            mediaPrepareLocks.compute(normalizedId) { _, existing ->
             (existing ?: MediaPrepareLock()).also { it.references++ }
+        }
         } ?: return WeChatSnsPrepareResult.failure(normalizedId, "朋友圈媒体准备锁创建失败")
         return try {
             synchronized(lock.monitor) {
-                if (canceled.get()) {
+                if (closed || canceled.get()) {
                     WeChatSnsPrepareResult.failure(normalizedId, "已取消准备朋友圈媒体")
                 } else {
                     prepareSnsPostMediaLocked(normalizedId, canceled)
@@ -262,6 +301,7 @@ class WeChatSnsApi(
     }
 
     fun publishSnsPost(result: WeChatSnsPrepareResult?): Boolean {
+        if (closed) return false
         if (result?.isSuccess() != true) return false
         return when (result.getType()) {
             WeChatSnsPost.TYPE_TEXT -> uploadText(result.getContent())
@@ -412,6 +452,7 @@ class WeChatSnsApi(
     }
 
     fun like(snsInfo: Any?, sourceScene: Int = 0): Boolean {
+        if (closed) return false
         if (snsInfo == null || snsInfo.javaClass.name != SnsInteractionLocator.SNS_INFO_CLASS) return false
         val method = interactionLocator?.nativeLikeMethod() ?: run {
             log("朋友圈点赞失败: 原生方法未就绪")
@@ -426,6 +467,7 @@ class WeChatSnsApi(
     }
 
     fun comment(snsInfo: Any?, content: String?, sourceScene: Int = 0): Boolean {
+        if (closed) return false
         if (snsInfo == null || snsInfo.javaClass.name != SnsInteractionLocator.SNS_INFO_CLASS) return false
         val text = content.orEmpty().trim()
         if (text.isEmpty()) return false
@@ -468,6 +510,7 @@ class WeChatSnsApi(
     }
 
     fun refreshTimeline(): Boolean {
+        if (closed) return false
         val constructor = interactionLocator?.timelineRefreshConstructor() ?: run {
             log("朋友圈刷新失败: 原生请求未就绪")
             return false
@@ -487,6 +530,7 @@ class WeChatSnsApi(
         publish(content, emptyList(), null, sdkId, sdkAppName)
 
     fun uploadText(jsonObj: JSONObject?): Boolean {
+        if (closed) return false
         if (jsonObj == null) {
             return uploadText("")
         }
@@ -501,6 +545,7 @@ class WeChatSnsApi(
         uploadTextAndPicList(content, picPath, "", "")
 
     fun uploadTextAndPicList(content: String?, picPath: String?, sdkId: String?, sdkAppName: String?): Boolean {
+        if (closed) return false
         val list = if (picPath.isNullOrBlank()) emptyList() else listOf(picPath)
         return publish(content, list, null, sdkId, sdkAppName)
     }
@@ -509,6 +554,7 @@ class WeChatSnsApi(
         uploadTextAndPicList(content, picPathList, "", "")
 
     fun uploadTextAndPicList(content: String?, picPathList: List<*>?, sdkId: String?, sdkAppName: String?): Boolean {
+        if (closed) return false
         val list = picPathList.orEmpty()
             .mapNotNull { it?.toString()?.trim() }
             .filter { it.isNotBlank() }
@@ -516,6 +562,7 @@ class WeChatSnsApi(
     }
 
     fun uploadTextAndPicList(jsonObj: JSONObject?): Boolean {
+        if (closed) return false
         if (jsonObj == null) {
             return uploadTextAndPicList("", emptyList<String>())
         }
@@ -544,6 +591,7 @@ class WeChatSnsApi(
         uploadTextAndLivePhoto("", imagePath, videoPath)
 
     fun uploadLivePhoto(jsonObj: JSONObject?): Boolean {
+        if (closed) return false
         if (jsonObj == null) return uploadLivePhoto("", "")
         return uploadTextAndLivePhoto(jsonObj)
     }
@@ -595,6 +643,7 @@ class WeChatSnsApi(
         sdkAppName: String?,
         coverTimeMs: Long
     ): Boolean {
+        if (closed) return false
         val normalizedImagePath = imagePath.orEmpty().trim()
         val normalizedVideoPath = videoPath.orEmpty().trim()
         val resolved = resolveLivePhotoFiles(normalizedImagePath, normalizedVideoPath)
@@ -615,6 +664,7 @@ class WeChatSnsApi(
     }
 
     fun uploadTextAndLivePhoto(jsonObj: JSONObject?): Boolean {
+        if (closed) return false
         if (jsonObj == null) return uploadTextAndLivePhoto("", "", "")
         val livePhotoPath = jsonObj.optString(
             "livePhotoPath",
@@ -650,6 +700,7 @@ class WeChatSnsApi(
         sdkId: String?,
         sdkAppName: String?
     ): Boolean {
+        if (closed) return false
         val items = resolveLivePhotoItems(livePhotoList.orEmpty()) ?: return false
         return publishLivePhotos(
             content = content.orEmpty(),
@@ -661,6 +712,7 @@ class WeChatSnsApi(
     }
 
     fun uploadTextAndLivePhotoList(jsonObj: JSONObject?): Boolean {
+        if (closed) return false
         if (jsonObj == null) return false
         val array = jsonObj.optJSONArray("livePhotoList")
             ?: jsonObj.optJSONArray("livePhotoPathList")
@@ -765,6 +817,7 @@ class WeChatSnsApi(
     fun uploadVideo(videoPath: String?): Boolean = uploadTextAndVideo("", videoPath)
 
     fun uploadVideo(jsonObj: JSONObject?): Boolean {
+        if (closed) return false
         if (jsonObj == null) {
             return uploadVideo("")
         }
@@ -775,11 +828,13 @@ class WeChatSnsApi(
         uploadTextAndVideo(content, videoPath, "", "")
 
     fun uploadTextAndVideo(content: String?, videoPath: String?, sdkId: String?, sdkAppName: String?): Boolean {
+        if (closed) return false
         val video = videoPath?.trim().orEmpty()
         return publish(content, emptyList(), video, sdkId, sdkAppName)
     }
 
     fun uploadTextAndVideo(jsonObj: JSONObject?): Boolean {
+        if (closed) return false
         if (jsonObj == null) {
             return uploadTextAndVideo("", "")
         }
@@ -1004,6 +1059,7 @@ class WeChatSnsApi(
     }
 
     private fun livePhotoUploadRuntime(): SnsLivePhotoUploadRuntime? {
+        if (closed) return null
         livePhotoUploadRuntime?.let { return it }
         val context = hostContext ?: return null
         val finder = dexFinder ?: return null
@@ -1016,8 +1072,9 @@ class WeChatSnsApi(
             helperClass = finder.snsUploadPackHelperClass,
             logger = ::log
         ) ?: return null
-        livePhotoUploadRuntime = located
-        return located
+        return synchronized(lifecycleLock) {
+            if (closed) null else (livePhotoUploadRuntime ?: located.also { livePhotoUploadRuntime = it })
+        }
     }
 
     private data class LivePhotoVideoMetadata(

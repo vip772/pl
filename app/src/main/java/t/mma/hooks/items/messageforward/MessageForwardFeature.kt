@@ -106,6 +106,7 @@ private class MessageForwardHooker(
     private val logger: (String, Throwable?) -> Unit
 ) {
     @Volatile private var closed = false
+    private val contactSession = SelectedMessageContactRepository.openSession()
     private val resources = FeatureResourceScope { logger("释放转发资源失败", it) }
     private val pendingPreparations = ConcurrentHashMap.newKeySet<AtomicBoolean>()
     private val loadingDialogs = ConcurrentHashMap.newKeySet<VoiceForwardMiuixDialog.DialogHandle>()
@@ -202,6 +203,7 @@ private class MessageForwardHooker(
     fun destroy() {
         if (closed) return
         closed = true
+        contactSession.close()
         pendingPreparations.forEach { it.set(true) }
         pendingPreparations.clear()
         activeSends.forEach { runCatching { it.stopPending() } }
@@ -1345,7 +1347,7 @@ private class MessageForwardHooker(
                 onLoaded(contacts)
             }
         }
-        SelectedMessageContactRepository.cached(friendsOnly)?.let {
+        contactSession.cached(friendsOnly)?.let {
             deliver(it)
             return
         }
@@ -1364,7 +1366,7 @@ private class MessageForwardHooker(
         loadingDialogs.add(loading)
         submitPreparation {
             if (closed) { pendingPreparations.remove(canceled); return@submitPreparation }
-            val result = runCatching { SelectedMessageContactRepository.load(friendsOnly) }
+            val result = runCatching { contactSession.load(friendsOnly) }
             pendingPreparations.remove(canceled)
             main.post {
                 if (closed) { loadingDialogs.remove(loading); loading.close(); return@post }

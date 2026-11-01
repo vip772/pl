@@ -11,7 +11,7 @@ import t.mma.dexkit.DexKitBridgeManager;
  *
  * 每种媒体独立一个子 API，避免图片、语音、视频、表情、文件发送逻辑混在一起。
  */
-public final class WeChatMediaApi {
+public final class WeChatMediaApi implements AutoCloseable {
     public interface Logger {
         void log(String message);
     }
@@ -40,6 +40,9 @@ public final class WeChatMediaApi {
                 dexKitManager, currentActivityApi, message -> log(logger, message));
     }
 
+    @Override public void close() {
+        try { voiceApi.close(); } finally { favoriteApi.close(); }
+    }
     public boolean isAvailable() {
         return true;
     }
