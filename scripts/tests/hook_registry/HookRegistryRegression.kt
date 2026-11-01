@@ -19,12 +19,11 @@ fun main() {
     val failing = registry.hook(method, XC_MethodHook())
     failing.fail = true
     check(runCatching { registry.unhook(failing) }.isFailure)
-    check(registry.size() == 2) { "Failed unhook lost the handle needed to retry" }
+    check(registry.size() == 1) { "Failed unhook retained a stale local handle" }
     failing.fail = false
-    registry.unhook(failing)
     registry.unhook(failing)
     check(registry.size() == 1)
     registry.unhookAll()
     check(registry.size() == 0 && !permanent.active)
-    println("PASS: 1000 reload cycles, independent hooks, null/idempotent removal, failed-unhook retry")
+    println("PASS: 1000 reload cycles, independent hooks, null/idempotent removal, failed-unhook local ownership removal")
 }

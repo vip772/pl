@@ -15,16 +15,16 @@ const output = fs.mkdtempSync(path.join(os.tmpdir(), 'hchat-lifecycle-tests-'));
 const stub = 'scripts/tests/script_lifecycle/';
 const tests = [
     ['hooks', 'HookRegistryRegressionKt', [
-        'app/src/main/java/h/Hchat/hooks/core/HookRegistry.kt',
+        'app/src/main/java/t/mma/hooks/core/HookRegistry.kt',
         'scripts/tests/hook_registry/XposedStub.kt',
         'scripts/tests/hook_registry/HookRegistryRegression.kt'
     ]],
-    ['delays', 'h.Hchat.hooks.items.script.DelayRegressionKt', [
-        'app/src/main/java/h/Hchat/hooks/items/script/ScriptDelayScope.kt',
+    ['delays', 't.mma.hooks.items.script.DelayRegressionKt', [
+        'app/src/main/java/t/mma/hooks/items/script/ScriptDelayScope.kt',
         stub + 'AndroidStub.kt', stub + 'HLogStub.kt', stub + 'DelayRegression.kt'
     ]],
-    ['messages', 'h.Hchat.hooks.items.script.MessageRegressionKt', [
-        'app/src/main/java/h/Hchat/hooks/items/script/ScriptMessageHook.kt',
+    ['messages', 't.mma.hooks.items.script.MessageRegressionKt', [
+        'app/src/main/java/t/mma/hooks/items/script/ScriptMessageHook.kt',
         ...['AndroidStub', 'HLogStub', 'FeatureStub', 'FinderStub', 'MessageApiStub', 'ScriptRuntimeStub', 'MessageRegression'].map(name => stub + name + '.kt')
     ]]
 ];

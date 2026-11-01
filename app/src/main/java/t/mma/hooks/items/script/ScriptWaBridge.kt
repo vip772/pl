@@ -963,9 +963,24 @@ class ScriptWaBridge @JvmOverloads internal constructor(
     fun delay(millis: Long, action: Runnable?) = delays.delay(millis, action)
 
     internal fun dispose() {
+        // Stop accepting plugin-owned delayed/async closures before dropping the
+        // HTTP clients and script metadata. In-flight network calls are allowed to
+        // finish through their task scope, but no queued script callback survives.
         delays.dispose()
         asyncScope.dispose()
-        httpClients.clear()
+        synchronized(httpClients) {
+            httpClients.values.forEach { client ->
+                runCatching { client.connectionPool.evictAll() }
+                runCatching { client.dispatcher.cancelAll() }
+                runCatching { client.dispatcher.executorService.shutdownNow() }
+            }
+            httpClients.clear()
+        }
+        runCatching { baseHttpClient.connectionPool.evictAll() }
+        runCatching { baseHttpClient.dispatcher.cancelAll() }
+        runCatching { baseHttpClient.dispatcher.executorService.shutdownNow() }
+        currentPluginName = null
+        currentPluginDir = null
     }
 
     fun notify(title: String?, text: String?) {

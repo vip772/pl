@@ -107,6 +107,10 @@ object ScriptPluginRuntime {
     // queued callbacks already use LoadedPlugin identity checks before touching a
     // script, so a later install cannot be affected by an old generation.
     private val lifecycleClosed = AtomicBoolean(false)
+    private val generationSequence = AtomicLong(0L)
+    @Volatile private var runtimeGeneration = 0L
+    private fun beginGeneration(): Long { val value = generationSequence.incrementAndGet(); runtimeGeneration = value; return value }
+    private fun isGenerationActive(value: Long): Boolean = !lifecycleClosed.get() && runtimeGeneration == value
     private val pluginDirObservers = ConcurrentHashMap<String, FileObserver>()
     private val pluginCatalogListeners = CopyOnWriteArrayList<() -> Unit>()
     private val reloadTasks = ConcurrentHashMap<String, Runnable>()
@@ -128,61 +132,58 @@ object ScriptPluginRuntime {
     private val finderMediaDownloadTasks = ConcurrentHashMap<String, Long>()
     private val snsPrepareSequence = AtomicLong(0L)
     private val snsPrepareCancellations = ConcurrentHashMap<String, AtomicBoolean>()
-    private val snsPrepareExecutor = ThreadPoolExecutor(
-        2,
-        2,
-        0L,
-        TimeUnit.MILLISECONDS,
-        ArrayBlockingQueue(SNS_PREPARE_QUEUE_CAPACITY),
-        { runnable ->
-            Thread(runnable, "Hchat-Script-SnsPrepare").apply { isDaemon = true }
-        },
-        ThreadPoolExecutor.AbortPolicy()
+    private val executorLock = Any()
+    @Volatile private var snsPrepareExecutor = createExecutor(
+        2, SNS_PREPARE_QUEUE_CAPACITY, "Hchat-Script-SnsPrepare"
     )
-    private val protobufCallbackExecutor = ThreadPoolExecutor(
-        1,
-        1,
-        0L,
-        TimeUnit.MILLISECONDS,
-        ArrayBlockingQueue(PROTOBUF_CALLBACK_QUEUE_CAPACITY),
-        { runnable ->
-            Thread(runnable, "Hchat-Script-Protobuf").apply { isDaemon = true }
-        },
-        ThreadPoolExecutor.AbortPolicy()
+    @Volatile private var protobufCallbackExecutor = createExecutor(
+        1, PROTOBUF_CALLBACK_QUEUE_CAPACITY, "Hchat-Script-Protobuf"
     )
-    private val imageDownloadCallbackExecutor = ThreadPoolExecutor(
-        2,
-        2,
-        0L,
-        TimeUnit.MILLISECONDS,
-        ArrayBlockingQueue(IMAGE_DOWNLOAD_CALLBACK_QUEUE_CAPACITY),
-        { runnable ->
-            Thread(runnable, "Hchat-Script-ImageDownload").apply { isDaemon = true }
-        },
-        ThreadPoolExecutor.AbortPolicy()
+    @Volatile private var imageDownloadCallbackExecutor = createExecutor(
+        2, IMAGE_DOWNLOAD_CALLBACK_QUEUE_CAPACITY, "Hchat-Script-ImageDownload"
     )
-    private val videoDownloadCallbackExecutor = ThreadPoolExecutor(
-        2,
-        2,
-        0L,
-        TimeUnit.MILLISECONDS,
-        ArrayBlockingQueue(VIDEO_DOWNLOAD_CALLBACK_QUEUE_CAPACITY),
-        { runnable ->
-            Thread(runnable, "Hchat-Script-VideoDownload").apply { isDaemon = true }
-        },
-        ThreadPoolExecutor.AbortPolicy()
+    @Volatile private var videoDownloadCallbackExecutor = createExecutor(
+        2, VIDEO_DOWNLOAD_CALLBACK_QUEUE_CAPACITY, "Hchat-Script-VideoDownload"
     )
-    private val finderMediaDownloadCallbackExecutor = ThreadPoolExecutor(
-        2,
-        2,
-        0L,
-        TimeUnit.MILLISECONDS,
-        ArrayBlockingQueue(FINDER_MEDIA_DOWNLOAD_CALLBACK_QUEUE_CAPACITY),
-        { runnable ->
-            Thread(runnable, "Hchat-Script-FinderDownload").apply { isDaemon = true }
-        },
-        ThreadPoolExecutor.AbortPolicy()
+    @Volatile private var finderMediaDownloadCallbackExecutor = createExecutor(
+        2, FINDER_MEDIA_DOWNLOAD_CALLBACK_QUEUE_CAPACITY, "Hchat-Script-FinderDownload"
     )
+
+    private fun createExecutor(
+        threads: Int,
+        capacity: Int,
+        threadName: String
+    ): ThreadPoolExecutor {
+        return ThreadPoolExecutor(
+            threads,
+            threads,
+            0L,
+            TimeUnit.MILLISECONDS,
+            ArrayBlockingQueue(capacity),
+            { runnable -> Thread(runnable, threadName).apply { isDaemon = true } },
+            ThreadPoolExecutor.AbortPolicy()
+        )
+    }
+
+    private fun ensureExecutors() {
+        synchronized(executorLock) {
+            if (snsPrepareExecutor.isShutdown) {
+                snsPrepareExecutor = createExecutor(2, SNS_PREPARE_QUEUE_CAPACITY, "Hchat-Script-SnsPrepare")
+            }
+            if (protobufCallbackExecutor.isShutdown) {
+                protobufCallbackExecutor = createExecutor(1, PROTOBUF_CALLBACK_QUEUE_CAPACITY, "Hchat-Script-Protobuf")
+            }
+            if (imageDownloadCallbackExecutor.isShutdown) {
+                imageDownloadCallbackExecutor = createExecutor(2, IMAGE_DOWNLOAD_CALLBACK_QUEUE_CAPACITY, "Hchat-Script-ImageDownload")
+            }
+            if (videoDownloadCallbackExecutor.isShutdown) {
+                videoDownloadCallbackExecutor = createExecutor(2, VIDEO_DOWNLOAD_CALLBACK_QUEUE_CAPACITY, "Hchat-Script-VideoDownload")
+            }
+            if (finderMediaDownloadCallbackExecutor.isShutdown) {
+                finderMediaDownloadCallbackExecutor = createExecutor(2, FINDER_MEDIA_DOWNLOAD_CALLBACK_QUEUE_CAPACITY, "Hchat-Script-FinderDownload")
+            }
+        }
+    }
     private val protobufPacketListener = ProtobufPacketRuntime.Listener { packet ->
         dispatchOnProtobufPacket(packet)
     }
@@ -242,7 +243,9 @@ object ScriptPluginRuntime {
     }
 
     fun install(context: FeatureContext) {
+        ensureExecutors()
         lifecycleClosed.set(false)
+        beginGeneration()
         val hostAppContext = context.hostContext().applicationContext ?: context.hostContext()
         appContext = hostAppContext
         runtimeProcess = PROCESS_MAIN
@@ -262,6 +265,8 @@ object ScriptPluginRuntime {
     @JvmStatic
     fun installAppBrandProcess(context: Context, classLoader: ClassLoader, processName: String?) {
         if (lifecycleClosed.get()) return
+        ensureExecutors()
+        val generation = beginGeneration()
         val hostAppContext = context.applicationContext ?: context
         if (!isPluginRuntimeEnabled(hostAppContext)) return
         if (!initialLoadStarted.compareAndSet(false, true)) return
@@ -276,6 +281,7 @@ object ScriptPluginRuntime {
         bridge = currentBridge
         Thread({
             try {
+                if (!isGenerationActive(generation)) return@Thread
                 val result = loadEnabledAppBrandPlugins(hostAppContext, currentBridge)
                 if (result.isFailure) {
                     HLog.e(
@@ -298,18 +304,22 @@ object ScriptPluginRuntime {
 
     fun loadEnabledPluginsWhenReady(context: Context) {
         if (lifecycleClosed.get()) return
+        ensureExecutors()
+        val generation = runtimeGeneration
         val hostAppContext = context.applicationContext ?: context
         val prefs = HchatStorage.preferences(hostAppContext, ScriptPluginSettings.PREFS_NAME)
         if (!prefs.getBoolean(ScriptPluginSettings.KEY_ENABLE, ScriptPluginSettings.DEFAULT_ENABLE)) return
         if (!initialLoadStarted.compareAndSet(false, true)) return
         Thread({
             try {
+                if (!isGenerationActive(generation)) return@Thread
                 if (!awaitScriptApiReady(hostAppContext)) {
                     if (isPluginRuntimeEnabled(hostAppContext)) {
                         HLog.e("$TAG 等待联系人数据库就绪超时，跳过本次自动加载")
                     }
                     return@Thread
                 }
+                if (!isGenerationActive(generation)) return@Thread
                 val result = loadEnabledPlugins(hostAppContext, currentBridge(hostAppContext))
                 if (result.isFailure) {
                     HLog.e(
@@ -460,7 +470,9 @@ object ScriptPluginRuntime {
     }
 
     fun reloadPluginAsync(context: Context, pluginId: String) {
+        val generation = runtimeGeneration
         Thread({
+            if (!isGenerationActive(generation)) return@Thread
             val result = reloadPlugin(context, pluginId)
             if (result.isFailure) {
                 HLog.e(
@@ -593,14 +605,16 @@ object ScriptPluginRuntime {
         val normalizedId = snsId.orEmpty().trim()
         if (normalizedId.isEmpty() || callback == null) return false
         val api = WeChatApis.interaction().sns() ?: return false
+        val generation = runtimeGeneration
         val taskId = "$pluginId:$normalizedId:${snsPrepareSequence.incrementAndGet()}"
         val canceled = AtomicBoolean(false)
         snsPrepareCancellations[taskId] = canceled
         return try {
             snsPrepareExecutor.execute {
                 try {
+                    if (!isGenerationActive(generation)) return@execute
                     val result = api.prepareSnsPostMedia(normalizedId, canceled)
-                    if (!canceled.get()) {
+                    if (!canceled.get() && isGenerationActive(generation)) {
                         val loaded = loadedPlugins[pluginId]
                         if (loaded?.interpreter === interpreter) {
                             runCatching {
@@ -878,12 +892,15 @@ object ScriptPluginRuntime {
         if (!msgInfoBean.isImage()) return
         val imageMsg = runCatching { msgInfoBean.getImageMsg() }.getOrNull() ?: return
         val currentBridge = bridge ?: return
+        val generation = runtimeGeneration
         val taskKey = imageDownloadTaskKey(msgInfoBean)
         if (!acquireImageDownloadTask(taskKey)) return
         try {
             imageDownloadCallbackExecutor.execute {
                 try {
+                    if (!isGenerationActive(generation)) return@execute
                     val path = downloadCallbackImage(currentBridge, msgInfoBean, imageMsg)
+                    if (!isGenerationActive(generation)) return@execute
                     if (path == null) {
                         imageDownloadTasks.remove(taskKey)
                         return@execute
@@ -982,16 +999,19 @@ object ScriptPluginRuntime {
             .toList()
         if (targets.isEmpty()) return
         val currentBridge = bridge ?: return
+        val generation = runtimeGeneration
         val taskKey = videoDownloadTaskKey(msgInfoBean)
         if (!acquireVideoDownloadTask(taskKey)) return
         try {
             videoDownloadCallbackExecutor.execute {
                 try {
+                    if (!isGenerationActive(generation)) return@execute
                     if (targets.none { loadedPlugins[it.plugin.id] === it }) {
                         videoDownloadTasks.remove(taskKey)
                         return@execute
                     }
                     val path = downloadCallbackVideo(currentBridge, msgInfoBean)
+                    if (!isGenerationActive(generation)) return@execute
                     if (path == null) {
                         videoDownloadTasks.remove(taskKey)
                         return@execute
@@ -1089,16 +1109,19 @@ object ScriptPluginRuntime {
             return
         }
         val currentBridge = bridge ?: return
+        val generation = runtimeGeneration
         val taskKey = finderMediaDownloadTaskKey(msgInfoBean)
         if (!acquireFinderMediaDownloadTask(taskKey)) return
         try {
             finderMediaDownloadCallbackExecutor.execute {
                 try {
+                    if (!isGenerationActive(generation)) return@execute
                     if (targets.none { loadedPlugins[it.plugin.id] === it }) {
                         finderMediaDownloadTasks.remove(taskKey)
                         return@execute
                     }
                     val paths = downloadCallbackFinderMedia(currentBridge, msgInfoBean, media)
+                    if (!isGenerationActive(generation)) return@execute
                     if (paths.isEmpty()) {
                         finderMediaDownloadTasks.remove(taskKey)
                         return@execute
@@ -1269,8 +1292,10 @@ object ScriptPluginRuntime {
     fun dispatchOnProtobufPacket(packet: ProtobufPacketRuntime.Packet) {
         if (lifecycleClosed.get()) return
         if (loadedPlugins.values.none { it.hasProtobufPacketCallback }) return
+        val generation = runtimeGeneration
         try {
             protobufCallbackExecutor.execute {
+                if (!isGenerationActive(generation)) return@execute
                 val targets = loadedPlugins.values
                     .asSequence()
                     .filter { it.hasProtobufPacketCallback }
@@ -1524,6 +1549,8 @@ object ScriptPluginRuntime {
         if (forceReload) unloadPlugin(plugin.id)
         if (loadedPlugins.containsKey(plugin.id)) return Result.success(Unit)
         var pendingWaBridge: ScriptWaBridge? = null
+        var pendingInterpreter: Interpreter? = null
+        var lifecycleEntered = false
         return runCatching {
             val prefs = HchatStorage.preferences(context, ScriptPluginSettings.PREFS_NAME)
             if (!prefs.getBoolean(ScriptPluginSettings.KEY_ENABLE, ScriptPluginSettings.DEFAULT_ENABLE)) {
@@ -1536,6 +1563,7 @@ object ScriptPluginRuntime {
             pendingWaBridge = waBridge
             waBridge.bindPluginLog(plugin.name, plugin.dir)
             val interpreter = newInterpreter(currentBridge, plugin, waBridge)
+            pendingInterpreter = interpreter
             withInterpreterLock(interpreter) {
                 // BeanShell does not resolve the nested Xposed callback type
                 // from a short import reliably on Android. Normalize only in
@@ -1545,6 +1573,7 @@ object ScriptPluginRuntime {
                     .replace(Regex("(?<![\\w.])MethodHookParam(?![\\w])"), "XC_MethodHook.MethodHookParam")
                 interpreter.eval(compatibleScript)
             }
+            lifecycleEntered = true
             callLifecycle(interpreter, "onLoad")
             val interpreterFlags = detectCallbacks(interpreter)
             val sourceFlags = detectCallbacks(scriptText)
@@ -1576,7 +1605,19 @@ object ScriptPluginRuntime {
             refreshCallbacks(plugin.id, interpreter)
             notifyPluginCatalogChanged()
         }.onFailure {
-            pendingWaBridge?.dispose()
+            if (lifecycleEntered) {
+                runCatching {
+                    // Roll back partially initialized script state before disposing
+                    // the bridge that its onUnload hook may still need.
+                    val loaded = loadedPlugins[plugin.id]
+                    callLifecycle(loaded?.interpreter ?: pendingInterpreter ?: return@runCatching, "onUnload")
+                }.onFailure { cleanupError ->
+                    HLog.e("$TAG 插件加载回滚回调失败: ${plugin.name} ${cleanupError.message}", cleanupError)
+                }
+            }
+            runCatching { pendingWaBridge?.dispose() }.onFailure { cleanupError ->
+                HLog.e("$TAG 插件加载回滚资源释放失败: ${plugin.name} ${cleanupError.message}", cleanupError)
+            }
             loadedPlugins.remove(plugin.id)
             if (!hasHandleMsgCallbacks()) ScriptMessageHook.clearPendingMessages()
             updateProtobufPacketListener()
@@ -1591,14 +1632,19 @@ object ScriptPluginRuntime {
     private fun unloadPlugin(pluginId: String): Result<Unit> {
         cancelSnsPrepareTasks(pluginId)
         val loaded = loadedPlugins.remove(pluginId) ?: return Result.success(Unit)
-        loaded.waBridge.dispose()
-        if (!hasHandleMsgCallbacks()) ScriptMessageHook.clearPendingMessages()
-        updateProtobufPacketListener()
+        // Removing the identity first prevents new dispatches from entering the
+        // plugin while still allowing its synchronous onUnload hook to release
+        // plugin-owned state through the live ScriptWaBridge.
         runCatching {
             callLifecycle(loaded.interpreter, "onUnload")
         }.onFailure {
             HLog.e("$TAG 插件卸载回调失败: ${loaded.plugin.name} ${it.message}", it)
         }
+        runCatching { loaded.waBridge.dispose() }.onFailure {
+            HLog.e("$TAG 插件资源释放失败: ${loaded.plugin.name} ${it.message}", it)
+        }
+        if (!hasHandleMsgCallbacks()) ScriptMessageHook.clearPendingMessages()
+        updateProtobufPacketListener()
         bridge?.unhookPlugin(pluginId)
         notifyPluginCatalogChanged()
         return Result.success(Unit)
@@ -1619,6 +1665,7 @@ object ScriptPluginRuntime {
     @Synchronized
     fun close() {
         if (!lifecycleClosed.compareAndSet(false, true)) return
+        runtimeGeneration = generationSequence.incrementAndGet()
         runCatching { scriptRootObserver?.stopWatching() }
         scriptRootObserver = null
         pluginDirObservers.values.forEach { runCatching { it.stopWatching() } }
@@ -1629,15 +1676,15 @@ object ScriptPluginRuntime {
         snsPrepareCancellations.clear()
         runCatching { unloadAllPlugins() }
             .onFailure { HLog.e("$TAG 关闭脚本运行时失败: ${it.message}", it) }
-        // Executors are process-local reusable services. Remove queued work rather
-        // than shutting them down, so a later install can create a fresh generation
-        // without leaking or permanently rejecting callbacks. In-flight tasks are
-        // isolated by LoadedPlugin identity checks and lifecycleClosed guards.
-        snsPrepareExecutor.queue.clear()
-        protobufCallbackExecutor.queue.clear()
-        imageDownloadCallbackExecutor.queue.clear()
-        videoDownloadCallbackExecutor.queue.clear()
-        finderMediaDownloadCallbackExecutor.queue.clear()
+        // Stop this generation completely. install() recreates fresh executors;
+        // queued work is discarded and in-flight callbacks are generation-checked.
+        synchronized(executorLock) {
+            snsPrepareExecutor.shutdownNow()
+            protobufCallbackExecutor.shutdownNow()
+            imageDownloadCallbackExecutor.shutdownNow()
+            videoDownloadCallbackExecutor.shutdownNow()
+            finderMediaDownloadCallbackExecutor.shutdownNow()
+        }
         bridge = null
         appContext = null
         initialLoadStarted.set(false)
@@ -2362,17 +2409,20 @@ object ScriptPluginRuntime {
 
     private fun schedulePluginReload(pluginId: String) {
         if (!loadedPlugins.containsKey(pluginId)) return
+        val generation = runtimeGeneration
         val context = appContext ?: return
         val task = Runnable {
+            if (!isGenerationActive(generation)) return@Runnable
             reloadTasks.remove(pluginId)
-            reloadPluginFromFileChange(context, pluginId)
+            reloadPluginFromFileChange(context, pluginId, generation)
         }
         reloadTasks.put(pluginId, task)?.let { mainHandler.removeCallbacks(it) }
         mainHandler.postDelayed(task, RELOAD_DEBOUNCE_MS)
     }
 
-    private fun reloadPluginFromFileChange(context: Context, pluginId: String) {
+    private fun reloadPluginFromFileChange(context: Context, pluginId: String, generation: Long) {
         Thread({
+            if (!isGenerationActive(generation)) return@Thread
             val result = reloadPlugin(context, pluginId)
             if (result.isFailure) {
                 val plugin = listPlugins(context).firstOrNull { it.id == pluginId }
@@ -2381,6 +2431,7 @@ object ScriptPluginRuntime {
                     .putBoolean(ScriptPluginSettings.pluginEnableKey(pluginId), false)
                     .apply()
                 Handler(Looper.getMainLooper()).post {
+                    if (!isGenerationActive(generation)) return@post
                     Toast.makeText(
                         context,
                         "加载[${plugin?.displayName ?: "未知"}]失败，已自动关闭",
@@ -2388,7 +2439,7 @@ object ScriptPluginRuntime {
                     ).show()
                 }
             }
-            notifyPluginCatalogChanged()
+            if (isGenerationActive(generation)) notifyPluginCatalogChanged()
         }, "Hchat-Script-AutoReload-$pluginId").start()
     }
 
