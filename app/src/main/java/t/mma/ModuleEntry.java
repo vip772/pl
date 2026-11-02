@@ -220,6 +220,7 @@ public class ModuleEntry implements IXposedHookLoadPackage {
             FakeLocationFeature.destroyProcessHooks();
             FakeMiniProgramBaseLibFeature.destroyProcessHooks();
             SkipMiniProgramVideoAdsFeature.destroyProcessHooks();
+            SkipGlobalMiniProgramSplashAdsFeature.destroyProcessHooks();
             return;
         }
         boolean failed = false;
@@ -238,7 +239,11 @@ public class ModuleEntry implements IXposedHookLoadPackage {
             SkipMiniProgramVideoAdsFeature.destroyProcessHooks();
         }
         if (SkipGlobalMiniProgramSplashAdsFeature.isEnabled(context)) {
-            SkipGlobalMiniProgramSplashAdsFeature.scheduleAppBrandProcessHook(context, classLoader);
+            if (!SkipGlobalMiniProgramSplashAdsFeature.installAppBrandProcessHook(context, classLoader)) {
+                failed = true;
+            }
+        } else {
+            SkipGlobalMiniProgramSplashAdsFeature.destroyProcessHooks();
         }
         if (FakeLocationFeature.isEnabled(context)) {
             if (!FakeLocationFeature.installAppBrandProcessHook(context, classLoader)) {

@@ -4062,6 +4062,28 @@
       ],
       "sharedRootCauseRefs": [
         "shared-schedule-mutable-runtime"
+      ],
+      "runtimeRepairProgress": [
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-splash-validate-final-20261101-235342",
+          "focusedTestsPassed": 11,
+          "sdkDirectCompileExit": 0,
+          "toggleGenerationIterations": 100,
+          "capacityLimits": {
+            "mainProcessGenerations": 1,
+            "appbrandProcessOwner": 1,
+            "dexInstallTicketsPerGeneration": 1,
+            "dexReadySubscriptionsPerGeneration": 1,
+            "hookHandlesPerOwner": 1,
+            "locatorCacheEntriesPerKey": 1
+          },
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "Main process: PreferenceRuntimeOwner per enabled interval owning one SkipGlobalMiniProgramSplashAdsRuntime, one DexInstallScheduler.Installation ticket, one DexReady subscription and one hook handle, all registered in the feature resource scope. The runtime keeps the located method in DexMethodCache under one key and hooks it with param.result=false; the callback does not read preferences. Appbrand process: the shared DexInstallScheduler.schedule call is gone and MiniProgramSplashAdProcessOwner owns both the hook handle and its own retry ticket (key with the appbrand loader suffix, Stage.EARLY, priority -100), so a descriptor that is not resolvable at process start no longer aborts the install; the ticket is closed before the unhook. The static installedLoaders set is gone. ModuleEntry now calls installAppBrandProcessHook with an else-branch release, releases the appbrand owner on unaccepted terms, and FeatureManager.destroyAll releases it on feature shutdown.",
+          "boundary": "Synthetic host regression over the complete production file plus direct Kotlin/Java/SDK/existing-ABI compilation, not Android/R8 and not device acceptance. The synthetic DexKit query reproduces only the usingEqStrings tag pair and the boolean-return / single-parameter / appbrand-package matcher the feature uses; the real CgiLaunchWxaApp eligibility method descriptor across WeChat versions, cross-process preferences visibility, real loader replacement order and repeated rapid toggles during a live Dex warmup remain unverified. The forced result value and the tag pair are unchanged by this repair. No memory or scrolling-smoothness data; deviceAcceptancePercent=0 and memoryBenefitProven=false."
+        }
       ]
     },
     {
