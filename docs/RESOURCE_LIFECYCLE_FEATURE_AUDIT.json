@@ -1711,6 +1711,28 @@
       ],
       "sharedRootCauseRefs": [
         "shared-schedule-mutable-runtime"
+      ],
+      "runtimeRepairProgress": [
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-mr-validate-final-20261102-062040",
+          "focusedTestsPassed": 13,
+          "sdkDirectCompileExit": 0,
+          "toggleGenerationIterations": 100,
+          "capacityLimits": {
+            "mainProcessGenerations": 1,
+            "dexInstallTicketsPerGeneration": 1,
+            "dexReadySubscriptionsPerGeneration": 1,
+            "hookHandlesPerGeneration": 2,
+            "locatorCacheEntriesPerKey": 1,
+            "revokeSubmissionsAfterClose": 0
+          },
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "PreferenceRuntimeOwner per enabled interval owning one MultiRecallRuntime, one DexInstallScheduler.Installation ticket with its own owner, one DexReady subscription and one hook handle per entry point (menu create, menu click), all registered in the feature resource scope and released in reverse order. The shared DexInstallScheduler.schedule call and the mutable hooker field on the feature are gone; install() dedupes per member through installedMembers and rolls back when the scope closed during the install. Each entry point is gated on its own descriptors so a missing exit method blocks only the click hook. Both callbacks read the stored preference through MultiRecallFeature.isEnabled instead of a cached flag, and the instance closed flag stops new work: the batch revoke loop breaks before the next submission, and the late toast and the native multi-select exit are skipped, while every revoke already submitted to the host is left to complete.",
+          "boundary": "Synthetic host regression over the complete production file plus direct Kotlin/SDK/existing-ABI compilation, not Android/R8 and not device acceptance. The synthetic host reproduces only the three descriptors the locator matches (onCreateMMMenu with its WWAPIFactory invoke, onMMMenuItemSelected with the FinalShareCountByType anchor, and the zero-argument exit method called from the click method) and the selected-message component graph the resolver walks to depth 4; the real chatting component field layout on a live WeChat build, the real menu item id collision surface, the real revokeNative result distribution and the visibility of a mid-loop feature destroy remain unverified. The menu item id, the title and the revoke call are unchanged by this repair. No memory or scrolling-smoothness data; deviceAcceptancePercent=0 and memoryBenefitProven=false."
+        }
       ]
     },
     {

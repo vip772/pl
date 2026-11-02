@@ -1,0 +1,27 @@
+package t.mma.ui
+
+interface FeatureSettingsProvider {
+    fun featureId(): String
+    fun title(): String
+    fun subtitle(): String
+    fun category(): String = CATEGORY_ENHANCE
+    fun isNewFeature(): Boolean = false
+
+    companion object {
+        const val CATEGORY_PRACTICAL = "practical"
+        const val CATEGORY_ENTERTAINMENT = "entertainment"
+        const val CATEGORY_ENHANCE = "enhance"
+    }
+}
+
+open class SimpleFeatureSettingsProvider protected constructor(
+    private val featureId: String,
+    private val title: String,
+    private val subtitle: String,
+    private val category: String = FeatureSettingsProvider.CATEGORY_ENHANCE
+) : FeatureSettingsProvider {
+    final override fun featureId(): String = featureId
+    final override fun title(): String = title
+    final override fun subtitle(): String = subtitle
+    final override fun category(): String = category
+}

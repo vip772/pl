@@ -31,6 +31,7 @@ sources += list((r/'app/src/main/java/t/mma/hooks/items/miniprogrambaselib').glo
 sources += list((r/'app/src/main/java/t/mma/hooks/items/miniprogramvideoad').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/miniprogramsplashad').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/securemessage').glob('*.kt'))
+sources += list((r/'app/src/main/java/t/mma/hooks/items/multirecall').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/selectedmessages').glob('*.kt'))
 sources += list((r/'app/src/main/java/t/mma/hooks/items/settings').glob('*.kt'))
 java_sources += [r/'app/src/main/java/t/mma/hooks/api/ui/SettingsInjector.java', r/'app/src/main/java/t/mma/dexkit/SettingsDexFinder.java', r/'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java']
