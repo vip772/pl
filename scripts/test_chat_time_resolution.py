@@ -7,7 +7,7 @@ a=s.index('    private fun resolveMessageCreateTime(');b=s.index('    private fu
 end=s.index('    private fun methodCacheKey(',b)
 # Compile production resolver and cache declarations with counted host reflection.
 methods=s[a:end]
-assert 'synchronized(resolutionMetadata) { resolutionMetadata.clear() }' in s[s.index('    fun destroy()'):s.index('    @Synchronized')]
+assert 'synchronized(resolutionMetadata) { resolutionMetadata.clear() }' in s[s.index('    fun close()'):s.index('    /** 返回本次是否真正装上')]
 metadata=s[s.index('    private class ResolutionMetadata'):s.index('    private val bindings =')]
 lib=Path('/tmp/pl-kotlin-libs');std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
 files={'Main.kt':'''import java.util.Collections

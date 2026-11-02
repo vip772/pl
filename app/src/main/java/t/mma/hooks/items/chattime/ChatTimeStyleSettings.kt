@@ -1,8 +1,9 @@
 package t.mma.hooks.items.chattime
 
+import android.content.SharedPreferences
+
 object ChatTimeStyleSettings {
     const val PREFS_NAME = "Hchat_chat_time_style_config"
-
     const val KEY_MODE = "chat_time_mode"
     const val KEY_TIME_FORMAT = "chat_time_format"
 
@@ -20,5 +21,11 @@ object ChatTimeStyleSettings {
         MODE_CUSTOM -> MODE_CUSTOM
         MODE_HIDDEN -> MODE_HIDDEN
         else -> MODE_ORIGINAL
+    }
+
+    /** 与设置页开关同一判据：自定义或隐藏才需要运行时，原始模式即关闭。 */
+    fun isConfigured(prefs: SharedPreferences): Boolean {
+        val mode = normalizeMode(prefs.getString(KEY_MODE, DEFAULT_MODE))
+        return mode == MODE_CUSTOM || mode == MODE_HIDDEN
     }
 }

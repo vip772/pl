@@ -3337,7 +3337,7 @@
     {
       "feature": "ChatTimeStyleFeature",
       "source": "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt",
-      "status": "源码入口及释放链已复核；发现待闭环项",
+      "status": "已完成按代际安装所有权与资源释放改造；合成宿主回归11项通过，Android SDK编译通过，实机未验收",
       "evidence": [
         "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt: 入口、释放、渲染回调与缓存复核",
         "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt:onFeatureInstall",
@@ -3346,39 +3346,43 @@
         "/tmp/pl-audit-sync-20261101-1921/batch4-review.json",
         "/tmp/pl-audit-sync-20261101-1943/fields-3-review.json"
       ],
-      "ownership": "已核实入口：共享schedule捕获可变runtime；destroy注销监听、清部分缓存并post恢复，没有关闭标记或Hook释放；完整依赖所有权仍待核实",
-      "cleanup": "已核实当前入口/Runtime退出范围：共享schedule捕获可变runtime；destroy注销监听、清部分缓存并post恢复，没有关闭标记或Hook释放；其余开放记录继续核查",
-      "inFlight": "共享schedule读可变runtime；destroy无closed/Hook释放，旧绑定可继续，恢复投递与重装不以代际隔离。",
-      "lateCallbacks": "view.post恢复未检查代际及返回值；旧Hook未失活，注销或单View恢复异常可截断清理。",
-      "bounds": "resolutionMetadata已有128项上限并在destroy清；rootFieldCache/timeFieldCache/unsupportedTimeHolders未清且无硬容量，不能泛称全部缓存无界。",
+      "ownership": "ChatTimeStyleFeature按启用区间创建PreferenceRuntimeOwner；每代由FeatureResourceScope独占安装票根、DexReady订阅、Hook句柄、偏好监听与恢复投递Handler；原始模式不创建运行时",
+      "cleanup": "close幂等置closed并清hooks，逐句柄隔离释放HookRegistry，注销偏好监听，按代次快照逐视图恢复原生文本/可见性，最后清空三类反射缓存与resolutionMetadata",
+      "inFlight": "install与close互斥；close期间装上的句柄立即回卷；恢复投递与样式刷新都以closed门和bindings身份双校验；安装失败保留票根由调度器退避重试",
+      "lateCallbacks": "视图回调检查closed、bindings当前身份与styledText归属，宿主复用后的内容不被改写；view.post被拒时回退到本代mainHandler，最终失败只记录不抛异常",
+      "bounds": "rootFieldCache/timeFieldCache/unsupportedTimeHolders均为128项LRU，resolutionMetadata为128项LRU，bindings为WeakHashMap弱键；关闭时全部清空",
       "tests": [
+        "scripts/test_chat_time_owner.py",
         "scripts/test_chat_time_resolution.py",
-        "覆盖边界：相关源码约束/局部JVM合成，不证明全部生命周期、原生交错或实机；本次未重跑。"
+        "scripts/test_chat_time_sdk.py",
+        "覆盖边界：合成JVM宿主与真实Android SDK编译，不证明原生交错与实机表现；本次已运行。"
       ],
       "openFindings": [
-        "共享schedule捕获可变runtime；destroy注销监听、清部分缓存并post恢复，没有关闭标记或Hook释放",
-        "旧Hook可在销毁后继续绑定；view.post恢复没有代际校验；反射缓存和清理异常隔离待闭环"
+        "实机需验证：自定义/隐藏模式切换后列表复用视图的文本与可见性恢复",
+        "实机需验证：关闭功能后的内存与线程回落、以及长时间会话下的缓存边界"
       ],
       "findingReview": [
         {
           "finding": "共享schedule捕获可变runtime；destroy注销监听、清部分缓存并post恢复，没有关闭标记或Hook释放",
-          "category": "真实待实现",
+          "category": "已修复",
           "evidence": [
             "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt:onFeatureInstall",
-            "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt",
-            "app/src/main/java/t/mma/hooks/core/DexInstallScheduler.kt:scheduleOwned"
+            "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt:startGeneration",
+            "scripts/test_chat_time_owner.py"
           ],
-          "remainingOpen": true,
-          "boundary": "仅核实入口、安装调度与退出实现；其他ThreadLocal/UI/缓存/部分失败条目尚待独立核准。"
+          "remainingOpen": false,
+          "boundary": "共享schedule已替换为DexInstallScheduler.installation票根并随代关闭；可复现证据为合成宿主S1/S4/S5。"
         },
         {
           "finding": "旧Hook可在销毁后继续绑定；view.post恢复没有代际校验；反射缓存和清理异常隔离待闭环",
-          "category": "源码核实：真实缺口/纠正泛化并保留验收边界",
+          "category": "已修复",
           "evidence": [
-            "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt:98-126,69-85"
+            "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt:close",
+            "app/src/main/java/t/mma/hooks/items/chattime/ChatTimeStyleFeature.kt:restoreOriginal",
+            "scripts/test_chat_time_owner.py"
           ],
-          "remainingOpen": true,
-          "boundary": "destroy注销偏好并清resolutionMetadata及bindings；metadata已有128项上限，但rootFieldCache/timeFieldCache/unsupportedTimeHolders未清。Hook未持有局部释放句柄且无closed门；view.post恢复未核对重绑定代际或返回值，注销/逐View异常隔离未闭环。"
+          "remainingOpen": false,
+          "boundary": "旧回调以closed门拒绝写入（S8），恢复带重试与Handler回退（S6），缓存有界且关闭清空（S11）。"
         }
       ],
       "sharedRootCauseRefs": [
