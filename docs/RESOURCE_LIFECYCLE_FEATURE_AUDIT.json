@@ -568,6 +568,28 @@
       ],
       "sharedRootCauseRefs": [
         "shared-schedule-mutable-runtime"
+      ],
+      "runtimeRepairProgress": [
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-sm-validate-final-20261102-050851",
+          "focusedTestsPassed": 12,
+          "sdkDirectCompileExit": 0,
+          "toggleGenerationIterations": 100,
+          "capacityLimits": {
+            "mainProcessGenerations": 1,
+            "dexInstallTicketsPerGeneration": 1,
+            "dexReadySubscriptionsPerGeneration": 1,
+            "hookHandlesPerOwner": 3,
+            "checkHookCandidatesMax": 6,
+            "menuMarkerFrames": "thread local deque paired before/after, empty frame removed"
+          },
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "PreferenceRuntimeOwner per enabled interval owning one AntiSecureMessageRuntime, one DexInstallScheduler.Installation ticket with its own owner, one DexReady subscription and one hook handle per member, all registered in the feature resource scope and released in reverse order by close(). The shared DexInstallScheduler.schedule call and the static installed flags are gone; install() dedupes per member via installedMembers and rolls back when the scope closed during the install. The check callback forces param.result=false and strips sec_msg_node at the insert boundary, both gated by the instance closed flag rather than by a preference read. The menu before/after pair pushes MenuMarkerState.None when closed and always pops in after, so a message that entered beforeHook still gets its marker restored after close.",
+          "boundary": "Synthetic host regression over the complete production file plus direct Kotlin/SDK/existing-ABI compilation, not Android/R8 and not device acceptance. The synthetic host reproduces only the anchor string, the source setters/fields and the menu create menu descriptor the feature matches; the real sec_msg_node payload shape across WeChat 8.0.76/8.0.77 and other versions, the real SingleMessageMenuLocator hit rate on those versions and the visibility of msgSource writes across processes remain unverified. The forced result value and the stripped node are unchanged by this repair. No memory or scrolling-smoothness data; deviceAcceptancePercent=0 and memoryBenefitProven=false."
+        }
       ]
     },
     {
@@ -619,6 +641,29 @@
       ],
       "sharedRootCauseRefs": [
         "shared-schedule-mutable-runtime"
+      ],
+      "runtimeRepairProgress": [
+        {
+          "state": "code_and_focused_verification_complete_device_pending",
+          "evidence": "/tmp/pl-sm-validate-final-20261102-050851",
+          "focusedTestsPassed": 12,
+          "sdkDirectCompileExit": 0,
+          "toggleGenerationIterations": 100,
+          "capacityLimits": {
+            "mainProcessGenerations": 1,
+            "dexInstallTicketsPerGeneration": 1,
+            "dexReadySubscriptionsPerGeneration": 1,
+            "insertHookHandlesPerGeneration": 1,
+            "sourceSetterHookHandlesPerGeneration": "derived from the insert parameter superclasses",
+            "emojiHookHandlesPerGeneration": 3,
+            "cacheEntriesPerKey": 1
+          },
+          "deviceAcceptancePercent": 0,
+          "memoryBenefitProven": false,
+          "openFindingsRetained": true,
+          "scope": "PreferenceRuntimeOwner per enabled interval owning one SendSecureMessageRuntime, one DexInstallScheduler.Installation ticket, one DexReady subscription and the hook handles it created, all registered in the feature resource scope. The five @Volatile static installed flags (insert, merge, emoji source, emoji dispatch, emoji check) are now instance fields, so a reinstalled runtime no longer skips its own install because of a leftover static marker; the insert method is kept in DexMethodCache under one key and located through the cached path first. install() derives the msgSource setter hooks from the insert parameter superclasses, keeps the outgoing marker through SecureMessageSource.addMarker and the emoji request graph rewrite, and dedupes every hook per member through installedMembers with a rollback when the scope closed mid install. EmojiSecureMessageProfile remains restricted to 8.0.76 (3140) and 8.0.77 (3160), so an unmapped host version adds no emoji hook.",
+          "boundary": "Synthetic host regression over the complete production file plus direct Kotlin/SDK/existing-ABI compilation, not Android/R8 and not device acceptance. The synthetic emoji graph reproduces only the field chain d-a-a-e-p of the sendemoji request and the doScene signature on the two mapped versions; the real object graph on a live WeChat 8.0.76/8.0.77 process, the real insert method descriptor across other versions, the actual msgSource visibility across processes and the real setter discovery on classes the matcher scores remain unverified. The marker text and the rewrite targets are unchanged by this repair. No memory or scrolling-smoothness data; deviceAcceptancePercent=0 and memoryBenefitProven=false."
+        }
       ]
     },
     {

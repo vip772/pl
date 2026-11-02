@@ -1,14 +1,17 @@
 package t.mma.hooks.items.securemessage
 
+import android.content.Context
+import android.content.SharedPreferences
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
 import t.mma.event.Events
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.api.model.WeChatMessageTypes
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.core.HookRegistry
-import t.mma.hooks.api.model.WeChatMessageTypes
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
@@ -18,23 +21,8 @@ import java.lang.reflect.Modifier
 
 /** Injects the WeChat secure-message marker before outgoing supported messages are stored. */
 class SendSecureMessageFeature : BaseFeature() {
-    @Volatile private var installed = false
-    @Volatile private var mergeInstalled = false
-    @Volatile private var emojiSourceInstalled = false
-    @Volatile private var emojiDispatchInstalled = false
-    @Volatile private var emojiCheckInstalled = false
-    private var prefs: android.content.SharedPreferences? = null
-    private lateinit var methodPrefs: android.content.SharedPreferences
-    @Volatile private var markerLogged = false
-    @Volatile private var imageMarkerLogged = false
-    @Volatile private var markerFailureLogged = false
-    @Volatile private var hookMissLogged = false
-    @Volatile private var emojiSourceTriggeredLogged = false
-    @Volatile private var emojiDispatchTriggeredLogged = false
-    @Volatile private var emojiCheckTriggeredLogged = false
-    @Volatile private var unsupportedEmojiVersionLogged = false
-
     override fun featureId(): String = SecureMessageSettings.SEND_ID
+
     override fun name(): String = "安全消息"
 
     override fun onFeatureInit(context: FeatureContext) {
@@ -42,75 +30,232 @@ class SendSecureMessageFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        prefs = HchatStorage.preferences(context.hostContext(), SecureMessageSettings.SEND_PREFS)
-        methodPrefs = DexMethodCache.prefs(context.hostContext(), "Hchat_secure_message_method_cache")
-        logInfo("安全消息功能已初始化，等待 DexKit")
-        schedule(context)
-        subscribe(Events.DexReady::class.java) { schedule(context) }
+        val prefs = HchatStorage.preferences(context.hostContext(), SecureMessageSettings.SEND_PREFS)
+        val runtime = PreferenceRuntimeOwner(
+            prefs, setOf(SecureMessageSettings.KEY_ENABLE),
+            enabled = { isEnabled(context.hostContext()) },
+            create = { resources ->
+                val owner = SendSecureMessageRuntime(context, prefs, ::logFeatureError, ::logInfo)
+                // 先登记释放再装 Hook：create 中途抛错时已装句柄仍归本代所有。
+                resources.register { owner.close() }
+                val installation = DexInstallScheduler.installation(
+                    SecureMessageSettings.SEND_ID, name(), stage = DexInstallScheduler.Stage.BRIDGE
+                )
+                resources.register { installation.close() }
+                installation.schedule { owner.install() }
+                val subscription = context.eventBus().subscribe(Events.DexReady::class.java, {
+                    if (!resources.isClosed()) installation.schedule { owner.install() }
+                })
+                resources.register { context.eventBus().unsubscribe(subscription) }
+            },
+            onError = { logFeatureError("安全消息启停失败", it) }
+        )
+        trackResource { runtime.close() }
+        runtime.start()
     }
 
-    private fun schedule(context: FeatureContext) {
-        DexInstallScheduler.schedule(featureId(), name()) { installHook(context) }
+    private fun logFeatureError(message: String, throwable: Throwable?) {
+        logError(message, throwable)
     }
+
+    companion object {
+        /** 设置读取入口：安装期与每组回调都用同一判定，不缓存布尔。 */
+        @JvmStatic
+        fun isEnabled(context: Context?): Boolean {
+            if (context == null) return false
+            return HchatStorage.preferences(context, SecureMessageSettings.SEND_PREFS)
+                .getBoolean(SecureMessageSettings.KEY_ENABLE, SecureMessageSettings.DEFAULT_ENABLE)
+        }
+    }
+}
+
+/**
+ * 一次启用周期一个运行时：独占安装票根、DexReady 订阅与全部 Hook 句柄。
+ *
+ * 开关与状态都归本代：关闭时只拒绝新工作，已装句柄在 close() 里反序释放。
+ */
+private class SendSecureMessageRuntime(
+    private val context: FeatureContext,
+    private val prefs: SharedPreferences,
+    private val logger: (String, Throwable?) -> Unit,
+    private val info: (String) -> Unit
+) : AutoCloseable {
+    private val lock = Any()
+    private val hooks = ArrayList<XC_MethodHook.Unhook>()
+    private val installedMembers = LinkedHashSet<String>()
+    private var insertInstalled = false
+    private var mergeInstalled = false
+    private var emojiSourceInstalled = false
+    private var emojiDispatchInstalled = false
+    private var emojiCheckInstalled = false
+    private var markerLogged = false
+    private var imageMarkerLogged = false
+    private var markerFailureLogged = false
+    private var hookMissLogged = false
+    private var emojiSourceTriggeredLogged = false
+    private var emojiDispatchTriggeredLogged = false
+    private var emojiCheckTriggeredLogged = false
+    private var unsupportedEmojiVersionLogged = false
+    private lateinit var methodPrefs: SharedPreferences
+    @Volatile private var closed = false
+
+    private fun report(message: String, error: Throwable?) {
+        runCatching { logger(message, error) }
+    }
+
+    private fun log(message: String) {
+        runCatching { info(message) }
+    }
+
+    fun isClosed(): Boolean = closed
 
     @Synchronized
-    private fun installHook(context: FeatureContext): Boolean {
-        if (installed && mergeInstalled && emojiHooksReady(context) && emojiCheckInstalled) return true
-        val runtimeKey = methodCacheKey(context)
+    override fun close() {
+        if (closed) return
+        closed = true
+        insertInstalled = false
+        mergeInstalled = false
+        emojiSourceInstalled = false
+        emojiDispatchInstalled = false
+        emojiCheckInstalled = false
+        val pending = synchronized(lock) { hooks.toList().also { hooks.clear() } }
+        pending.asReversed().forEach { unhook ->
+            runCatching { HookRegistry.get().unhook(unhook) }
+                .onFailure { report("安全消息Hook释放失败", it) }
+        }
+        synchronized(lock) { installedMembers.clear() }
+    }
+
+    /** 返回本次是否三条链路都就绪；任一失败保留票据供调度器重试。 */
+    @Synchronized
+    fun install(): Boolean {
+        if (closed) return false
+        methodPrefs = DexMethodCache.prefs(
+            context.hostContext(), "Hchat_secure_message_method_cache"
+        )
+        val runtimeKey = methodCacheKey()
         if (runtimeKey.isBlank()) {
-            logError("安全消息安装跳过：微信运行时版本信息未就绪", null)
+            report("安全消息安装跳过：微信运行时版本信息未就绪", null)
             return false
         }
         val direct = context.dexFinder().localMessageInsertMethod?.takeIf(::isInsertMethod)
         if (direct != null) {
             DexMethodCache.save(methodPrefs, runtimeKey, SecureMessageSettings.CACHE_INSERT, direct)
-            logInfo("安全消息使用微信本地消息插入 API: ${direct.toGenericString()}")
+            log("安全消息使用微信本地消息插入 API: ${direct.toGenericString()}")
         }
-        val insert = direct ?: cachedOrLocate(context, runtimeKey, SecureMessageSettings.CACHE_INSERT, INSERT_ANCHOR, ::isInsertMethod)
+        val insert = direct
+            ?: cachedOrLocate(runtimeKey, SecureMessageSettings.CACHE_INSERT, INSERT_ANCHOR, ::isInsertMethod)
             ?: run {
-                logError("安全消息入库方法未定位到，微信版本可能不匹配", null)
+                report("安全消息入库方法未定位到，微信版本可能不匹配", null)
                 return false
             }
-        val insertReady = if (installed) true else runCatching {
-            HookRegistry.get().hook(insert, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (!enabled()) return
-                    val args = param.args ?: return
-                    val msg = args.firstOrNull { it != null && isMessageLike(it) } ?: run {
-                        if (!hookMissLogged) {
-                            hookMissLogged = true
-                            logInfo("安全消息 Hook 已触发，但未找到消息参数")
-                        }
-                        return
+        val insertReady = installInsertHook(insert)
+        val mergeReady = installSourceMergeHooks(insert)
+        val emojiReady = installEmojiHooks()
+        val emojiCheckReady = if (emojiCheckInstalled) true else installEmojiSelfCheckHooks(runtimeKey)
+        return insertReady && mergeReady && emojiReady && emojiCheckReady
+    }
+
+    private fun hookOnce(method: Method, callback: XC_MethodHook): Boolean {
+        val memberKey = method.toGenericString()
+        synchronized(lock) {
+            if (closed) return false
+            if (!installedMembers.add(memberKey)) return true
+        }
+        val unhook = runCatching { HookRegistry.get().hook(method, callback) }.getOrElse {
+            synchronized(lock) { installedMembers.remove(memberKey) }
+            report("安全消息Hook安装失败: $memberKey", it)
+            return false
+        }
+        synchronized(lock) {
+            if (!closed) {
+                hooks.add(unhook)
+                return true
+            }
+        }
+        runCatching { HookRegistry.get().unhook(unhook) }
+            .onFailure { report("安全消息Hook释放失败", it) }
+        synchronized(lock) { installedMembers.remove(memberKey) }
+        return false
+    }
+
+    private fun installInsertHook(insert: Method): Boolean {
+        if (insertInstalled) return true
+        val ready = hookOnce(insert, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                // 关闭后不再写标记，但不会因此丢弃已登记的句柄。
+                if (closed || !enabled()) return
+                val args = param.args ?: return
+                val message = args.firstOrNull { it != null && isMessageLike(it) } ?: run {
+                    if (!hookMissLogged) {
+                        hookMissLogged = true
+                        log("安全消息 Hook 已触发，但未找到消息参数")
                     }
-                    if (!isSupportedOutgoingMessage(msg)) return
-                    addSecureMarker(msg)
+                    return
+                }
+                if (!isSupportedOutgoingMessage(message)) return
+                addSecureMarker(message)
+            }
+        })
+        if (ready) {
+            insertInstalled = true
+            log("安全消息 Hook 已安装: ${insert.toGenericString()}")
+        }
+        return ready
+    }
+
+    /**
+     * Media senders assign msgSource before the final local insert. Hook the setter layer
+     * as well so the marker reaches the actual image/video/emoji/AppMsg send request.
+     * Candidates are derived from the already verified insert argument class; no
+     * obfuscated method name is guessed.
+     */
+    private fun installSourceMergeHooks(insert: Method): Boolean {
+        if (mergeInstalled) return true
+        val messageClass = insert.parameterTypes.firstOrNull {
+            !it.isPrimitive && it != String::class.java && it.name.startsWith(MESSAGE_PACKAGE)
+        } ?: return false
+        val candidates = generateSequence<Class<*>>(messageClass) { current -> current.superclass }
+            .takeWhile { it != Any::class.java }
+            .flatMap { KavaReflector.declaredMethods(it).asSequence() }
+            .filter(::isStringSetter)
+            .distinctBy { it.toGenericString() }
+            .toList()
+        if (candidates.isEmpty()) {
+            report("安全消息 msgSource 合并入口未找到: ${messageClass.name}", null)
+            return false
+        }
+        var count = 0
+        candidates.forEach { method ->
+            val ready = hookOnce(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (closed || !enabled()) return
+                    val source = param.args?.getOrNull(0) as? String ?: return
+                    if (!looksLikeMsgSource(source)) return
+                    val message = param.thisObject ?: return
+                    if (!isSupportedOutgoingMessage(message)) return
+                    param.args[0] = SecureMessageSource.addMarker(source)
                 }
             })
-            installed = true
-            logInfo("安全消息 Hook 已安装: ${insert.toGenericString()}")
-            true
-        }.getOrElse {
-            logError("安全消息入库Hook安装失败", it)
-            false
+            if (ready) count++
         }
-        val mergeReady = if (mergeInstalled) true else installSourceMergeHooks(insert)
-        val emojiReady = installEmojiHooks(context)
-        val emojiCheckReady = if (emojiCheckInstalled) true else installEmojiSelfCheckHooks(context, runtimeKey)
-        return insertReady && mergeReady && emojiReady && emojiCheckReady
+        mergeInstalled = count > 0
+        if (mergeInstalled) log("安全消息 msgSource 合并 Hook 已安装: $count 个候选")
+        return mergeInstalled
     }
 
     /**
      * 表情发送会在本地消息入库后重新生成 MsgSource，因此通用入库 Hook 不足以覆盖
      * 最终网络请求。这里按已确认的 8.0.76/8.0.77 链路补写两次标记。
      */
-    private fun installEmojiHooks(context: FeatureContext): Boolean {
+    private fun installEmojiHooks(): Boolean {
+        if (emojiSourceInstalled && emojiDispatchInstalled) return true
         val version = WeChatApis.version()?.current()
         val profile = EmojiSecureMessageProfile.forVersion(version?.versionName, version?.versionCode ?: 0L)
         if (profile == null) {
             if (!unsupportedEmojiVersionLogged) {
                 unsupportedEmojiVersionLogged = true
-                logInfo(
+                log(
                     "表情安全消息专用链路未启用: 微信 ${version?.displayVersion() ?: "版本未知"} " +
                         "不在已验证映射中"
                 )
@@ -118,18 +263,9 @@ class SendSecureMessageFeature : BaseFeature() {
             return true
         }
         val hostVersion = version?.displayVersion() ?: "未知"
-        val sourceReady = emojiSourceInstalled || installEmojiSourceHook(context, profile, hostVersion)
-        val dispatchReady = emojiDispatchInstalled || installEmojiDispatchHook(context, profile, hostVersion)
+        val sourceReady = emojiSourceInstalled || installEmojiSourceHook(profile, hostVersion)
+        val dispatchReady = emojiDispatchInstalled || installEmojiDispatchHook(profile, hostVersion)
         return sourceReady && dispatchReady
-    }
-
-    private fun emojiHooksReady(context: FeatureContext): Boolean {
-        val version = WeChatApis.version()?.current()
-        val supported = EmojiSecureMessageProfile.forVersion(
-            version?.versionName,
-            version?.versionCode ?: 0L
-        ) != null
-        return !supported || (emojiSourceInstalled && emojiDispatchInstalled)
     }
 
     /**
@@ -137,52 +273,42 @@ class SendSecureMessageFeature : BaseFeature() {
      * 微信的 sec_msg_node 检查。对 type=47 且 isSend=1 的消息做精确兜底，避免自己
      * 可以转发表情、别人却不能转发的不一致行为；反安全消息开关不参与此判断。
      */
-    private fun installEmojiSelfCheckHooks(context: FeatureContext, runtimeKey: String): Boolean {
+    private fun installEmojiSelfCheckHooks(runtimeKey: String): Boolean {
         val candidates = linkedSetOf<Method>()
         DexMethodCache.load(
-            methodPrefs,
-            runtimeKey,
-            context.hostClassLoader(),
-            SecureMessageSettings.CACHE_EMOJI_CHECK
+            methodPrefs, runtimeKey, context.hostClassLoader(), SecureMessageSettings.CACHE_EMOJI_CHECK
         )?.takeIf(::isCheckMethod)?.let(candidates::add)
-        candidates += findMethods(context, SECURE_CHECK_ANCHOR).filter(::isCheckMethod)
+        candidates += findMethods(SECURE_CHECK_ANCHOR).filter(::isCheckMethod)
         if (candidates.isEmpty()) {
-            logError("自发表情安全检查兜底入口未定位到", null)
+            report("自发表情安全检查兜底入口未定位到", null)
             return true
         }
         if (candidates.size == 1) {
             DexMethodCache.save(
-                methodPrefs,
-                runtimeKey,
-                SecureMessageSettings.CACHE_EMOJI_CHECK,
-                candidates.first()
+                methodPrefs, runtimeKey, SecureMessageSettings.CACHE_EMOJI_CHECK, candidates.first()
             )
         } else {
             DexMethodCache.clear(methodPrefs, runtimeKey, SecureMessageSettings.CACHE_EMOJI_CHECK)
         }
         var hooked = false
         candidates.take(MAX_CHECK_HOOKS).forEach { method ->
-            runCatching {
-                HookRegistry.get().hook(method, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (!enabled()) return
-                        val message = param.args?.firstOrNull { it != null && isMessageLike(it) } ?: return
-                        if (!isOutgoingEmoji(message)) return
-                        if (SecureMessageSource.containsMarker(readMessageSource(message))) return
-                        param.result = true
-                        if (!emojiCheckTriggeredLogged) {
-                            emojiCheckTriggeredLogged = true
-                            logInfo("自发表情安全检查兜底已生效: ${method.name}")
-                        }
+            val ready = hookOnce(method, object : XC_MethodHook() {
+                override fun beforeHookedMethod(param: MethodHookParam) {
+                    if (closed || !enabled()) return
+                    val message = param.args?.firstOrNull { it != null && isMessageLike(it) } ?: return
+                    if (!isOutgoingEmoji(message)) return
+                    if (SecureMessageSource.containsMarker(readMessageSource(message))) return
+                    param.result = true
+                    if (!emojiCheckTriggeredLogged) {
+                        emojiCheckTriggeredLogged = true
+                        log("自发表情安全检查兜底已生效: ${method.name}")
                     }
-                })
-                hooked = true
-            }.onFailure {
-                logError("自发表情安全检查 Hook 安装失败: ${method.toGenericString()}", it)
-            }
+                }
+            })
+            if (ready) hooked = true
         }
         emojiCheckInstalled = hooked
-        if (hooked) logInfo("自发表情安全检查兜底 Hook 已安装: ${candidates.size} 个入口")
+        if (hooked) log("自发表情安全检查兜底 Hook 已安装: ${candidates.size} 个入口")
         return hooked
     }
 
@@ -193,13 +319,12 @@ class SendSecureMessageFeature : BaseFeature() {
     }
 
     private fun isCheckMethod(method: Method): Boolean =
-        Modifier.isStatic(method.modifiers) &&
+        KavaReflector.isStatic(method) &&
             method.returnType == Boolean::class.javaPrimitiveType &&
             method.parameterCount == 1 &&
             !method.parameterTypes[0].isPrimitive
 
     private fun installEmojiSourceHook(
-        context: FeatureContext,
         profile: EmojiSecureMessageProfile,
         hostVersion: String
     ): Boolean = runCatching {
@@ -214,9 +339,9 @@ class SendSecureMessageFeature : BaseFeature() {
             "未找到 ${profile.sourceOwner}.$EMOJI_SOURCE_METHOD(${messageClass.name})"
         }
         check(target.returnType == String::class.java) { "表情 MsgSource 方法返回类型不匹配: $target" }
-        HookRegistry.get().hook(target, object : XC_MethodHook() {
+        val ready = hookOnce(target, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
-                if (!enabled() || param.hasThrowable()) return
+                if (closed || !enabled() || param.hasThrowable()) return
                 val message = param.args?.getOrNull(0) ?: return
                 if (readNumber(message, "field_type", "type", "getType", "getMsgType")?.toInt() != EMOJI_TYPE) {
                     return
@@ -224,20 +349,21 @@ class SendSecureMessageFeature : BaseFeature() {
                 param.result = SecureMessageSource.addMarker(param.result as? String)
                 if (!emojiSourceTriggeredLogged) {
                     emojiSourceTriggeredLogged = true
-                    logInfo("表情 MsgSource 安全标记已写入")
+                    log("表情 MsgSource 安全标记已写入")
                 }
             }
         })
-        emojiSourceInstalled = true
-        logInfo("表情 MsgSource Hook 已安装[$hostVersion]: ${target.toGenericString()}")
-        true
+        if (ready) {
+            emojiSourceInstalled = true
+            log("表情 MsgSource Hook 已安装[$hostVersion]: ${target.toGenericString()}")
+        }
+        ready
     }.getOrElse {
-        logError("表情 MsgSource Hook 安装失败[$hostVersion]", it)
+        report("表情 MsgSource Hook 安装失败[$hostVersion]", it)
         false
     }
 
     private fun installEmojiDispatchHook(
-        context: FeatureContext,
         profile: EmojiSecureMessageProfile,
         hostVersion: String
     ): Boolean = runCatching {
@@ -257,9 +383,9 @@ class SendSecureMessageFeature : BaseFeature() {
             "未找到 ${profile.emojiScene}.$EMOJI_DISPATCH_METHOD(${network.name},${dispatcher.name})"
         }
         check(target.returnType == Int::class.javaPrimitiveType) { "表情请求分发方法返回类型不匹配: $target" }
-        HookRegistry.get().hook(target, object : XC_MethodHook() {
+        val ready = hookOnce(target, object : XC_MethodHook() {
             override fun beforeHookedMethod(param: MethodHookParam) {
-                if (!enabled()) return
+                if (closed || !enabled()) return
                 try {
                     val request = KavaReflector.readField(param.thisObject, EMOJI_SCENE_REQUEST_FIELD) ?: return
                     val wrapper = KavaReflector.readField(request, EMOJI_REQUEST_WRAPPER_FIELD) ?: return
@@ -273,65 +399,25 @@ class SendSecureMessageFeature : BaseFeature() {
                     }
                     if (!emojiDispatchTriggeredLogged) {
                         emojiDispatchTriggeredLogged = true
-                        logInfo("表情 sendemoji 请求安全标记已写入")
+                        log("表情 sendemoji 请求安全标记已写入")
                     }
                 } catch (error: Throwable) {
-                    logError("表情 sendemoji 请求安全标记注入失败[$hostVersion]", error)
+                    report("表情 sendemoji 请求安全标记注入失败[$hostVersion]", error)
                 }
             }
         })
-        emojiDispatchInstalled = true
-        logInfo("表情 sendemoji Hook 已安装[$hostVersion]: ${target.toGenericString()}")
-        true
+        if (ready) {
+            emojiDispatchInstalled = true
+            log("表情 sendemoji Hook 已安装[$hostVersion]: ${target.toGenericString()}")
+        }
+        ready
     }.getOrElse {
-        logError("表情 sendemoji Hook 安装失败[$hostVersion]", it)
+        report("表情 sendemoji Hook 安装失败[$hostVersion]", it)
         false
     }
 
-    /**
-     * Media senders assign msgSource before the final local insert. Hook the setter layer
-     * as well so the marker reaches the actual image/video/emoji/AppMsg send request.
-     * Candidates are derived from the already verified insert argument class; no
-     * obfuscated method name is guessed.
-     */
-    private fun installSourceMergeHooks(insert: Method): Boolean {
-        val messageClass = insert.parameterTypes.firstOrNull {
-            !it.isPrimitive && it != String::class.java && it.name.startsWith(MESSAGE_PACKAGE)
-        } ?: return false
-        val candidates = generateSequence<Class<*>>(messageClass) { current -> current.superclass }
-            .takeWhile { it != Any::class.java }
-            .flatMap { KavaReflector.declaredMethods(it).asSequence() }
-            .filter(::isStringSetter)
-            .distinctBy { it.toGenericString() }
-            .toList()
-        if (candidates.isEmpty()) {
-            logError("安全消息 msgSource 合并入口未找到: ${messageClass.name}", null)
-            return false
-        }
-        var count = 0
-        candidates.forEach { method ->
-            runCatching {
-                HookRegistry.get().hook(method, object : XC_MethodHook() {
-                    override fun beforeHookedMethod(param: MethodHookParam) {
-                        if (!enabled()) return
-                        val source = param.args?.getOrNull(0) as? String ?: return
-                        if (!looksLikeMsgSource(source)) return
-                        val message = param.thisObject ?: return
-                        if (!isSupportedOutgoingMessage(message)) return
-                        param.args[0] = SecureMessageSource.addMarker(source)
-                    }
-                })
-                count++
-            }.onFailure {
-                logError("安全消息 msgSource 候选 Hook 安装失败: ${method.toGenericString()}", it)
-            }
-        }
-        mergeInstalled = count > 0
-        if (mergeInstalled) logInfo("安全消息 msgSource 合并 Hook 已安装: $count 个候选")
-        return mergeInstalled
-    }
-
-    private fun enabled(): Boolean = prefs?.getBoolean(SecureMessageSettings.KEY_ENABLE, SecureMessageSettings.DEFAULT_ENABLE) == true
+    private fun enabled(): Boolean =
+        prefs.getBoolean(SecureMessageSettings.KEY_ENABLE, SecureMessageSettings.DEFAULT_ENABLE)
 
     private fun isImageMessage(message: Any): Boolean {
         val type = readNumber(message, "field_type", "type", "getType", "getMsgType")?.toInt() ?: return false
@@ -349,14 +435,14 @@ class SendSecureMessageFeature : BaseFeature() {
         if (!setMessageSource(message, updated)) {
             if (!markerFailureLogged) {
                 markerFailureLogged = true
-                logError("安全消息标记注入失败: msgSource 不可写，类型=${message.javaClass.name}", null)
+                report("安全消息标记注入失败: msgSource 不可写，类型=${message.javaClass.name}", null)
             }
         } else if (isImageMessage(message) && !imageMarkerLogged) {
             imageMarkerLogged = true
-            logInfo("图片安全消息标记已写入 MsgSource")
+            log("图片安全消息标记已写入 MsgSource")
         } else if (!markerLogged) {
             markerLogged = true
-            logInfo("安全消息标记已写入消息")
+            log("安全消息标记已写入消息")
         }
     }
 
@@ -372,9 +458,7 @@ class SendSecureMessageFeature : BaseFeature() {
             val method = KavaReflector.findCompatibleMethod(message.javaClass, name, value)
             if (KavaReflector.invokeSuccessfully(method, message, value)) return true
         }
-        return SOURCE_FIELDS.any { fieldName ->
-            KavaReflector.writeField(message, fieldName, value)
-        }
+        return SOURCE_FIELDS.any { fieldName -> KavaReflector.writeField(message, fieldName, value) }
     }
 
     private fun isSupportedOutgoingMessage(message: Any): Boolean {
@@ -418,9 +502,15 @@ class SendSecureMessageFeature : BaseFeature() {
             trimmed.contains("</msgsource>", ignoreCase = true)
     }
 
-    private fun cachedOrLocate(context: FeatureContext, runtimeKey: String, name: String, anchor: String, predicate: (Method) -> Boolean): Method? {
-        DexMethodCache.load(methodPrefs, runtimeKey, context.hostClassLoader(), name)?.takeIf(predicate)?.let { return it }
-        val candidates = findMethods(context, anchor)
+    private fun cachedOrLocate(
+        runtimeKey: String,
+        name: String,
+        anchor: String,
+        predicate: (Method) -> Boolean
+    ): Method? {
+        DexMethodCache.load(methodPrefs, runtimeKey, context.hostClassLoader(), name)
+            ?.takeIf(predicate)?.let { return it }
+        val candidates = findMethods(anchor)
             .filter(predicate).distinctBy { it.toGenericString() }
         val method = candidates.maxByOrNull { candidate ->
             val params = candidate.parameterTypes
@@ -430,32 +520,35 @@ class SendSecureMessageFeature : BaseFeature() {
             if (params.any { it.name.contains("Msg", true) || it.simpleName.equals("k9", true) }) score += 2
             score
         }
-        if (method != null) DexMethodCache.save(methodPrefs, runtimeKey, name, method) else DexMethodCache.clear(methodPrefs, runtimeKey, name)
+        if (method != null) DexMethodCache.save(methodPrefs, runtimeKey, name, method)
+        else DexMethodCache.clear(methodPrefs, runtimeKey, name)
         return method
     }
 
-    private fun methodCacheKey(context: FeatureContext): String = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
+    private fun methodCacheKey(): String = DexMethodCache
+        .runtimeKey(context.hostContext(), context.hostClassLoader())
         .takeIf { it.isNotBlank() }
         ?.let { "$it|${SecureMessageSettings.CACHE_SCHEMA}" }
         .orEmpty()
 
-    private fun findMethods(context: FeatureContext, anchor: String): List<Method> = runCatching {
+    private fun findMethods(anchor: String): List<Method> = runCatching {
         context.dexKitManager().withCurrentBridge { bridge ->
-        val exact = bridge.findMethod(FindMethod().apply {
-            matcher(MethodMatcher().apply { usingEqStrings(anchor) })
-        })
-        val candidates = if (exact.isNotEmpty()) exact else {
-            runCatching {
-                bridge.findMethod(FindMethod().apply {
-                    matcher(MethodMatcher().apply { usingStrings(anchor) })
-                })
-            }.getOrDefault(emptyList())
-        }
-        candidates.mapNotNull { data -> runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull() }
-            .distinctBy { it.toGenericString() }
+            val exact = bridge.findMethod(FindMethod().apply {
+                matcher(MethodMatcher().apply { usingEqStrings(anchor) })
+            })
+            val candidates = if (exact.isNotEmpty()) exact else {
+                runCatching {
+                    bridge.findMethod(FindMethod().apply {
+                        matcher(MethodMatcher().apply { usingStrings(anchor) })
+                    })
+                }.getOrDefault(emptyList())
+            }
+            candidates.mapNotNull { data ->
+                runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
+            }.distinctBy { it.toGenericString() }
         }
     }.getOrElse {
-        logError("安全消息方法定位失败", it)
+        report("安全消息方法定位失败", it)
         emptyList()
     }
 
