@@ -1,8 +1,10 @@
 # 资源生命周期七项总清单：第1项续作检查点
 
-- 固定基准：`caa675c`。当前工作分支：`dev`。恢复时 HEAD：`c90207f18fe7729860619748b185053b841c4b27`。
-- 当前阶段：**第1项进行中，总清单0/7（0%阶段完成）**。109项历史首轮复核不等于109项最终闭环。
-- 本检查点不提交、不推送；等第1项全部范围修改、验证和归档完成后统一中文提交并推送，不能把本轮专项当作大项完成。
+- 固定基准：`caa675c`。当前工作分支：`dev`。恢复时 HEAD：`b20c093`，与 `origin/dev` 一致。
+- 当前阶段：**第1项进行中，总清单0/7（0%阶段完成）**。109项历史首轮复核不等于109项最终闭环；第1项内 109 个入口的最终核准仍为 **0/109**。
+- 第22～28号累计改动（79 文件）已在 `b20c093` 一次性中文提交并推送到 `origin/dev`，推送后 `origin/dev == HEAD`、工作区 0 项未提交（docs 勘误另计）。
+- 首个检查点当时的「不提交、不推送」约定已作废；后续每个大项完成后统一中文提交并推送，不得把单个入口的专项通过当作大项完成。
+- 阅读规则：`## 接续：第N号…` 各小节是**当时的归档记录**，里面出现的「未提交未推送」「下一入口第M号」只描述该次收口瞬间，不是当前状态；当前状态以上面三行 + 文末「编号勘误」为准。
 
 ## 固定顺序
 1. 全部功能的独占资源生命周期闭环。
@@ -222,10 +224,10 @@
 - 验证（生产代码真执行，非字符串断言）：`scripts/test_hchat_extra_scope.py` 四阶段。Phase A 切片真实 `HchatExtraRuntime` 原文 + 真实 `DexInstallScheduler` + 桩 hooker，覆盖 WARMUP 门、票据去重、关闭停重试、幂等 close、start 中孤儿回滚、干净重开且不误报；Phase B 编译真实 `ForwardedRecordTypeLabels.kt` + 真实 `FeatureOwnership.kt`，覆盖被拒安装返回 false、单句柄、真实 bind、被拒投递上报、销毁丢弃排队刷新、句柄只释放一次、迟到回调 no-op、unhook 失败隔离；Phase C 编译真实 `MessageDetailsPendingLayoutObserver.kt`，覆盖即时投递被拒后下一次布局重试、轮询被拒后链条仍活、clear 摘监听、脱离窗口抑制、连续被拒后恢复；Phase D 剥注释后做源码不变量（入口所有权、四个重启键、先释放后启动、不直接触 `HookRegistry`、Hook 最后撤、票据先于 hooker、孤儿回滚、每处投递判返回值）。四行 PASS、`feature lines: 4436`、`labels lines: 270`、`ALL PHASES PASSED`、exit=0。
 - 突变检验（证明脚本不恒绿）：`scripts/mutate_hchat_extra_scope.py` 八条注入全部 FAIL-CAUGHT——A posted 归位失效、B labels 谎报安装成功、C 删 `ownedHooks.close()`、D 尾部超时改裸调、E 逐视图隔离换 `run{}`+`if (false)`、F 摘除投递不判返回值、G labels 先关 main 再卸句柄、H Runtime 先销毁后停重试。`BASELINE exit=0`、`mutations caught: 8/8`、`FINAL exit=0 (restored)`。
 - 证据：两份日志 SHA256 为 `fdc3de24e4d32e81e4cce549c52fabc8f8bd6b4a0f834df32631b0670e95ff36`（924 字节）/ `2a812a097e83cae66e00354d5238d8ddaf0d20ac944463160afb6c310c3bd35a`（1307 字节），原始日志在 `/tmp/pl-stage1-20261103-hchatextra/`；10 个文件指纹写入 `docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.HchatExtraFeature`，历史 7 个 continuation 指纹零漂移；`run_resource_regression.py` 登记 `test_hchat_extra_scope`（129 → 130）。审计条目 `features[107]` 已按真实源码重写，四条旧缺口移入 resolvedFindings，openFindings 收为 2 条（109 核准 0/109、设备验收缺口）。
-- 边界：未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话验证回调线程、View 复用与内存回收；缓存 ABI 为 2026-10-29～11-02 旧产物且缺多个宿主类，全包编译不可成立，只能声称四阶段定向编译并执行通过。共享 `DexInstallScheduler` 与 `NativeGroupNicknameGate` 内部引用计数归第2项，在途页面与业务归第3项，容量归第4项。109 入口最终核准仍 0/109，七阶段 0/7，`deviceAcceptance` 仍为 false；未提交未推送。下一入口第28号 ScriptPluginFeature。
+- 边界：未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话验证回调线程、View 复用与内存回收；缓存 ABI 为 2026-10-29～11-02 旧产物且缺多个宿主类，全包编译不可成立，只能声称四阶段定向编译并执行通过。共享 `DexInstallScheduler` 与 `NativeGroupNicknameGate` 内部引用计数归第2项，在途页面与业务归第3项，容量归第4项。109 入口最终核准仍 0/109，七阶段 0/7，`deviceAcceptance` 仍为 false。（本节为第27号收口当时状态：当时未提交未推送；第28号已完成，两者一并进入了 `b20c093`。）
 
 ## 接续：第28号脚本插件专项（2026-11-03）
-- 现场：分支 dev、HEAD `c90207f18fe7729860619748b185053b841c4b27`、固定基准 `caa675c`；历史未提交改动与新增测试/证据全部保留，未 reset/clean/commit/push，未运行 Gradle。
+- 现场：分支 dev、HEAD `c90207f18fe7729860619748b185053b841c4b27`、固定基准 `caa675c`；历史未提交改动与新增测试/证据全部保留，未 reset/clean，未运行 Gradle。（收口当时未提交；此后已完成一次性中文提交并推送，结果见文件头 `b20c093`。）
 - 入口所有权：`ScriptPluginFeature` 不再持有任何全局安装标志；每个启用区间新建 `ScriptHookGeneration`，独占四张 `DexInstallScheduler.Installation` 票据（`script_plugin:menus` / `:message` / `:new_friend` / `:member_change`，全部 `Stage.WARMUP`）、两份本代订阅（`ScriptMessageHook` 的消息变动监听 + 订阅句柄、`ScriptMemberChangeHook` 的群成员监听 + 消息观察监听）以及好友申请监听的共享租约（`SharedHookLease`，key `shared:new_friend_listener`，owner `script_plugin`）。`BaseFeature.trackResource` 兜底登记，`onFeatureDestroy` 未执行也会撤销本代。
 - 关闭顺序（源码注释写明不可交换）：锁内置 `closed`、取 `tickets` / `newFriendLease` / `started` 三元组；`started` 为假直接 return（从未成功 start 的代不关闭别人的运行时、不撤销别人的订阅）→ 取消票据停重试 → 撤销本代两份订阅 → 关闭本代运行时 → 归还共享租约。`start()` 在锁内被拒时对新建票据 `created.forEach(::closeTicket)` 回滚孤儿。
 - 本轮修掉的真实生产缺陷：`installNewFriend()` 在取得租约后才发现 `closed`，原先直接 `return false` 会把 owner 留在共享租约里，脚本退出后自动回复仍持有时监听撤不掉、反之亦然；现改为就地 `release(OWNER_SCRIPT)`。`ScriptPluginRuntime.install(context)` 包 try/catch，运行时不抛是常态，万一抛也不能让本代停在半启动状态。
@@ -234,4 +236,5 @@
 - 顺带修掉的测试侧缺陷（不影响生产语义但会让红测指错地方）：Phase B 的 `await("首次菜单安装尝试") { count > 0 }` 用绝对阈值，前面几代已装过菜单时会立刻返回，漏掉本代首次尝试，改为相对 `menuBase`；「关闭后不得再重试安装」原先固定等 1200ms 就断言，而 `DexInstallScheduler.cancel` 明确不中断已在执行器里跑的那一次安装，改为先让在途尝试落地取快照、再跨过 1000ms/3000ms 两个重试周期断言计数不增长。
 - 证据：`docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.ScriptPluginFeature` 含两份日志（`test_script_plugin_scope.log` SHA256 `b7a5bcfde9e7ae8713b41c26bbb27023be34ce36ac7d57ab122df1cd1df6a2a2` 1108 字节、`mutate_script_plugin_scope.log` SHA256 `54db4bde15f5c081a94f9c596d5b1ccb30de5ae756b970e3bc422eb3936453e7` 4546 字节，内嵌文本与磁盘逐字节一致）、8 个文件指纹、4 条突变定性记录、7 条 deferred 与验证边界。原始日志在 `/tmp/pl-stage1-20261103-scriptplugin/`。
 - 回归：`scripts/run_resource_regression.py` 登记 `test_script_plugin_scope`（130 → 131，131 项唯一）。审计 `features[108]` 已按真实源码重写（status 366 字），本轮收口补证追加进 resolvedFindingEvidence（现 7 条），openFindings 仍 2 条（109 核准 0/109、设备验收缺口），findingReview 2 条验收边界。
-- 边界：未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话验证宿主回调线程、插件生命周期与内存回收；四阶段是合成 JVM 边界下真执行生产代码切片与源码不变量。共享 `NativeGroupNicknameGate` 引用计数与共享 `DexInstallScheduler.schedule(owner=null)` 通用重试边界归第2项，在途消息分发与脚本执行业务归第3项，消息分发队列 128 格 / 媒体补查队列 32 格 / 去重表容量归第4项。109 入口最终核准仍 0/109，七阶段 0/7，`deviceAcceptance` 仍为 false；未提交未推送。下一入口第29号。
+- 边界：未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话验证宿主回调线程、插件生命周期与内存回收；四阶段是合成 JVM 边界下真执行生产代码切片与源码不变量。共享 `NativeGroupNicknameGate` 引用计数与共享 `DexInstallScheduler.schedule(owner=null)` 通用重试边界归第2项，在途消息分发与脚本执行业务归第3项，消息分发队列 128 格 / 媒体补查队列 32 格 / 去重表容量归第4项。109 入口最终核准仍 0/109，七阶段 0/7，`deviceAcceptance` 仍为 false。（收口当时未提交未推送；已在 `b20c093` 一次性中文提交并推送到 `origin/dev`，见文件头。）
+- 编号勘误（2026-11-03 核实）：第28号对应台账第 109 行、审计 `features[108]`，即 109 个入口的最后一条，**不存在第29号**。此前若干小节里的「下一入口第N号」只是当时随手指到的下一个未收口条目，不是严格顺序编号——例如第26号 AutoRedPacketFeature 之后并没有走台账第 27 行 WeChatTabletFeature，而是直接跳到台账第 108 行 HchatExtraFeature。后续接续一律以台账行号与审计下标为准，不按「+1」推。第1项剩余待收口条目：台账共 109 行，已收口 9 行——台账行 20~26（审计 features[19]~[25]：DynamicBadge、RoundAvatar、CustomFriendAvatar、RealNameTail、MemberTitle、NicknameWidth、AutoRedPacket）、台账行 108（审计 features[107] HchatExtraFeature）、台账行 109（审计 features[108] ScriptPluginFeature）；其余 100 行为未核准入口，从台账第 1 行 SettingsFeature（审计 features[0]）起逐条推进。换算关系固定为：台账行号 = 审计下标 + 1。
