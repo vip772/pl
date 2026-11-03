@@ -359,15 +359,12 @@ object ScriptNewFriendHook {
     }
 
     private fun decodeXml(value: String): String {
-        val amp = '&'.single()
-        val quote = 34.toChar()
-        val apostrophe = 39.toChar()
         return value
-            .replace(amp + "lt;", "<")
-            .replace(amp + "gt;", ">")
-            .replace(amp + "quot;", quote.toString())
-            .replace(amp + "apos;", apostrophe.toString())
-            .replace(amp + "amp;", amp.toString())
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&quot;", "\"")
+            .replace("&apos;", "'")
+            .replace("&amp;", "&")
     }
 
     private fun decodeUrl(value: String): String {

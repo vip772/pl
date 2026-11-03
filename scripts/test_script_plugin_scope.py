@@ -26,6 +26,9 @@ import os
 import subprocess
 import sys
 import tempfile
+import sys as _sys
+_sys.path.insert(0, str(Path(__file__).resolve().parent))
+import check_script_newfriend_compile as newfriend_gate
 
 ROOT = Path(__file__).resolve().parents[1]
 LIBS = Path('/tmp/pl-kotlin-libs')
@@ -1036,6 +1039,18 @@ fun main() {
 '''
 
 
+def phase_c2(tmp: Path):
+    """Real compile gate for ScriptNewFriendHook.kt.
+
+    Phases A-C compile ScriptPluginFeature's generation, ScriptMessageHook and
+    ScriptMemberChangeHook. ScriptNewFriendHook.kt was never handed to the Kotlin
+    compiler: Phase D only pattern-matches its text. That gap is how commit b20c093
+    shipped a Char.single() call (Char is not a CharSequence) into a red CI build
+    while all four local phases still printed PASS.
+    """
+    newfriend_gate.run(tmp)
+
+
 def phase_c(tmp: Path):
     files = {
         'Probe.kt': PROBE_STUB,
@@ -1155,6 +1170,8 @@ def main():
         phase_b(tmp)
         print('--- phase C: hook subscription ownership ---')
         phase_c(tmp)
+        print('--- phase C2: real compile gate for ScriptNewFriendHook ---')
+        phase_c2(tmp)
     print('--- phase D: source invariants ---')
     phase_d()
     print('ALL PHASES PASSED')

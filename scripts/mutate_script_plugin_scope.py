@@ -166,6 +166,13 @@ MUTANTS = [
         'val subscription = changeApi.subscribe { change -> val unused = change; Unit }',
         'script hook subscriptions',
     ),
+    (
+        "friend hook builds the ampersand via Char.single()",
+        NEWFRIEND,
+        "return value\n            .replace(\"&lt;\", \"<\")",
+        "val amp = '&'.single()\n            .replace(amp + \"lt;\", \"<\")",
+        "real compile",
+    ),
 ]
 
 
@@ -239,7 +246,8 @@ def main():
                 detail = ''
                 for stream in (result.stdout, result.stderr):
                     for line in stream.splitlines():
-                        if 'Exception' in line or 'AssertionError' in line or 'MISSING' in line:
+                        if ('Exception' in line or 'AssertionError' in line or 'MISSING' in line
+                                or 'error:' in line or 'kompile failed' in line or 'compile failed' in line):
                             detail = line.strip()[:200]
                             break
                     if detail:
