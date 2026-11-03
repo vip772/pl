@@ -5680,7 +5680,7 @@
     {
       "feature": "ScriptPluginFeature",
       "source": "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt",
-      "status": "每个启用区间新建 ScriptHookGeneration 独占四张 DexInstallScheduler.Installation 票据、ScriptMessageHook/ScriptMemberChangeHook 两份本代订阅与好友申请监听租约；关闭顺序固定为取消票据->撤销本代订阅->关闭运行时->归还租约；未启动的代 close() 为空操作，取得租约期间被关闭则就地归还租约。共享安装点（视频号详情、发送按钮）只由本代发起、不撤销。四阶段专项验证全绿（test_script_plugin_scope.py，1164 行，exit=0），19 条突变全部捕获（mutate_script_plugin_scope.py，19/19，ALL MUTANTS CAUGHT），已登记回归清单 131 项；实机验收待闭环",
+      "status": "每个启用区间新建 ScriptHookGeneration 独占四张 DexInstallScheduler.Installation 票据、ScriptMessageHook/ScriptMemberChangeHook 两份本代订阅与好友申请监听租约；关闭顺序固定为取消票据->撤销本代订阅->关闭运行时->归还租约；未启动的代 close() 为空操作，取得租约期间被关闭则就地归还租约。共享安装点（视频号详情、发送按钮）只由本代发起、不撤销。五阶段专项验证全绿（test_script_plugin_scope.py，1181 行，exit=0，新增 Phase C2 真编译闸门），20 条突变全部捕获（mutate_script_plugin_scope.py，20/20，ALL MUTANTS CAUGHT），已登记回归清单 132 项；CI 实跑 Gradle 曾在此条目抓出 ScriptNewFriendHook.kt:362:23 编译错误并已修复；实机验收待闭环",
       "evidence": [
         "17: registerSettingsProvider(ScriptPluginSettingsProvider())",
         "20: override fun onFeatureInstall(context: FeatureContext) {",
@@ -5702,11 +5702,12 @@
         "scripts/test_script_resource_scope.py",
         "scripts/test_dex_query_consumers.py",
         "scripts/test_script_plugin_scope.py",
-        "scripts/mutate_script_plugin_scope.py"
+        "scripts/mutate_script_plugin_scope.py",
+        "scripts/check_script_newfriend_compile.py"
       ],
       "openFindings": [
         "109 入口最终核准仍 0/109、七阶段 0/7；本条目专项通过不等于实机验收。",
-        "未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话验证回调线程、View 复用与内存回收；deviceAcceptance 仍为 false。"
+        "CI 实跑 Gradle 已抓出并修复一例真实编译错误，但本地未复跑完整 Gradle/Android/R8 构建，构建转绿与真实微信 8.0.78 会话（回调线程、View 复用、内存回收）均待验证；deviceAcceptance 仍为 false。"
       ],
       "resolvedFindingEvidence": [
         {
@@ -5797,6 +5798,18 @@
             "scripts/mutate_script_plugin_scope.py"
           ],
           "boundary": "directed JVM/ABI validation: 合成边界下真执行生产代码切片与源码不变量；not Android/R8 build and not device acceptance"
+        },
+        {
+          "finding": "2026-11-03 CI 修复补证：GitHub Actions 的 :app:compileReleaseKotlin 因 ScriptNewFriendHook.kt:362:23 Unresolved reference 'single' 失败（全日志 Kotlin 错误 1、警告 0），根因是 b20c093 把 decodeXml 的五条字面 replace 改写成 Char.single() 拼接（Char 不是 CharSequence，写盘即编译不过）。本地四阶段为何全绿：Phase A/B/C 从未编译该文件，Phase D 只做文本断言，文本无法证明可编译性。已回退 decodeXml 至 b20c093^ 原写法（429→426 行），新增 scripts/check_script_newfriend_compile.py 把真实 ScriptNewFriendHook.kt 连同真实 SharedHookLease/DatabaseChange/WeChatMessageTypes 交给 K2JVMCompiler 真编译（宿主面 12 个声明桩），接入 test_script_plugin_scope.py 作为 Phase C2，登记 run_resource_regression.py（131→132），突变扩至 20 条且第 20 条捕获详情与 CI 逐字同位置。",
+          "category": "已解决有证据",
+          "evidence": [
+            "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.ScriptPluginFeature.buildEvidence",
+            "/tmp/pl-stage1-20261103-scriptplugin2/test_script_plugin_scope.log",
+            "/tmp/pl-stage1-20261103-scriptplugin2/mutate_script_plugin_scope.log",
+            "scripts/check_script_newfriend_compile.py",
+            "app/src/main/java/t/mma/hooks/items/script/ScriptNewFriendHook.kt"
+          ],
+          "boundary": "CI 实跑 Gradle 是唯一真实构建证据（非本地构建）；修复后本地只跑到真编译闸门与五阶段专项，构建转绿须等 CI 复跑。"
         }
       ],
       "findingReview": [
@@ -5811,14 +5824,16 @@
           "boundary": "专项定向验证与突变检验通过，但未执行 Android/R8 构建与实机内存验收。"
         },
         {
-          "finding": "未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话验证回调线程、View 复用与内存回收；deviceAcceptance 仍为 false。",
+          "finding": "本地未运行完整 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话验证回调线程、View 复用与内存回收；deviceAcceptance 仍为 false。",
           "category": "验收边界",
           "evidence": [
+            "scripts/check_script_newfriend_compile.py",
             "scripts/test_script_plugin_scope.py",
-            "scripts/mutate_script_plugin_scope.py"
+            "scripts/mutate_script_plugin_scope.py",
+            "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.ScriptPluginFeature.buildEvidence"
           ],
           "remainingOpen": true,
-          "boundary": "缓存 ABI 为旧产物且缺多个宿主类；只能声称定向编译并执行通过。"
+          "boundary": "CI 已实跑 Gradle 并据此修掉一例真实编译错误；本地仍只有定向 K2JVMCompiler 编译与合成 JVM 边界执行，不等于 Android/R8 构建通过，也不等于实机验收。"
         }
       ]
     }
