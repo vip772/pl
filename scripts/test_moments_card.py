@@ -39,17 +39,19 @@ object PixelFormat { const val TRANSLUCENT=-3 }
 class Rect(val left:Int,val top:Int,val right:Int,val bottom:Int)
 class RectF {var left=0f;var top=0f;var right=0f;var bottom=0f
  fun set(l:Float,t:Float,r:Float,b:Float){left=l;top=t;right=r;bottom=b}
- fun width()=right-left; val isEmpty get()=right<=left || bottom<=top
+ fun width()=right-left; fun height()=bottom-top; val isEmpty get()=right<=left || bottom<=top
 }
 open class Shader { enum class TileMode {CLAMP} }
 class LinearGradient(l:Float,t:Float,r:Float,b:Float,c:IntArray,p:FloatArray?,m:Shader.TileMode):Shader(){init{allocations++};companion object{var allocations=0}}
 class ColorFilter
-class Paint(f:Int) { var color=0;var style=Style.FILL;var strokeWidth=0f;var alpha=255;var colorFilter:ColorFilter?=null;var shader:Shader?=null
+class Paint(f:Int) { var color=0
+ set(v){field=v;alpha=v ushr 24}
+ var style=Style.FILL;var strokeWidth=0f;var alpha=255;var colorFilter:ColorFilter?=null;var shader:Shader?=null
  enum class Style{FILL,STROKE};companion object{const val ANTI_ALIAS_FLAG=1}
 }
-class Canvas {var draws=0;var last:List<Float> = emptyList();val ops=mutableListOf<Pair<String,Int>>()
+class Canvas {var draws=0;var lastAlpha=255;var lastRadius=0f;var last:List<Float> = emptyList();val ops=mutableListOf<Pair<String,Int>>()
  fun drawRect(r:RectF,p:Paint){draws++;ops+="rect" to p.color}
- fun drawRoundRect(r:RectF,x:Float,y:Float,p:Paint){draws++;ops+="round" to p.color;last=listOf(r.left,r.top,r.right,r.bottom)}}
+ fun drawRoundRect(r:RectF,x:Float,y:Float,p:Paint){draws++;lastAlpha=p.alpha;lastRadius=x;ops+="round" to p.color;last=listOf(r.left,r.top,r.right,r.bottom)}}
 ''',
     'Drawable.kt': '''package android.graphics.drawable
 import android.graphics.*
@@ -98,9 +100,9 @@ fun main(){
  v.background=bg;v.foreground=fg;v.setPadding(1,2,3,4)
  apply(r,v,divider);val card=v.background
  check(card is MomentsCardDrawable && v.foreground is LayerDrawable)
- check(padding(v)==listOf(13,2,15,8) && divider.visibility==View.GONE)
+ check(padding(v)==listOf(13,2,15,16) && divider.visibility==View.GONE)
  repeat(1000){apply(r,v,divider)}
- check(v.background===card && padding(v)==listOf(13,2,15,8))
+ check(v.background===card && padding(v)==listOf(13,2,15,16))
  r.close();r.close();check(v.background===bg && v.foreground===fg)
  check(padding(v)==listOf(1,2,3,4) && divider.visibility==View.VISIBLE)
  apply(r,v);check(v.background===bg)
@@ -118,20 +120,23 @@ fun main(){
  repeat(60){if(weak.get()!=null){System.gc();Thread.sleep(10)}}
  check(weak.get()==null){"Card index retained host Drawable.Callback/View cycle"};gc.close()
  // No border is required to distinguish the card from its gutters/gap.
- val surface=Canvas();val outlined=MomentsCardDrawable(2f,4,12,-1,null,surround=0xFFF2F2F2.toInt())
+ val surface=Canvas();val outlined=MomentsCardDrawable(2f,12,12,-1,null,surround=0xFFF2F2F2.toInt())
  outlined.bounds(0,0,200,100);outlined.draw(surface)
  check(surface.ops==listOf("rect" to 0xFFF2F2F2.toInt(),"round" to -1))
- val dark=Canvas();val darkCard=MomentsCardDrawable(2f,4,12,0xFF242424.toInt(),null,surround=0xFF191919.toInt())
+ val dark=Canvas();val darkCard=MomentsCardDrawable(2f,12,12,0xFF242424.toInt(),null,surround=0xFF191919.toInt())
  darkCard.bounds(0,0,200,100);darkCard.draw(dark)
  check(dark.ops==listOf("rect" to 0xFF191919.toInt(),"round" to 0xFF242424.toInt()))
- val canvas=Canvas();val fill=MomentsCardDrawable(2f,4,12,-1,null)
- fill.bounds(0,0,200,100);fill.draw(canvas);check(canvas.last==listOf(12f,0f,188f,96f))
- val stroke=MomentsCardDrawable(2f,4,12,0,intArrayOf(1,2,3));val before=LinearGradient.allocations
+ val canvas=Canvas();val fill=MomentsCardDrawable(2f,12,12,-1,null)
+ fill.bounds(0,0,200,100);fill.draw(canvas);check(canvas.last==listOf(12f,0f,188f,88f))
+ val stroke=MomentsCardDrawable(2f,12,12,0,intArrayOf(1,2,3));val before=LinearGradient.allocations
  stroke.bounds(0,0,200,100);check(LinearGradient.allocations==before+1)
  repeat(1000){stroke.draw(canvas)};check(LinearGradient.allocations==before+1)
- check(canvas.last==listOf(13f,1f,187f,95f))
+ check(canvas.last==listOf(14f,2f,186f,86f))
+ check(canvas.lastAlpha==255 && canvas.lastRadius==42f)
+ stroke.setAlpha(128);stroke.draw(canvas);check(canvas.lastAlpha==128)
+ stroke.setAlpha(255)
  stroke.bounds(0,0,220,100);check(LinearGradient.allocations==before+2)
- println("PASS production style/restore/draw bodies: 2dp gap, 1dp inset stroke, repeated bind, off/on, stale guard, main-thread cleanup, host replacement, 192-view cap, collectible callback cycle, no gradient allocations during draw")
+ println("PASS production style/restore/draw bodies: 6dp gap, 2dp inset stroke, repeated bind, off/on, stale guard, main-thread cleanup, host replacement, 192-view cap, collectible callback cycle, no gradient allocations during draw")
 }
 ''',
 }

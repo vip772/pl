@@ -7,6 +7,8 @@ object MomentsCardSettings {
     const val BORDER = "border_enable"
     const val COLORS = "border_colors"
     const val DEFAULT_COLORS = "#FF4D67,#7C6BFF,#FFC857"
-    const val GAP_DP = 2
-    const val STROKE_DP = 1
+    const val GAP_DP = 6
+    const val STROKE_DP = 2
+    const val CORNER_RADIUS_DP = 32
+    const val CARD_BACKGROUND = 0xFFA7A59D.toInt()
 }

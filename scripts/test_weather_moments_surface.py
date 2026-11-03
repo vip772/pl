@@ -31,13 +31,23 @@ draw = card.split('override fun draw(canvas: Canvas)', 1)[1].split('override fun
 assert draw.index('canvas.drawRect(surroundRect') < draw.index('canvas.drawRoundRect(rect')
 assert 'Paint(' not in draw and 'LinearGradient(' not in draw
 assert 'surround = if (night) 0xFF191919.toInt() else 0xFFF2F2F2.toInt()' in card
-assert 'if (night) 0xFF242424.toInt() else Color.WHITE' in card
+assert 'MomentsCardSettings.CARD_BACKGROUND, null, original' in card
+settings = (BASE / 'hooks/items/moments/MomentsCardSettings.kt').read_text()
+assert 'const val GAP_DP = 6' in settings
+assert 'const val STROKE_DP = 2' in settings
+assert 'const val CORNER_RADIUS_DP = 32' in settings
+assert 'const val CARD_BACKGROUND = 0xFFA7A59D.toInt()' in settings
+assert 'color = if (colors == null) fill else Color.WHITE' in card
+assert 'rect.height().coerceAtLeast(0f) / 2' in card
+page = (BASE / 'ui/miuix/MomentsCardMiuixPage.kt').read_text()
+assert '卡片间距 6dp' in page and '添加 2dp 三色渐变描边' in page
+print('PASS source: opaque shader paint, fixed #A7A59D, 6dp gap, 2dp stroke, 32dp capsule-like corners')
 # Numeric geometry check only, not an execution of Kotlin/Android drawing.
 for density in (1, 2, 3):
-    side, gap = int(6*density+.5), int(2*density+.5)
-    assert side > 0 and gap == 2*density
-    assert 0xFFF2F2F2 != 0xFFFFFFFF and 0xFF191919 != 0xFF242424
-print('PASS source/geometry: contrasting light/dark gutters, 2dp gap, no draw-time shader allocation')
+    side, gap = int(6*density+.5), int(6*density+.5)
+    assert side > 0 and gap == 6*density
+    assert 0xFFF2F2F2 != 0xFFA7A59D and 0xFF191919 != 0xFFA7A59D
+print('PASS source/geometry: contrasting light/dark gutters, 6dp gap, no draw-time shader allocation')
 ast.parse((ROOT / 'scripts/test_moments_card.py').read_text())
 print('PASS Python syntax: updated Android synthetic harness (NOT compiled or executed)')
 parser = argparse.ArgumentParser()

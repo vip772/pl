@@ -45,3 +45,6 @@ python3 -S scripts/test_home_header_bootstrap_source.py：源码约束检查通�
 python3 -S scripts/test_weather_moments_surface.py --native-dir /tmp/pl-card-native-fresh：源码、绘制几何与既有原生证据检查通过；不代表实机验收。
 
 朋友圈外观 5 个既有修改文件的 git diff SHA256 仍为 a04db15baf29fcdcc559a78e8d7c019e825fd8b3faaadb0dbc9ec3c85f04a7d1，与 /tmp/pl-header-fix-20261103/prior-moments.patch 一致；docs/MOMENTS_CARD_APPEARANCE_LOCAL.md 同样保留，禁止混入本次提交。
+## 后续提交范围变更
+
+首屏补挂代码与排查记录已以 dd3f945 中文提交并推送 dev。用户随后明确要求全部提交推送，现将此前保留的朋友圈外观代码、检查脚本及外观记录一并提交到 dev；前述不纳入提交的表述仅为当时范围，已被本次授权覆盖。标题栏灰化仍未修复，实机验收仍为 0/2，提交推送不代表整个双问题任务已完成。

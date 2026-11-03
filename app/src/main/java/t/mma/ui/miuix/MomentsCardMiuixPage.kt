@@ -29,13 +29,13 @@ internal fun MomentsCardMiuixPage(context: Context, provider: FeatureSettingsPro
             contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item { SettingsCard {
-                SwitchRow(enabled, "卡片模式", "每条动态显示为独立卡片，卡片间距 2dp") {
+                SwitchRow(enabled, "卡片模式", "每条动态显示为独立卡片，卡片间距 6dp") {
                     enabled = it
                     prefs.edit().putBoolean(Settings.ENABLE, it).apply()
                 }
                 if (enabled) {
                     InsetDivider()
-                    SwitchRow(border, "描边颜色", "为每张卡片添加 1dp 三色渐变描边") {
+                    SwitchRow(border, "描边颜色", "为每张卡片添加 2dp 三色渐变描边") {
                         border = it
                         prefs.edit().putBoolean(Settings.BORDER, it).apply()
                     }

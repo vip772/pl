@@ -26,7 +26,7 @@ class MomentsCardFeature : BaseFeature() {
 
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(object : SimpleFeatureSettingsProvider(
-            ID, name(), "独立动态卡片、2dp 间距与三色渐变描边",
+            ID, name(), "独立动态卡片、6dp 间距与三色渐变描边",
             FeatureSettingsProvider.CATEGORY_PRACTICAL, true
         ) {}, enabledCheck = {
             HchatStorage.preferences(context.hostContext(), MomentsCardSettings.PREFS_NAME)
@@ -165,10 +165,9 @@ internal class MomentsCardRuntime(
         )
         originals[view] = WeakReference(original)
         // Keep host descendants, tags, listeners, clipping and layout-param types untouched.
-        // Paint the row's exposed gutters/gap too: the native timeline is white.
-        // A white round-rect on that same white surface has no visible card boundary.
+        // Preserve contrasting gutters around the requested fixed card color.
         val fill = MomentsCardDrawable(
-            density, gap, side, if (night) 0xFF242424.toInt() else Color.WHITE, null, original,
+            density, gap, side, MomentsCardSettings.CARD_BACKGROUND, null, original,
             surround = if (night) 0xFF191919.toInt() else 0xFFF2F2F2.toInt()
         )
         original.installedBackground = WeakReference(fill)
@@ -230,22 +229,27 @@ internal class MomentsCardDrawable(
     private val surroundPaint = if (surround == Color.TRANSPARENT) null else
         Paint(Paint.ANTI_ALIAS_FLAG).apply { color = surround; style = Paint.Style.FILL }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        color = fill
+        // Paint alpha modulates shader colors: a transparent unused fill hides the stroke.
+        color = if (colors == null) fill else Color.WHITE
         style = if (colors == null) Paint.Style.FILL else Paint.Style.STROKE
         strokeWidth = MomentsCardSettings.STROKE_DP * density
     }
-    private val radius = 12 * density
+    private val radius = MomentsCardSettings.CORNER_RADIUS_DP * density
+    private var drawRadius = radius
     override fun onBoundsChange(bounds: Rect) {
         surroundRect.set(bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat())
         val half = if (colors == null) 0f else paint.strokeWidth / 2
         rect.set(bounds.left + side + half, bounds.top + half, bounds.right - side - half, bounds.bottom - gap - half)
+        // Match the inner stroke curve to the fill; clamp short rows to a capsule.
+        drawRadius = minOf((radius - half).coerceAtLeast(0f),
+            rect.width().coerceAtLeast(0f) / 2, rect.height().coerceAtLeast(0f) / 2)
         if (colors != null && rect.width() > 0) {
             paint.shader = LinearGradient(rect.left, rect.top, rect.right, rect.bottom, colors, null, Shader.TileMode.CLAMP)
         }
     }
     override fun draw(canvas: Canvas) {
         surroundPaint?.let { canvas.drawRect(surroundRect, it) }
-        if (!rect.isEmpty) canvas.drawRoundRect(rect, radius, radius, paint)
+        if (!rect.isEmpty) canvas.drawRoundRect(rect, drawRadius, drawRadius, paint)
     }
     override fun setAlpha(alpha: Int) {
         paint.alpha = alpha; surroundPaint?.alpha = alpha; invalidateSelf()
