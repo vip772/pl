@@ -5468,20 +5468,23 @@ public class DexFinder {
     }
 
     private Constructor<?> findRevokeMsgCtor(Class<?> cl) {
-        if (cl == null || localMessageClass == null) return null;
+        if (cl == null) return null;
+        Constructor<?> matched = null;
         for (Constructor<?> ctor : KavaReflector.declaredConstructors(cl)) {
             Class<?>[] params = ctor.getParameterTypes();
-            if (params.length != 3) continue;
-            if (!params[0].isAssignableFrom(localMessageClass)
-                    && !localMessageClass.isAssignableFrom(params[0])) {
-                continue;
-            }
-            if (params[1] != String.class || params[2] != String.class) continue;
-            return KavaReflector.accessible(ctor);
+            if (params.length != 3 || params[1] != String.class || params[2] != String.class) continue;
+            // 撤回持有原生消息，不依赖可被系统消息路径跳过的本地插入 API。
+            // 仅接受原生消息的稳定存储字段；不写回 localMessageClass，避免污染插入能力。
+            if (!params[0].getName().startsWith("com.tencent.mm.storage.")) continue;
+            Field msgId = KavaReflector.findFieldRecursive(params[0], "field_msgId");
+            Field isSend = KavaReflector.findFieldRecursive(params[0], "field_isSend");
+            if (msgId == null || msgId.getType() != long.class
+                    || isSend == null || isSend.getType() != int.class) continue;
+            if (matched != null) return null;
+            matched = ctor;
         }
-        return null;
+        return matched != null ? KavaReflector.accessible(matched) : null;
     }
-
     private Constructor<?> findUploadDeviceStepCtor(Class<?> cl) {
         if (cl == null) return null;
         for (Constructor<?> ctor : KavaReflector.declaredConstructors(cl)) {

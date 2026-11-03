@@ -73,9 +73,10 @@ internal class MomentsCardRuntime(
 ) : AutoCloseable {
     private val hooks = OwnedHooks(report)
     private val main = Handler(Looper.getMainLooper())
-    // State is owned by the installed drawable, never strongly by this index.
-    // Host drawables may retain their View through Drawable.Callback.
+    // State is owned by a keyed row tag; the index never owns host View/Drawable cycles.
+    // A replaced drawable must not lose the baseline and compound padding at next bind.
     private val originals = WeakHashMap<View, WeakReference<Original>>()
+    private val ownerToken = Any()
     // Weak index; the installed drawable owns the original background, not the runtime.
     private val listBackgrounds = WeakHashMap<View, WeakReference<TimelineBackground>>()
     private class TimelineBackground(val original: Drawable?) : android.graphics.drawable.ColorDrawable(Color.WHITE)
@@ -171,47 +172,76 @@ internal class MomentsCardRuntime(
 
     private fun style(view: View, divider: View? = null) {
         if (closed || Looper.myLooper() != Looper.getMainLooper()) return
-        val existing = originals[view]?.get()
-        if (existing != null) {
-            existing.divider?.get()?.let { if (it.visibility != View.GONE) it.visibility = View.GONE }
+        val tagged = view.getTag(t.mma.R.id.hchat_moments_card_state) as? Original
+        if (tagged != null && tagged.owner === ownerToken) {
+            applyStyle(view, tagged)
             return
         }
         if (originals.size >= MAX_VIEWS) return
+        // A retired generation may still be awaiting its main-thread cleanup.
+        if (tagged != null) restore(view, tagged)
         whitenTimeline(view)
         val density = view.resources.displayMetrics.density
         val side = (6 * density + .5f).toInt()
         val gap = (MomentsCardSettings.GAP_DP * density + .5f).toInt()
-        val inset = (MomentsCardSettings.CONTENT_INSET_DP * density + .5f).toInt()
         val original = Original(
             view.background, view.foreground?.let { java.lang.ref.WeakReference(it) },
             view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom,
             divider?.let { java.lang.ref.WeakReference(it) }, divider?.visibility ?: View.GONE,
-            view.elevation, view.translationZ
+            view.elevation, view.translationZ, ownerToken
         )
         originals[view] = WeakReference(original)
+        // The row, not a replaceable background, owns its baseline for its full lifetime.
+        view.setTag(t.mma.R.id.hchat_moments_card_state, original)
         view.addOnAttachStateChangeListener(rowAttachListener)
-        // Keep host descendants, tags, listeners, clipping and layout-param types untouched.
-        // Remove row Z shadows only; restore both original values when ownership ends.
-        view.elevation = 0f
-        view.translationZ = 0f
-        // White timeline and gutters surround the fixed light-gray card in both themes.
-        val fill = MomentsCardDrawable(
+        original.installedBackground = WeakReference(MomentsCardDrawable(
             density, gap, side, MomentsCardSettings.CARD_BACKGROUND, null, original,
             surround = Color.WHITE
-        )
-        original.installedBackground = WeakReference(fill)
-        view.background = fill
-        if (border) {
-            val stroke = MomentsCardDrawable(density, gap, side, Color.TRANSPARENT, colors)
-            view.foreground = original.foreground?.get()?.let { LayerDrawable(arrayOf(it, stroke)) } ?: stroke
-        }
-        // Reserve interior space separately from the 6dp inter-card gutter.
-        // The 32dp rounded foreground must not cross the native bottom/end comment action.
-        view.setPadding(original.left + side + inset, original.top + inset,
-            original.right + side + inset, original.bottom + gap + inset)
-        divider?.visibility = View.GONE
+        ))
+        applyStyle(view, original)
     }
-
+    private fun applyStyle(view: View, original: Original) {
+        val density = view.resources.displayMetrics.density
+        val side = (6 * density + .5f).toInt()
+        val gap = (MomentsCardSettings.GAP_DP * density + .5f).toInt()
+        val inset = (MomentsCardSettings.CONTENT_INSET_DP * density + .5f).toInt()
+        val fill = original.installedBackground?.get() ?: MomentsCardDrawable(
+            density, gap, side, MomentsCardSettings.CARD_BACKGROUND, null, original,
+            surround = Color.WHITE
+        ).also { original.installedBackground = WeakReference(it) }
+        if (view.background !== fill) view.background = fill
+        if (border) {
+            val foreground = original.installedForeground?.get() ?: run {
+                val stroke = MomentsCardDrawable(density, gap, side, Color.TRANSPARENT, colors)
+                (original.foreground?.get()?.let { LayerDrawable(arrayOf(it, stroke)) } ?: stroke)
+                    .also { original.installedForeground = WeakReference(it) }
+            }
+            if (view.foreground !== foreground) view.foreground = foreground
+        }
+        if (view.elevation != 0f) view.elevation = 0f
+        if (view.translationZ != 0f) view.translationZ = 0f
+        // Absolute baseline + one inset; never read the already styled padding as baseline.
+        val left = original.left + side + inset
+        val top = original.top + inset
+        val right = original.right + side + inset
+        val bottom = original.bottom + gap + inset
+        if (view.paddingLeft != left || view.paddingTop != top ||
+            view.paddingRight != right || view.paddingBottom != bottom) {
+            view.setPadding(left, top, right, bottom)
+        }
+        original.divider?.get()?.let { if (it.visibility != View.GONE) it.visibility = View.GONE }
+    }
+    private fun restore(view: View, old: Original) {
+        if (view.getTag(t.mma.R.id.hchat_moments_card_state) !== old) return
+        if (view.background === old.installedBackground?.get()) view.background = old.background
+        if (view.foreground === old.installedForeground?.get()) view.foreground = old.foreground?.get()
+        // Background replacement must not prevent releasing our content inset.
+        view.setPadding(old.left, old.top, old.right, old.bottom)
+        view.elevation = old.elevation
+        view.translationZ = old.translationZ
+        old.divider?.get()?.visibility = old.dividerVisibility
+        view.setTag(t.mma.R.id.hchat_moments_card_state, null)
+    }
     @Synchronized override fun close() {
         if (closed) return
         closed = true
@@ -221,16 +251,7 @@ internal class MomentsCardRuntime(
             originals.entries.toList().forEach { (view, reference) ->
                 view.removeOnAttachStateChangeListener(rowAttachListener)
                 val old = reference.get() ?: return@forEach
-                runCatching {
-                    if (view.background === old.installedBackground?.get()) {
-                        view.background = old.background
-                        if (border) view.foreground = old.foreground?.get()
-                        view.setPadding(old.left, old.top, old.right, old.bottom)
-                        view.elevation = old.elevation
-                        view.translationZ = old.translationZ
-                        old.divider?.get()?.visibility = old.dividerVisibility
-                    }
-                }.onFailure(report)
+                runCatching { restore(view, old) }.onFailure(report)
             }
             originals.clear()
             listBackgrounds.entries.toList().forEach { (view, reference) ->
@@ -248,8 +269,9 @@ internal class MomentsCardRuntime(
         val background: Drawable?, val foreground: java.lang.ref.WeakReference<Drawable>?,
         val left: Int, val top: Int, val right: Int, val bottom: Int,
         val divider: java.lang.ref.WeakReference<View>?, val dividerVisibility: Int,
-        val elevation: Float, val translationZ: Float,
-        var installedBackground: WeakReference<MomentsCardDrawable>? = null
+        val elevation: Float, val translationZ: Float, val owner: Any,
+        var installedBackground: WeakReference<MomentsCardDrawable>? = null,
+        var installedForeground: WeakReference<Drawable>? = null
     )
 
     companion object {

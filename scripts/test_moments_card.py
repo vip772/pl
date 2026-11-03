@@ -68,6 +68,7 @@ class HostDrawable:Drawable(){override fun draw(c:Canvas){}}
 import android.content.res.Resources
 import android.graphics.drawable.Drawable
 open class View {val resources=Resources();var foreground:Drawable?=null
+ private val tags=mutableMapOf<Int,Any>();fun setTag(k:Int,v:Any?){if(v==null)tags.remove(k) else tags[k]=v};fun getTag(k:Int):Any?=tags[k]
  var parent:View?=null
  interface OnAttachStateChangeListener{fun onViewAttachedToWindow(v:View);fun onViewDetachedFromWindow(v:View)}
  val attachListeners=mutableListOf<OnAttachStateChangeListener>()
@@ -89,6 +90,7 @@ open class AbsListView:android.view.ViewGroup()
 class Looper {companion object {private val main=Looper();var current:Looper?=main;fun getMainLooper()=main;fun myLooper()=current}}
 class Handler(l:Looper) {fun post(r:Runnable):Boolean {queue+=r;return true};companion object{val queue=mutableListOf<Runnable>();fun drain(){val q=queue.toList();queue.clear();q.forEach{it.run()}}}}
 ''',
+    'R.kt': 'package t.mma\nobject R {object id {const val hchat_moments_card_state=0x7f0a7a01}}',
     'Core.kt': '''package t.mma.hooks.core
 class FeatureContext
 class OwnedHooks(r:(Throwable)->Unit):AutoCloseable{var closed=false;override fun close(){closed=true}}
@@ -114,6 +116,12 @@ fun main(){
  check(padding(v)==listOf(37,26,39,40) && divider.visibility==View.GONE)
  repeat(1000){apply(r,v,divider)}
  check(v.background===card && padding(v)==listOf(37,26,39,40))
+ repeat(200){
+  v.background=HostDrawable();v.foreground=HostDrawable()
+  if(it%20==0){System.gc();Thread.sleep(2)}
+  apply(r,v,divider)
+  check(padding(v)==listOf(37,26,39,40)) {"padding compounded on host rebind"}
+ }
  r.close();r.close();check(v.background===bg && v.foreground===fg)
  check(v.elevation==7f && v.translationZ==3f && v.attachListeners.isEmpty())
  check(padding(v)==listOf(1,2,3,4) && divider.visibility==View.VISIBLE)
@@ -124,8 +132,8 @@ fun main(){
  val oldGeneration=runtime();apply(oldGeneration,v)
  Looper.current=Looper();oldGeneration.close();Looper.current=Looper.getMainLooper()
  val newGeneration=runtime();apply(newGeneration,v);val currentCard=v.background
- Handler.drain();check(v.background===currentCard);newGeneration.close()
- val guarded=runtime();apply(guarded,v);val replacement=HostDrawable();v.background=replacement;guarded.close();check(v.background===replacement)
+ Handler.drain();check(v.background===currentCard);newGeneration.close();check(padding(v)==listOf(1,2,3,4))
+ val guarded=runtime();apply(guarded,v);val replacement=HostDrawable();v.background=replacement;guarded.close();check(v.background===replacement && padding(v)==listOf(1,2,3,4) && v.getTag(t.mma.R.id.hchat_moments_card_state)==null)
  val bounded=runtime(false);val many=List(193){View()};many.forEach{apply(bounded,it)}
  check(many.take(192).all{it.background is MomentsCardDrawable} && many.last().background==null);bounded.close();check(many.all{it.background==null})
  val gc=runtime();val weak=abandoned(gc)

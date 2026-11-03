@@ -96,9 +96,11 @@ object HchatStorage {
             .resolve(name).apply { if (!exists()) createNewFile() }
         return preferences(context, name)
     }
+    // 兼容既有悬浮菜单库名；不放宽其它非 Hchat 库的备份边界。
     @JvmStatic
     fun validBackupName(name: String): Boolean =
-        name.length in 1..200 && name.matches(Regex("[A-Za-z0-9_-]+")) && name.startsWith("Hchat")
+        name.length in 1..200 && name.matches(Regex("[A-Za-z0-9_-]+")) &&
+            (name.startsWith("Hchat") || name == "floating_shortcut_menu")
     @JvmStatic
     fun isBackupPreference(context: Context, name: String): Boolean {
         val lower = name.lowercase(java.util.Locale.ROOT)

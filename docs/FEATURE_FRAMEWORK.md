@@ -2176,3 +2176,14 @@ BaseFeature 事件订阅包装现绑定订阅时的资源作用域，作用域�
 视频号详情定位、聊天实况图片 fresh 定位、官方群发运行时定位及转账实名 ensureReady 现自行通过共享 Dex 门，含延迟 invokes 消费、缓存整理及关联 Hook。网络发送和响应等待不放在查询区间内。test_dex_query_consumers.py 新增这些生产入口及官方群发子定位的源码约束；完整四文件编译仍依赖 Actions，不能把该约束当作真实发送/网络查询通过。原 matcher 和缓存 key 未改。
 
 会话长按菜单和朋友圈头像菜单定位入口自行通过共享 Dex 门，完整生产定位器加入 SDK/DexKit 编译并通过。收款账户解析共享 Hook 安装先取共享门再取安装 monitor，源码入口约束已覆盖，整文件编译以 Actions 为准；不改账户解析字段、收款行为或缓存定位条件。1e7a88c 的完整 Actions 41056337449 已成功。
+
+
+### 悬浮快捷菜单、朋友圈卡片与多选撤回修复（2026-11-03）
+
+- 悬浮快捷菜单纵向布局在测量前设置列表及子项的最终对齐方式，行内使用 `CENTER_VERTICAL` 和固定 LTR；图标列定位纳入列表左右内边距，避免向上展开时各行图标左右错位、文字与图标不同中线。
+- 朋友圈卡片的原始内边距等恢复基线由行 View 的 `hchat_moments_card_state` tag 持有，而不是依赖可被宿主替换的背景 Drawable 保活。重复绑定使用同一基线加一次 inset，padding、背景、前景及 elevation 幂等写入；关闭时即使宿主换过背景仍释放卡片 inset。索引仍用弱引用，保留 192 行上限，不在滚动绘制中新增渐变分配或轮询。
+- 多选撤回日志显示原生菜单 Hook 与自定义项均已生效，但点击后报“API未就绪”。公共 `findRevokeMsgCtor` 原先强制依赖本地插入 API 的 `localMessageClass`；系统消息路径可在未填写该字段时正常提前返回。现在从已由撤回字符串锚点定位的场景类中确认唯一三参构造，并验证原生 storage 消息类型及继承的 `field_msgId:long` / `field_isSend:int`，不反向改写本地插入 API。保留现有 DexKit 串行查询和运行环境缓存，不在点击回调增加 DexKit 查询。未就绪日志区分 finder、构造器和发包器，便于后续确认。
+- `快捷项样式` 下方新增 `文字底色`，仅在“仅文字”或“图标和文字”样式显示，复用 `ColorPickerRow(threeColorGradient = true)`，支持单色、三色及透明度；保存后沿现有配置监听刷新。只改变标签背景，不改变文字颜色或图标圆底。留空/重置保持原有深浅色默认底色，创建菜单时解析最多三个色点，绘制期间不解析配置。
+- 新字段为现有 `floating_shortcut_menu` 库中的 `label_background_color`，默认空字符串。统一备份原先只接受 Hchat 前缀库名，现对该既有库名增加精确兼容，不迁移/覆盖原配置，不放宽其它库名；图标继续使用现有受管目录 `FloatingShortcut/icons`。往返测试覆盖空值/单色/三色/带透明度、独立文字与图标颜色、图标字节与路径重定位及运行缓存排除。
+- 本轮逆向核对以现场微信 8.0.78（versionCode 3180）APK 为准：`m5.onCreateMMMenu`、`n5.onMMMenuItemSelected`、`modelsimple.d1(storage.e9,String,String)`；消息字段继承自 `im.c8`。本轮未重新获得其它版本 APK 的同条件复核证据，不将既往版本记录视为本次兼容验收。
+- 验证命令、结果和未验收边界见 `docs/SHORTCUT_CARD_RECALL_FIX_20261103.md`。未运行 Gradle、APK/R8 构建或实机验收，SDK 定向编译与合成回归均不代表手机效果已确认。

@@ -345,7 +345,9 @@ public final class WeChatMessageApi implements AutoCloseable {
             return false;
         }
         if (dexFinder == null || dexFinder.revokeMsgCtor == null || networkDispatcher == null) {
-            log("撤回消息失败: API未就绪");
+            log("撤回消息失败: API未就绪 finder=" + (dexFinder != null)
+                    + " ctor=" + (dexFinder != null && dexFinder.revokeMsgCtor != null)
+                    + " dispatcher=" + (networkDispatcher != null));
             return false;
         }
         WeChatMessage message = messageStoreApi.getMessageById(msgId);
@@ -389,7 +391,9 @@ public final class WeChatMessageApi implements AutoCloseable {
             return false;
         }
         if (dexFinder == null || dexFinder.revokeMsgCtor == null || networkDispatcher == null) {
-            log("撤回消息失败: API未就绪");
+            log("撤回消息失败: API未就绪 finder=" + (dexFinder != null)
+                    + " ctor=" + (dexFinder != null && dexFinder.revokeMsgCtor != null)
+                    + " dispatcher=" + (networkDispatcher != null));
             return false;
         }
 

@@ -105,7 +105,7 @@ with tempfile.TemporaryDirectory() as td:
         print(compiled.stderr)
         raise SystemExit(compiled.returncode)
     ran = subprocess.run(
-        ['java', '-cp', str(p / 'test.jar') + ':' + str(std),
+        ['java', '-ea', '-cp', str(p / 'test.jar') + ':' + str(std),
          't.mma.hooks.items.multirecall.RegressionMainKt'],
         capture_output=True, text=True, timeout=300
     )

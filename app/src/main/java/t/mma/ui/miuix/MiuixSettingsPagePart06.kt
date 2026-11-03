@@ -928,6 +928,14 @@ internal fun FloatingShortcutMiuixPage(
             ) ?: FloatingShortcutSettings.DEFAULT_DISPLAY_MODE
         )
     }
+    var labelBackgroundColor by remember {
+        mutableStateOf(
+            sp.getString(
+                FloatingShortcutSettings.KEY_LABEL_BACKGROUND_COLOR,
+                FloatingShortcutSettings.DEFAULT_LABEL_BACKGROUND_COLOR
+            ).orEmpty()
+        )
+    }
     var expandDirection by remember {
         mutableStateOf(
             sp.getString(
@@ -1055,6 +1063,24 @@ internal fun FloatingShortcutMiuixPage(
                             }
                         )
                         InsetDivider()
+                        if (displayMode != FloatingShortcutSettings.DISPLAY_ICON) {
+                            ColorPickerRow(
+                                title = "文字底色",
+                                summary = "仅文字标签背景，留空时跟随深浅色模式",
+                                value = labelBackgroundColor,
+                                threeColorGradient = true,
+                                onReset = {
+                                    labelBackgroundColor = FloatingShortcutSettings.DEFAULT_LABEL_BACKGROUND_COLOR
+                                    sp.edit().remove(FloatingShortcutSettings.KEY_LABEL_BACKGROUND_COLOR).apply()
+                                }
+                            ) { value ->
+                                labelBackgroundColor = value.take(29)
+                                sp.edit().putString(
+                                    FloatingShortcutSettings.KEY_LABEL_BACKGROUND_COLOR, labelBackgroundColor
+                                ).apply()
+                            }
+                            InsetDivider()
+                        }
                         PopupChoiceRow(
                             title = "展开方向",
                             summary = when (expandDirection) {

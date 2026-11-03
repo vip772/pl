@@ -145,6 +145,31 @@ fun main(args:Array<String>){
   check("Hchat_moments_card_test_runtime" !in Store.backupPreferenceNames(cardOut))
  }
  println("PASS: moments card two default-off toggles and three colors true/false round trip; runtime excluded")
+ // Shortcut label background is a user preference, independent of text/icon colors.
+ val label=Context(File(base,"shortcut-label"),"com.shortcut.label")
+ val labelOut=Context(File(base,"shortcut-label-out"),"com.shortcut.label.out")
+ val labelPrefs=Store.preferences(label,"floating_shortcut_menu")
+ check(!Store.validBackupName("unmanaged_other_store"))
+ val labelIcon=File(Store.storageDir(label),"FloatingShortcut/icons/label-test.png")
+ labelIcon.parentFile.mkdirs();labelIcon.writeBytes(byteArrayOf(7,8,9))
+ labelPrefs.edit().putString("bubble_icon",labelIcon.absolutePath).commit()
+ for (color in listOf("", "#112233", "#112233,#445566,#778899", "#80112233,#90445566,#A0778899")) {
+  labelPrefs.edit().putString("label_background_color",color).putString("label_color","#123456").putString("action_color","#654321").commit()
+  Store.runtimePreferences(label,"Hchat_shortcut_label_test_runtime").edit().putInt("view",1).commit()
+  val labelZip=File(base,"shortcut-label.zip")
+  val labelExport=HchatConfigBackup.exportToUri(label,Uri(labelZip))
+  check(labelExport.stores==1 && labelExport.resources==1)
+  HchatConfigBackup.importFromUri(labelOut,Uri(labelZip))
+  val restoredLabel=Store.preferences(labelOut,"floating_shortcut_menu")
+  check(restoredLabel.getString("label_background_color",null)==color)
+  check(restoredLabel.getString("label_color",null)=="#123456")
+  check(restoredLabel.getString("action_color",null)=="#654321")
+  val restoredIcon=File(Store.storageDir(labelOut),"FloatingShortcut/icons/label-test.png")
+  check(restoredIcon.readBytes().contentEquals(labelIcon.readBytes()))
+  check(restoredLabel.getString("bubble_icon",null)==restoredIcon.absolutePath)
+  check("Hchat_shortcut_label_test_runtime" !in Store.backupPreferenceNames(labelOut))
+ }
+ println("PASS: shortcut label background blank/single/three/alpha colors round trip; text/icon unchanged; runtime excluded")
  // Calendar uses a fixed resource path, so restore never needs the source URI.
  val cal=Context(File(base,"calendar"),"com.calendar")
  val calOut=Context(File(base,"calendar-restored"),"com.calendar.restored")

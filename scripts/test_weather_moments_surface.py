@@ -44,7 +44,8 @@ assert 'const val CORNER_RADIUS_DP = 32' in settings
 assert 'const val CONTENT_INSET_DP = 12' in settings
 assert 'view.elevation = 0f' in card and 'view.translationZ = 0f' in card
 assert 'view.elevation = old.elevation' in card and 'view.translationZ = old.translationZ' in card
-assert 'original.right + side + inset, original.bottom + gap + inset' in card
+assert 'val right = original.right + side + inset' in card
+assert 'val bottom = original.bottom + gap + inset' in card
 assert card.index('view.elevation, view.translationZ') < card.index('view.elevation = 0f')
 assert card.index('view.elevation, view.translationZ') < card.index('view.translationZ = 0f')
 assert 'const val CARD_BACKGROUND = 0xFFF3F3F3.toInt()' in settings

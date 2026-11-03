@@ -30,6 +30,7 @@ object FloatingShortcutSettings {
     const val KEY_ACTION_COLOR = "action_color"
     const val KEY_LABEL_TEXT_SIZE = "label_text_size"
     const val KEY_LABEL_COLOR = "label_color"
+    const val KEY_LABEL_BACKGROUND_COLOR = "label_background_color"
     const val KEY_ITEMS = "items"
     const val KEY_POSITION_X = "position_x"
     const val KEY_POSITION_Y = "position_y"
@@ -69,6 +70,7 @@ object FloatingShortcutSettings {
     const val MAX_LABEL_TEXT_SIZE = 24
     const val DEFAULT_LABEL_TEXT_SIZE = 14
     const val DEFAULT_LABEL_COLOR = ""
+    const val DEFAULT_LABEL_BACKGROUND_COLOR = ""
 
     fun loadItems(context: Context): List<FloatingShortcutItem> {
         val preferences = HchatStorage.preferences(context, PREFS_NAME)

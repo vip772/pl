@@ -593,7 +593,8 @@ internal class FloatingShortcutInstallation : AutoCloseable {
         val iconColor = contrastColor(representativeColor(actionColors))
         return LinearLayout(activity).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
+            layoutDirection = View.LAYOUT_DIRECTION_LTR
+            gravity = Gravity.CENTER_VERTICAL
             isClickable = true
             isFocusable = true
             minimumHeight = dp(activity, actionSize)
@@ -737,13 +738,6 @@ internal class FloatingShortcutInstallation : AutoCloseable {
             .coerceAtLeast(dp(context, actionSize))
             .coerceAtMost((decor.height - margin * 2).coerceAtLeast(dp(context, actionSize)))
         val maxWidth = (decor.width - margin * 2).coerceAtLeast(dp(context, 80))
-        menu.measure(
-            View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST)
-        )
-        val params = menu.layoutParams as? FrameLayout.LayoutParams ?: return
-        params.width = menu.measuredWidth.coerceAtMost(maxWidth)
-        params.height = menu.measuredHeight.coerceAtMost(maxHeight)
         val showIcons = prefs?.getString(
             FloatingShortcutSettings.KEY_DISPLAY_MODE,
             FloatingShortcutSettings.DEFAULT_DISPLAY_MODE
@@ -761,14 +755,23 @@ internal class FloatingShortcutInstallation : AutoCloseable {
                 child.layoutParams = childParams
             }
         }
+        menu.measure(
+            View.MeasureSpec.makeMeasureSpec(maxWidth, View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(maxHeight, View.MeasureSpec.AT_MOST)
+        )
+        val params = menu.layoutParams as? FrameLayout.LayoutParams ?: return
+        params.width = menu.measuredWidth.coerceAtMost(maxWidth)
+        params.height = menu.measuredHeight.coerceAtMost(maxHeight)
         val desiredLeft = when {
             !showIcons -> bubbleCenter - params.width / 2
-            iconOnRight -> bubbleCenter + dp(context, actionSize / 2) - params.width
-            else -> bubbleCenter - dp(context, actionSize / 2)
+            iconOnRight -> bubbleCenter + dp(context, actionSize) / 2 + list.paddingRight - params.width
+            else -> bubbleCenter - dp(context, actionSize) / 2 - list.paddingLeft
         }
+        // List padding is outside the icon column, including at screen edges.
+        val minLeft = (margin - list.paddingLeft).coerceAtLeast(0)
         params.leftMargin = desiredLeft.coerceIn(
-            margin,
-            (decor.width - params.width - margin).coerceAtLeast(margin)
+            minLeft,
+            (decor.width - params.width - margin + list.paddingRight).coerceAtLeast(minLeft)
         )
         val desiredTop = if (expandUp) {
             bubbleParams.topMargin - params.height - gap
@@ -1148,10 +1151,8 @@ internal class FloatingShortcutInstallation : AutoCloseable {
     private fun actionSurface(context: Context, circle: Boolean, circleColors: IntArray? = null): Drawable {
         val surfaceColors = if (circle) {
             circleColors ?: actionColors(context)
-        } else if (isDark(context)) {
-            intArrayOf(0xf2383b40.toInt())
         } else {
-            intArrayOf(0xf5ffffff.toInt())
+            labelBackgroundColors(context)
         }
         val surfaceTone = representativeColor(surfaceColors)
         val base = GradientDrawable(
@@ -1254,6 +1255,17 @@ internal class FloatingShortcutInstallation : AutoCloseable {
             ),
             fallback
         )
+    }
+
+    /** 仅文字标签底色，创建菜单时解析；不改文字颜色、图标圆底或绘制热路径。 */
+    private fun labelBackgroundColors(context: Context): IntArray {
+        val fallback = if (isDark(context)) 0xf2383b40.toInt() else 0xf5ffffff.toInt()
+        val value = prefs?.getString(
+            FloatingShortcutSettings.KEY_LABEL_BACKGROUND_COLOR,
+            FloatingShortcutSettings.DEFAULT_LABEL_BACKGROUND_COLOR
+        ).orEmpty()
+        if (value.isBlank()) return intArrayOf(fallback)
+        return value.split(',').take(3).map { parseColor(it, fallback) }.toIntArray()
     }
 
     private fun applyLabelColors(view: TextView, colors: IntArray) {
