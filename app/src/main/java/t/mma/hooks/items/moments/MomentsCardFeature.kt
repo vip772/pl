@@ -158,13 +158,18 @@ internal class MomentsCardRuntime(
         val night = view.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         val side = (6 * density + .5f).toInt()
         val gap = (MomentsCardSettings.GAP_DP * density + .5f).toInt()
+        val inset = (MomentsCardSettings.CONTENT_INSET_DP * density + .5f).toInt()
         val original = Original(
             view.background, view.foreground?.let { java.lang.ref.WeakReference(it) },
             view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom,
-            divider?.let { java.lang.ref.WeakReference(it) }, divider?.visibility ?: View.GONE
+            divider?.let { java.lang.ref.WeakReference(it) }, divider?.visibility ?: View.GONE,
+            view.elevation, view.translationZ
         )
         originals[view] = WeakReference(original)
         // Keep host descendants, tags, listeners, clipping and layout-param types untouched.
+        // Remove row Z shadows only; restore both original values when ownership ends.
+        view.elevation = 0f
+        view.translationZ = 0f
         // Preserve contrasting gutters around the requested fixed card color.
         val fill = MomentsCardDrawable(
             density, gap, side, MomentsCardSettings.CARD_BACKGROUND, null, original,
@@ -176,7 +181,10 @@ internal class MomentsCardRuntime(
             val stroke = MomentsCardDrawable(density, gap, side, Color.TRANSPARENT, colors)
             view.foreground = original.foreground?.get()?.let { LayerDrawable(arrayOf(it, stroke)) } ?: stroke
         }
-        view.setPadding(original.left + side, original.top, original.right + side, original.bottom + gap)
+        // Reserve interior space separately from the 6dp inter-card gutter.
+        // The 32dp rounded foreground must not cross the native bottom/end comment action.
+        view.setPadding(original.left + side + inset, original.top + inset,
+            original.right + side + inset, original.bottom + gap + inset)
         divider?.visibility = View.GONE
     }
 
@@ -193,6 +201,8 @@ internal class MomentsCardRuntime(
                         view.background = old.background
                         if (border) view.foreground = old.foreground?.get()
                         view.setPadding(old.left, old.top, old.right, old.bottom)
+                        view.elevation = old.elevation
+                        view.translationZ = old.translationZ
                         old.divider?.get()?.visibility = old.dividerVisibility
                     }
                 }.onFailure(report)
@@ -206,6 +216,7 @@ internal class MomentsCardRuntime(
         val background: Drawable?, val foreground: java.lang.ref.WeakReference<Drawable>?,
         val left: Int, val top: Int, val right: Int, val bottom: Int,
         val divider: java.lang.ref.WeakReference<View>?, val dividerVisibility: Int,
+        val elevation: Float, val translationZ: Float,
         var installedBackground: WeakReference<MomentsCardDrawable>? = null
     )
 

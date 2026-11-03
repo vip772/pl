@@ -69,6 +69,7 @@ import android.graphics.drawable.Drawable
 open class View {val resources=Resources();var foreground:Drawable?=null
  var background:Drawable?=null
  set(v){field=v;v?.callback=this}
+ var elevation=0f;var translationZ=0f
  var visibility=VISIBLE;var paddingLeft=0;var paddingTop=0;var paddingRight=0;var paddingBottom=0
  fun setPadding(l:Int,t:Int,r:Int,b:Int){paddingLeft=l;paddingTop=t;paddingRight=r;paddingBottom=b}
  companion object {const val GONE=8;const val VISIBLE=0}
@@ -97,13 +98,15 @@ private fun padding(v:View)=listOf(v.paddingLeft,v.paddingTop,v.paddingRight,v.p
 private fun abandoned(r:MomentsCardRuntime):WeakReference<View>{val v=View();v.background=HostDrawable();apply(r,v);return WeakReference(v)}
 fun main(){
  val r=runtime();val v=View();val bg=HostDrawable();val fg=HostDrawable();val divider=View()
- v.background=bg;v.foreground=fg;v.setPadding(1,2,3,4)
+ v.background=bg;v.foreground=fg;v.elevation=7f;v.translationZ=3f;v.setPadding(1,2,3,4)
  apply(r,v,divider);val card=v.background
  check(card is MomentsCardDrawable && v.foreground is LayerDrawable)
- check(padding(v)==listOf(13,2,15,16) && divider.visibility==View.GONE)
+ check(v.elevation==0f && v.translationZ==0f)
+ check(padding(v)==listOf(37,26,39,40) && divider.visibility==View.GONE)
  repeat(1000){apply(r,v,divider)}
- check(v.background===card && padding(v)==listOf(13,2,15,16))
+ check(v.background===card && padding(v)==listOf(37,26,39,40))
  r.close();r.close();check(v.background===bg && v.foreground===fg)
+ check(v.elevation==7f && v.translationZ==3f)
  check(padding(v)==listOf(1,2,3,4) && divider.visibility==View.VISIBLE)
  apply(r,v);check(v.background===bg)
  val next=runtime(false);apply(next,v);check(v.foreground===fg);next.close();check(v.background===bg && padding(v)==listOf(1,2,3,4))

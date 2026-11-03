@@ -36,17 +36,28 @@ settings = (BASE / 'hooks/items/moments/MomentsCardSettings.kt').read_text()
 assert 'const val GAP_DP = 6' in settings
 assert 'const val STROKE_DP = 2' in settings
 assert 'const val CORNER_RADIUS_DP = 32' in settings
-assert 'const val CARD_BACKGROUND = 0xFFA7A59D.toInt()' in settings
+assert 'const val CONTENT_INSET_DP = 12' in settings
+assert 'view.elevation = 0f' in card and 'view.translationZ = 0f' in card
+assert 'view.elevation = old.elevation' in card and 'view.translationZ = old.translationZ' in card
+assert 'original.right + side + inset, original.bottom + gap + inset' in card
+assert card.index('view.elevation, view.translationZ') < card.index('view.elevation = 0f')
+assert card.index('view.elevation, view.translationZ') < card.index('view.translationZ = 0f')
+assert 'const val CARD_BACKGROUND = 0xFFF3F3F3.toInt()' in settings
 assert 'color = if (colors == null) fill else Color.WHITE' in card
 assert 'rect.height().coerceAtLeast(0f) / 2' in card
 page = (BASE / 'ui/miuix/MomentsCardMiuixPage.kt').read_text()
 assert '卡片间距 6dp' in page and '添加 2dp 三色渐变描边' in page
-print('PASS source: opaque shader paint, fixed #A7A59D, 6dp gap, 2dp stroke, 32dp capsule-like corners')
+print('PASS source: opaque shader paint, fixed #F3F3F3, 6dp gap, 2dp stroke, 32dp capsule-like corners')
 # Numeric geometry check only, not an execution of Kotlin/Android drawing.
 for density in (1, 2, 3):
     side, gap = int(6*density+.5), int(6*density+.5)
     assert side > 0 and gap == 6*density
-    assert 0xFFF2F2F2 != 0xFFA7A59D and 0xFF191919 != 0xFFA7A59D
+    inset = int(12*density+.5)
+    padding = (1+side+inset, 2+inset, 3+side+inset, 4+gap+inset)
+    assert padding == (1+18*density, 2+12*density, 3+18*density, 4+18*density)
+    if density == 2:
+        assert padding == (37, 26, 39, 40)
+    assert 0xFFF2F2F2 != 0xFFF3F3F3 and 0xFF191919 != 0xFFF3F3F3
 print('PASS source/geometry: contrasting light/dark gutters, 6dp gap, no draw-time shader allocation')
 ast.parse((ROOT / 'scripts/test_moments_card.py').read_text())
 print('PASS Python syntax: updated Android synthetic harness (NOT compiled or executed)')
