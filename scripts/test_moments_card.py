@@ -47,7 +47,9 @@ class ColorFilter
 class Paint(f:Int) { var color=0;var style=Style.FILL;var strokeWidth=0f;var alpha=255;var colorFilter:ColorFilter?=null;var shader:Shader?=null
  enum class Style{FILL,STROKE};companion object{const val ANTI_ALIAS_FLAG=1}
 }
-class Canvas {var draws=0;var last:List<Float> = emptyList();fun drawRoundRect(r:RectF,x:Float,y:Float,p:Paint){draws++;last=listOf(r.left,r.top,r.right,r.bottom)}}
+class Canvas {var draws=0;var last:List<Float> = emptyList();val ops=mutableListOf<Pair<String,Int>>()
+ fun drawRect(r:RectF,p:Paint){draws++;ops+="rect" to p.color}
+ fun drawRoundRect(r:RectF,x:Float,y:Float,p:Paint){draws++;ops+="round" to p.color;last=listOf(r.left,r.top,r.right,r.bottom)}}
 ''',
     'Drawable.kt': '''package android.graphics.drawable
 import android.graphics.*
@@ -115,6 +117,13 @@ fun main(){
  val gc=runtime();val weak=abandoned(gc)
  repeat(60){if(weak.get()!=null){System.gc();Thread.sleep(10)}}
  check(weak.get()==null){"Card index retained host Drawable.Callback/View cycle"};gc.close()
+ // No border is required to distinguish the card from its gutters/gap.
+ val surface=Canvas();val outlined=MomentsCardDrawable(2f,4,12,-1,null,surround=0xFFF2F2F2.toInt())
+ outlined.bounds(0,0,200,100);outlined.draw(surface)
+ check(surface.ops==listOf("rect" to 0xFFF2F2F2.toInt(),"round" to -1))
+ val dark=Canvas();val darkCard=MomentsCardDrawable(2f,4,12,0xFF242424.toInt(),null,surround=0xFF191919.toInt())
+ darkCard.bounds(0,0,200,100);darkCard.draw(dark)
+ check(dark.ops==listOf("rect" to 0xFF191919.toInt(),"round" to 0xFF242424.toInt()))
  val canvas=Canvas();val fill=MomentsCardDrawable(2f,4,12,-1,null)
  fill.bounds(0,0,200,100);fill.draw(canvas);check(canvas.last==listOf(12f,0f,188f,96f))
  val stroke=MomentsCardDrawable(2f,4,12,0,intArrayOf(1,2,3));val before=LinearGradient.allocations

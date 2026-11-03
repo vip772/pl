@@ -212,7 +212,6 @@ internal object HomeWeather {
             val cityLabel = text(name.substringBefore("·").trim().ifBlank { "请选择天气城市" }, 14f).apply {
                 gravity = Gravity.CENTER_VERTICAL
             }
-            labels.addView(cityLabel, if(compact) LinearLayout.LayoutParams(-1,-2) else LinearLayout.LayoutParams(0,-2,1f))
             val stamp = if (data != null) java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(data.getLong("saved"))) else "--:--"
             val status = when {
                 locating -> "正在定位…"
@@ -220,9 +219,9 @@ internal object HomeWeather {
                 stale -> "更新失败 · 上次 $stamp"
                 else -> "更新于 $stamp"
             }
-            labels.addView(text(status, 11f, true))
-            heading.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
-            heading.addView(android.widget.ImageButton(context).apply {
+            // Keep the location action immediately before the city in both layouts.
+            val cityRow = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+            cityRow.addView(android.widget.ImageButton(context).apply {
                 setImageDrawable(WeatherLocationDrawable(0xFF777777.toInt()))
                 scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
                 setPadding(dp(14), dp(13), dp(14), dp(13))
@@ -235,6 +234,10 @@ internal object HomeWeather {
                 alpha = if (isEnabled) 1f else 0.45f
                 setOnClickListener { manualRefresh() }
             }, LinearLayout.LayoutParams(dp(48), dp(48)))
+            cityRow.addView(cityLabel, LinearLayout.LayoutParams(0, -2, 1f))
+            labels.addView(cityRow, if (compact) LinearLayout.LayoutParams(-1, -2) else LinearLayout.LayoutParams(0, -2, 1f))
+            labels.addView(text(status, 11f, true))
+            heading.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
             panel.addView(heading)
             if (showWeek && weekPage) {
                 panel.addView(text("七天预报",16f).apply { setPadding(0,dp(12),0,dp(8)) })

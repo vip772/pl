@@ -133,7 +133,9 @@ internal class MomentsCardRuntime(
             ).apply { check(returnType == java.lang.Boolean.TYPE) }
             check(hooks.hook(bind, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
-                    if (closed || param.hasThrowable() || param.result != true) return
+                    // h() returns isItemChanged, not bind success (8078 m2.p/h).
+                    // Unchanged/payload binds still need styling after settings are enabled.
+                    if (closed || param.hasThrowable()) return
                     runCatching {
                         val view = param.thisObject as View
                         style(view, divider.invoke(view) as? View)
@@ -163,7 +165,12 @@ internal class MomentsCardRuntime(
         )
         originals[view] = WeakReference(original)
         // Keep host descendants, tags, listeners, clipping and layout-param types untouched.
-        val fill = MomentsCardDrawable(density, gap, side, if (night) 0xFF242424.toInt() else Color.WHITE, null, original)
+        // Paint the row's exposed gutters/gap too: the native timeline is white.
+        // A white round-rect on that same white surface has no visible card boundary.
+        val fill = MomentsCardDrawable(
+            density, gap, side, if (night) 0xFF242424.toInt() else Color.WHITE, null, original,
+            surround = if (night) 0xFF191919.toInt() else 0xFFF2F2F2.toInt()
+        )
         original.installedBackground = WeakReference(fill)
         view.background = fill
         if (border) {
@@ -215,9 +222,13 @@ internal class MomentsCardDrawable(
     private val density: Float, private val gap: Int, private val side: Int,
     fill: Int, private val colors: IntArray?,
     // Keeps restoration state alive exactly as long as the host owns this drawable.
-    @Suppress("unused") private val restorationState: Any? = null
+    @Suppress("unused") private val restorationState: Any? = null,
+    private val surround: Int = Color.TRANSPARENT
 ) : Drawable() {
     private val rect = RectF()
+    private val surroundRect = RectF()
+    private val surroundPaint = if (surround == Color.TRANSPARENT) null else
+        Paint(Paint.ANTI_ALIAS_FLAG).apply { color = surround; style = Paint.Style.FILL }
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         color = fill
         style = if (colors == null) Paint.Style.FILL else Paint.Style.STROKE
@@ -225,15 +236,23 @@ internal class MomentsCardDrawable(
     }
     private val radius = 12 * density
     override fun onBoundsChange(bounds: Rect) {
+        surroundRect.set(bounds.left.toFloat(), bounds.top.toFloat(), bounds.right.toFloat(), bounds.bottom.toFloat())
         val half = if (colors == null) 0f else paint.strokeWidth / 2
         rect.set(bounds.left + side + half, bounds.top + half, bounds.right - side - half, bounds.bottom - gap - half)
         if (colors != null && rect.width() > 0) {
             paint.shader = LinearGradient(rect.left, rect.top, rect.right, rect.bottom, colors, null, Shader.TileMode.CLAMP)
         }
     }
-    override fun draw(canvas: Canvas) { if (!rect.isEmpty) canvas.drawRoundRect(rect, radius, radius, paint) }
-    override fun setAlpha(alpha: Int) { paint.alpha = alpha; invalidateSelf() }
-    override fun setColorFilter(filter: ColorFilter?) { paint.colorFilter = filter; invalidateSelf() }
+    override fun draw(canvas: Canvas) {
+        surroundPaint?.let { canvas.drawRect(surroundRect, it) }
+        if (!rect.isEmpty) canvas.drawRoundRect(rect, radius, radius, paint)
+    }
+    override fun setAlpha(alpha: Int) {
+        paint.alpha = alpha; surroundPaint?.alpha = alpha; invalidateSelf()
+    }
+    override fun setColorFilter(filter: ColorFilter?) {
+        paint.colorFilter = filter; surroundPaint?.colorFilter = filter; invalidateSelf()
+    }
     @Deprecated("Drawable opacity is deprecated")
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }
