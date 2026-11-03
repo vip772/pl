@@ -18,7 +18,7 @@ import kotlin.math.roundToInt
 internal object HomeWeather {
     private const val HOST = "n276xa5gxm.re.qweatherapi.com"
     private const val API_KEY = "92858ad8f04a427480e004ae8fefac7e"
-    private const val CACHE_TTL = 6 * 60 * 60_000L
+    private const val CACHE_TTL = 3 * 60 * 60_000L
     data class City(val name: String, val latitude: Double, val longitude: Double)
     private val worker = t.mma.hooks.core.IdleSerialExecutor.create("Hchat-Weather")
     private val main = Handler(Looper.getMainLooper())
@@ -136,6 +136,36 @@ internal object HomeWeather {
             }.getOrNull()
             main.post { callback(result) }
         }
+    }
+    // Android may return a town in subLocality; prefer an explicit county/district field.
+    internal fun districtName(subLocality: String?, subAdminArea: String?, locality: String?): String? {
+        val names = listOfNotNull(subAdminArea, subLocality, locality).map(String::trim).filter(String::isNotEmpty)
+        return names.firstOrNull { it.endsWith("县") || it.endsWith("区") || it.endsWith("旗") }
+            ?: names.firstOrNull { it != locality?.trim() }
+    }
+    private fun locatedName(context: Context, latitude: Double, longitude: Double): String? {
+        val address = runCatching {
+            @Suppress("DEPRECATION")
+            android.location.Geocoder(context.applicationContext, java.util.Locale.CHINA)
+                .getFromLocation(latitude, longitude, 1)?.firstOrNull()
+        }.getOrNull()
+        val district = districtName(address?.subLocality, address?.subAdminArea, address?.locality)
+        if (!district.isNullOrBlank() && (district.endsWith("县") || district.endsWith("区") || district.endsWith("旗"))) {
+            return listOfNotNull(district, address?.locality).filter { it.isNotBlank() }.distinct().joinToString(" · ")
+        }
+        // GeoAPI documents longitude,latitude reverse lookup; keep the most local name first.
+        val resolved = runCatching {
+            val coordinates = URLEncoder.encode("$longitude,$latitude", "UTF-8")
+            val data = request("https://$HOST/geo/v2/city/lookup?location=$coordinates&number=1&lang=zh")
+            check(data.optString("code") == "200")
+            val item = data.getJSONArray("location").getJSONObject(0)
+            check(item.getString("name").isNotBlank())
+            listOf(item.getString("name"), item.optString("adm2"), item.optString("adm1"))
+                .filter { it.isNotBlank() }.distinct().joinToString(" · ")
+        }.getOrNull()
+        if (!resolved.isNullOrBlank()) return resolved
+        return listOfNotNull(district, address?.locality, address?.adminArea)
+            .filter { it.isNotBlank() }.distinct().joinToString(" · ").takeIf { it.isNotBlank() }
     }
     fun card(context: Context, compact: Boolean = false, settings: android.content.SharedPreferences? = null): LinearLayout {
         val prefs = settings ?: HomeExtensionSettings.preferences(context)
@@ -387,6 +417,8 @@ val sky = LinearLayout(context).apply {
             listeners[requestKey]?.removeAll { it.get() == null }
             if (listeners[requestKey]?.isEmpty() == true) listeners.remove(requestKey)
         }
+        // Exactly one pending callback per attached card; detach cancels it.
+        var scheduleUpdate: () -> Unit = {}
         fun fetch(force: Boolean = false) {
             val latitude = lat.toDoubleOrNull()?.takeIf { it.isFinite() && it in -90.0..90.0 } ?: return
             val longitude = lon.toDoubleOrNull()?.takeIf { it.isFinite() && it in -180.0..180.0 } ?: return
@@ -412,7 +444,26 @@ val sky = LinearLayout(context).apply {
                     inFlight.remove(requestKey)
                     if (result == null) failures[requestKey] = System.currentTimeMillis() else failures.remove(requestKey)
                     notifyCards(requestKey)
+                    scheduleUpdate()
                 }
+            }
+        }
+        val automaticUpdate = object : Runnable {
+            override fun run() {
+                if (!panel.isAttachedToWindow) return
+                fetch()
+                scheduleUpdate()
+            }
+        }
+        scheduleUpdate = {
+            main.removeCallbacks(automaticUpdate)
+            if (panel.isAttachedToWindow) {
+                val now = System.currentTimeMillis()
+                val expires = cached()?.optLong("saved")?.plus(CACHE_TTL) ?: now
+                val retryAfter = failures[key]?.plus(5 * 60_000L) ?: 0L
+                val delay = maxOf(expires, retryAfter) - now
+                // A short bounded retry interval also avoids a busy loop while another card fetches.
+                main.postDelayed(automaticUpdate, delay.coerceIn(60_000L, CACHE_TTL))
             }
         }
         manualRefresh = manual@{
@@ -469,16 +520,13 @@ val sky = LinearLayout(context).apply {
                     fetch(force = true)
                     refresh()
                     val locatedKey = key
+                    val locatedRequest = locationRequest
                     worker.execute {
-                        val city = runCatching {
-                            @Suppress("DEPRECATION")
-                            val address = android.location.Geocoder(context.applicationContext, java.util.Locale.CHINA)
-                                .getFromLocation(latitude, longitude, 1)?.firstOrNull()
-                            listOfNotNull(address?.locality, address?.subLocality, address?.adminArea)
-                                .filter { it.isNotBlank() }.distinct().joinToString(" · ")
-                        }.getOrNull()
+                        val city = locatedName(context.applicationContext, latitude, longitude)
                         main.post {
-                            if (key == locatedKey && !city.isNullOrBlank()) {
+                            if (key == locatedKey && locationRequest == locatedRequest && panel.isAttachedToWindow &&
+                                prefs.getString("weather_lat", "") == lat && prefs.getString("weather_lon", "") == lon &&
+                                !city.isNullOrBlank()) {
                                 name = city
                                 // Do not overwrite a city subsequently selected in settings.
                                 if (prefs.getString("weather_lat", "") == lat && prefs.getString("weather_lon", "") == lon) {
@@ -512,8 +560,10 @@ val sky = LinearLayout(context).apply {
                 register()
                 refresh()
                 fetch()
+                scheduleUpdate()
             }
             override fun onViewDetachedFromWindow(view: android.view.View) {
+                main.removeCallbacks(automaticUpdate)
                 locationCleanup?.invoke()
                 unregister()
             }

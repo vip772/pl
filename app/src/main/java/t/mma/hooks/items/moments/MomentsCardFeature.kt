@@ -1,6 +1,5 @@
 package t.mma.hooks.items.moments
 
-import android.content.res.Configuration
 import android.graphics.*
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.LayerDrawable
@@ -77,6 +76,30 @@ internal class MomentsCardRuntime(
     // State is owned by the installed drawable, never strongly by this index.
     // Host drawables may retain their View through Drawable.Callback.
     private val originals = WeakHashMap<View, WeakReference<Original>>()
+    // Weak index; the installed drawable owns the original background, not the runtime.
+    private val listBackgrounds = WeakHashMap<View, WeakReference<TimelineBackground>>()
+    private class TimelineBackground(val original: Drawable?) : android.graphics.drawable.ColorDrawable(Color.WHITE)
+    private val rowAttachListener = object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(view: View) { whitenTimeline(view) }
+        override fun onViewDetachedFromWindow(view: View) {}
+    }
+    private fun whitenTimeline(row: View) {
+        if (closed) return
+        var ancestor = row.parent
+        repeat(12) {
+            val view = ancestor as? View ?: return
+            // 8.0.78 emh/bl3.xml names ImproveRecyclerView; legacy rows use AbsListView.
+            if (view is android.widget.AbsListView ||
+                view.javaClass.name == "com.tencent.mm.plugin.sns.ui.improve.view.ImproveRecyclerView") {
+                if (listBackgrounds[view]?.get() != null || listBackgrounds.size >= 16) return
+                val background = TimelineBackground(view.background)
+                listBackgrounds[view] = WeakReference(background)
+                view.background = background
+                return
+            }
+            ancestor = view.parent
+        }
+    }
     @Volatile private var closed = false
     private var legacyCreateInstalled = false
     private var legacyInstalled = false
@@ -154,8 +177,8 @@ internal class MomentsCardRuntime(
             return
         }
         if (originals.size >= MAX_VIEWS) return
+        whitenTimeline(view)
         val density = view.resources.displayMetrics.density
-        val night = view.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
         val side = (6 * density + .5f).toInt()
         val gap = (MomentsCardSettings.GAP_DP * density + .5f).toInt()
         val inset = (MomentsCardSettings.CONTENT_INSET_DP * density + .5f).toInt()
@@ -166,14 +189,15 @@ internal class MomentsCardRuntime(
             view.elevation, view.translationZ
         )
         originals[view] = WeakReference(original)
+        view.addOnAttachStateChangeListener(rowAttachListener)
         // Keep host descendants, tags, listeners, clipping and layout-param types untouched.
         // Remove row Z shadows only; restore both original values when ownership ends.
         view.elevation = 0f
         view.translationZ = 0f
-        // Preserve contrasting gutters around the requested fixed card color.
+        // White timeline and gutters surround the fixed light-gray card in both themes.
         val fill = MomentsCardDrawable(
             density, gap, side, MomentsCardSettings.CARD_BACKGROUND, null, original,
-            surround = if (night) 0xFF191919.toInt() else 0xFFF2F2F2.toInt()
+            surround = Color.WHITE
         )
         original.installedBackground = WeakReference(fill)
         view.background = fill
@@ -195,6 +219,7 @@ internal class MomentsCardRuntime(
         // A single main-thread release; never post per row or retain an Activity globally.
         val restore = Runnable {
             originals.entries.toList().forEach { (view, reference) ->
+                view.removeOnAttachStateChangeListener(rowAttachListener)
                 val old = reference.get() ?: return@forEach
                 runCatching {
                     if (view.background === old.installedBackground?.get()) {
@@ -208,6 +233,13 @@ internal class MomentsCardRuntime(
                 }.onFailure(report)
             }
             originals.clear()
+            listBackgrounds.entries.toList().forEach { (view, reference) ->
+                val installed = reference.get() ?: return@forEach
+                runCatching {
+                    if (view.background === installed) view.background = installed.original
+                }.onFailure(report)
+            }
+            listBackgrounds.clear()
         }
         if (Looper.myLooper() == Looper.getMainLooper()) restore.run() else main.post(restore)
     }

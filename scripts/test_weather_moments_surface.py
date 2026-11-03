@@ -30,7 +30,12 @@ print('PASS source: unchanged modern binds allowed, bounded state and original c
 draw = card.split('override fun draw(canvas: Canvas)', 1)[1].split('override fun setAlpha', 1)[0]
 assert draw.index('canvas.drawRect(surroundRect') < draw.index('canvas.drawRoundRect(rect')
 assert 'Paint(' not in draw and 'LinearGradient(' not in draw
-assert 'surround = if (night) 0xFF191919.toInt() else 0xFFF2F2F2.toInt()' in card
+assert 'surround = Color.WHITE' in card
+assert 'ColorDrawable(Color.WHITE)' in card
+assert 'view.background === installed' in card
+assert 'view.background = installed.original' in card
+assert 'view.removeOnAttachStateChangeListener(rowAttachListener)' in card
+assert 'listBackgrounds.clear()' in card
 assert 'MomentsCardSettings.CARD_BACKGROUND, null, original' in card
 settings = (BASE / 'hooks/items/moments/MomentsCardSettings.kt').read_text()
 assert 'const val GAP_DP = 6' in settings
@@ -57,8 +62,8 @@ for density in (1, 2, 3):
     assert padding == (1+18*density, 2+12*density, 3+18*density, 4+18*density)
     if density == 2:
         assert padding == (37, 26, 39, 40)
-    assert 0xFFF2F2F2 != 0xFFF3F3F3 and 0xFF191919 != 0xFFF3F3F3
-print('PASS source/geometry: contrasting light/dark gutters, 6dp gap, no draw-time shader allocation')
+    assert 0xFFFFFFFF != 0xFFF3F3F3
+print('PASS source/geometry: white timeline/gutters and gray cards in both themes, 6dp gap, no draw-time shader allocation')
 ast.parse((ROOT / 'scripts/test_moments_card.py').read_text())
 print('PASS Python syntax: updated Android synthetic harness (NOT compiled or executed)')
 parser = argparse.ArgumentParser()

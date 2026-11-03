@@ -60,6 +60,7 @@ abstract class Drawable {var callback:Any?=null
  open fun setAlpha(a:Int){};open fun setColorFilter(f:ColorFilter?){};open fun getOpacity()=0
  fun invalidateSelf(){};fun bounds(l:Int,t:Int,r:Int,b:Int){onBoundsChange(Rect(l,t,r,b))}
 }
+open class ColorDrawable(val color:Int):Drawable(){override fun draw(c:Canvas){}}
 class LayerDrawable(val children:Array<Drawable>):Drawable(){override fun draw(c:Canvas){children.forEach{it.draw(c)}}}
 class HostDrawable:Drawable(){override fun draw(c:Canvas){}}
 ''',
@@ -67,6 +68,11 @@ class HostDrawable:Drawable(){override fun draw(c:Canvas){}}
 import android.content.res.Resources
 import android.graphics.drawable.Drawable
 open class View {val resources=Resources();var foreground:Drawable?=null
+ var parent:View?=null
+ interface OnAttachStateChangeListener{fun onViewAttachedToWindow(v:View);fun onViewDetachedFromWindow(v:View)}
+ val attachListeners=mutableListOf<OnAttachStateChangeListener>()
+ fun addOnAttachStateChangeListener(l:OnAttachStateChangeListener){attachListeners+=l}
+ fun removeOnAttachStateChangeListener(l:OnAttachStateChangeListener){attachListeners-=l}
  var background:Drawable?=null
  set(v){field=v;v?.callback=this}
  var elevation=0f;var translationZ=0f
@@ -75,6 +81,9 @@ open class View {val resources=Resources();var foreground:Drawable?=null
  companion object {const val GONE=8;const val VISIBLE=0}
 }
 open class ViewGroup:View()
+''',
+    'Widget.kt': '''package android.widget
+open class AbsListView:android.view.ViewGroup()
 ''',
     'Os.kt': '''package android.os
 class Looper {companion object {private val main=Looper();var current:Looper?=main;fun getMainLooper()=main;fun myLooper()=current}}
@@ -106,7 +115,7 @@ fun main(){
  repeat(1000){apply(r,v,divider)}
  check(v.background===card && padding(v)==listOf(37,26,39,40))
  r.close();r.close();check(v.background===bg && v.foreground===fg)
- check(v.elevation==7f && v.translationZ==3f)
+ check(v.elevation==7f && v.translationZ==3f && v.attachListeners.isEmpty())
  check(padding(v)==listOf(1,2,3,4) && divider.visibility==View.VISIBLE)
  apply(r,v);check(v.background===bg)
  val next=runtime(false);apply(next,v);check(v.foreground===fg);next.close();check(v.background===bg && padding(v)==listOf(1,2,3,4))
@@ -123,12 +132,19 @@ fun main(){
  repeat(60){if(weak.get()!=null){System.gc();Thread.sleep(10)}}
  check(weak.get()==null){"Card index retained host Drawable.Callback/View cycle"};gc.close()
  // No border is required to distinguish the card from its gutters/gap.
- val surface=Canvas();val outlined=MomentsCardDrawable(2f,12,12,-1,null,surround=0xFFF2F2F2.toInt())
+ val surface=Canvas();val outlined=MomentsCardDrawable(2f,12,12,0xFFF3F3F3.toInt(),null,surround=Color.WHITE)
  outlined.bounds(0,0,200,100);outlined.draw(surface)
- check(surface.ops==listOf("rect" to 0xFFF2F2F2.toInt(),"round" to -1))
- val dark=Canvas();val darkCard=MomentsCardDrawable(2f,12,12,0xFF242424.toInt(),null,surround=0xFF191919.toInt())
+ check(surface.ops==listOf("rect" to Color.WHITE,"round" to 0xFFF3F3F3.toInt()))
+ val dark=Canvas();val darkCard=MomentsCardDrawable(2f,12,12,0xFFF3F3F3.toInt(),null,surround=Color.WHITE)
  darkCard.bounds(0,0,200,100);darkCard.draw(dark)
- check(dark.ops==listOf("rect" to 0xFF191919.toInt(),"round" to 0xFF242424.toInt()))
+ check(dark.ops==listOf("rect" to Color.WHITE,"round" to 0xFFF3F3F3.toInt()))
+ val list=android.widget.AbsListView();val listOriginal=HostDrawable();list.background=listOriginal
+ val row=View();row.parent=list;val owner=runtime(false);apply(owner,row)
+ check(list.background is ColorDrawable);owner.close();check(list.background===listOriginal && row.attachListeners.isEmpty())
+ val late=View();val lateOwner=runtime(false);apply(lateOwner,late);late.parent=list
+ late.attachListeners.toList().forEach{it.onViewAttachedToWindow(late)}
+ check(list.background is ColorDrawable);val hostReplacement=HostDrawable();list.background=hostReplacement
+ lateOwner.close();check(list.background===hostReplacement && late.attachListeners.isEmpty())
  val canvas=Canvas();val fill=MomentsCardDrawable(2f,12,12,-1,null)
  fill.bounds(0,0,200,100);fill.draw(canvas);check(canvas.last==listOf(12f,0f,188f,88f))
  val stroke=MomentsCardDrawable(2f,12,12,0,intArrayOf(1,2,3));val before=LinearGradient.allocations

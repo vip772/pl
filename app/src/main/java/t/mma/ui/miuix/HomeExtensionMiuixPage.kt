@@ -153,7 +153,7 @@ internal fun HomeExtensionMiuixPage(context: Context, provider: FeatureSettingsP
                 } } }
                 item { SmallTitle(text = "首页天气") }
                 item { SettingsCard { Column {
-                    SwitchRow(weather, "首页天气", "城市天气、温度、体感、湿度和风速；后台按需更新") { weather = it; prefs.edit().putBoolean(Settings.WEATHER, it).apply() }
+                    SwitchRow(weather, "首页天气", "城市天气、温度、体感、湿度和风速；显示期间每3小时更新") { weather = it; prefs.edit().putBoolean(Settings.WEATHER, it).apply() }
                     if (weather) {
                         SwitchRow(sevenDay, "显示七天预报", "左滑查看七天预报，右滑返回当前天气") { sevenDay = it; prefs.edit().putBoolean("weather_seven_day", it).apply() }
                         InputRow(title = "搜索城市", summary = cityName.ifBlank { "输入城市名后点击搜索，可用中文或拼音" }, value = cityQuery, onValueChange = { cityQuery = it.take(80) })
