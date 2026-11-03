@@ -300,7 +300,9 @@ class LHS implements ParserConstants, Serializable {
                 val = Types.castObject( val,
                       Types.arrayElementType(object.getClass()),
                       Types.ASSIGNMENT);
-            } catch (Exception e) { /* ignore cast exceptions */ }
+            } catch (UtilTargetError e) {
+                throw e; // Invalid numeric input must not fall through to a different assignment.
+            } catch (Exception e) { /* ignore other cast exceptions for legacy array coercion */ }
 
             BshArray.setIndex(object, index, val);
         } catch ( UtilTargetError e1 ) { // pass along target error

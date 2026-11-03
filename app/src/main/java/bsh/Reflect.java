@@ -193,11 +193,15 @@ public final class Reflect {
     private static Object invokeMathMethod(Class<?> mathType, Object object, Class<?> returnType,
         String methodName, Object[] args, Interpreter interpreter, CallStack callstack,
             Node callerInfo) throws EvalError {
-        Object retrn = invokeObjectMethod(Primitive.castWrapper(mathType, object),
-            methodName, args, interpreter, callstack, callerInfo);
-        if (retrn instanceof Primitive && ((Primitive)retrn).getType() == mathType)
-            return Primitive.wrap(Primitive.castWrapper(returnType, retrn), returnType);
-        return retrn;
+        try {
+            Object retrn = invokeObjectMethod(Primitive.castWrapper(mathType, object),
+                methodName, args, interpreter, callstack, callerInfo);
+            if (retrn instanceof Primitive && ((Primitive)retrn).getType() == mathType)
+                return Primitive.wrap(Primitive.castWrapper(returnType, retrn), returnType);
+            return retrn;
+        } catch (UtilEvalError e) {
+            throw e.toEvalError(callerInfo, callstack);
+        }
     }
 
     /**

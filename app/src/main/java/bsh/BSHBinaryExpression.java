@@ -39,6 +39,14 @@ class BSHBinaryExpression extends SimpleNode implements ParserConstants {
 
     BSHBinaryExpression(int id) { super(id); }
 
+    private Object castBoolean(Object value, CallStack callstack) throws EvalError {
+        try {
+            return Primitive.castWrapper(Boolean.TYPE, value);
+        } catch (UtilEvalError e) {
+            throw e.toEvalError(this, callstack);
+        }
+    }
+
     public Object eval( CallStack callstack, Interpreter interpreter)
         throws EvalError
     {
@@ -83,14 +91,14 @@ class BSHBinaryExpression extends SimpleNode implements ParserConstants {
             if ( interpreter.getStrictJava() ) {
                 if (Primitive.FALSE.equals(lhs)) return Primitive.FALSE;
             } else {
-                if (Primitive.FALSE.equals(Primitive.castWrapper(Boolean.TYPE, lhs)))
+                if (Primitive.FALSE.equals(castBoolean(lhs, callstack)))
                     return lhs;
             }
         if ( (kind == BOOL_OR || kind == BOOL_ORX || kind == ELVIS) )
             if ( interpreter.getStrictJava() ) {
                 if (Primitive.TRUE.equals(lhs)) return Primitive.TRUE;
             } else {
-                if (Primitive.TRUE.equals(Primitive.castWrapper(Boolean.TYPE, lhs)))
+                if (Primitive.TRUE.equals(castBoolean(lhs, callstack)))
                     return lhs;
             }
         if ( kind == NULLCOALESCE && Primitive.NULL != lhs)
@@ -104,7 +112,7 @@ class BSHBinaryExpression extends SimpleNode implements ParserConstants {
         if ( !interpreter.getStrictJava() ) switch(kind) {
             case BOOL_OR: case BOOL_ORX: case BOOL_AND: case BOOL_ANDX:
                 // needs to validate to a boolean is all we return rhs
-                if (Primitive.castWrapper(Boolean.TYPE, rhs) instanceof Boolean)
+                if (castBoolean(rhs, callstack) instanceof Boolean)
                     return rhs;
         }
 

@@ -232,6 +232,14 @@ class BSHPrimarySuffix extends SimpleNode
         return index;
     }
 
+    private int castEntryIndex(Object key, CallStack callstack) throws EvalError {
+        try {
+            return (int) Primitive.castWrapper(Integer.TYPE, key);
+        } catch (UtilEvalError e) {
+            throw e.toEvalError(this, callstack);
+        }
+    }
+
     /** Array index or bracket expression implementation.
      * @param obj array or list instance
      * @param toLHS whether to return an LHS instance
@@ -280,7 +288,7 @@ class BSHPrimarySuffix extends SimpleNode
             int idx = 0;
             if ( ((key instanceof Primitive && ((Primitive) key).isNumber())
                         || Primitive.isWrapperType(key.getClass()))
-                    && length > (idx = (int) Primitive.castWrapper(Integer.TYPE, key))
+                    && length > (idx = castEntryIndex(key, callstack))
                     && -length < idx)
                 index = idx;
             else if (toLHS)

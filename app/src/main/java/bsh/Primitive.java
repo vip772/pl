@@ -499,7 +499,7 @@ public final class Primitive implements Serializable {
         @param value is the value in java.lang wrapper.
         value may not be null.
     */
-    static Object castWrapper( Class<?> toType, Object value ) {
+    static Object castWrapper( Class<?> toType, Object value ) throws UtilEvalError {
         if ( Primitive.VOID.equals(value) )
             return value;
 
@@ -529,7 +529,8 @@ public final class Primitive implements Serializable {
         if ( value instanceof String ) try {
             value = Double.parseDouble(String.valueOf(value));
         } catch (NumberFormatException nfe) {
-            throw new InterpreterError("cannot cast string \""+value+"\" to number", nfe);
+            // Invalid script input must follow the catchable target-error path.
+            throw new UtilTargetError("cannot cast string \""+value+"\" to number", nfe);
         }
 
         if ( value instanceof Boolean )

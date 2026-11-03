@@ -2187,3 +2187,8 @@ BaseFeature 事件订阅包装现绑定订阅时的资源作用域，作用域�
 - 新字段为现有 `floating_shortcut_menu` 库中的 `label_background_color`，默认空字符串。统一备份原先只接受 Hchat 前缀库名，现对该既有库名增加精确兼容，不迁移/覆盖原配置，不放宽其它库名；图标继续使用现有受管目录 `FloatingShortcut/icons`。往返测试覆盖空值/单色/三色/带透明度、独立文字与图标颜色、图标字节与路径重定位及运行缓存排除。
 - 本轮逆向核对以现场微信 8.0.78（versionCode 3180）APK 为准：`m5.onCreateMMMenu`、`n5.onMMMenuItemSelected`、`modelsimple.d1(storage.e9,String,String)`；消息字段继承自 `im.c8`。本轮未重新获得其它版本 APK 的同条件复核证据，不将既往版本记录视为本次兼容验收。
 - 验证命令、结果和未验收边界见 `docs/SHORTCUT_CARD_RECALL_FIX_20261103.md`。未运行 Gradle、APK/R8 构建或实机验收，SDK 定向编译与合成回归均不代表手机效果已确认。
+
+
+## BeanShell 数字转换异常隔离修复
+
+将非法字符串数字转换从 `InterpreterError` 改为保留原始原因的 `UtilTargetError`，并贯通变量、参数、数组和表达式的节点错误转换，复用脚本 try/catch 与接口代理的既有 TargetError 处理。无全局吞异常、无默认填 0、无新增线程/缓存/配置。证据、146个源文件 SDK 定向编译、97项合成 JVM 断言与未完成的实机验收边界见 `docs/BEANSHELL_NUMERIC_ERROR_FIX_20261103.md`；回归命令为 `python3 scripts/test_beanshell_numeric_error.py`。

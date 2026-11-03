@@ -391,6 +391,9 @@ public class BshMethod implements Serializable, Cloneable, BshClassManager.Liste
                 argValues[i] = Primitive.unwrap(
                     Types.castObject(
                         argValues[i], paramType, Types.ASSIGNMENT ) );
+            } catch (UtilTargetError e) {
+                throw e.toEvalError("Invalid callback argument for method: " + name,
+                    callerInfo, callstack);
             } catch ( UtilEvalError e ) {
                 throw new EvalError(
                     "Invalid argument: "
@@ -516,6 +519,10 @@ public class BshMethod implements Serializable, Cloneable, BshClassManager.Liste
                 try {
                     argValues[i] = Types.castObject(
                             argValues[i], paramType, Types.ASSIGNMENT );
+                }
+                catch (UtilTargetError e) {
+                    throw e.toEvalError("Invalid argument for method: " + name,
+                        callerInfo, callstack);
                 }
                 catch( UtilEvalError e) {
                     throw new EvalError(
