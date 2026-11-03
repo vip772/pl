@@ -19,6 +19,7 @@ class RedPacketFilter(private val settings: RedPacketSettings) {
         keywordMode: Int,
         keywords: String?
     ): String? {
+        if (settings.shouldSkipPrivateChat(talker)) return "私聊不抢"
         if (TextUtils.isEmpty(exclusiveRecvUser) && !skipSelf && listMode == 0 && keywordMode == 0) {
             return null
         }
@@ -62,6 +63,7 @@ class RedPacketFilter(private val settings: RedPacketSettings) {
         myWxid: String?,
         rule: RedPacketEffectiveRule
     ): String? {
+        if (settings.shouldSkipPrivateChat(talker)) return "私聊不抢"
         if (!rule.enabled) return "规则已关闭"
 
         if (!TextUtils.isEmpty(exclusiveRecvUser) && exclusiveRecvUser != myWxid) {

@@ -473,6 +473,7 @@ public class RedPacketHooker {
             notificationCenter.notifyIncoming(talker, nu, rule);
             final String ft = talker, fn = nu, fs = sender;
             scheduleOnMain("redpacket_ui:" + fn, delay, () -> {
+                if (settings.shouldSkipPrivateChat(ft)) return;
                 Intent intent = new Intent();
                 intent.putExtra("key_native_url", fn);
                 intent.putExtra("key_username", ft);

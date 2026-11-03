@@ -200,6 +200,7 @@ object FeatureRegistry {
             .register(MomentsKeywordBlockFeature())
             .register(MomentsContactFilterFeature())
             .register(MomentsBottomDetailFeature())
+            .register(t.mma.hooks.items.moments.MomentsCardFeature())
             .register(MomentsPostNotificationFeature())
             .register(OriginalMomentsUploadFeature())
             .register(MomentsUploadTailFeature())

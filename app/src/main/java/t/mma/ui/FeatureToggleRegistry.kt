@@ -71,6 +71,7 @@ object FeatureToggleRegistry {
         "moments_auto_forward" to Toggle("Hchat_moments_auto_forward_config", "enable"),
         "moments_auto_like" to Toggle("Hchat_moments_auto_like_config", "enable"),
         "moments_auto_refresh" to Toggle("Hchat_moments_auto_refresh_config", "enable"),
+        "moments_card_mode" to Toggle("Hchat_moments_card_config", "enable"),
         "moments_bottom_detail" to Toggle("Hchat_moments_bottom_detail_config", "moments_bottom_detail_enable"),
         "moments_contact_filter" to Toggle("Hchat_moments_contact_filter_config", "moments_contact_filter_enable"),
         "moments_keyword_block" to Toggle("Hchat_moments_keyword_block_config", "moments_keyword_block_enable"),

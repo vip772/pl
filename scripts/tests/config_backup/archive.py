@@ -110,6 +110,41 @@ fun main(args:Array<String>){
  File(Store.resourceDirectory(only,"new"),"icon").writeText("icon")
  val onlyZip=File(base,"only.zip");check(HchatConfigBackup.exportToUri(only,Uri(onlyZip)).items==0)
  check(HchatConfigBackup.importFromUri(b,Uri(onlyZip)).resources==1)
+ // Global private-chat switch: absent defaults off; true and false survive archive restore.
+ val hb=Context(File(base,"redpacket"),"com.redpacket")
+ val hbOut=Context(File(base,"redpacket-restored"),"com.redpacket.restored")
+ val hbPrefs=Store.preferences(hb,"Hchat_redpacket_config")
+ check(!hbPrefs.getBoolean("hb_skip_private",false))
+ for (enabled in listOf(true,false)) {
+  hbPrefs.edit().putBoolean("hb_skip_private",enabled).commit()
+  Store.runtimePreferences(hb,"Hchat_redpacket_runtime_test").edit().putString("pending","packet").commit()
+  val hbZip=File(base,"redpacket-$enabled.zip")
+  check(HchatConfigBackup.exportToUri(hb,Uri(hbZip)).stores==1)
+  HchatConfigBackup.importFromUri(hbOut,Uri(hbZip))
+  val restoredHb=Store.preferences(hbOut,"Hchat_redpacket_config")
+  check(restoredHb.contains("hb_skip_private") && restoredHb.getBoolean("hb_skip_private",!enabled)==enabled)
+  check("Hchat_redpacket_runtime_test" !in Store.backupPreferenceNames(hbOut))
+ }
+ println("PASS: private-chat skip default off, true/false archive round trip, runtime excluded")
+ // Card settings are normal user configuration; drawing state is never persisted.
+ val card=Context(File(base,"moments-card"),"com.card")
+ val cardOut=Context(File(base,"moments-card-restored"),"com.card.restored")
+ val cardPrefs=Store.preferences(card,"Hchat_moments_card_config")
+ check(!cardPrefs.getBoolean("enable",false) && !cardPrefs.getBoolean("border_enable",false))
+ for (enabled in listOf(true,false)) {
+  cardPrefs.edit().putBoolean("enable",enabled).putBoolean("border_enable",enabled)
+   .putString("border_colors","#123456,#789ABC,#DEF012").commit()
+  Store.runtimePreferences(card,"Hchat_moments_card_test_runtime").edit().putInt("view",12).commit()
+  val cardZip=File(base,"card-$enabled.zip")
+  check(HchatConfigBackup.exportToUri(card,Uri(cardZip)).stores==1)
+  HchatConfigBackup.importFromUri(cardOut,Uri(cardZip))
+  val restoredCard=Store.preferences(cardOut,"Hchat_moments_card_config")
+  check(restoredCard.contains("enable") && restoredCard.getBoolean("enable",!enabled)==enabled)
+  check(restoredCard.contains("border_enable") && restoredCard.getBoolean("border_enable",!enabled)==enabled)
+  check(restoredCard.getString("border_colors","")=="#123456,#789ABC,#DEF012")
+  check("Hchat_moments_card_test_runtime" !in Store.backupPreferenceNames(cardOut))
+ }
+ println("PASS: moments card two default-off toggles and three colors true/false round trip; runtime excluded")
  // Calendar uses a fixed resource path, so restore never needs the source URI.
  val cal=Context(File(base,"calendar"),"com.calendar")
  val calOut=Context(File(base,"calendar-restored"),"com.calendar.restored")

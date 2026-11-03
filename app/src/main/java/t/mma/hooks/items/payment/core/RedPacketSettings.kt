@@ -41,6 +41,11 @@ class RedPacketSettings @JvmOverloads constructor(
         }
     }
 
+    /** Global private-chat gate; templates cannot override it. OpenIM users are private chats. */
+    fun shouldSkipPrivateChat(talker: String?): Boolean {
+        if (!getBoolean(KEY_SKIP_PRIVATE, false) || talker.isNullOrBlank()) return false
+        return !talker.endsWith("@chatroom") && !talker.endsWith("@im.chatroom")
+    }
     fun isEnabled(): Boolean = getBoolean(KEY_ENABLE, false)
 
     fun isSilentGrabEnabled(): Boolean = isEnabled() && getInt(KEY_GRAB_MODE, DEFAULT_GRAB_MODE) == 1
@@ -74,6 +79,7 @@ class RedPacketSettings @JvmOverloads constructor(
         const val PREFS_NAME = "Hchat_redpacket_config"
 
         const val KEY_ENABLE = "hb_auto_enable"
+        const val KEY_SKIP_PRIVATE = "hb_skip_private"
         const val KEY_SKIP_SELF = "hb_skip_self"
         const val KEY_AUTO_CLOSE = "hb_auto_close"
         const val KEY_GRAB_MODE = "hb_grab_mode"

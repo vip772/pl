@@ -504,7 +504,7 @@ internal class FloatingShortcutInstallation : AutoCloseable {
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply {
                     if (index > 0) {
-                        if (horizontal) leftMargin = dp(activity, 5) else topMargin = dp(activity, 5)
+                        if (horizontal) leftMargin = dp(activity, 5) else topMargin = dp(activity, 12)
                     }
                 }
             )
@@ -716,7 +716,8 @@ internal class FloatingShortcutInstallation : AutoCloseable {
         list: LinearLayout
     ) {
         val margin = dp(context, 12)
-        val gap = dp(context, 10)
+        // 4dp list padding + 8dp outer gap = 12dp between the icon and main button.
+        val gap = dp(context, 8)
         val bubbleParams = bubble.layoutParams as? FrameLayout.LayoutParams ?: return
         if (isHorizontalDirection()) {
             positionHorizontalMenu(context, decor, bubble, bubbleParams, menu, list)
@@ -958,12 +959,12 @@ internal class FloatingShortcutInstallation : AutoCloseable {
                             baseMaxLeft
                         }
                         val minTop = if (openMenu != null && expandUp) {
-                            (margin + openMenu.height + dp(view.context, 10)).coerceAtMost(baseMaxTop)
+                            (margin + openMenu.height + dp(view.context, 8)).coerceAtMost(baseMaxTop)
                         } else {
                             margin
                         }
                         val maxTop = if (openMenu != null && expandDown) {
-                            (decor.height - margin - openMenu.height - dp(view.context, 10) - view.height)
+                            (decor.height - margin - openMenu.height - dp(view.context, 8) - view.height)
                                 .coerceAtLeast(minTop)
                                 .coerceAtMost(baseMaxTop)
                         } else {

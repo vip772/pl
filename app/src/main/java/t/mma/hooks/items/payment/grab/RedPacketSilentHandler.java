@@ -87,6 +87,11 @@ public class RedPacketSilentHandler {
     }
 
     private void tryReceiveInternal(String content, String talker, String nativeUrl, int attempt) {
+        if (settings.shouldSkipPrivateChat(talker)) {
+            String sendId = RedPacketParser.getNativeUrlParam(nativeUrl, "sendid");
+            if (!TextUtils.isEmpty(sendId)) cleanup(sendId);
+            return;
+        }
         log("trySilentReceive 开始, mode=" + settings.getInt(RedPacketSettings.KEY_GRAB_MODE, RedPacketSettings.DEFAULT_GRAB_MODE)
                 + " recvClass=" + (dexFinder.receiveLuckyMoneyClass != null)
                 + " openClass=" + (dexFinder.openLuckyMoneyClass != null)
@@ -277,6 +282,10 @@ public class RedPacketSilentHandler {
                         } catch (Throwable ignored) {}
                         Map<String, Object> info = reqInfo != null ? reqInfo : state.silentRedPacketMap.get(sendId);
                         if (info == null || !state.silentReceivingSet.contains(sendId)) return;
+                        if (settings.shouldSkipPrivateChat((String) info.get("talker"))) {
+                            cleanup(sendId);
+                            return;
+                        }
                         if (!state.silentOpeningSet.add(sendId)) return;
                         state.silentReceivingSet.remove(sendId);
                         cancelTask(receiveTimeoutKey(sendId));
@@ -540,6 +549,10 @@ public class RedPacketSilentHandler {
         log("静默拆包重试: sendid=" + sendId + " attempt=" + nextAttempt + " reason=" + reason);
         runDelayed(openRetryKey(sendId), 1200L * nextAttempt, () -> {
             if (!state.silentOpeningSet.contains(sendId) || state.silentFinishedSet.contains(sendId)) return;
+            if (settings.shouldSkipPrivateChat((String) info.get("talker"))) {
+                cleanup(sendId);
+                return;
+            }
             if (networkDispatcher.send(openRequest)) {
                 scheduleOpenTimeout(sendId);
             } else if (!retryOpenLater(info, sendId, "拆红包重试发包失败")) {

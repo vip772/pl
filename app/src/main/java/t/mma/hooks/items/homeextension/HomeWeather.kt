@@ -11,7 +11,6 @@ import android.widget.TextView
 import org.json.JSONObject
 import java.net.URL
 import java.net.URLEncoder
-import java.util.concurrent.Executors
 import t.mma.preferences.HchatStorage
 import kotlin.math.roundToInt
 
@@ -141,11 +140,15 @@ internal object HomeWeather {
     fun card(context: Context, compact: Boolean = false, settings: android.content.SharedPreferences? = null): LinearLayout {
         val prefs = settings ?: HomeExtensionSettings.preferences(context)
         val storage = HchatStorage.preferences(context, "Hchat_home_qweather_v1_cache")
-        val name = prefs.getString("weather_city", "").orEmpty()
-        val lat = prefs.getString("weather_lat", "").orEmpty()
-        val lon = prefs.getString("weather_lon", "").orEmpty()
+        var name = prefs.getString("weather_city", "").orEmpty()
+        var lat = prefs.getString("weather_lat", "").orEmpty()
+        var lon = prefs.getString("weather_lon", "").orEmpty()
         val showWeek = prefs.getBoolean("weather_seven_day", false)
-        val key = "$lat,$lon" + if (showWeek) ":week7" else ""
+        var key = "$lat,$lon" + if (showWeek) ":week7" else ""
+        var locating = false
+        var locationRequest = 0L
+        var locationCleanup: (() -> Unit)? = null
+        var manualRefresh: () -> Unit = {}
         var weekPage = false
         var swipePage: (Boolean) -> Unit = {}
         val density = context.resources.displayMetrics.density
@@ -201,17 +204,37 @@ internal object HomeWeather {
         fun render(data: JSONObject?, stale: Boolean = false) {
             swipePage = { next -> weekPage=next; render(data,stale) }
             panel.removeAllViews()
-            val heading = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL; if(compact) orientation=LinearLayout.VERTICAL }
+            val heading = LinearLayout(context).apply { gravity = Gravity.CENTER_VERTICAL }
+            val labels = LinearLayout(context).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                if (compact) orientation = LinearLayout.VERTICAL
+            }
             val cityLabel = text(name.substringBefore("·").trim().ifBlank { "请选择天气城市" }, 14f).apply {
-                val pin = WeatherLocationDrawable(currentTextColor)
-                pin.setBounds(0, 0, dp(16), dp(18))
-                setCompoundDrawablesRelative(pin, null, null, null)
-                compoundDrawablePadding = dp(5)
                 gravity = Gravity.CENTER_VERTICAL
             }
-            heading.addView(cityLabel, if(compact) LinearLayout.LayoutParams(-1,-2) else LinearLayout.LayoutParams(0,-2,1f))
+            labels.addView(cityLabel, if(compact) LinearLayout.LayoutParams(-1,-2) else LinearLayout.LayoutParams(0,-2,1f))
             val stamp = if (data != null) java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(data.getLong("saved"))) else "--:--"
-            heading.addView(text(if(stale) "更新失败 · $stamp" else "更新于 $stamp", 11f, true))
+            val status = when {
+                locating -> "正在定位…"
+                inFlight.contains(key) -> "正在更新…"
+                stale -> "更新失败 · 上次 $stamp"
+                else -> "更新于 $stamp"
+            }
+            labels.addView(text(status, 11f, true))
+            heading.addView(labels, LinearLayout.LayoutParams(0, -2, 1f))
+            heading.addView(android.widget.ImageButton(context).apply {
+                setImageDrawable(WeatherLocationDrawable(0xFF777777.toInt()))
+                scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+                setPadding(dp(14), dp(13), dp(14), dp(13))
+                background = android.graphics.drawable.RippleDrawable(
+                    android.content.res.ColorStateList.valueOf(0x22777777), null,
+                    GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) }
+                )
+                contentDescription = "定位并刷新天气"
+                isEnabled = !locating && !inFlight.contains(key)
+                alpha = if (isEnabled) 1f else 0.45f
+                setOnClickListener { manualRefresh() }
+            }, LinearLayout.LayoutParams(dp(48), dp(48)))
             panel.addView(heading)
             if (showWeek && weekPage) {
                 panel.addView(text("七天预报",16f).apply { setPadding(0,dp(12),0,dp(8)) })
@@ -334,50 +357,169 @@ val sky = LinearLayout(context).apply {
             }
             return data
         }
-        val cached = runCatching { validated(JSONObject(storage.getString(key,null)!!)) }.getOrNull()
-        render(cached)
-        val refresh: () -> Unit = {
-            if (panel.isAttachedToWindow) {
-                val latest = runCatching { validated(JSONObject(storage.getString(key,null)!!)) }.getOrNull()
-                render(latest ?: cached, failures.containsKey(key))
+        fun cached(): JSONObject? = runCatching {
+            validated(JSONObject(storage.getString(key, null)!!))
+        }.getOrNull()
+        var lastWeather = cached()
+        fun refresh() {
+            val latest = cached()
+            if (latest != null) lastWeather = latest
+            if (panel.isAttachedToWindow) render(latest ?: lastWeather, failures.containsKey(key))
+        }
+        // The view owns the callback strongly; the registry must not retain the view.
+        val onWeatherChanged: () -> Unit = { refresh() }
+        fun unregister() {
+            listeners[key]?.let { callbacks ->
+                callbacks.removeAll { it.get() == null || it.get() === onWeatherChanged }
+                if (callbacks.isEmpty()) listeners.remove(key)
+            }
+        }
+        fun register() {
+            val callbacks = listeners.getOrPut(key) { mutableListOf() }
+            callbacks.removeAll { it.get() == null || it.get() === onWeatherChanged }
+            callbacks.add(java.lang.ref.WeakReference(onWeatherChanged))
+        }
+        fun notifyCards(requestKey: String) {
+            listeners[requestKey]?.toList()?.forEach { it.get()?.invoke() }
+            listeners[requestKey]?.removeAll { it.get() == null }
+            if (listeners[requestKey]?.isEmpty() == true) listeners.remove(requestKey)
+        }
+        fun fetch(force: Boolean = false) {
+            val latitude = lat.toDoubleOrNull()?.takeIf { it.isFinite() && it in -90.0..90.0 } ?: return
+            val longitude = lon.toDoubleOrNull()?.takeIf { it.isFinite() && it in -180.0..180.0 } ?: return
+            val saved = cached()
+            val now = System.currentTimeMillis()
+            if (!force && saved != null && now - saved.optLong("saved") < CACHE_TTL) return
+            if (!force && now - (failures[key] ?: 0L) < 5 * 60_000L) return
+            val requestKey = key
+            if (!inFlight.add(requestKey)) { refresh(); return }
+            notifyCards(requestKey)
+            worker.execute {
+                val result = runCatching {
+                    val location = String.format(java.util.Locale.ROOT, "%.2f/%.2f", latitude, longitude)
+                    val current = request("https://$HOST/weather/v1/current/$location?lang=zh")
+                    val forecast = request("https://$HOST/weather/v1/daily/$location?days=${if(showWeek) 7 else 1}&lang=zh&localTime=true")
+                    validated(normalize(current, forecast)).apply { put("saved", System.currentTimeMillis()) }
+                }.recoverCatching {
+                    val url = "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=${if(showWeek) 7 else 1}"
+                    validated(normalizeBackup(request(url))).apply { put("saved", System.currentTimeMillis()) }
+                }.getOrNull()
+                if (result != null) storage.edit().putString(requestKey, result.toString()).apply()
+                main.post {
+                    inFlight.remove(requestKey)
+                    if (result == null) failures[requestKey] = System.currentTimeMillis() else failures.remove(requestKey)
+                    notifyCards(requestKey)
+                }
+            }
+        }
+        manualRefresh = manual@{
+            if (locating || inFlight.contains(key) || !panel.isAttachedToWindow) return@manual
+            fun message(value: String) = android.widget.Toast.makeText(context, value, android.widget.Toast.LENGTH_SHORT).show()
+            val fine = context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            val coarse = context.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            if (!fine && !coarse) {
+                message("定位失败：请在系统设置中允许微信使用位置信息")
+                return@manual
+            }
+            val manager = context.getSystemService(Context.LOCATION_SERVICE) as? android.location.LocationManager
+            val providers = runCatching {
+                manager?.getProviders(true)?.filter {
+                    it == android.location.LocationManager.NETWORK_PROVIDER || (fine && it == android.location.LocationManager.GPS_PROVIDER)
+                }.orEmpty()
+            }.getOrDefault(emptyList())
+            if (manager == null || providers.isEmpty()) {
+                message("定位失败：请开启系统定位服务")
+                return@manual
+            }
+            locating = true
+            val requestId = ++locationRequest
+            refresh()
+            lateinit var listener: android.location.LocationListener
+            val timeout = Runnable {
+                if (!locating || locationRequest != requestId) return@Runnable
+                locationCleanup?.invoke()
+                refresh()
+                message("定位超时，请到信号良好的位置重试")
+            }
+            locationCleanup = {
+                locating = false
+                locationRequest++
+                main.removeCallbacks(timeout)
+                runCatching { manager.removeUpdates(listener) }
+                locationCleanup = null
+            }
+            listener = object : android.location.LocationListener {
+                override fun onLocationChanged(location: android.location.Location) {
+                    if (!locating || locationRequest != requestId || !panel.isAttachedToWindow) return
+                    val latitude = location.latitude
+                    val longitude = location.longitude
+                    if (!latitude.isFinite() || latitude !in -90.0..90.0 || !longitude.isFinite() || longitude !in -180.0..180.0) return
+                    locationCleanup?.invoke()
+                    unregister()
+                    lat = latitude.toString()
+                    lon = longitude.toString()
+                    // Keep usable coordinates when reverse geocoding is unavailable.
+                    name = String.format(java.util.Locale.ROOT, "%.2f, %.2f", latitude, longitude)
+                    key = "$lat,$lon" + if (showWeek) ":week7" else ""
+                    prefs.edit().putString("weather_city", name).putString("weather_lat", lat).putString("weather_lon", lon).apply()
+                    register()
+                    fetch(force = true)
+                    refresh()
+                    val locatedKey = key
+                    worker.execute {
+                        val city = runCatching {
+                            @Suppress("DEPRECATION")
+                            val address = android.location.Geocoder(context.applicationContext, java.util.Locale.CHINA)
+                                .getFromLocation(latitude, longitude, 1)?.firstOrNull()
+                            listOfNotNull(address?.locality, address?.subLocality, address?.adminArea)
+                                .filter { it.isNotBlank() }.distinct().joinToString(" · ")
+                        }.getOrNull()
+                        main.post {
+                            if (key == locatedKey && !city.isNullOrBlank()) {
+                                name = city
+                                // Do not overwrite a city subsequently selected in settings.
+                                if (prefs.getString("weather_lat", "") == lat && prefs.getString("weather_lon", "") == lon) {
+                                    prefs.edit().putString("weather_city", name).apply()
+                                }
+                                refresh()
+                            }
+                        }
+                    }
+                }
+                @Deprecated("Required on Android 8–9")
+                override fun onStatusChanged(provider: String?, status: Int, extras: android.os.Bundle?) {}
+                override fun onProviderEnabled(provider: String) {}
+                override fun onProviderDisabled(provider: String) {}
+            }
+            main.postDelayed(timeout, 20_000L)
+            val started = providers.map { provider ->
+                runCatching {
+                    @Suppress("DEPRECATION")
+                    manager.requestSingleUpdate(provider, listener, Looper.getMainLooper())
+                }.isSuccess
+            }.any { it }
+            if (!started) {
+                locationCleanup?.invoke()
+                refresh()
+                message("定位请求失败，请检查微信定位权限和系统定位服务")
             }
         }
         panel.addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(view: android.view.View) { refresh() }
-            override fun onViewDetachedFromWindow(view: android.view.View) {}
-        })
-        listeners.getOrPut(key) { mutableListOf() }.apply {
-            removeAll { it.get() == null }; add(java.lang.ref.WeakReference(refresh))
-        }
-        if(lat.toDoubleOrNull()==null || lon.toDoubleOrNull()==null) return panel
-        if(cached != null && System.currentTimeMillis()-cached.optLong("saved") < CACHE_TTL) return panel
-        if(!inFlight.add(key)) return panel
-        if(System.currentTimeMillis()-(failures[key] ?: 0L)<5*60_000L) { inFlight.remove(key);return panel }
-        worker.execute {
-            val result=runCatching {
-                val latitude = lat.toDouble().also { check(it.isFinite() && it in -90.0..90.0) }
-                val longitude = lon.toDouble().also { check(it.isFinite() && it in -180.0..180.0) }
-                val location = String.format(java.util.Locale.ROOT, "%.2f/%.2f", latitude, longitude)
-                val now = request("https://$HOST/weather/v1/current/$location?lang=zh")
-                val forecast = request("https://$HOST/weather/v1/daily/$location?days=${if(showWeek) 7 else 1}&lang=zh&localTime=true")
-                validated(normalize(now, forecast)).apply { put("saved",System.currentTimeMillis()) }
-            }.recoverCatching {
-                val latitude = lat.toDouble().also { check(it.isFinite() && it in -90.0..90.0) }
-                val longitude = lon.toDouble().also { check(it.isFinite() && it in -180.0..180.0) }
-                val url = "https://api.open-meteo.com/v1/forecast?latitude=$latitude&longitude=$longitude&current=temperature_2m,relative_humidity_2m,apparent_temperature,is_day,weather_code,wind_speed_10m&daily=temperature_2m_max,temperature_2m_min,weather_code&timezone=auto&forecast_days=${if(showWeek) 7 else 1}"
-                validated(normalizeBackup(request(url))).apply { put("saved",System.currentTimeMillis()) }
-            }.getOrNull()
-            if(result!=null) storage.edit().putString(key,result.toString()).apply()
-            main.post {
-                inFlight.remove(key)
-                if(result==null) failures[key]=System.currentTimeMillis() else failures.remove(key)
-                listeners.remove(key)?.forEach { it.get()?.invoke() }
+            override fun onViewAttachedToWindow(view: android.view.View) {
+                register()
+                refresh()
+                fetch()
             }
-        }
+            override fun onViewDetachedFromWindow(view: android.view.View) {
+                locationCleanup?.invoke()
+                unregister()
+            }
+        })
+        render(cached())
         return panel
     }
 }
-/** Static vector pin; tint follows the city label rather than font-specific glyphs. */
+/** Static vector pin for the weather location button. */
 internal class WeatherLocationDrawable(color: Int) : android.graphics.drawable.Drawable() {
     private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
         this.color = color
@@ -394,6 +536,8 @@ internal class WeatherLocationDrawable(color: Int) : android.graphics.drawable.D
         cubicTo(13.2f, 10.5f, 9.8f, 14.2f, 8f, 16.3f)
         close()
     }
+    override fun getIntrinsicWidth() = 16
+    override fun getIntrinsicHeight() = 18
     override fun draw(canvas: android.graphics.Canvas) {
         if (bounds.isEmpty) return
         val save = canvas.save()

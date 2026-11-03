@@ -1252,6 +1252,7 @@ internal fun practicalFeatureGroups(
                 MomentsContactFilterFeature.ID,
                 MomentsKeywordBlockFeature.ID,
                 MomentsBottomDetailFeature.ID,
+                t.mma.hooks.items.moments.MomentsCardFeature.ID,
                 MomentsPostNotificationFeature.ID,
                 OriginalMomentsUploadFeature.ID,
                 MomentsUploadTailFeature.ID,
@@ -2058,7 +2059,7 @@ internal fun featureSubSearchTerms(featureId: String): List<String> {
         VoiceForwardFeature.ID -> listOf("语音转发", "语音保存", "合并语音", "合并MP3", "转发弹窗", "好友列表", "群聊列表", "语音列表", "批量转发")
         ScheduledTaskFeature.ID -> listOf("定时任务", "定时发送", "群发任务", "计划发送", "循环发送", "每日发送", "每周发送", "朋友圈", "图文", "视文")
         AutoRedPacketFeature.ID -> listOf(
-            "自动抢红包", "红包关键词", "红包规则", "规则模板", "回复步骤", "私聊红包回复", "群红包回复", "延迟抢红包", "仅群聊", "仅私聊", "排除名单", "领取后回复"
+            "自动抢红包", "私聊不抢", "红包关键词", "红包规则", "规则模板", "回复步骤", "私聊红包回复", "群红包回复", "延迟抢红包", "仅群聊", "仅私聊", "排除名单", "领取后回复"
         )
         AutoTransferFeature.ID -> listOf(
             "自动收款", "转账关键词", "转账规则", "延迟到账", "自动领取转账", "自动收转账", "收款回复",
@@ -2087,6 +2088,7 @@ internal fun featureSubSearchTerms(featureId: String): List<String> {
         MomentsAutoRefreshFeature.ID -> listOf("朋友圈自动刷新", "后台刷新", "原生刷新", "刷新间隔", "刷新时段")
         MomentsContactFilterFeature.ID -> listOf("朋友圈过滤", "好友过滤", "过滤好友", "只看好友", "朋友圈白名单", "朋友圈黑名单", "好友标签", "聊天分组")
         MomentsKeywordBlockFeature.ID -> listOf("朋友圈关键词屏蔽", "朋友圈屏蔽", "关键词过滤", "隐藏朋友圈")
+        t.mma.hooks.items.moments.MomentsCardFeature.ID -> listOf("朋友圈卡片模式", "卡片模式", "描边颜色", "三色渐变颜色")
         MomentsBottomDetailFeature.ID -> listOf("朋友圈底部详情", "朋友圈时间", "底部时间", "自定义时间", "时间格式", "可见范围")
         MomentsPostNotificationFeature.ID -> listOf("朋友圈发布通知", "朋友圈提醒", "好友发布朋友圈", "朋友圈Toast", "通知模板")
         OriginalMomentsUploadFeature.ID -> listOf("朋友圈原图", "原图上传", "原视频", "原视频上传", "不压缩", "朋友圈图片", "朋友圈视频")

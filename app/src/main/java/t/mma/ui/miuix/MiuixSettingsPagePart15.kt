@@ -1923,6 +1923,8 @@ internal fun RedPacketMiuixPage(
                         defaultValue = RedPacketSettings.DEFAULT_GRAB_MODE
                     )
                     InsetDivider()
+                    SwitchRow(sp, RedPacketSettings.KEY_SKIP_PRIVATE, "私聊不抢", "开启后不自动领取任何私聊红包，群聊仍按原有规则处理", false)
+                    InsetDivider()
                     SwitchRow(sp, RedPacketSettings.KEY_SKIP_SELF, "跳过自己的红包", "不会抢自己发出的红包", false)
                     InsetDivider()
                     SwitchRow(

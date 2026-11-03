@@ -1208,6 +1208,7 @@ internal fun FeatureSettingsPage(
         MomentsContactFilterFeature.ID -> MomentsContactFilterMiuixPage(context, provider, onBack)
         MomentsKeywordBlockFeature.ID -> MomentsKeywordBlockMiuixPage(context, provider, onBack)
         MomentsBottomDetailFeature.ID -> MomentsBottomDetailMiuixPage(context, provider, onBack)
+        t.mma.hooks.items.moments.MomentsCardFeature.ID -> MomentsCardMiuixPage(context, provider, onBack)
         MomentsPostNotificationFeature.ID -> MomentsPostNotificationMiuixPage(context, provider, onBack)
         OriginalMomentsUploadFeature.ID -> OriginalMomentsUploadMiuixPage(context, provider, onBack)
         MomentsUploadTailFeature.ID -> MomentsUploadTailMiuixPage(context, provider, onBack)
