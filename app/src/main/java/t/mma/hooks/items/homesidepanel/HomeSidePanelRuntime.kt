@@ -91,6 +91,30 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 else sessions[activity]?.pauseEffect()
             }
         }
+        bootstrapHomepage(launcher)
+    }
+    private fun bootstrapHomepage(launcher: Class<*>) {
+        // Both lifecycle trackers may be installed after the first resume/focus.
+        // Resolve the verified native accessor once; never scan the view tree here.
+        val getInstance = KavaReflector.findMethod(launcher, "getInstance")
+        val bootstrap = object : Runnable {
+            private var attempts = 0
+            override fun run() {
+                if (!active.get() || sessions.isNotEmpty()) return
+                attempts++
+                fun usable(activity: Activity): Boolean =
+                    isLauncher(activity) && !activity.isFinishing && !activity.isDestroyed
+                val current = WeChatApis.currentActivity()?.currentActivity()?.takeIf(::usable)
+                    ?: (KavaReflector.invoke(getInstance, null) as? Activity)?.takeIf(::usable)
+                current?.let(::attachNow)
+                // Installation-only, at most 40 attempts / 9.75 seconds. destroy()
+                // clears this Handler; the active gate also rejects raced callbacks.
+                if (active.get() && sessions.isEmpty() && attempts < 40) {
+                    handler.postDelayed(this, 250L)
+                }
+            }
+        }
+        postActive { bootstrap.run() }
     }
     private fun hook(owner: Class<*>, name: String, params: Array<Class<*>>, action: (XC_MethodHook.MethodHookParam) -> Unit) {
         KavaReflector.findMethodRecursive(owner, name, *params)?.let { method ->
