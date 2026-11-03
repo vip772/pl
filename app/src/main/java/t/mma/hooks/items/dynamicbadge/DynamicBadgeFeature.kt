@@ -9,7 +9,6 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.drawable.Drawable
-import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.view.View
@@ -25,7 +24,9 @@ import t.mma.event.Events
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
-import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.core.OwnedHandler
+import t.mma.hooks.core.OwnedHooks
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
 import java.lang.reflect.Method
@@ -35,6 +36,7 @@ import java.util.WeakHashMap
 
 class DynamicBadgeFeature : BaseFeature() {
     private var runtime: DynamicBadgeRuntime? = null
+    private var owner: PreferenceRuntimeOwner? = null
 
     override fun featureId(): String = DynamicBadgeSettings.ID
     override fun name(): String = "动态角标"
@@ -44,34 +46,50 @@ class DynamicBadgeFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
-        val current = DynamicBadgeRuntime(context)
-        runtime = current
-        if (!current.install(allowDexSearch = false)) scheduleInstall()
-        subscribe(Events.DexReady::class.java) { scheduleInstall() }
+        val prefs = HchatStorage.preferences(context.hostContext(), DynamicBadgeSettings.PREFS_NAME)
+        val next = PreferenceRuntimeOwner(
+            prefs, setOf(DynamicBadgeSettings.KEY_ENABLE),
+            enabled = { prefs.getBoolean(DynamicBadgeSettings.KEY_ENABLE, DynamicBadgeSettings.DEFAULT_ENABLE) },
+            create = { scope ->
+                val current = DynamicBadgeRuntime(context)
+                runtime = current
+                scope.register {
+                    try { current.destroy() } finally { if (runtime === current) runtime = null }
+                }
+                current.start()
+            },
+            onError = { error ->
+                try { t.mma.utils.HLog.e("[Hchat:动态角标] 生命周期失败", error) } catch (_: Throwable) { }
+            }
+        )
+        owner = next
+        next.start()
+        subscribe(Events.DexReady::class.java) { runtime?.scheduleInstall() }
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {
-        runtime?.destroy()
-        runtime = null
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(DynamicBadgeSettings.ID, name()) {
-            runtime?.install(allowDexSearch = true) == true
-        }
+        val current = owner
+        owner = null
+        try { current?.close() } finally { runtime = null }
     }
 }
-
 private class DynamicBadgeRuntime(private val context: FeatureContext) {
     private val host = context.hostContext()
     private val loader = context.hostClassLoader()
     private val prefs = HchatStorage.preferences(host, DynamicBadgeSettings.PREFS_NAME)
     private val methodPrefs = DexMethodCache.prefs(host, "Hchat_dynamic_badge_method_cache")
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val mainHandler = OwnedHandler({ HLogBridge.error("主线程任务失败", null, it) })
     private val overlays = Collections.synchronizedMap(WeakHashMap<View, BadgeOverlay>())
     private val badgeSources = Collections.synchronizedMap(WeakHashMap<View, View>())
     private val modernRows = Collections.synchronizedMap(WeakHashMap<Any, View>())
     @Volatile private var destroyed = false
+    private fun newHooks() = OwnedHooks { HLogBridge.error("Hook 所有权失败", null, it) }
+    private var hooks = newHooks()
+    private var installFailed = false
+    @Volatile private var hookGeneration = 0
+    private var installation: DexInstallScheduler.Installation? = null
+    private var listening = false
+    private val rowTasks = mutableMapOf<View, MutableSet<RowTask>>()
     @Volatile private var installedMethods = emptySet<Method>()
     private val boundRows = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
     private val pendingRowBindings = Collections.synchronizedMap(WeakHashMap<View, View.OnAttachStateChangeListener>())
@@ -82,32 +100,51 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     private val queuedRows = Collections.newSetFromMap(WeakHashMap<View, Boolean>())
     private val colorCache = java.util.concurrent.ConcurrentHashMap<Boolean, Pair<Int, Int>>()
     private val preferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-        colorCache.clear()
-        mainHandler.post { refreshAll() }
+        if (!destroyed) {
+            colorCache.clear()
+            mainHandler.post { if (!destroyed) refreshAll() }
+        }
     }
-
-    init {
-        prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
+    @Synchronized fun start() {
+        if (destroyed || listening) return
+        listening = true
+        try {
+            prefs.registerOnSharedPreferenceChangeListener(preferenceListener)
+            if (!install(allowDexSearch = false)) scheduleInstall()
+        } catch (error: Throwable) {
+            destroy()
+            throw error
+        }
+    }
+    @Synchronized fun scheduleInstall() {
+        if (destroyed) return
+        val ticket = installation ?: DexInstallScheduler.installation(
+            DynamicBadgeSettings.ID, "动态角标"
+        ).also { installation = it }
+        ticket.schedule { synchronized(this) { destroyed || install(allowDexSearch = true) } }
     }
 
     @Synchronized
     fun install(allowDexSearch: Boolean): Boolean {
         if (destroyed) return false
+        installFailed = false
+        val epoch = hookGeneration
+        try {
         val methods = locateConversationBindMethods(allowDexSearch)
         val legacyInstalled = if (methods.isEmpty()) false else {
             val newMethods = methods - installedMethods
             if (newMethods.isNotEmpty()) {
                 val callback = object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        if (destroyed || param.hasThrowable()) return
+                        if (destroyed || epoch != hookGeneration || param.hasThrowable()) return
                         val row = param.result as? View ?: return
                         if (Looper.myLooper() == Looper.getMainLooper()) {
                             scheduleBindRow(row)
-                        } else row.post { removeOverlaysIn(row); scheduleBindRow(row) }
+                        } else postRow(row) { removeOverlaysIn(row); scheduleBindRow(row) }
                     }
                 }
                 val hookedMethods = newMethods.filter { method ->
-                    runCatching { HookRegistry.get().hook(method, callback); true }
+                    runCatching { hook(method, callback) != null }
                         .getOrElse { HLogBridge.error("安装旧版会话行角标动画 Hook 失败", method, it); false }
                 }
                 if (hookedMethods.isNotEmpty()) installedMethods = installedMethods + hookedMethods
@@ -116,11 +153,13 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
         val modernInstalled = installModernConversationHooks(allowDexSearch)
         val installed = legacyInstalled || modernInstalled
+        if (destroyed || installFailed) { rollbackHooks(); return false }
         if (!installed && allowDexSearch) {
             t.mma.utils.HLog.e("[Hchat:动态角标] 会话绑定 Hook 未安装，动态角标未生效")
         }
         if (installed) {
             installVisibleRowRecovery()
+            if (destroyed || installFailed) { rollbackHooks(); return false }
             mainHandler.post { recoverVisibleRows() }
             // The Activity API or its window can itself be unavailable at hook install.
             listOf(100L, 300L, 1000L, 3000L).forEach { delay ->
@@ -128,18 +167,38 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             }
         }
         return installed
+        } catch (error: Throwable) {
+            rollbackHooks()
+            HLogBridge.error("安装失败，已回滚独占Hook", null, error)
+            return false
+        }
+    }
+    private fun hook(method: Method, callback: XC_MethodHook): XC_MethodHook.Unhook? {
+        val handle = hooks.hook(method, callback)
+        if (handle == null) installFailed = true
+        return handle
+    }
+    private fun rollbackHooks() {
+        hookGeneration++
+        release { hooks.close() }
+        if (!destroyed) hooks = newHooks()
+        installedMethods = emptySet()
+        modernHolderInstalled = false
+        modernBindInstalled = false
+        resumeHookInstalled = false
     }
     private fun installVisibleRowRecovery() {
+        val epoch = hookGeneration
         if (resumeHookInstalled) return
         val resume = Activity::class.java.getDeclaredMethod("onResume")
-        HookRegistry.get().hook(resume, object : XC_MethodHook() {
+        val handle = hook(resume, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 val activity = param.thisObject as? Activity ?: return
-                if (destroyed || !activity.javaClass.name.startsWith("com.tencent.mm.")) return
-                activity.window?.decorView?.post { recoverVisibleRows(activity) }
+                if (destroyed || epoch != hookGeneration || !activity.javaClass.name.startsWith("com.tencent.mm.")) return
+                activity.window?.decorView?.let { decor -> postRow(decor) { recoverVisibleRows(activity) } }
             }
         })
-        resumeHookInstalled = true
+        resumeHookInstalled = handle != null
     }
     private fun recoverVisibleRows(activity: Activity? = WeChatApis.currentActivity()?.currentActivity() as? Activity) {
         if (destroyed || !isEnabled()) return
@@ -148,7 +207,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             recoveryHosts.remove(it)?.dispose()
         }
         if (recoveryHosts[decor] == null) {
-            recoveryHosts[decor] = BadgeListRecovery(decor) { repairVisibleRows(decor) }
+            recoveryHosts[decor] = BadgeListRecovery(decor, onError = { HLogBridge.error("列表恢复释放失败", null, it) }) { repairVisibleRows(decor) }
         }
         repairVisibleRows(decor)
     }
@@ -197,25 +256,50 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
         return candidates.singleOrNull()?.also { modernRows[holder] = it }
     }
-    fun destroy() {
+    private fun release(action: () -> Unit) {
+        try { action() } catch (error: Throwable) {
+            try { HLogBridge.error("释放独占资源失败", null, error) } catch (_: Throwable) { }
+        }
+    }
+    @Synchronized fun destroy() {
+        if (destroyed) return
         destroyed = true
-        prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
-        mainHandler.removeCallbacksAndMessages(null)
-        recoveryHosts.values.toList().forEach { it.dispose() }
+        hookGeneration++
+        val ticket = installation
+        installation = null
+        release { ticket?.close() }
+        release { hooks.close() }
+        if (listening) {
+            listening = false
+            release { prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener) }
+        }
+        release { mainHandler.close() }
+        val tasks = synchronized(rowTasks) { rowTasks.toMap().also {
+            rowTasks.values.forEach { callbacks -> callbacks.forEach { it.action = null } }
+            rowTasks.clear()
+        } }
+        tasks.forEach { (row, callbacks) -> callbacks.forEach { task -> release { row.removeCallbacks(task) } } }
+        val recoveries = recoveryHosts.values.toList()
         recoveryHosts.clear()
+        recoveries.forEach { release { it.dispose() } }
         queuedRows.clear()
         synchronized(modernRows) { modernRows.clear() }
         synchronized(boundRows) { boundRows.clear() }
-        synchronized(pendingRowBindings) {
-            pendingRowBindings.forEach { (row, listener) -> row.removeOnAttachStateChangeListener(listener) }
-            pendingRowBindings.clear()
+        val pending = synchronized(pendingRowBindings) {
+            pendingRowBindings.toMap().also { pendingRowBindings.clear() }
         }
+        pending.forEach { (row, listener) -> release { row.removeOnAttachStateChangeListener(listener) } }
         synchronized(badgeSources) { badgeSources.clear() }
         val current = synchronized(overlays) { overlays.values.toList().also { overlays.clear() } }
-        current.forEach(BadgeOverlay::detach)
+        current.forEach { release { it.detach() } }
+        colorCache.clear()
+        installedMethods = emptySet()
+        modernHolderInstalled = false
+        modernBindInstalled = false
+        resumeHookInstalled = false
     }
-
     private fun installModernConversationHooks(allowDexSearch: Boolean): Boolean {
+        val epoch = hookGeneration
         if (modernHolderInstalled && modernBindInstalled) return true
         val runtimeKey = DexMethodCache.runtimeKey(host, loader)
         val cachedBind = DexMethodCache.load(methodPrefs, runtimeKey, loader, CACHE_MODERN_BIND)
@@ -251,22 +335,22 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         val targetHolder = holder ?: return false
         if (!modernHolderInstalled) {
             modernHolderInstalled = runCatching {
-                HookRegistry.get().hook(targetHolder, object : XC_MethodHook() {
+                hook(targetHolder, object : XC_MethodHook() {
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        if (destroyed || param.hasThrowable()) return
+                        if (destroyed || epoch != hookGeneration || param.hasThrowable()) return
                         val holderObject = param.args?.getOrNull(0) ?: return
                         val row = param.args?.getOrNull(1) as? View ?: return
                         modernRows[holderObject] = row
                         scheduleBindRow(row)
                     }
-                })
-                true
+                }) != null
             }.getOrElse { HLogBridge.error("安装现代会话 Holder 行缓存 Hook 失败", targetHolder, it); false }
         }
         if (!modernBindInstalled) {
             modernBindInstalled = runCatching {
-                HookRegistry.get().hook(targetBind, object : XC_MethodHook() {
+                hook(targetBind, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (destroyed || epoch != hookGeneration) return
                         val holderObjects = param.args?.drop(1)?.take(2).orEmpty()
                         holderObjects.forEach { holderObject ->
                             modernRows[holderObject]?.let { row ->
@@ -275,15 +359,14 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
                         }
                     }
                     override fun afterHookedMethod(param: MethodHookParam) {
-                        if (destroyed || param.hasThrowable()) return
+                        if (destroyed || epoch != hookGeneration || param.hasThrowable()) return
                         val holderObjects = param.args?.drop(1)?.take(2).orEmpty()
                         val row = holderObjects.asSequence().mapNotNull { holderObject ->
                             holderRow(holderObject)
                         }.firstOrNull() ?: return
-                        if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
+                        if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else postRow(row) { scheduleBindRow(row) }
                     }
-                })
-                true
+                }) != null
             }.getOrElse { HLogBridge.error("安装现代会话绑定角标 Hook 失败", targetBind, it); false }
         }
         return modernHolderInstalled && modernBindInstalled
@@ -343,6 +426,39 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             method.declaringClass.name.startsWith(CONVERSATION_OWNER) &&
             !Modifier.isStatic(method.modifiers) && !Modifier.isAbstract(method.modifiers)
     }
+    private class RowTask(
+        private val runtime: DynamicBadgeRuntime,
+        val row: View,
+        var action: (() -> Unit)?
+    ) : Runnable {
+        override fun run() {
+            val next = synchronized(runtime.rowTasks) {
+                runtime.rowTasks[row]?.let { tasks ->
+                    tasks.remove(this); if (tasks.isEmpty()) runtime.rowTasks.remove(row)
+                }
+                action.also { action = null }
+            }
+            if (!runtime.destroyed) next?.invoke()
+        }
+    }
+    private fun postRow(row: View, animation: Boolean = false, action: () -> Unit) {
+        val task = RowTask(this, row, action)
+        synchronized(rowTasks) {
+            if (destroyed) { task.action = null; return }
+            rowTasks.getOrPut(row) { linkedSetOf() }.add(task)
+            try {
+                if (animation) row.postOnAnimation(task)
+                else if (!row.post(task)) {
+                    task.action = null
+                    rowTasks[row]?.let { tasks -> tasks.remove(task); if (tasks.isEmpty()) rowTasks.remove(row) }
+                }
+            } catch (error: Throwable) {
+                task.action = null
+                rowTasks[row]?.let { tasks -> tasks.remove(task); if (tasks.isEmpty()) rowTasks.remove(row) }
+                throw error
+            }
+        }
+    }
     private fun scheduleBindRow(row: View) {
         if (destroyed) return
         if (!isEnabled()) {
@@ -351,7 +467,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         }
         if (row.isAttachedToWindow) {
             if (!queuedRows.add(row)) return
-            row.postOnAnimation {
+            postRow(row, animation = true) {
                 queuedRows.remove(row)
                 bindRow(row)
             }
@@ -361,6 +477,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             if (pendingRowBindings.containsKey(row)) return
             val listener = object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
+                    if (destroyed) return
                     view.removeOnAttachStateChangeListener(this)
                     synchronized(pendingRowBindings) { pendingRowBindings.remove(view) }
                     scheduleBindRow(view)
@@ -385,7 +502,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         val badges = if (knownBadges.isNotEmpty()) knownBadges else candidates.filter(::isBadge)
         if (badges.isEmpty()) {
             if (row.isShown) {
-                row.postOnAnimation {
+                postRow(row, animation = true) {
                     if (!destroyed && row.isAttachedToWindow && row.isShown) {
                         val retry = ArrayList<View>()
                         collectViews(row, retry)
@@ -462,8 +579,9 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
     }
 
     private fun removeOverlay(view: View) {
-        synchronized(overlays) { overlays.remove(view) }?.detach()
+        val overlay = synchronized(overlays) { overlays.remove(view) }
         synchronized(badgeSources) { badgeSources.remove(view) }
+        release { overlay?.detach() }
     }
 
     private fun isDescendantOf(view: View, ancestor: View): Boolean {
@@ -485,7 +603,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         recoverVisibleRows()
         val rows = synchronized(boundRows) { boundRows.keys.toList() }
         rows.forEach { row ->
-            if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else row.post { scheduleBindRow(row) }
+            if (Looper.myLooper() == Looper.getMainLooper()) scheduleBindRow(row) else postRow(row) { scheduleBindRow(row) }
         }
     }
 
@@ -545,7 +663,7 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
 
     private object HLogBridge {
         fun error(message: String, member: Method?, error: Throwable) {
-            t.mma.utils.HLog.e("[Hchat:动态角标] $message${member?.let { ": ${it.toGenericString()}" } ?: ""}", error)
+            try { t.mma.utils.HLog.e("[Hchat:动态角标] $message${member?.let { ": ${it.toGenericString()}" } ?: ""}", error) } catch (_: Throwable) { }
         }
     }
 
@@ -558,21 +676,37 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         private val hostView: View = (rowView.parent as? View) ?: rowView
         private val drawable = AnimatedBadgeDrawable(hostView, source, preferences, initialKind)
         private var disposed = false
+        private val drawableTasks = mutableMapOf<Runnable, Runnable>()
         fun isCurrentHost(row: View): Boolean = rowView === row && hostView === ((row.parent as? View) ?: row)
-        private val windowObserver = BadgeWindowObserver(hostView) {
+        private val windowObserver = BadgeWindowObserver(hostView, onError = { HLogBridge.error("窗口观察释放失败", null, it) }) {
             updateBounds()
             updateVisibility()
         }
         init {
+            try {
             drawable.callback = object : Drawable.Callback {
                 override fun invalidateDrawable(who: Drawable) {
-                    hostView.postInvalidateOnAnimation()
+                    if (!disposed && !destroyed) hostView.postInvalidateOnAnimation()
                 }
                 override fun scheduleDrawable(who: Drawable, what: Runnable, whenMillis: Long) {
-                    hostView.postDelayed(what, (whenMillis - SystemClock.uptimeMillis()).coerceAtLeast(0L))
+                    synchronized(drawableTasks) {
+                        if (disposed || destroyed) return
+                        drawableTasks.remove(what)?.let { hostView.removeCallbacks(it) }
+                        lateinit var callback: Runnable
+                        callback = Runnable {
+                            synchronized(drawableTasks) { if (drawableTasks[what] === callback) drawableTasks.remove(what) }
+                            if (!disposed && !destroyed) what.run()
+                        }
+                        drawableTasks[what] = callback
+                        try {
+                            if (!hostView.postDelayed(callback, (whenMillis - SystemClock.uptimeMillis()).coerceAtLeast(0L))) {
+                                drawableTasks.remove(what)
+                            }
+                        } catch (error: Throwable) { drawableTasks.remove(what); throw error }
+                    }
                 }
                 override fun unscheduleDrawable(who: Drawable, what: Runnable) {
-                    hostView.removeCallbacks(what)
+                    synchronized(drawableTasks) { drawableTasks.remove(what) }?.let { hostView.removeCallbacks(it) }
                 }
             }
             updateBounds()
@@ -582,8 +716,13 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             source.addOnLayoutChangeListener(this)
             windowObserver.attach()
             drawable.start()
+            } catch (error: Throwable) {
+                detach()
+                throw error
+            }
         }
         fun update(kind: BadgeKind) {
+            if (disposed || destroyed) return
             windowObserver.attach()
             drawable.setKind(kind)
             updateVisibility()
@@ -593,28 +732,35 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
             else drawable.stop()
         }
         fun detach() {
+            if (disposed) return
             disposed = true
-            windowObserver.dispose()
-            drawable.stop()
-            hostView.overlay.remove(drawable)
-            hostView.removeOnAttachStateChangeListener(this)
-            source.removeOnAttachStateChangeListener(this)
-            source.removeOnLayoutChangeListener(this)
+            release { windowObserver.dispose() }
+            release { drawable.dispose() }
+            release { drawable.callback = null }
+            val tasks = synchronized(drawableTasks) { drawableTasks.values.toList().also { drawableTasks.clear() } }
+            tasks.forEach { release { hostView.removeCallbacks(it) } }
+            release { hostView.overlay.remove(drawable) }
+            release { hostView.removeOnAttachStateChangeListener(this) }
+            release { source.removeOnAttachStateChangeListener(this) }
+            release { source.removeOnLayoutChangeListener(this) }
         }
         override fun onViewAttachedToWindow(view: View) {
+            if (disposed || destroyed) return
             windowObserver.attach()
             updateBounds()
             updateVisibility()
             hostView.postInvalidateOnAnimation()
         }
         override fun onViewDetachedFromWindow(view: View) {
-            drawable.stop()
-            if (view === hostView) windowObserver.detach()
+            release { drawable.stop() }
+            if (view === hostView) release { windowObserver.detach() }
+            if (view === source) removeOverlay(source)
         }
         override fun onLayoutChange(v: View, left: Int, top: Int, right: Int, bottom: Int, oldLeft: Int, oldTop: Int, oldRight: Int, oldBottom: Int) {
             updateBounds()
         }
         private fun updateBounds() {
+            if (disposed || destroyed) return
             val location = IntArray(2)
             source.getLocationOnScreen(location)
             val hostLocation = IntArray(2)
@@ -642,33 +788,38 @@ private class DynamicBadgeRuntime(private val context: FeatureContext) {
         private var shaderY = Float.NaN
         private val frame = object : Runnable {
             override fun run() {
-                if (!running) return
+                if (!running || disposed || destroyed) return
                 if (!hostView.isAttachedToWindow || !source.isAttachedToWindow || !source.isShown) {
                     stop()
                     return
                 }
                 invalidateSelf()
                 hostView.postInvalidateOnAnimation()
-                hostView.postOnAnimation(this)
+                if (running && !disposed && !destroyed) hostView.postOnAnimation(this)
             }
         }
+        @Volatile private var disposed = false
         @Volatile private var running = false
         @Volatile private var badgeKind = kind
         fun setKind(value: BadgeKind) { badgeKind = value; invalidateSelf() }
         fun start() {
-            if (running || !source.isAttachedToWindow || !source.isShown) return
+            if (disposed || destroyed || running || !hostView.isAttachedToWindow || !source.isAttachedToWindow || !source.isShown) return
             running = true
             invalidateSelf()
             hostView.postInvalidateOnAnimation()
             hostView.postOnAnimation(frame)
         }
         fun stop() {
-            if (!running) return
             running = false
             hostView.removeCallbacks(frame)
         }
+        fun dispose() {
+            if (disposed) return
+            disposed = true
+            try { stop() } finally { callback = null }
+        }
         override fun draw(canvas: Canvas) {
-            if (!source.isShown || source.visibility != View.VISIBLE || bounds.isEmpty) return
+            if (disposed || destroyed || !source.isShown || source.visibility != View.VISIBLE || bounds.isEmpty) return
             val number = badgeKind == BadgeKind.NUMBER
             val colors = colorCache[number] ?: parseGradient(
                 prefs.getString(

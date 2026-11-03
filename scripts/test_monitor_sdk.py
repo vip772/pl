@@ -11,6 +11,10 @@ sources=[r/'app/src/main/java/t/mma/hooks/core'/n for n in ['FeatureManager.kt',
 sources+=[r/'app/src/main/java/t/mma/dexkit/DexKitBridgeManager.java']
 for folder in ['grouprename','groupleave','voicetotext','stepmultiplier','protobuf','hidemenu','messagemenuextension','groupbar','nicknamewidth','mentionextension','swipequote','backgroundbeauty','typingreport','patblock','inputhint','textspeech','forwardlimit','callmedialimit','statuslimit','quickread','fakevoiceduration','quoteclear']:
  sources+=list((r/'app/src/main/java/t/mma/hooks/items'/folder).glob('*.kt'))
+for folder in ['hiddenat','zombiecheck','scheduledtask']:
+ sources+=list((r/'app/src/main/java/t/mma/hooks/items'/folder).glob('*.kt'))
+sources += [r/'app/src/main/java/t/mma/hooks/core/FeatureOwnership.kt']
+sources += list((r/'app/src/main/java/t/mma/hooks/items/roundavatar').glob('*.kt'))
 java_sources=[r/'app/src/main/java/t/mma/hooks/items/protobuf'/n for n in ['ProtobufPacketHook.java','ProtobufPacketRuntime.java']]
 sources += [r/'app/src/main/java/t/mma/hooks/items/antirecall/DynamicRecallGradient.kt']
 sources += [r/'app/src/main/java/t/mma/hooks/items/conversationanalysis'/n for n in ['ConversationAnalysisFeature.kt','ConversationAnalysisRuntime.kt','ConversationAnalysisMessageMenuRuntime.kt']]

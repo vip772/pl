@@ -28,7 +28,9 @@ class HiddenAtFeature : BaseFeature() {
         runtime = installed
         installed.install()
     }
-    override fun onFeatureDestroy(context: FeatureContext) { runtime?.destroy(); runtime = null }
+    override fun onFeatureDestroy(context: FeatureContext) {
+        try { runtime?.destroy() } finally { runtime = null }
+    }
 }
 
 /** Type57 replacement using a verified synchronous AppMsg insertion path. */
@@ -37,7 +39,9 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
     @Volatile private var enabled = prefs.getBoolean(HiddenAtSettings.ENABLE, false)
     @Volatile private var alive = true
     private var handle: java.io.Closeable? = null
-    private var generation = 0
+    @Volatile private var generation = 0
+    private var listening = false
+    private var installation: t.mma.hooks.core.DexInstallScheduler.Installation? = null
     private val replacing = ThreadLocal<Boolean>()
     private data class Replacement(val talker: String, val users: List<String>)
     private val replacement = ThreadLocal<Replacement>()
@@ -45,23 +49,37 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
     private var sourceHook: de.robv.android.xposed.XC_MethodHook.Unhook? = null
     private var appRouteHook: de.robv.android.xposed.XC_MethodHook.Unhook? = null
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == HiddenAtSettings.ENABLE) {
-            enabled = prefs.getBoolean(key, false)
-            if (enabled) schedule() else stop()
+        synchronized(this) {
+            if (alive && (key == null || key == HiddenAtSettings.ENABLE)) {
+                enabled = prefs.getBoolean(HiddenAtSettings.ENABLE, false)
+                if (enabled) schedule() else stop()
+            }
         }
     }
+    @Synchronized
     fun install() {
-        prefs.registerOnSharedPreferenceChangeListener(listener)
-        if (enabled) schedule()
+        if (!alive || listening) return
+        listening = true
+        try {
+            prefs.registerOnSharedPreferenceChangeListener(listener)
+            if (enabled) schedule()
+        } catch (error: Throwable) {
+            destroy()
+            throw error
+        }
     }
     private fun call(message: Any, name: String, vararg args: Any?): Any? {
         val method = KavaReflector.findMethodRecursive(message.javaClass, name, *args.map { it?.javaClass ?: Any::class.java }.toTypedArray())
             ?: error("消息方法缺失: $name")
         return KavaReflector.invokeOrThrow(method, message, *args)
     }
-    private fun schedule() {
+    @Synchronized private fun schedule() {
+        if (!alive || !enabled) return
         val epoch = generation
-        t.mma.hooks.core.DexInstallScheduler.schedule("hidden_at_$epoch", "隐藏艾特") {
+        val ticket = installation ?: t.mma.hooks.core.DexInstallScheduler.installation(
+            "hidden_at_$epoch", "隐藏艾特"
+        ).also { installation = it }
+        ticket.schedule {
             synchronized(this) {
                 if (!alive || !enabled || epoch != generation || handle != null) true
                 else try {
@@ -178,23 +196,45 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                     })
                     true
                 } catch (e: Throwable) {
-                    handle?.close(); handle = null
-                    sourceHook?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) }; sourceHook = null
-                    pending.clear()
-                    appRouteHook?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) }; appRouteHook = null
-                    HLog.e("[Hchat:隐藏艾特] 8.0.78入口适配失败", e); false
+                    releaseHooks()
+                    releaseSafely { pending.clear() }
+                    reportCleanupFailure(e)
+                    false
+                } finally {
+                    if (!alive || !enabled || epoch != generation) releaseHooks()
                 }
             }
         }
     }
+    private fun reportCleanupFailure(error: Throwable) {
+        try { HLog.e("[Hchat:隐藏艾特] 安装或资源释放失败", error) } catch (_: Throwable) { }
+    }
+    private inline fun releaseSafely(release: () -> Unit) {
+        try { release() } catch (error: Throwable) { reportCleanupFailure(error) }
+    }
+    private fun releaseHooks() {
+        val observer = handle; handle = null
+        val source = sourceHook; sourceHook = null
+        val route = appRouteHook; appRouteHook = null
+        releaseSafely { observer?.close() }
+        releaseSafely { source?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) } }
+        releaseSafely { route?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) } }
+    }
     @Synchronized private fun stop() {
         generation++
-        handle?.close(); handle = null
-        sourceHook?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) }; sourceHook = null
-        appRouteHook?.let { t.mma.hooks.core.HookRegistry.get().unhook(it) }; appRouteHook = null
-        pending.clear()
-        replacement.remove()
-        replacing.remove()
+        val ticket = installation; installation = null
+        releaseSafely { ticket?.close() }
+        releaseHooks()
+        releaseSafely { pending.clear() }
+        releaseSafely { replacement.remove() }
+        releaseSafely { replacing.remove() }
     }
-    fun destroy() { alive = false; enabled = false; prefs.unregisterOnSharedPreferenceChangeListener(listener); stop() }
+    @Synchronized fun destroy() {
+        if (!alive) return
+        alive = false
+        enabled = false
+        val unregister = listening; listening = false
+        if (unregister) releaseSafely { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+        stop()
+    }
 }

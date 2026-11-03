@@ -3,6 +3,7 @@ import t.mma.utils.HLog
 
 import android.os.SystemClock
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.api.message.WeChatMessageChangeApi
 import t.mma.hooks.core.FeatureContext
 import t.mma.hooks.items.shortvideo.FinderMediaDownloadSupport
 import java.util.Locale
@@ -24,6 +25,8 @@ object ScriptMessageHook {
     private val USERNAME_REGEX = Regex("[a-z0-9_\\-.]{3,}")
     @Volatile
     private var installed = false
+    /** 本代持有的宿主侧订阅句柄；撤销时必须逐个还回去，否则回调会一直持有本对象。 */
+    private val hostSubscriptions = ArrayList<AutoCloseable>()
     private val recentMessages = ConcurrentHashMap<String, Long>()
     private val droppedMessages = AtomicLong()
     private val nextOverflowLogAtMs = AtomicLong()
@@ -62,13 +65,13 @@ object ScriptMessageHook {
             return false
         }
         if (!changeApi.isInstalled) return false
-        changeApi.subscribe { change ->
+        val listener = WeChatMessageChangeApi.Listener { change ->
             val handleMessage = ScriptPluginRuntime.hasHandleMsgCallbacks()
             val imageCallback = ScriptPluginRuntime.hasImageDownloadCallback()
             val videoCallback = ScriptPluginRuntime.hasVideoDownloadCallback()
             val finderCallback = ScriptPluginRuntime.hasFinderMediaDownloadCallback()
-            if (!handleMessage && !imageCallback && !videoCallback && !finderCallback) return@subscribe
-            val message = change.message ?: return@subscribe
+            if (!handleMessage && !imageCallback && !videoCallback && !finderCallback) return@Listener
+            val message = change.message ?: return@Listener
             val scriptMessage = ScriptMessageBean(message)
             val image = imageCallback && scriptMessage.isImage()
             val video = videoCallback && scriptMessage.isVideo()
@@ -76,8 +79,32 @@ object ScriptMessageHook {
             dispatchMedia(scriptMessage, image, video, finder)
             if (handleMessage) dispatchMessageDedup(scriptMessage)
         }
+        val subscription = changeApi.subscribe(listener)
+        if (subscription == null) return false
+        hostSubscriptions += AutoCloseable {
+            changeApi.unsubscribe(listener)
+            subscription.unsubscribe()
+        }
         installed = true
         return true
+    }
+
+    /**
+     * 撤销本代安装的宿主侧订阅。与 [install] 对称：先摘自身登记，再逐个还回句柄，
+     * 单项撤销异常只记录不阻断其余项。重复调用幂等。
+     */
+    @Synchronized
+    fun uninstall() {
+        installed = false
+        val pending = hostSubscriptions.toList().also { hostSubscriptions.clear() }
+        pending.forEach { closeable ->
+            try {
+                closeable.close()
+            } catch (t: Throwable) {
+                HLog.e("[Hchat:Script] 消息监听撤销失败: ${t.message}", t)
+            }
+        }
+        clearPendingMessages()
     }
 
     fun clearPendingMessages() {

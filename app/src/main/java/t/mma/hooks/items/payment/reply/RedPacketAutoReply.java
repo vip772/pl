@@ -99,7 +99,7 @@ public final class RedPacketAutoReply {
                                    String sender, List<ReplyPlan> plans, int index) {
         if (index >= plans.size()) return;
         ReplyPlan plan = plans.get(index);
-        resources.post(replyKey + ":step:" + index, plan.delayMs, () -> {
+        boolean accepted = resources.post(replyKey + ":step:" + index, plan.delayMs, () -> {
             if (!isReplyEnabled()) {
                 log("自动回复跳过: 全局开关已关闭");
                 return;
@@ -109,6 +109,10 @@ public final class RedPacketAutoReply {
                 scheduleReplyStep(tasks, replyKey, talker, sender, plans, index + 1);
             }
         });
+        if (!accepted) {
+            // A refused step ends the reply chain explicitly instead of stalling on a missing link.
+            log("自动回复跳过: 第 " + (index + 1) + " 步投递被拒绝");
+        }
     }
 
     private void sendReplySequence(String talker, String sender, List<ReplyPlan> plans) {

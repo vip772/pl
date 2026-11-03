@@ -39,16 +39,22 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
     @Volatile private var alive = true
     @Volatile private var generation = 0
     private var targets: EmojiAtLocator.Targets? = null
+    private var installed = false
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == EmojiAtSettings.ENABLE) {
-            enabled = prefs.getBoolean(key, false)
-            if (enabled) { generation++; schedule() } else stop()
+        synchronized(this) {
+            if (alive && (key == null || key == EmojiAtSettings.ENABLE)) {
+                enabled = prefs.getBoolean(EmojiAtSettings.ENABLE, false)
+                if (enabled) { generation++; schedule() } else stop()
+            }
         }
     }
     private val cleanup = object : Runnable {
         override fun run() { if (alive && enabled) { pending.prune(); synchronized(requests) { requests.entries.removeAll { SystemClock.elapsedRealtime() - it.value.created >= 120_000 } }; main.postDelayed(this, 30_000) } }
     }
+    @Synchronized
     fun install() {
+        if (!alive || installed) return
+        installed = true
         prefs.registerOnSharedPreferenceChangeListener(listener)
         (context.hostContext().applicationContext as? Application)?.registerActivityLifecycleCallbacks(lifecycle)
         if (enabled) schedule()
@@ -67,7 +73,7 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
                     val t = EmojiAtLocator(context).locate()
                     installTargets(t); targets = t; true
                 } catch (e: Throwable) {
-                    handles.forEach { HookRegistry.get().unhook(it) }; handles.clear(); storageHandle?.close(); storageHandle = null
+                    releaseHooks()
                     targets = null; pending.clear(); requests.clear()
                     report("适配检查或安装失败，保留原发送流程", e); false
                 }
@@ -166,10 +172,12 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
     private var resumed = WeakReference<Activity>(null)
     private val lifecycle = object : Application.ActivityLifecycleCallbacks {
         override fun onActivityResumed(activity: Activity) {
+            if (!alive) return
             resumed = WeakReference(activity)
             main.post { drainChoices(activity) }
         }
         override fun onActivityDestroyed(activity: Activity) {
+            if (!alive) return
             val request = shown ?: return
             if (request.host.get() !== activity || request.selected) return
             shown = null
@@ -180,6 +188,7 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
             drainChoices()
         }
         override fun onActivityPaused(activity: Activity) {
+            if (!alive) return
             if (resumed.get() === activity) resumed.clear()
             val request = shown ?: return
             if (request.host.get() !== activity || request.selected) return
@@ -254,25 +263,51 @@ internal class EmojiAtRuntime(private val context: FeatureContext) {
         catch (e: Throwable) { report("恢复原发送失败", e); notice("表情发送失败，请重试") }
         finally { if (previous == null) scope.remove() else scope.set(previous) }
     }
-    @Synchronized private fun stop() {
-        generation++
-        installation?.close(); installation = null
-        main.removeCallbacks(cleanup)
-        worker.queue.clear()
-        handles.forEach { HookRegistry.get().unhook(it) }; handles.clear(); storageHandle?.close(); storageHandle = null
-        targets = null; pending.clear(); requests.clear()
-        val stoppedEpoch = generation
-        main.post {
-            choices.removeIf { it.epoch < stoppedEpoch }
-            val old = shown
-            if (old != null && old.epoch < stoppedEpoch) { shown = null; old.handle?.close() }
-            drainChoices()
+    private fun releaseSafely(stage: String, release: () -> Unit) {
+        try { release() } catch (error: Throwable) {
+            try { report(stage, error) } catch (_: Throwable) { /* Continue independent releases. */ }
         }
     }
-    fun destroy() {
+    private fun releaseHooks() {
+        val owned = handles.toList()
+        handles.clear()
+        val storage = storageHandle
+        storageHandle = null
+        owned.forEach { handle -> releaseSafely("卸载独占Hook失败") { HookRegistry.get().unhook(handle) } }
+        releaseSafely("注销存储观察失败") { storage?.close() }
+    }
+    @Synchronized private fun stop() {
+        generation++
+        val ticket = installation
+        installation = null
+        releaseSafely("取消安装失败") { ticket?.close() }
+        releaseSafely("撤销清理任务失败") { main.removeCallbacks(cleanup) }
+        releaseSafely("清理排队任务失败") { worker.queue.clear() }
+        releaseHooks()
+        targets = null; pending.clear(); requests.clear()
+        val stoppedEpoch = generation
+        releaseSafely("投递选择页清理失败") {
+            check(main.post {
+                choices.removeIf { it.epoch < stoppedEpoch }
+                val old = shown
+                if (old != null && old.epoch < stoppedEpoch) {
+                    shown = null
+                    releaseSafely("关闭选择页失败") { old.handle?.close() }
+                }
+                drainChoices()
+            }) { "主线程拒绝选择页清理" }
+        }
+    }
+    @Synchronized fun destroy() {
+        if (!alive) return
         alive = false; enabled = false
-        prefs.unregisterOnSharedPreferenceChangeListener(listener)
-        (context.hostContext().applicationContext as? Application)?.unregisterActivityLifecycleCallbacks(lifecycle)
-        stop(); main.removeCallbacks(cleanup); worker.shutdown(); scope.remove()
+        releaseSafely("注销设置监听失败") { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+        releaseSafely("注销页面监听失败") {
+            (context.hostContext().applicationContext as? Application)?.unregisterActivityLifecycleCallbacks(lifecycle)
+        }
+        releaseSafely("停止运行时失败") { stop() }
+        releaseSafely("撤销清理任务失败") { main.removeCallbacks(cleanup) }
+        releaseSafely("关闭成员查询线程失败") { worker.shutdown() }
+        scope.remove()
     }
 }

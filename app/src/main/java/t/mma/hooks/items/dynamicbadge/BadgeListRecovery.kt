@@ -6,6 +6,7 @@ import android.view.ViewTreeObserver
 /** Coalesced, layout-driven recovery for lists populated after the first resume. */
 internal class BadgeListRecovery(
     private val host: View,
+    private val onError: (Throwable) -> Unit = {},
     private var repair: () -> Unit
 ) : View.OnAttachStateChangeListener, ViewTreeObserver.OnGlobalLayoutListener {
     private var observer: ViewTreeObserver? = null
@@ -20,10 +21,17 @@ internal class BadgeListRecovery(
     }
 
     init {
-        host.addOnAttachStateChangeListener(this)
-        if (host.isAttachedToWindow) attach()
+        try {
+            host.addOnAttachStateChangeListener(this)
+            if (host.isAttachedToWindow) attach()
+        } catch (error: Throwable) {
+            dispose()
+            throw error
+        }
     }
     private fun attach() {
+        if (disposed) return
+        cancelPending()
         detachObserver()
         host.viewTreeObserver.takeIf { it.isAlive }?.let {
             observer = it
@@ -35,7 +43,10 @@ internal class BadgeListRecovery(
     private fun schedule() {
         if (disposed || posted || !host.isAttachedToWindow) return
         posted = true
-        host.postOnAnimation(runRepair)
+        try { host.postOnAnimation(runRepair) } catch (error: Throwable) {
+            posted = false
+            throw error
+        }
     }
     override fun onGlobalLayout() = schedule()
     override fun onViewAttachedToWindow(view: View) { if (!disposed) attach() }
@@ -43,22 +54,31 @@ internal class BadgeListRecovery(
         cancelPending()
         detachObserver()
     }
+    private fun release(block: () -> Unit) {
+        try { block() } catch (error: Throwable) {
+            try { onError(error) } catch (_: Throwable) { }
+        }
+    }
     private fun cancelPending() {
         posted = false
-        host.removeCallbacks(runRepair)
-        retries.forEach { (_, callback) -> host.removeCallbacks(callback) }
+        release { host.removeCallbacks(runRepair) }
+        retries.forEach { (_, callback) -> release { host.removeCallbacks(callback) } }
     }
     private fun detachObserver() {
-        observer?.takeIf { it.isAlive }?.removeOnGlobalLayoutListener(this)
-        val current = host.viewTreeObserver
-        if (current !== observer && current.isAlive) current.removeOnGlobalLayoutListener(this)
+        val old = observer
         observer = null
+        release { old?.takeIf { it.isAlive }?.removeOnGlobalLayoutListener(this) }
+        release {
+            val current = host.viewTreeObserver
+            if (current !== old && current.isAlive) current.removeOnGlobalLayoutListener(this)
+        }
     }
     fun dispose() {
+        if (disposed) return
         disposed = true
+        repair = {}
         cancelPending()
         detachObserver()
-        host.removeOnAttachStateChangeListener(this)
-        repair = {}
+        release { host.removeOnAttachStateChangeListener(this) }
     }
 }

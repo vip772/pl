@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.Looper;
 import android.text.TextUtils;
 import android.view.View;
 import android.view.ViewGroup;
@@ -33,18 +34,36 @@ import de.robv.android.xposed.XC_MethodHook;
  */
 public class RedPacketUiAutomator {
     private final PaymentResourceScope resources = new PaymentResourceScope();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Map<View, ViewTreeObserver.OnGlobalLayoutListener> layoutListeners = new WeakHashMap<>();
     public void destroy() {
         resources.close();
-        new Handler(android.os.Looper.getMainLooper()).post(() -> {
+        // Views and listeners are host-owned objects reachable from the main thread only; when the
+        // posting is refused, detach inline so the listener table cannot outlive this instance.
+        Runnable cleanup = () -> {
             for (Map.Entry<View, ViewTreeObserver.OnGlobalLayoutListener> entry : layoutListeners.entrySet()) {
                 View view = entry.getKey();
-                if (view != null) view.getViewTreeObserver().removeOnGlobalLayoutListener(entry.getValue());
+                if (view == null) continue;
+                try { view.getViewTreeObserver().removeOnGlobalLayoutListener(entry.getValue()); }
+                catch (Throwable error) { log("移除布局监听失败: " + error.getMessage()); }
             }
             layoutListeners.clear();
             clickedActivities.clear();
             clickedViews.clear();
-        });
+        };
+        try {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                cleanup.run();
+                return;
+            }
+            if (!mainHandler.post(cleanup)) {
+                log("UI 清理主线程投递被拒绝，就地清理");
+                cleanup.run();
+            }
+        } catch (Throwable error) {
+            log("UI 清理失败: " + error.getMessage());
+            try { cleanup.run(); } catch (Throwable ignored) { }
+        }
     }
     public interface FilterCallback {
         boolean shouldSkip(String nativeUrl);
@@ -239,8 +258,7 @@ public class RedPacketUiAutomator {
         }
     }
 
-    private void startContinuousCheck(Activity activity, String nativeUrl) {
-
+private void startContinuousCheck(Activity activity, String nativeUrl) {
         int maxChecks = settings.getInt(RedPacketSettings.KEY_CHECK_TIMES, 10);
         final int[] count = {0};
         Runnable runnable = new Runnable() {
@@ -248,10 +266,16 @@ public class RedPacketUiAutomator {
             public void run() {
                 if (resources.isClosed() || !settings.isEnabled() || activity.isFinishing() || activity.isDestroyed()) return;
                 boolean closed = checkAndCloseIfFailed(activity, nativeUrl);
-                if (!closed && count[0]++ < maxChecks) resources.post("failed:" + System.identityHashCode(activity), 300, this);
+                if (!closed && count[0]++ < maxChecks
+                        && !resources.post("failed:" + System.identityHashCode(activity), 300, this)) {
+                    // Refused posting ends the polling loop instead of leaving it half-scheduled.
+                    log("领取页检查任务投递被拒绝，停止轮询");
+                }
             }
         };
-        resources.post("failed:" + System.identityHashCode(activity), 300, runnable);
+        if (!resources.post("failed:" + System.identityHashCode(activity), 300, runnable)) {
+            log("领取页检查任务投递被拒绝，未开始轮询");
+        }
     }
 
     private void scheduleDetailSuccessCheck(Activity activity) {
@@ -271,10 +295,15 @@ public class RedPacketUiAutomator {
             public void run() {
                 if (resources.isClosed() || !settings.isEnabled() || activity.isFinishing() || activity.isDestroyed()) return;
                 boolean success = checkAndCloseIfSuccess(activity, nativeUrl, finalSelfSent);
-                if (!success && count[0]++ < maxChecks) resources.post("detail:" + System.identityHashCode(activity), 300, this);
+                if (!success && count[0]++ < maxChecks
+                        && !resources.post("detail:" + System.identityHashCode(activity), 300, this)) {
+                    log("详情页检查任务投递被拒绝，停止轮询");
+                }
             }
         };
-        resources.post("detail:" + System.identityHashCode(activity), 100, runnable);
+        if (!resources.post("detail:" + System.identityHashCode(activity), 100, runnable)) {
+            log("详情页检查任务投递被拒绝，未开始轮询");
+        }
     }
 
     private boolean checkAndCloseIfFailed(Activity activity, String nativeUrl) {
@@ -475,7 +504,7 @@ public class RedPacketUiAutomator {
         if (resources.isClosed() || !settings.isEnabled()) return;
         view.setEnabled(true);
         java.lang.ref.WeakReference<View> reference = new java.lang.ref.WeakReference<>(view);
-        resources.post("click:" + System.identityHashCode(view), 0L, () -> {
+        if (!resources.post("click:" + System.identityHashCode(view), 0L, () -> {
             View current = reference.get();
             if (current == null || resources.isClosed() || !settings.isEnabled()) return;
             ViewTreeObserver.OnGlobalLayoutListener previous = layoutListeners.remove(current);
@@ -497,7 +526,10 @@ public class RedPacketUiAutomator {
             };
             layoutListeners.put(current, listener);
             current.getViewTreeObserver().addOnGlobalLayoutListener(listener);
-        });
+        })) {
+            // No posting, no layout listener: the button stays untouched instead of half-registered.
+            log("红包按钮点击任务投递被拒绝，跳过本次点击");
+        }
     }
     private boolean shouldSkip(String nativeUrl) {
         return filterCallback != null && filterCallback.shouldSkip(nativeUrl);

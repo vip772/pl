@@ -36,9 +36,9 @@ class ScheduledTaskFeature : BaseFeature() {
         val installed = ScheduledTaskRuntime(context, ::logFeatureError)
         runtime = installed
         trackResource {
-            ScheduledTaskRuntimeCoordinator.detach(installed)
-            installed.shutdown()
-            if (runtime === installed) runtime = null
+            try { ScheduledTaskRuntimeCoordinator.detach(installed) } finally {
+                try { installed.shutdown() } finally { if (runtime === installed) runtime = null }
+            }
         }
         ScheduledTaskRuntimeCoordinator.attach(installed)
         installed.start()
@@ -104,9 +104,10 @@ class ScheduledTaskRuntime(
     @Synchronized
     fun shutdown() {
         started = false
-        cancelAll()
-        // Already accepted sends finish normally: interrupting them can cause duplicate delivery.
-        executionWorker.shutdown()
+        try { cancelAll() } finally {
+            // Already accepted sends finish normally: interrupting them can cause duplicate delivery.
+            executionWorker.shutdown()
+        }
     }
 
     @Synchronized
@@ -654,7 +655,11 @@ class ScheduledTaskRuntime(
     }
 
     private fun cancelAll() {
-        scheduled.keys.toList().forEach { cancelScheduledKey(it) }
+        scheduled.keys.toList().forEach { key ->
+            try { cancelScheduledKey(key) } catch (error: Throwable) {
+                try { logger("取消定时任务失败", error) } catch (_: Throwable) { }
+            }
+        }
     }
 
     private fun cancel(taskId: String) {

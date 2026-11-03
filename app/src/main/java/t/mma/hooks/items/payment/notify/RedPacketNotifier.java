@@ -42,11 +42,30 @@ public class RedPacketNotifier {
     private final java.util.Set<Ringtone> activeRingtones = java.util.Collections.newSetFromMap(new java.util.concurrent.ConcurrentHashMap<>());
     public void destroy() {
         destroyed = true;
-        mainHandler.removeCallbacksAndMessages(null);
-        mainHandler.post(() -> {
+        try {
+            mainHandler.removeCallbacksAndMessages(null);
+        } catch (Throwable error) {
+            HLog.e(tag + " 清理红包提醒主线程任务失败: " + error.getMessage(), error);
+        }
+        // Ringtone.stop() must run on the main thread; when the posting is refused, still detach the
+        // ringtone table so nothing keeps playing through this instance's references.
+        Runnable cleanup = () -> {
             for (Ringtone ringtone : activeRingtones) stopRingtone(ringtone);
             activeRingtones.clear();
-        });
+        };
+        try {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                cleanup.run();
+                return;
+            }
+            if (!mainHandler.post(cleanup)) {
+                HLog.e(tag + " 红包提醒清理投递被拒绝，就地清理");
+                cleanup.run();
+            }
+        } catch (Throwable error) {
+            HLog.e(tag + " 红包提醒清理失败: " + error.getMessage(), error);
+            try { cleanup.run(); } catch (Throwable ignored) { }
+        }
     }
 
     public RedPacketNotifier(Context hostContext) {
@@ -190,7 +209,18 @@ public class RedPacketNotifier {
             try {
                 activeRingtones.add(ringtone);
                 ringtone.play();
-                mainHandler.postDelayed(() -> stopRingtone(ringtone), MANUAL_SOUND_STOP_DELAY_MS);
+                boolean scheduled;
+                try {
+                    scheduled = mainHandler.postDelayed(() -> stopRingtone(ringtone), MANUAL_SOUND_STOP_DELAY_MS);
+                } catch (Throwable error) {
+                    HLog.e(tag + " 铃声停止任务投递异常: " + error.getMessage(), error);
+                    scheduled = false;
+                }
+                if (!scheduled) {
+                    // No stop task will run: stop inline so the sound never outlives its owner.
+                    HLog.e(tag + " 铃声停止任务投递被拒绝，就地停止");
+                    stopRingtone(ringtone);
+                }
             } catch (Throwable e) {
                 HLog.e(tag + " 铃声播放失败: " + e.getMessage(), e);
             }

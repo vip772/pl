@@ -13,8 +13,9 @@ class Owner {
  val worker=ScheduledThreadPoolExecutor(1);val actionWorker=ScheduledThreadPoolExecutor(1)
  val queue=java.util.ArrayDeque<Item>();val pendingResults=linkedMapOf<String,Item>()
  var activeProbe:Probe?=null;var saved=listOf<String>();var releases=0;var notifications=0
- fun persistLocked(){saved=queue.map{it.wxid}}
- fun releaseWakeLock(){releases++};fun cancelNotification(){notifications++}
+ var failCleanup=false;val logger:(String,Throwable?)->Unit={_,_->if(failCleanup)error("logger")}
+ fun persistLocked(){saved=queue.map{it.wxid};if(failCleanup)error("persist")}
+ fun releaseWakeLock(){releases++;if(failCleanup)error("wake")};fun cancelNotification(){notifications++;if(failCleanup)error("notification")}
 '''+close+'''}
 fun main(){
  val o=Owner();o.queue.add(Owner.Item("queued"));o.pendingResults["result"]=Owner.Item("result")
@@ -27,6 +28,8 @@ fun main(){
  check(o.saved.toSet()==setOf("active","result","queued"));check(o.pendingResults.isEmpty()&&o.activeProbe==null)
  check(o.closed&&!o.ready&&!o.running&&!o.deleting&&o.hooker==null&&o.stopSignal.count==0L)
  check(o.releases==1&&o.notifications==1&&o.actionGeneration==1L&&!interrupted&&effects==1)
+ val failing=Owner();failing.failCleanup=true;failing.queue.add(Owner.Item("saved"));failing.close();failing.close()
+ check(failing.worker.isShutdown&&failing.actionWorker.isShutdown&&failing.releases==1&&failing.notifications==1&&failing.hooker==null&&failing.saved==listOf("saved"))
  println("PASS production detection close: pending/result/probe preserved, callbacks drained, active job uninterrupted, repeated close idempotent")
 }
 '''

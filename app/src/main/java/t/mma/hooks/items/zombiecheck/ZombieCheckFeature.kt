@@ -40,17 +40,19 @@ class ZombieCheckFeature : BaseFeature() {
                 val currentRuntime = ZombieCheckRuntime(context.hostContext(), ::logRuntimeError)
                 runtime = currentRuntime
                 resources.register {
-                    currentRuntime.close()
-                    ZombieCheckController.detach(currentRuntime)
-                    if (runtime === currentRuntime) runtime = null
+                    try { currentRuntime.close() } finally {
+                        try { ZombieCheckController.detach(currentRuntime) } finally {
+                            if (runtime === currentRuntime) runtime = null
+                        }
+                    }
                 }
                 val currentHooker = ZombieCheckHooker(context, currentRuntime, ::logRuntimeError)
                 hooker = currentHooker
-                resources.register { currentHooker.destroy(); if (hooker === currentHooker) hooker = null }
+                resources.register { try { currentHooker.destroy() } finally { if (hooker === currentHooker) hooker = null } }
                 currentRuntime.bind(currentHooker)
                 ZombieCheckController.attach(currentRuntime)
                 val ticket = DexInstallScheduler.installation(ID, name())
-                resources.register { ticket.close(); schedule = null }
+                resources.register { try { ticket.close() } finally { schedule = null } }
                 schedule = { ticket.schedule { currentHooker.install() } }
                 schedule?.invoke()
             }, onError = { logRuntimeError("检测资源启停失败", it) })

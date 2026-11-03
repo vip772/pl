@@ -7,41 +7,129 @@ import t.mma.hooks.api.model.DatabaseChange
 import t.mma.hooks.api.model.WeChatMessageTypes
 import t.mma.hooks.api.message.WeChatMessageParseApi
 import t.mma.hooks.core.FeatureContext
+import t.mma.hooks.core.SharedHookLease
+import t.mma.utils.HLog
 import java.net.URLDecoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 
+/**
+ * 好友申请监听。
+ *
+ * 宿主侧安装由进程级租约持有：脚本插件与自动回复共用同一份数据库/消息观察
+ * 监听，任何一方退出只归还自己的租约，不会掐掉另一方的回调。
+ */
 object ScriptNewFriendHook {
     private const val DEDUP_WINDOW_MS = 3000L
     private const val VERIFY_ALIAS_WINDOW_MS = 10 * 60 * 1000L
+
+    /** 租约 key：宿主侧好友申请监听。 */
+    const val LEASE_KEY = "shared:new_friend_listener"
+
+    /** 租约持有者标识。 */
+    const val OWNER_SCRIPT = "script_plugin"
+    const val OWNER_AUTO_REPLY = "auto_reply"
+
     private val parseApi = WeChatMessageParseApi()
     private val recentEvents = ConcurrentHashMap<String, Long>()
     private val recentVerifyAliases = ConcurrentHashMap<String, VerifyAlias>()
     private val nativeListeners = CopyOnWriteArrayList<(NewFriendEvent) -> Unit>()
-    @Volatile
-    private var installed = false
 
-    @Synchronized
-    fun install(context: FeatureContext): Boolean {
-        if (installed) return true
-        installDatabaseListener()
-        val observeApi = runCatching { WeChatApis.messageObserve() }.getOrNull()
-        if (observeApi != null && observeApi.isAvailable()) {
-            runCatching { observeApi.install() }
-            observeApi.subscribe { message ->
-                handleMessage(ScriptMessageBean(message))
+    private val lease = SharedHookLease { message, error -> HLog.e("[Hchat:Script] $message", error) }
+    private val hostSubscriptions = ArrayList<AutoCloseable>()
+
+    @Volatile
+    private var hostInstalled = false
+
+    @Volatile
+    private var pendingContext: FeatureContext? = null
+
+    init {
+        lease.register(
+            LEASE_KEY,
+            install = { installHostListeners() },
+            uninstall = { uninstallHostListeners() }
+        )
+    }
+
+    /**
+     * 取得好友申请监听租约。返回 false 表示宿主 API 当前不可用，调用方可以
+     * 在 DexReady 之后重试，且不会影响其他持有者。
+     */
+    fun acquire(context: FeatureContext, owner: String): Boolean {
+        pendingContext = context
+        return lease.acquire(LEASE_KEY, owner)
+    }
+
+    /** 归还租约。宿主侧监听只在最后一个持有者离开时真正撤销。 */
+    fun release(owner: String) {
+        lease.release(LEASE_KEY, owner)
+    }
+
+    fun owners(): Set<String> = lease.owners(LEASE_KEY)
+
+    fun isHostInstalled(): Boolean = lease.isActive(LEASE_KEY)
+
+    private fun installHostListeners(): Boolean {
+        val context = pendingContext ?: return false
+        synchronized(hostSubscriptions) {
+            if (hostInstalled) return true
+            var any = false
+            val databaseChanges = runCatching { WeChatApis.runtime().databaseChanges() }.getOrNull()
+            if (databaseChanges != null && databaseChanges.isAvailable) {
+                runCatching { databaseChanges.install() }.onFailure {
+                    HLog.e("[Hchat:Script] 好友申请数据库监听安装失败: ${it.message}", it)
+                }
+                val subscription = databaseChanges.subscribe { change -> handleDatabaseChange(change) }
+                if (subscription != null) {
+                    hostSubscriptions += AutoCloseable { subscription.unsubscribe() }
+                    any = true
+                }
             }
-        } else {
-            context.eventBus().subscribe(Events.MessageReceived::class.java) { event ->
-                handleMessage(ScriptMessageBean(event))
+            val observeApi = runCatching { WeChatApis.messageObserve() }.getOrNull()
+            if (observeApi != null && observeApi.isAvailable()) {
+                runCatching { observeApi.install() }.onFailure {
+                    HLog.e("[Hchat:Script] 好友申请消息观察安装失败: ${it.message}", it)
+                }
+                val subscription = observeApi.subscribe { message ->
+                    handleMessage(ScriptMessageBean(message))
+                }
+                if (subscription != null) {
+                    hostSubscriptions += AutoCloseable { subscription.unsubscribe() }
+                    any = true
+                }
+            } else {
+                val subscription = context.eventBus().subscribe(Events.MessageReceived::class.java) { event ->
+                    handleMessage(ScriptMessageBean(event))
+                }
+                hostSubscriptions += AutoCloseable { context.eventBus().unsubscribe(subscription) }
+                any = true
+            }
+            hostInstalled = any
+            return any
+        }
+    }
+
+    private fun uninstallHostListeners() {
+        val pending = synchronized(hostSubscriptions) {
+            hostInstalled = false
+            hostSubscriptions.toList().also { hostSubscriptions.clear() }
+        }
+        pending.forEach { closeable ->
+            try {
+                closeable.close()
+            } catch (error: Throwable) {
+                HLog.e("[Hchat:Script] 好友申请监听撤销失败: ${error.message}", error)
             }
         }
-        installed = true
-        return true
     }
 
     fun handleMessage(message: ScriptMessageBean) {
         val event = parseNewFriend(message) ?: return
+        dispatch(event)
+    }
+
+    private fun dispatch(event: NewFriendEvent) {
         val now = System.currentTimeMillis()
         cleanup(now)
         registerVerifyAlias(event, now)
@@ -72,15 +160,6 @@ object ScriptNewFriendHook {
             ?.verifyUsername
             ?.takeIf { it.isNotBlank() }
             ?: cleanWxid
-    }
-
-    private fun installDatabaseListener() {
-        val databaseChanges = runCatching { WeChatApis.runtime().databaseChanges() }.getOrNull() ?: return
-        if (!databaseChanges.isAvailable) return
-        runCatching { databaseChanges.install() }
-        databaseChanges.subscribe { change ->
-            handleDatabaseChange(change)
-        }
     }
 
     private fun handleDatabaseChange(change: DatabaseChange?) {
@@ -120,15 +199,7 @@ object ScriptNewFriendHook {
                 contentValueString(values, "scene_id")
             )
         ) ?: return
-        val now = System.currentTimeMillis()
-        cleanup(now)
-        registerVerifyAlias(event, now)
-        val key = dedupKey(event)
-        val previous = recentEvents[key]
-        if (previous != null && now - previous < DEDUP_WINDOW_MS) return
-        recentEvents[key] = now
-        dispatchNative(event)
-        ScriptPluginRuntime.dispatchOnNewFriend(event.wxid, event.ticket, event.scene)
+        dispatch(event)
     }
 
     fun subscribe(listener: (NewFriendEvent) -> Unit): NativeSubscription {
@@ -288,12 +359,15 @@ object ScriptNewFriendHook {
     }
 
     private fun decodeXml(value: String): String {
+        val amp = '&'.single()
+        val quote = 34.toChar()
+        val apostrophe = 39.toChar()
         return value
-            .replace("&lt;", "<")
-            .replace("&gt;", ">")
-            .replace("&quot;", "\"")
-            .replace("&apos;", "'")
-            .replace("&amp;", "&")
+            .replace(amp + "lt;", "<")
+            .replace(amp + "gt;", ">")
+            .replace(amp + "quot;", quote.toString())
+            .replace(amp + "apos;", apostrophe.toString())
+            .replace(amp + "amp;", amp.toString())
     }
 
     private fun decodeUrl(value: String): String {

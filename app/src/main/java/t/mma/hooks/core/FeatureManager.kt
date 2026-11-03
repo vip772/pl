@@ -93,28 +93,27 @@ class FeatureManager {
     }
 
     fun destroyAll(context: FeatureContext) {
-        for (i in initializedFeatures.size - 1 downTo 0) {
-            val feature = initializedFeatures[i]
-            try {
-                HLog.i("[Hchat:FeatureManager] 卸载功能: ${safeName(feature)} (${feature.featureId()})")
-                feature.onDestroy(context)
-                HLog.i("[Hchat:FeatureManager] 功能卸载完成: ${safeName(feature)}")
-            } catch (e: Throwable) {
-                HLog.e("$TAG onDestroy 异常: ${safeName(feature)}, error=$e", e)
+        fun release(label: String, block: () -> Unit) {
+            try { block() } catch (error: Throwable) {
+                try { HLog.e("$TAG 释放失败: $label", error) } catch (_: Throwable) { }
             }
         }
+        val pending = initializedFeatures.asReversed().toList()
         installedFeatures.clear()
         initializedFeatures.clear()
-        t.mma.hooks.items.floatingshortcut.FloatingShortcutRuntime.destroy()
-        t.mma.hooks.items.custombottombar.CustomBottomBarFeature.destroyEarlyRuntimes()
-        t.mma.hooks.items.custombottombar.CustomBottomBarIconPicker.destroy()
-        t.mma.hooks.items.fakelocation.FakeLocationFeature.destroyProcessHooks()
-        t.mma.hooks.items.miniprogramvideoad.SkipMiniProgramVideoAdsFeature.destroyProcessHooks()
-        t.mma.hooks.items.miniprogramsplashad.SkipGlobalMiniProgramSplashAdsFeature.destroyProcessHooks()
-        t.mma.hooks.api.media.WeChatImageApi.closeMarsRuntime()
-        HookRegistry.get().unhookAll()
+        pending.forEach { feature ->
+            // Diagnostic failures must never prevent invoking the feature's cleanup.
+            release(safeName(feature)) { feature.onDestroy(context) }
+        }
+        release("悬浮快捷入口") { t.mma.hooks.items.floatingshortcut.FloatingShortcutRuntime.destroy() }
+        release("早期底栏") { t.mma.hooks.items.custombottombar.CustomBottomBarFeature.destroyEarlyRuntimes() }
+        release("底栏图标选择器") { t.mma.hooks.items.custombottombar.CustomBottomBarIconPicker.destroy() }
+        release("位置进程Hook") { t.mma.hooks.items.fakelocation.FakeLocationFeature.destroyProcessHooks() }
+        release("小程序视频Hook") { t.mma.hooks.items.miniprogramvideoad.SkipMiniProgramVideoAdsFeature.destroyProcessHooks() }
+        release("小程序开屏Hook") { t.mma.hooks.items.miniprogramsplashad.SkipGlobalMiniProgramSplashAdsFeature.destroyProcessHooks() }
+        release("Mars运行时") { t.mma.hooks.api.media.WeChatImageApi.closeMarsRuntime() }
+        release("剩余Hook") { HookRegistry.get().unhookAll() }
     }
-
     private fun safeName(feature: Feature): String {
         return try {
             val name = feature.name()

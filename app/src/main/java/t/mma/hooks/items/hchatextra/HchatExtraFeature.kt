@@ -37,7 +37,8 @@ import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
-import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.core.OwnedHooks
+import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.hooks.items.hideavatar.HideChatAvatarSettings
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
@@ -64,7 +65,7 @@ import java.util.WeakHashMap
 import java.util.concurrent.ConcurrentHashMap
 
 class HchatExtraFeature : BaseFeature() {
-    private var hooker: HchatExtraHooker? = null
+    private var runtime: HchatExtraRuntime? = null
 
     override fun featureId(): String = ID
 
@@ -78,33 +79,191 @@ class HchatExtraFeature : BaseFeature() {
         registerSettingsProvider(SkipWebRiskSettingsProvider())
     }
 
+    @Throws(Throwable::class)
     override fun onFeatureInstall(context: FeatureContext) {
-        hooker = HchatExtraHooker(context, ::logError)
-        scheduleInstall()
+        val prefs = HchatStorage.preferences(context.hostContext(), HchatExtraSettings.PREFS_NAME)
+        // 只把四个启用开关当作重启边界：改颜色/格式/间距走 hooker 内部偏好监听，不做整代重装。
+        val enableKeys = setOf(
+            HchatExtraSettings.KEY_MESSAGE_DETAILS,
+            HchatExtraSettings.KEY_RED_PACKET_DETAILS,
+            HchatExtraSettings.KEY_SKIP_WEB_RISK,
+            HchatExtraSettings.KEY_GROUP_MEMBER_HISTORY
+        )
+        val owner = PreferenceRuntimeOwner(
+            prefs,
+            enableKeys,
+            enabled = { enableKeys.any { prefs.getBoolean(it, false) } },
+            create = { resources ->
+                val created = HchatExtraRuntime(context) { message, error -> logError(message, error) }
+                runtime = created
+                resources.register {
+                    // 清理异常必须隔离：引用一定断开，异常不能外泄到 FeatureResourceScope。
+                    try {
+                        created.close()
+                    } finally {
+                        if (runtime === created) runtime = null
+                    }
+                }
+                created.start()
+            },
+            onError = { logError("分支扩展资源启停失败", it) },
+            restartOnChange = true
+        )
+        trackResource { owner.close() }
+        owner.start()
         subscribe(Events.DexReady::class.java) {
-            scheduleInstall()
-        }
-    }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        hooker?.destroy()
-        hooker = null
-    }
-
-    private fun scheduleInstall() {
-        DexInstallScheduler.schedule(ID, name()) {
-            hooker?.install() == true
-        }
-        DexInstallScheduler.schedule("hchat_extra_message_details", "消息显示时间") {
-            hooker?.installMessageDetails() == true
-        }
-        DexInstallScheduler.schedule("hchat_extra_forwarded_types", "聊天记录消息类型") {
-            hooker?.installForwardedRecordTypes() == true
+            owner.refresh()
+            // DexKit 就绪后重新调度：票据自身负责去重与有限重试，已关闭的代际直接忽略。
+            runtime?.onDexReady()
         }
     }
 
     companion object {
         const val ID = "hchat_extra"
+    }
+}
+
+/**
+ * 单个启用区间的分支扩展运行时。
+ *
+ * 持有本代 [HchatExtraHooker] 与三个相互独立的 [DexInstallScheduler.Installation] 票据
+ * （主安装 / 消息显示时间 / 聊天记录类型）。`close()` 幂等：
+ * 先撤销三张票据（停掉未执行与已排期的重试），再销毁本代 hooker。
+ * 顺序不可交换——重试若晚于销毁进入，会把 Hook 装进已销毁的实例。
+ */
+internal class HchatExtraRuntime(
+    private val context: FeatureContext,
+    private val report: (String, Throwable?) -> Unit
+) {
+    private val lock = Any()
+    private var closed = false
+    private var hooker: HchatExtraHooker? = null
+    private var tickets: List<DexInstallScheduler.Installation> = emptyList()
+
+    fun start() {
+        val created = try {
+            HchatExtraHooker(context, report)
+        } catch (error: Throwable) {
+            report("创建分支扩展运行时失败", error)
+            return
+        }
+        val createdTickets = try {
+            listOf(
+                DexInstallScheduler.installation(ID, "分支扩展功能", DexInstallScheduler.Stage.WARMUP),
+                DexInstallScheduler.installation(KEY_MESSAGE_DETAILS, "消息显示时间", DexInstallScheduler.Stage.WARMUP),
+                DexInstallScheduler.installation(KEY_FORWARDED_TYPES, "聊天记录消息类型", DexInstallScheduler.Stage.WARMUP)
+            )
+        } catch (error: Throwable) {
+            report("创建分支扩展安装票据失败", error)
+            destroyHooker(created)
+            return
+        }
+        val accepted = synchronized(lock) {
+            if (closed) {
+                false
+            } else {
+                hooker = created
+                tickets = createdTickets
+                true
+            }
+        }
+        if (!accepted) {
+            // 启动过程中已被关闭：刚创建的这一代就地释放，不能留成孤儿 Hook。
+            createdTickets.forEach(::closeTicket)
+            destroyHooker(created)
+            return
+        }
+        scheduleInstall()
+    }
+
+    fun onDexReady() {
+        scheduleInstall()
+    }
+
+    private fun scheduleInstall() {
+        val snapshot = synchronized(lock) {
+            if (closed) null else Triple(hooker, tickets.getOrNull(0), tickets)
+        } ?: return
+        val target = snapshot.first ?: return
+        val primary = snapshot.second ?: return
+        val all = snapshot.third
+        try {
+            primary.schedule { installMain(target) }
+            all.getOrNull(1)?.schedule { installMessageDetails(target) }
+            all.getOrNull(2)?.schedule { installForwardedTypes(target) }
+        } catch (error: Throwable) {
+            report("调度分支扩展 Hook 安装失败", error)
+        }
+    }
+
+    /** 在 DexInstallScheduler 线程执行；返回 false 表示交给票据做有限重试。 */
+    private fun installMain(target: HchatExtraHooker): Boolean {
+        if (!isCurrent(target)) return false
+        return try {
+            target.install()
+        } catch (error: Throwable) {
+            report("分支扩展 Hook 安装失败", error)
+            false
+        }
+    }
+
+    private fun installMessageDetails(target: HchatExtraHooker): Boolean {
+        if (!isCurrent(target)) return false
+        return try {
+            target.installMessageDetails()
+        } catch (error: Throwable) {
+            report("消息显示时间 Hook 安装失败", error)
+            false
+        }
+    }
+
+    private fun installForwardedTypes(target: HchatExtraHooker): Boolean {
+        if (!isCurrent(target)) return false
+        return try {
+            target.installForwardedRecordTypes()
+        } catch (error: Throwable) {
+            report("聊天记录类型 Hook 安装失败", error)
+            false
+        }
+    }
+
+    private fun isCurrent(target: HchatExtraHooker): Boolean =
+        synchronized(lock) { !closed && hooker === target } && !target.isDestroyed()
+
+    fun close() {
+        val snapshot = synchronized(lock) {
+            if (closed) return
+            closed = true
+            val taken = hooker to tickets
+            hooker = null
+            tickets = emptyList()
+            taken
+        }
+        // 顺序不可交换：先停重试，再销毁本代，否则重试会把 Hook 装进已销毁的实例。
+        snapshot.second.forEach(::closeTicket)
+        snapshot.first?.let(::destroyHooker)
+    }
+
+    private fun closeTicket(installation: DexInstallScheduler.Installation) {
+        try {
+            installation.close()
+        } catch (error: Throwable) {
+            report("取消分支扩展安装重试失败", error)
+        }
+    }
+
+    private fun destroyHooker(target: HchatExtraHooker) {
+        try {
+            target.destroy()
+        } catch (error: Throwable) {
+            report("释放分支扩展运行时失败", error)
+        }
+    }
+
+    companion object {
+        private const val ID = HchatExtraFeature.ID
+        const val KEY_MESSAGE_DETAILS = "hchat_extra_message_details"
+        const val KEY_FORWARDED_TYPES = "hchat_extra_forwarded_types"
     }
 }
 
@@ -195,6 +354,25 @@ private class HchatExtraHooker(
         HideChatAvatarSettings.PREFS_NAME
     )
     private val methodPrefs = DexMethodCache.prefs(context.hostContext(), "Hchat_extra_method_cache")
+    /**
+     * 本代独占的 Hook 句柄。
+     *
+     * 这里必须自己持句柄：HookRegistry 只负责进程级兜底 unhookAll，不能证明任何单个功能的
+     * 资源在关闭时被释放。句柄统一登记到 OwnedHooks，destroy 时按注册逆序卸载。
+     */
+    private val ownedHooks = OwnedHooks { logger("分支扩展 Hook 句柄异常", it) }
+    /** 关闭门：置位后不再注册新 Hook、不再派发新的 UI 修复任务。 */
+    @Volatile private var destroyed = false
+
+    /** True once destroy() ran; the scheduler must not install into a released generation. */
+    fun isDestroyed(): Boolean = destroyed
+
+    private fun hookOwned(method: Method, callback: XC_MethodHook): Boolean {
+        if (destroyed) return false
+        // OwnedHooks 内部已捕获安装异常并上报；安装失败返回 null，由调用方决定是否重试。
+        return ownedHooks.hook(method, callback) != null
+    }
+
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
     private val hookedClasses = Collections.newSetFromMap(ConcurrentHashMap<Class<*>, Boolean>())
     private val holderRootFieldCache = ConcurrentHashMap<Class<*>, Field>()
@@ -369,28 +547,60 @@ private class HchatExtraHooker(
     }
 
     fun destroy() {
-        tailRepairTokens.clear()
-        dynamicRecall.destroy()
-        forwardedRecordTypes.destroy()
-        prefs.unregisterOnSharedPreferenceChangeListener(messageDetailsPrefsListener)
-        hideAvatarPrefs.unregisterOnSharedPreferenceChangeListener(hideAvatarPrefsListener)
-        val spacings = synchronized(avatarDetailsSpacings) {
-            avatarDetailsSpacings.entries.map { it.key to it.value }.also { avatarDetailsSpacings.clear() }
+        // 先置门：此后任何 Hook 安装、迟到回调与投递都被拒绝，不能复活本代。
+        if (destroyed) return
+        destroyed = true
+        // 逐项隔离：任何一步抛错都不能截断后续释放。
+        releaseSafely("动态撤回运行时") { dynamicRecall.destroy() }
+        releaseSafely("聊天记录类型") { forwardedRecordTypes.destroy() }
+        releaseSafely("消息详情偏好监听") {
+            prefs.unregisterOnSharedPreferenceChangeListener(messageDetailsPrefsListener)
         }
-        spacings.forEach { (parent, spacing) -> restoreAvatarDetailsSpacing(parent, spacing) }
-        synchronized(messageDetailsLabels) {
-            messageDetailsLabels.clear()
+        releaseSafely("隐藏头像偏好监听") {
+            hideAvatarPrefs.unregisterOnSharedPreferenceChangeListener(hideAvatarPrefsListener)
         }
-        synchronized(messageDetailsBindings) {
-            messageDetailsBindings.clear()
+        releaseSafely("头像详情间距") {
+            val spacings = synchronized(avatarDetailsSpacings) {
+                avatarDetailsSpacings.entries.map { it.key to it.value }.also { avatarDetailsSpacings.clear() }
+            }
+            // 逐项隔离：单个视图还原抛错不得跳过其余视图，否则被改过的 padding/clip 永久留在宿主上。
+            spacings.forEach { (parent, spacing) ->
+                try {
+                    restoreAvatarDetailsSpacing(parent, spacing)
+                } catch (error: Throwable) {
+                    logger("分支扩展释放失败: 头像详情间距", error)
+                }
+            }
         }
-        messageDetailsAttachCallbacks.clear()
-        messageDetailsLayoutCallbacks.clear()
-        messageDetailsRetryListeners.clear()
-        messageDetailsPendingLayout.clear()
-        messageDetailsPositionListeners.clear()
-        messageDetailsColorListeners.clear()
-        synchronized(messageDetailsBindTokens) { messageDetailsBindTokens.clear() }
+        releaseSafely("消息详情登记") {
+            synchronized(messageDetailsLabels) { messageDetailsLabels.clear() }
+            synchronized(messageDetailsBindings) { messageDetailsBindings.clear() }
+            synchronized(messageDetailsBindTokens) { messageDetailsBindTokens.clear() }
+        }
+        releaseSafely("消息详情监听") {
+            messageDetailsAttachCallbacks.clear()
+            messageDetailsLayoutCallbacks.clear()
+            messageDetailsRetryListeners.clear()
+            messageDetailsPendingLayout.clear()
+            messageDetailsPositionListeners.clear()
+            messageDetailsColorListeners.clear()
+        }
+        releaseSafely("尾部修复token") { tailRepairTokens.clear() }
+        // Hook 必须最后撤：前面的清理依赖 Hook 已置 destroyed 门后的行为一致，先撤会让迟到回调
+        // 在没有登记表的情况下重新写视图。撤销本身按注册逆序，单项失败只上报。
+        releaseSafely("独占Hook") { ownedHooks.close() }
+    }
+
+    private inline fun releaseSafely(label: String, block: () -> Unit) {
+        try {
+            block()
+        } catch (error: Throwable) {
+            try {
+                logger("分支扩展释放失败: $label", error)
+            } catch (_: Throwable) {
+                // 上报本身失败不能再阻断后续释放。
+            }
+        }
     }
 
     fun installForwardedRecordTypes(): Boolean = forwardedRecordTypes.install()
@@ -555,8 +765,7 @@ private class HchatExtraHooker(
             adapterBinds.any { it.parameterTypes.size == 2 } && adapterBinds.any { it.parameterTypes.size == 3 }
         for (bind in binds) {
             if (!hookedMethods.add(bind)) continue
-            val installed = runCatching {
-                HookRegistry.get().hook(bind, object : XC_MethodHook() {
+            val installed = hookOwned(bind, object : XC_MethodHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
                         // The payload method belongs to a shared base adapter. Only chat rows apply.
                         if (bind in adapterBinds && adapterClass?.isInstance(param.thisObject) != true) return
@@ -588,12 +797,7 @@ private class HchatExtraHooker(
                         }.onFailure { logger("消息显示时间绑定失败", it) }
                     }
                 })
-                true
-            }.getOrElse {
-                hookedMethods.remove(bind)
-                logger("消息显示时间Hook安装失败: $bind", it)
-                false
-            }
+            if (!installed) hookedMethods.remove(bind)
             complete = installed && complete
         }
         return complete
@@ -659,35 +863,35 @@ private class HchatExtraHooker(
     }
 
     private fun hookOnce(method: Method, block: (XC_MethodHook.MethodHookParam) -> Unit): Boolean {
+        if (destroyed) return false
         if (!hookedMethods.add(method)) return true
-        return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    runCatching { block(param) }.onFailure { logger("Hchat扩展Hook执行失败: ${method.name}", it) }
-                }
-            })
-            true
-        }.getOrElse {
+        val installed = hookOwned(method, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                if (destroyed) return
+                runCatching { block(param) }.onFailure { logger("Hchat扩展Hook执行失败: ${method.name}", it) }
+            }
+        })
+        if (!installed) {
             hookedMethods.remove(method)
-            logger("Hchat扩展Hook安装失败: ${method.name}", it)
-            false
+            logger("Hchat扩展Hook安装失败: ${method.name}", null)
         }
+        return installed
     }
 
     private fun hookAfterOnce(method: Method, block: (XC_MethodHook.MethodHookParam) -> Unit): Boolean {
+        if (destroyed) return false
         if (!hookedMethods.add(method)) return true
-        return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    runCatching { block(param) }.onFailure { logger("Hchat扩展Hook执行失败: ${method.name}", it) }
-                }
-            })
-            true
-        }.getOrElse {
+        val installed = hookOwned(method, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (destroyed) return
+                runCatching { block(param) }.onFailure { logger("Hchat扩展Hook执行失败: ${method.name}", it) }
+            }
+        })
+        if (!installed) {
             hookedMethods.remove(method)
-            logger("Hchat扩展Hook安装失败: ${method.name}", it)
-            false
+            logger("Hchat扩展Hook安装失败: ${method.name}", null)
         }
+        return installed
     }
 
     private fun locateMethod(cacheName: String, strings: List<String>, searchPackage: String? = null): Method? {
@@ -910,19 +1114,21 @@ private class HchatExtraHooker(
         val textView = getRedPacketRecordTimeTextView(holder, timestamp)
         if (textView != null) {
             textView.text = text
-            textView.post {
-                if (enabled(HchatExtraSettings.KEY_RED_PACKET_DETAILS, HchatExtraSettings.DEFAULT_RED_PACKET_DETAILS)) {
-                    textView.text = text
-                }
-            }
+            if (!textView.post {
+                    if (destroyed) return@post
+                    if (enabled(HchatExtraSettings.KEY_RED_PACKET_DETAILS, HchatExtraSettings.DEFAULT_RED_PACKET_DETAILS)) {
+                        textView.text = text
+                    }
+                }) logThrottled("红包记录时间二次写入投递被拒")
             applied = true
         }
         if (!applied) {
             val itemView = holder?.let { findRootView(it) }
-            itemView?.post {
-                setRedPacketRecordTimeByHolder(holder, text)
-                getRedPacketRecordTimeTextView(holder, timestamp)?.text = text
-            }
+            if (itemView != null && !itemView.post {
+                    if (destroyed) return@post
+                    setRedPacketRecordTimeByHolder(holder, text)
+                    getRedPacketRecordTimeTextView(holder, timestamp)?.text = text
+                }) logThrottled("红包记录时间补写投递被拒")
         }
     }
 
@@ -1383,19 +1589,19 @@ private class HchatExtraHooker(
     private val tailTouchMethods = java.util.concurrent.ConcurrentHashMap.newKeySet<Method>()
     @Synchronized
     private fun installTailTouchHook(touchMethod: Method): Boolean {
+        if (destroyed) return false
         if (touchMethod in tailTouchMethods) return true
-        val hooked = runCatching {
-            HookRegistry.get().hook(touchMethod, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    val event = param.args.firstOrNull() as? MotionEvent ?: return
-                    if (event.actionMasked != MotionEvent.ACTION_DOWN) return
-                    val touched = param.thisObject as? ViewGroup ?: return
-                    if (!isScrollingContainer(touched)) return
-                    tailRepairTokens.remove(touched)
-                    tailLastTouch[touched] = SystemClock.uptimeMillis()
-                }
-            })
-        }.isSuccess
+        val hooked = hookOwned(touchMethod, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                if (destroyed) return
+                val event = param.args.firstOrNull() as? MotionEvent ?: return
+                if (event.actionMasked != MotionEvent.ACTION_DOWN) return
+                val touched = param.thisObject as? ViewGroup ?: return
+                if (!isScrollingContainer(touched)) return
+                tailRepairTokens.remove(touched)
+                tailLastTouch[touched] = SystemClock.uptimeMillis()
+            }
+        })
         if (hooked) tailTouchMethods.add(touchMethod)
         return hooked
     }
@@ -1489,7 +1695,8 @@ private class HchatExtraHooker(
             if (observer.isAlive) {
                 list.addOnAttachStateChangeListener(attach)
                 observer.addOnPreDrawListener(listener)
-                list.postDelayed(timeout, 1550L)
+                // 投递被拒则超时兜底不存在：必须立刻 finish，否则 preDraw 与 attach 监听永远挂着。
+                if (!list.postDelayed(timeout, 1550L)) finish()
             } else finish()
         }
     }
@@ -1615,45 +1822,67 @@ private class HchatExtraHooker(
         val labels = synchronized(messageDetailsLabels) {
             messageDetailsLabels.toList()
         }
+        var rejected = false
         labels.forEach { label ->
-            label.post {
-                if (label.parent != null && label.tag == TAG_MESSAGE_DETAILS_VIEW) {
-                    applyMessageDetailsColors(label)
-                    label.invalidate()
-                }
-            }
+            if (!label.post {
+                    if (destroyed) return@post
+                    if (label.parent != null && label.tag == TAG_MESSAGE_DETAILS_VIEW) {
+                        applyMessageDetailsColors(label)
+                        label.invalidate()
+                    }
+                }) rejected = true
         }
+        if (rejected) logThrottled("消息详情颜色刷新投递被拒")
     }
 
     private fun refreshAttachedMessageDetailsLayouts() {
         val bindings = synchronized(messageDetailsBindings) {
             messageDetailsBindings.entries.map { it.key to it.value }
         }
+        var rejected = false
         bindings.forEach { (label, binding) ->
-            label.post {
-                val currentBinding = synchronized(messageDetailsBindings) { messageDetailsBindings[label] }
-                if (currentBinding !== binding) return@post
-                if (!messageDetailsConfig.enabled) {
-                    messageDetailsAttachCallbacks.cancel(binding.root)
-                    messageDetailsLayoutCallbacks.cancel(binding.root)
-                    messageDetailsRetryListeners.cancel(binding.root)
-                    removeMessageDetailsLabel(label)
-                    return@post
-                }
-                if (label.parent != null && label.tag == TAG_MESSAGE_DETAILS_VIEW) {
-                    val details = binding.nativeMessage?.let { messageDetails(it) } ?: binding.details
-                    insertMessageDetailsLabel(
-                        binding.root,
-                        binding.nativeTimeLabel,
-                        binding.holder,
-                        details,
-                        preferredLabel = label,
-                        nativeMessage = binding.nativeMessage
-                    )
-                }
-            }
+            if (!label.post {
+                    if (destroyed) return@post
+                    val currentBinding = synchronized(messageDetailsBindings) { messageDetailsBindings[label] }
+                    if (currentBinding !== binding) return@post
+                    if (!messageDetailsConfig.enabled) {
+                        messageDetailsAttachCallbacks.cancel(binding.root)
+                        messageDetailsLayoutCallbacks.cancel(binding.root)
+                        messageDetailsRetryListeners.cancel(binding.root)
+                        removeMessageDetailsLabel(label)
+                        return@post
+                    }
+                    if (label.parent != null && label.tag == TAG_MESSAGE_DETAILS_VIEW) {
+                        val details = binding.nativeMessage?.let { messageDetails(it) } ?: binding.details
+                        insertMessageDetailsLabel(
+                            binding.root,
+                            binding.nativeTimeLabel,
+                            binding.holder,
+                            details,
+                            preferredLabel = label,
+                            nativeMessage = binding.nativeMessage
+                        )
+                    }
+                }) rejected = true
+        }
+        if (rejected) logThrottled("消息详情布局刷新投递被拒")
+    }
+    /**
+     * 投递被拒只上报不重试：被拒说明宿主主队列已停或视图已死，重投只会拿到同样的结果。
+     * 用节流闸避免一次偏好变更在成百条消息上刷出成百条同源日志。
+     */
+    private fun logThrottled(message: String) {
+        val now = SystemClock.uptimeMillis()
+        val last = lastDeliveryRejectAt
+        if (last != 0L && now - last < 10_000L) return
+        lastDeliveryRejectAt = now
+        try {
+            logger(message, null)
+        } catch (_: Throwable) {
+            // 上报失败不能再影响调用方。
         }
     }
+    @Volatile private var lastDeliveryRejectAt = 0L
 
     private fun addAvatarDetailsView(
         root: View,
@@ -1839,7 +2068,12 @@ private class HchatExtraHooker(
         parent.clipToPadding = spacing.originalClipToPadding
         spacing.clipStates.forEach { state ->
             val view = state.view.get() ?: return@forEach
-            if (!view.clipChildren) view.clipChildren = state.originalClipChildren
+            // 单个子视图还原失败只跳过它自己，不能让异常中断本视图余下的还原。
+            try {
+                if (!view.clipChildren) view.clipChildren = state.originalClipChildren
+            } catch (error: Throwable) {
+                logger("分支扩展释放失败: 头像详情间距", error)
+            }
         }
     }
 
@@ -2204,18 +2438,21 @@ private class HchatExtraHooker(
 
     private fun refreshMessageDetailsColorsAfterAttach(label: TextView, newlyAttached: Boolean) {
         if (!newlyAttached) return
+        if (destroyed) return
         applyMessageDetailsColors(label)
         messageDetailsColorListeners.schedule(label, label) {
             if (label.parent != null && label.tag == TAG_MESSAGE_DETAILS_VIEW) {
                 applyMessageDetailsColors(label)
             }
         }
-        label.post {
-            if (label.parent != null && label.tag == TAG_MESSAGE_DETAILS_VIEW) {
-                applyMessageDetailsColors(label)
-                label.invalidate()
-            }
-        }
+        // 附着后的补色投递被拒不再补：preDraw 队列这一步已经同步补过一次颜色。
+        if (!label.post {
+                if (destroyed) return@post
+                if (label.parent != null && label.tag == TAG_MESSAGE_DETAILS_VIEW) {
+                    applyMessageDetailsColors(label)
+                    label.invalidate()
+                }
+            }) logThrottled("消息详情附着补色投递被拒")
     }
 
     private fun sameRelativeLayoutParams(
@@ -2930,8 +3167,10 @@ private class HchatExtraHooker(
             )
             editor.requestFocus()
             editor.setSelection(visibleOffset.coerceIn(0, editor.text?.length ?: 0))
-            editor.post {
-                editor.scrollTo(0, previousScrollY)
+            // 纯视觉补偿：投递被拒说明宿主主队列已停，这一次滚动恢复直接放弃，
+            // 它不持本代任何资源，也不参与 Hook 或挂载路径。
+            if (!editor.post { editor.scrollTo(0, previousScrollY) }) {
+                logThrottled("消息详情编辑滚动恢复投递被拒")
             }
             status.text = "编辑"
             updateButtons()

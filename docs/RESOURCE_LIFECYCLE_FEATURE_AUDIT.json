@@ -311,7 +311,7 @@
       ],
       "openFindings": [
         "入口启用区间scope、独立Installation和生命周期订阅；Runtime关闭Hook及移除工具栏UI已有",
-        "入口先注销偏好再stopRuntime，注销异常会跳过运行时释放；旧异步UI清理/面板回调与缓存预算需复核"
+        "2026-11-02：入口注销异常跳过stopRuntime已修复并经专项验证；原条目其他边界继续开放：入口先注销偏好再stopRuntime，注销异常会跳过运行时释放；旧异步UI清理/面板回调与缓存预算需复核"
       ],
       "findingReview": [
         {
@@ -337,7 +337,16 @@
       ],
       "sharedRootCauseRefs": [
         "sequential-cleanup-exception"
-      ]
+      ],
+      "stage1Resume20261102": {
+        "state": "partial_verified_not_stage_complete",
+        "change": "偏好注销以try/finally保证stopRuntime；注销异常不得跳过运行时关闭",
+        "tests": [
+          "scripts/test_feature_cleanup_isolation.py"
+        ],
+        "evidence": "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json",
+        "boundary": "合成清理回归；其余运行时依赖与宿主行为仍需逐项核准"
+      }
     },
     {
       "feature": "HomeSidePanelFeature",
@@ -360,7 +369,7 @@
       ],
       "openFindings": [
         "启用区间scope持有Runtime、页面与生命周期订阅；QuickMarkReadRuntime为共享依赖需进程保留依据",
-        "入口unregister异常可跳过stopRuntime；Runtime内部UI/异步清理链仍需复核"
+        "2026-11-02：入口注销异常跳过stopRuntime已修复并经专项验证；原条目其他边界继续开放：入口unregister异常可跳过stopRuntime；Runtime内部UI/异步清理链仍需复核"
       ],
       "findingReview": [
         {
@@ -386,7 +395,16 @@
       ],
       "sharedRootCauseRefs": [
         "sequential-cleanup-exception"
-      ]
+      ],
+      "stage1Resume20261102": {
+        "state": "partial_verified_not_stage_complete",
+        "change": "偏好注销以try/finally保证stopRuntime；注销异常不得跳过运行时关闭",
+        "tests": [
+          "scripts/test_feature_cleanup_isolation.py"
+        ],
+        "evidence": "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json",
+        "boundary": "合成清理回归；其余运行时依赖与宿主行为仍需逐项核准"
+      }
     },
     {
       "feature": "HomeExtensionFeature",
@@ -501,7 +519,16 @@
           "remainingOpen": true,
           "boundary": "pending/lastSubmitted为无界并发集合；singleThreadScheduledExecutor无总量准入；attempt=0并允许递归至720，即首轮加最多720次重试，不是720个总任务；同key去重及60秒submit节流不是全局容量预算。shutdown顺序ticket.close再shutdownNow，异常隔离亦待治理。"
         }
-      ]
+      ],
+      "stage1Resume20261102": {
+        "state": "partial_verified_not_stage_complete",
+        "change": "偏好注销以try/finally保证stopRuntime；注销异常不得跳过运行时关闭",
+        "tests": [
+          "scripts/test_feature_cleanup_isolation.py"
+        ],
+        "evidence": "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json",
+        "boundary": "合成清理回归；其余运行时依赖与宿主行为仍需逐项核准"
+      }
     },
     {
       "feature": "MonetModuleGeneratorFeature",
@@ -813,7 +840,8 @@
       ],
       "openFindings": [
         "Runtime拥有独占Installation、alive/enabled/generation门控和idle worker，stop清Hook及队列、关闭旧选择弹窗",
-        "destroy注销偏好/Activity监听异常可阻断stop和worker.shutdown；stop逐Hook unhook无异常隔离，部分失败会遗留其余Hook"
+        "destroy注销偏好/Activity监听异常可阻断stop和worker.shutdown；stop逐Hook unhook无异常隔离，部分失败会遗留其余Hook",
+        "2026-11-02：上述清理异常已局部修复；完整Android链接、主线程拒绝清理投递时的选择页恢复、共享存储Hook及在途宿主发送边界仍开放。"
       ],
       "findingReview": [
         {
@@ -839,7 +867,18 @@
       ],
       "sharedRootCauseRefs": [
         "sequential-cleanup-exception"
-      ]
+      ],
+      "stage1Resume20261102": {
+        "state": "partial_verified_not_stage_complete",
+        "change": "监听与Hook等资源逐项释放异常隔离；安装销毁幂等；旧偏好/页面监听失效；失败安装复用Hook清理",
+        "tests": [
+          "scripts/test_emoji_at_cleanup.py",
+          "scripts/test_emoji_at_choice_queue.py",
+          "scripts/test_emoji_at_native_passthrough.py"
+        ],
+        "evidence": "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json",
+        "boundary": "仅提取生产方法与真实选择队列合成测试；完整Android链接、退出投递拒绝后的UI恢复、宿主发送交错和容量仍未验收"
+      }
     },
     {
       "feature": "FloatingShortcutFeature",
@@ -1376,69 +1415,124 @@
     {
       "feature": "NicknameWidthFeature",
       "source": "app/src/main/java/t/mma/hooks/items/nicknamewidth/NicknameWidthFeature.kt",
-      "status": "代际门控已修改；SDK/现有宽度测试通过；完整代际行为测试待补",
+      "status": "源码闭环与专项行为验证完成；109入口最终核准仍待整体复核；未做 Android/R8 构建与实机验收",
       "evidence": [
-        "70: registerSettingsProvider(NicknameWidthSettingsProvider())",
-        "72: override fun onFeatureInstall(context: FeatureContext) {",
-        "114: override fun onFeatureDestroy(context: FeatureContext) {",
-        "/tmp/pl-audit-sync-20261101-1943/fields-1-review.json"
+        "app/src/main/java/t/mma/hooks/items/nicknamewidth/NicknameWidthFeature.kt:NicknameWidthFeature/NicknameWidthRuntime/NicknameWidthState",
+        "scripts/test_nickname_width_lifecycle.py",
+        "scripts/test_nickname_width.py",
+        "scripts/check_nickname_width_ui.py",
+        "/tmp/pl-stage1-20261103-nickname-width/test_nickname_width_lifecycle.log",
+        "/tmp/pl-stage1-20261103-nickname-width/test_nickname_width.log",
+        "/tmp/pl-stage1-20261103-nickname-width/check_nickname_width_ui.log",
+        "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.NicknameWidthFeature"
       ],
-      "ownership": "Feature持有Hook、偏好监听和弱键宽度状态；重装复位destroyed并递增generation",
-      "cleanup": "destroyed只置true不重置；关闭只还原宽度不撤私有Hook；旧restoreAll回调在重装后可能还原新状态",
-      "inFlight": "generation隔离重装，Hook入口检查epoch/destroyed/enabled且仅主线程bind；destroy与已进入Hook未统一互斥，注销偏好异常会阻断后续unhook/恢复。",
-      "lateCallbacks": "旧Hook/还原回调检查generation；主线程销毁即时还原；状态保留原宽度供后续绑定恢复",
-      "bounds": "NicknameWidthState使用WeakHashMap<TextView,Int>保存原maxWidth，restoreAll清表；无显式条目硬上限、无独占worker，Handler.post拒绝恢复未处理。",
+      "ownership": "PreferenceRuntimeOwner 按 enable 开关区间持有 NicknameWidthRuntime；Runtime 独占 OwnedHooks、DexInstallScheduler.Installation 票据与 NicknameWidthState 宽度登记，关闭即释放，重开创建新实例。",
+      "cleanup": "close 幂等：先停新绑定并还原宽度，再逐句柄卸载 Hook（单项失败隔离上报），最后取消安装票据与重试；销毁路径 finally 切断 runtime 引用，注销偏好监听异常不阻断后续释放。",
+      "inFlight": "Hook 回调与 bind 都检查 closeRequested/state.isClosed；state.close 在同一把锁内置 closed，已进入回调无法在还原后写入；安装与调度异常均回滚并释放票据，DexInstallScheduler 有限重试从干净所有权重装。",
+      "lateCallbacks": "宽度还原跨线程改为投递主线程，post 被拒或抛错时就地还原并上报；关闭后到达的回调因 closed 门失效；旧 Runtime 只还原自己 token 名下的记录，不会覆盖新实例已接管的视图。",
+      "bounds": "NicknameWidthState 使用进程级 WeakHashMap<TextView, Record>，按视图弱键增长并随 GC 回收；无每帧扫描、无 TextView 全局 Hook、无独占 worker；卸载时仅清本 token 条目，保留新实例接管记录。",
       "tests": [
-        "test_monitor_sdk",
-        "test_nickname_width"
+        "scripts/test_nickname_width_lifecycle.py",
+        "scripts/test_nickname_width.py",
+        "scripts/check_nickname_width_ui.py"
+      ],
+      "openFindings": [
+        "未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话中验证群昵称宽度、开关热启停与内存回收。",
+        "真实宿主 b0.p 的调用线程、userTV 复用时机与 gk5.d.x() 返回语义仍以逆向结论为据，未在设备上抓取运行时证据。"
+      ],
+      "resolvedFindings": [
+        "关闭只还原宽度不撤 Hook：已改为关闭即卸载独占 Hook 并取消安装票据。",
+        "注销偏好监听异常会阻断后续 unhook/恢复：已逐项隔离，销毁路径 finally 切断引用。",
+        "主线程 post 失败导致宽度还原丢失：已改为被拒就地还原并上报。",
+        "旧 restoreAll 回调可能覆盖新实例状态：已改为按 token 归属还原，接管记录不被旧实例清除。",
+        "安装失败后无重试与回滚：已接入 DexInstallScheduler.Installation 有限重试并在失败路径清空句柄。"
+      ],
+      "findingReview": [
+        {
+          "finding": "未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话中验证群昵称宽度、开关热启停与内存回收。",
+          "category": "验收边界保留",
+          "evidence": [
+            "/tmp/pl-stage1-20261103-nickname-width/test_nickname_width.log",
+            "/tmp/pl-stage1-20261103-nickname-width/test_nickname_width_lifecycle.log"
+          ],
+          "remainingOpen": true,
+          "boundary": "现有证据为 android.jar ABI 直接编译与合成平台边界下的生产代码执行，不等于 Android/R8 构建、真实微信业务或设备/内存验收。"
+        },
+        {
+          "finding": "真实宿主 b0.p 的调用线程、userTV 复用时机与 gk5.d.x() 返回语义仍以逆向结论为据，未在设备上抓取运行时证据。",
+          "category": "验收边界保留",
+          "evidence": [
+            "app/src/main/java/t/mma/hooks/items/nicknamewidth/NicknameWidthFeature.kt:isGroupRoom"
+          ],
+          "remainingOpen": true,
+          "boundary": "源码对非主线程回调直接跳过、对 @chatroom 与 @im.chatroom 后缀判定；未取得设备侧调用栈与字段取值样本。"
+        }
+      ],
+      "sharedRootCauseRefs": [
+        "shared-schedule-mutable-runtime"
       ]
     },
     {
       "feature": "AutoRedPacketFeature",
       "source": "app/src/main/java/t/mma/hooks/items/payment/core/AutoRedPacketFeature.kt",
-      "status": "源码入口及释放链已复核；发现待闭环项",
+      "status": "源码闭环与专项行为验证完成；109入口最终核准仍待整体复核；未做 Android/R8 构建与实机验收",
       "evidence": [
-        "app/src/main/java/t/mma/hooks/items/payment/core/AutoRedPacketFeature.kt: 入口、释放、调度和回调源码复核",
-        "app/src/main/java/t/mma/hooks/items/payment/core/AutoRedPacketFeature.kt:onFeatureInstall",
-        "app/src/main/java/t/mma/hooks/items/payment/core/RedPacketHooker.java:destroy",
-        "/tmp/pl-audit-sync-20261101-1943/fields-2-review.json"
+        "app/src/main/java/t/mma/hooks/items/payment/core/AutoRedPacketFeature.kt:AutoRedPacketFeature/RedPacketRuntime",
+        "app/src/main/java/t/mma/hooks/items/payment/core/RedPacketHooker.java:hookAll/destroy",
+        "app/src/main/java/t/mma/hooks/items/payment/core/PaymentResourceScope.java:post/run/close",
+        "scripts/test_payment_resource_scope.py",
+        "scripts/test_payment_notify_abi.py",
+        "/tmp/pl-stage1-20261103-redpacket/test_payment_resource_scope.log",
+        "/tmp/pl-stage1-20261103-redpacket/test_payment_notify_abi.log",
+        "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.AutoRedPacketFeature"
       ],
-      "ownership": "PreferenceRuntimeOwner持独占Installation和本代RedPacketHooker；message/database/fake/silent组件分别PaymentResourceScope持Hook，UI scope拥有延迟任务和订阅。",
-      "cleanup": "owner撤销ticket并destroy本代hooker；RedPacketHooker逐子组件销毁有异常隔离；子scope逆序释放Hook及任务，UI/announcer/notifier另投递主线程清理。",
-      "inFlight": "PaymentResourceScope取任务出锁后action.run可与close交错；网络dispatcher及autoReply已进入宿主调用不由scope取消，不能强断业务。",
-      "lateCallbacks": "scope closed拒绝新任务及迟到句柄；post返回失败及关闭后再post UI清理未完整处理，已出锁action仍可能执行一次。",
-      "bounds": "PaymentResourceScope pending无硬总量；替换同key及取消不是总容量预算，反馈和网络依赖完整峰值仍开放。",
+      "ownership": "PreferenceRuntimeOwner 以 KEY_ENABLE/hb_auto_enable、KEY_FAKE_PACKET_ENABLE/hb_fake_packet_enable、KEY_BLOCK_NEW_GROUP_ENABLE/hb_block_new_group_enable 三键 OR 作为启用区间，restartOnChange=true；每个区间独占一个 RedPacketRuntime，Runtime 独占本代 RedPacketHooker 与一个 DexInstallScheduler.installation(auto_redpacket, 自动抢红包, WARMUP) 票据。RedPacketHooker 内部由 resources(PaymentResourceScope) 持有全部 Hook、订阅与主线程延迟任务，message/database/fake/silent 各持自身 PaymentResourceScope，七个支付子组件各自 new 独立实例而非共享单例。",
+      "cleanup": "关闭顺序已固定并写入源码注释：RedPacketRuntime.close() 在锁内一次性置 closed 并取 hooker/ticket 快照、双置 null，随后先 closeTicket 再 destroyHooker——顺序不可交换，先停重试再销毁本代，否则重试会把 Hook 装进已销毁实例。RedPacketHooker.destroy() 首行置 destroyed（挡住此后进入的调度重试），先 resources.close()，再按与安装相反的顺序逐个销毁 newGroupBlocker→notifier→announcer→autoReply→silentHandler→fakePacketHook→uiAutomator→databaseHook→messageHook→networkDispatcher，逐项 try/catch 隔离，单项抛错不阻断其余释放。Feature 侧 resources.register { try { created.close() } finally { runtime = null } } 保证引用一定断开；owner.close() 由 trackResource 接管，先登记后 start。",
+      "inFlight": "PaymentResourceScope.Posting.run() 在锁内校验 closed 与 pending.get(key) != this，取走 claimed 并把 action 置 null 后出锁执行，出锁窗口内到达的 close() 只影响尚未 claim 的任务：已 claim 的一次执行允许完成（不打断宿主已在执行的调用），pending 表内其余条目由 close() 全量 release 并清空。scope 关闭后的 hook() 抛 IllegalStateException(\"Payment owner closed\")。已进入宿主业务（WeChatNetworkDispatcher 队列、RedPacketAutoReply 发送）的调用不由 close 取消，属在途业务边界，不强行中断。",
+      "lateCallbacks": "post() 返回 boolean：投递抛错或被主队列拒绝（queued==false）时回滚 pending.remove(key) 并 release 捕获的 action，返回 false 并由调用方记日志，不再留下永不执行的任务。RedPacketRuntime.install() 三重门（closed、hooker==null、hooker.isDestroyed()）后才 hookAll()+isDexReadyEnough()；安装体在调度线程执行，进入与退出都重核代际。关闭后再 post 一律 false；DexReady 回调只 owner.refresh() + runtime?.onDexReady()，已关闭代际直接忽略。本轮补修两处此前未处理返回值：RedPacketAnnouncer.retryPendingSpeeches 的 postDelayed 被拒时把 pendingSpeeches 全量 releasePending，RedPacketNotifier.playManualNotificationSound 的停止任务被拒时就地 stopRingtone。",
+      "bounds": "PaymentResourceScope.MAX_PENDING=128 为单 scope 并发待执行任务硬上限，达上限记 \"PaymentScope 待执行任务已达上限 128，拒绝投递: \" + key 并返回 false；同 key 替换走 cancel+覆盖，不额外占用配额。close() 先对所有 Posting 调 release() 置空 action 再逆序执行 releases，被丢弃的投递不再持有 Activity/View/网络请求。该预算只约束延迟任务条目数，不约束宿主反馈/网络依赖峰值与字节占用，后者归第4项。",
       "tests": [
         "scripts/test_payment_resource_scope.py",
-        "边界：仅相关源码约束/JVM合成，非全功能生命周期/实机验收，本次未重跑。"
+        "scripts/test_payment_notify_abi.py",
+        "边界：android.jar + 合成 android.os/Xposed/HookRegistry 边界下的生产代码真执行，非 Android/R8 构建与实机验收。"
       ],
       "openFindings": [
-        "PreferenceRuntimeOwner和独立Installation捕获RedPacketHooker；destroy逐组件隔离异常；resources拥有订阅和延迟任务",
-        "RedPacketHooker及message/database/UI/silent/network等子组件需逐个证明Hook归属和执行中网络/反馈边界，不能仅入口关闭视为完整验收"
+        "未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话中验证红包 Hook 安装、开关热启停与内存回收。",
+        "WeChatNetworkDispatcher 队列与 RedPacketAutoReply 发送进入宿主调用后不由 close 取消；真实宿主回调线程与在途业务边界仍需设备证据。",
+        "RedPacketAnnouncer/RedPacketNotifier 的类型检查依赖 2026-10-29～11-02 缓存 ABI，缓存与当前源码不同期，同类结论不能扩展到整个 payment 包。"
+      ],
+      "resolvedFindings": [
+        "PaymentResourceScope 出锁后 action.run 与 close 交错：已改为锁内校验 closed 与 pending 身份、取走 claimed 后出锁执行，未 claim 条目统一释放。",
+        "PaymentResourceScope pending 无硬总量：已加 MAX_PENDING=128 硬上限并拒绝超限投递。",
+        "post 投递失败未处理：post 已返回 boolean，抛错与被拒两路都回滚 pending 并释放捕获。",
+        "UI/announcer/notifier 关闭后再 post 清理未验：关闭后 post 一律 false；RedPacketAnnouncer.retryPendingSpeeches 与 RedPacketNotifier.playManualNotificationSound 两处裸 postDelayed 已补返回值处理，被拒时分别全量 releasePending 与就地 stopRingtone。",
+        "入口无独占所有权：已改为 PreferenceRuntimeOwner 三键 OR 启用区间 + 每区间独占 RedPacketRuntime(RedPacketHooker + Installation 票据)。",
+        "销毁无顺序保证、重试可装进已销毁实例：close 先 closeTicket 后 destroyHooker，destroy 首行置 destroyed，hookAll 首行判 isDestroyed() 且 synchronized。"
       ],
       "findingReview": [
         {
-          "finding": "PreferenceRuntimeOwner和独立Installation捕获RedPacketHooker；destroy逐组件隔离异常；resources拥有订阅和延迟任务",
-          "category": "已核实的现状及真实开放边界",
+          "finding": "未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话中验证红包 Hook 安装、开关热启停与内存回收。",
+          "category": "验收边界保留",
           "evidence": [
-            "app/src/main/java/t/mma/hooks/items/payment/core/AutoRedPacketFeature.kt:onFeatureInstall",
-            "app/src/main/java/t/mma/hooks/items/payment/core/RedPacketHooker.java:destroy"
+            "/tmp/pl-stage1-20261103-redpacket/test_payment_resource_scope.log",
+            "/tmp/pl-stage1-20261103-redpacket/test_payment_notify_abi.log"
           ],
           "remainingOpen": true,
-          "boundary": "共享所有者/在途回调/UI恢复及资源预算仍保留责任，源码核实不等于行为验收。"
+          "boundary": "现有证据为 android.jar ABI 类型检查与合成平台边界下的生产代码真执行（真实 PreferenceRuntimeOwner/FeatureResourceScope/DexInstallScheduler/PaymentResourceScope），不等于 Android/R8 构建、真实微信业务或设备/内存验收。"
         },
         {
-          "finding": "RedPacketHooker及message/database/UI/silent/network等子组件需逐个证明Hook归属和执行中网络/反馈边界，不能仅入口关闭视为完整验收",
-          "category": "源码核实：真实缺口/依赖深核保留",
+          "finding": "WeChatNetworkDispatcher 队列与 RedPacketAutoReply 发送进入宿主调用后不由 close 取消；真实宿主回调线程与在途业务边界仍需设备证据。",
+          "category": "共享依赖/在途业务边界保留",
           "evidence": [
-            "app/src/main/java/t/mma/hooks/items/payment/core/AutoRedPacketFeature.kt",
-            "/tmp/pl-audit-sync-20261101-1921/batch3-source.txt",
-            "/sdcard/Download/Operit/cleanOnExit/terminal_output_2026-11-01T11-26-38-580Z_393043.log",
-            "/sdcard/Download/Operit/cleanOnExit/terminal_output_2026-11-01T11-26-56-370Z_638340.log"
+            "app/src/main/java/t/mma/hooks/items/payment/core/RedPacketHooker.java:destroy",
+            "app/src/main/java/t/mma/hooks/items/payment/reply/RedPacketAutoReply.java"
           ],
           "remainingOpen": true,
-          "boundary": "已逐组件核实message/database/fake/silent各PaymentResourceScope持Hook，UI使用scope post，RedPacketHooker逐子destroy异常隔离；这不是仅入口无归属。PaymentResourceScope出锁后action.run与close可交错，pending无硬总量且post失败未处理；UI/announcer/notifier关闭再post清理返回值未验。网络dispatcher及autoReply进入宿主调用不由close取消，完整反馈/网络依赖与实机仍开放。"
+          "boundary": "关闭只保证不再发起新的宿主调用并撤销本代 Hook/订阅/延迟任务；已进入宿主队列或已发出网络的请求不可强断。在途业务与宿主网络调用归第3项，共享调度锁与通用容量预算归第2/第4项，不在本条目冒充完成。"
         }
+      ],
+      "sharedRootCauseRefs": [
+        "shared-schedule-mutable-runtime"
       ]
     },
     {
@@ -2227,7 +2321,16 @@
       "bounds": "启停清理已核实；全路径缓存与排队数量尚未逐项证明",
       "tests": [
         "test_auto_reply_lifecycle.py"
-      ]
+      ],
+      "stage1Resume20261102": {
+        "state": "partial_verified_not_stage_complete",
+        "change": "偏好注销以try/finally保证stopRuntime；注销异常不得跳过运行时关闭",
+        "tests": [
+          "scripts/test_feature_cleanup_isolation.py"
+        ],
+        "evidence": "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json",
+        "boundary": "合成清理回归；其余运行时依赖与宿主行为仍需逐项核准"
+      }
     },
     {
       "feature": "AutoMessageForwardFeature",
@@ -3061,7 +3164,16 @@
           "remainingOpen": true,
           "boundary": "83项结果仅属于历史冻结源码；本次仅核实入口源码哈希一致和相关日志，不是ca6669a新全量回归，不等于109项/实机验收。"
         }
-      ]
+      ],
+      "stage1Resume20261102": {
+        "state": "partial_verified_not_stage_complete",
+        "change": "偏好注销以try/finally保证stopRuntime；注销异常不得跳过运行时关闭",
+        "tests": [
+          "scripts/test_feature_cleanup_isolation.py"
+        ],
+        "evidence": "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json",
+        "boundary": "合成清理回归；其余运行时依赖与宿主行为仍需逐项核准"
+      }
     },
     {
       "feature": "TextVoiceFeature",
@@ -4177,7 +4289,7 @@
       ],
       "openFindings": [
         "启用区间scope持有Runtime和订阅；Runtime active门控并shutdownNow",
-        "入口释放先unregister监听后stopRuntime，注销异常可跳过资源关闭；shared:send_button进程归属和执行中请求取消待闭环"
+        "2026-11-02：入口注销异常跳过stopRuntime已修复并经专项验证；原条目其他边界继续开放：入口释放先unregister监听后stopRuntime，注销异常可跳过资源关闭；shared:send_button进程归属和执行中请求取消待闭环"
       ],
       "findingReview": [
         {
@@ -4203,7 +4315,16 @@
       ],
       "sharedRootCauseRefs": [
         "sequential-cleanup-exception"
-      ]
+      ],
+      "stage1Resume20261102": {
+        "state": "partial_verified_not_stage_complete",
+        "change": "偏好注销以try/finally保证stopRuntime；注销异常不得跳过运行时关闭",
+        "tests": [
+          "scripts/test_feature_cleanup_isolation.py"
+        ],
+        "evidence": "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json",
+        "boundary": "合成清理回归；其余运行时依赖与宿主行为仍需逐项核准"
+      }
     },
     {
       "feature": "MomentsAutoLikeFeature",
@@ -5491,88 +5612,75 @@
     {
       "feature": "HchatExtraFeature",
       "source": "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt",
-      "status": "源码入口及释放链已复核；发现待闭环项",
+      "status": "源码闭环与专项行为验证完成；109入口最终核准仍待整体复核；未做 Android/R8 构建与实机验收",
       "evidence": [
-        "75: registerSettingsProvider(MessageDetailsSettingsProvider())",
-        "76: registerSettingsProvider(GroupMemberHistorySettingsProvider())",
-        "77: registerSettingsProvider(RedPacketDetailsSettingsProvider())",
-        "78: registerSettingsProvider(SkipWebRiskSettingsProvider())",
-        "81: override fun onFeatureInstall(context: FeatureContext) {",
-        "83: scheduleInstall()",
-        "84: subscribe(Events.DexReady::class.java) {",
-        "85: scheduleInstall()",
-        "89: override fun onFeatureDestroy(context: FeatureContext) {",
-        "94: private fun scheduleInstall() {",
-        "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt:onFeatureInstall",
-        "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt",
-        "/tmp/pl-audit-sync-20261101-1921/batch4-review.json"
+        "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt:HchatExtraFeature/onFeatureInstall",
+        "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt:HchatExtraRuntime/start/onDexReady/close",
+        "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt:HchatExtraHooker/installDestroy/destroy/releaseSafely/restoreAvatarDetailsSpacing",
+        "app/src/main/java/t/mma/hooks/items/hchatextra/ForwardedRecordTypeLabels.kt:install/refresh/destroy",
+        "app/src/main/java/t/mma/hooks/items/hchatextra/MessageDetailsPendingLayoutObserver.kt:scheduleAction/schedulePoll",
+        "app/src/main/java/t/mma/hooks/items/hchatextra/MessageDetailsLayoutObserver.kt:post",
+        "app/src/main/java/t/mma/hooks/core/FeatureOwnership.kt:OwnedHooks/OwnedHandler",
+        "app/src/main/java/t/mma/hooks/core/DexInstallScheduler.kt:Installation/scheduleRetry",
+        "scripts/test_hchat_extra_scope.py",
+        "scripts/mutate_hchat_extra_scope.py",
+        "/tmp/pl-stage1-20261103-hchatextra/test_hchat_extra_scope.log",
+        "/tmp/pl-stage1-20261103-hchatextra/mutate_hchat_extra_scope.log",
+        "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.HchatExtraFeature"
       ],
-      "ownership": "已核实入口现状：HchatExtraFeature.scheduleInstall的3个共享任务读取可变hooker；缺少独占票据及捕获实例；其他依赖仍待逐项核查",
-      "cleanup": "destroy顺序释放dynamicRecall/forwardedRecordTypes、注销监听、恢复间距并清helper；helper.clear确实逐项remove/dispose监听，不能写成仅clear；Hooker直接Hook未释放且逐步骤异常可截断后续清理。",
-      "inFlight": "不强制打断已进入布局/绑定/原生调用；tail repair销毁仅清token，依赖下次preDraw或timeout执行finish，不直接持有全部结束句柄。",
-      "lateCallbacks": "Hooker无永久closed/generation，共享三任务读取可变hooker；旧Hook可重新注册监听，postDelayed拒绝未处理，helper移除不撤销正在运行的回调。",
-      "bounds": "tail repair有1500ms deadline/1550ms timeout/6次修正的局部约束；弱View表不保证峰值，反射/方法/失败key缓存未见全局硬预算；不得将超时视为全部资源回收证明。",
+      "ownership": "入口改为 PreferenceRuntimeOwner 以 hchat_extra_message_details / hchat_extra_red_packet_details / hchat_extra_skip_web_risk / hchat_extra_group_member_history 四键 OR 作为启用区间，restartOnChange=true；改颜色/格式/间距不重建整代，走 hooker 内部偏好监听。每个启用区间独占一个 HchatExtraRuntime，Runtime 独占本代 HchatExtraHooker 与三张独立 DexInstallScheduler.Installation 票据（hchat_extra / hchat_extra_message_details / hchat_extra_forwarded_types，均 Stage.WARMUP），不再出现三个共享调度任务读取可变 hooker。HchatExtraHooker 的全部 Hook 句柄登记在 OwnedHooks，派生类 ForwardedRecordTypeLabels 自持 OwnedHooks 与 OwnedHandler，不再裸用进程级 HookRegistry。",
+      "cleanup": "Runtime.close() 在锁内一次性置 closed、取 hooker/tickets 快照并双置 null，随后先 closeTicket 再 destroyHooker——顺序不可交换，先停重试再销毁本代，否则重试会把 Hook 装进已销毁实例；start() 在锁内被拒时对刚创建的一代执行 createdTickets.forEach(::closeTicket) + destroyHooker，不留孤儿 Hook。Hooker.destroy() 首行置 destroyed 门，然后逐项 releaseSafely 隔离：动态撤回运行时 → 聊天记录类型 → 两个偏好监听注销 → 头像详情间距（逐视图 try/catch，单视图抛错不跳过其余）→ 消息详情登记表 → 六个消息详情监听器 → 尾部修复 token → 最后才 ownedHooks.close()。Hook 必须最后撤：前面的清理依赖 destroyed 门，先撤会让迟到回调在无登记表时重新写视图。ForwardedRecordTypeLabels.destroy() 顺序固定为 置门 → ownedHooks.close() → main.close() → 取 label 快照并清 rows/adapters → 摘除 label（主线程就地执行，非主线程走 detachHandler 并判返回值，被拒只上报）。",
+      "inFlight": "不强制打断已进入宿主布局/绑定/原生调用的执行；已在宿主侧的调用允许完成。tail repair 销毁只清 token，实际 finish 依赖下一次 preDraw 或 1550ms timeout，不直接持有全部结束句柄，属在途边界。编辑模式对话框的滚动位置恢复由用户主动触发，投递被拒时只丢一次视觉补偿并计入节流日志，不持本代任何资源。",
+      "lateCallbacks": "两层门：Runtime 侧 closed + isCurrent(target) 双重校验，关闭后任何调度回调与重试都拿不到本代 hooker；Hooker 侧 destroyed 门在 install/hookOnce/hookAfterOnce/全部 Hook 回调首行生效，ForwardedRecordTypeLabels 的 beforeHookedMethod 与 afterHookedMethod 同样首行判 destroyed。OwnedHooks.adopt 对关闭后到达的句柄就地释放，OwnedHandler.close 撤销全部未执行投递并拒绝新投递。",
+      "bounds": "tail repair 有 1500ms deadline / 1550ms timeout / 6 次修正的局部约束；所有被拒投递通过 logThrottled 做 10 秒闸门，避免一次偏好变更在成百条消息上刷出成百条同源日志。弱 View 表（messageDetailsLabels/messageDetailsBindings/avatarDetailsSpacings/tailRepairTokens/ForwardedRecordTypeLabels.rows）不保证峰值，反射/方法/失败 key 缓存未见全局硬预算；不得将超时或弱引用视为全部资源回收证明。",
       "tests": [
+        "scripts/test_hchat_extra_scope.py",
+        "scripts/mutate_hchat_extra_scope.py",
         "scripts/run_message_details_layout_tests.cjs",
         "scripts/run_message_details_predraw_tests.cjs",
         "scripts/test_mention_snapshot_bottom_scope.py",
-        "覆盖边界：相关源码约束/局部 JVM 合成，不证明全部生命周期、原生交错或实机；本次未重跑。"
+        "边界：生产源码在合成 android.os/android.view/widget/Xposed/HookRegistry 边界下真执行；Phase A/B/C 编译并运行真实 HchatExtraRuntime、真实 ForwardedRecordTypeLabels、真实 MessageDetailsPendingLayoutObserver 与真实 FeatureOwnership/DexInstallScheduler，Phase D 为源码不变量。不是 Android/R8 构建，不是真实微信 Hook 行为，不是实机验收。"
       ],
       "openFindings": [
-        "HchatExtraFeature.scheduleInstall的3个共享任务读取可变hooker；缺少独占票据及捕获实例",
-        "HchatExtraHooker自身直接Hook未释放且无关闭门；监听helper.clear已有逐项remove/dispose，但destroy及helper遍历缺失败隔离，旧Hook可迟到注册。",
-        "1492行list.postDelayed(timeout,1550L)及消息布局/颜色/位置监听需逐一核查实际移除链"
+        "全量 109 入口最终核准仍为 0/109；本条目只证明第27号自身闭环，不能外推到其他入口",
+        "真实微信 8.0.78 设备上的回调线程、View 复用与内存回收未抓取，deviceAcceptance 保持 false"
+      ],
+      "resolvedFindings": [
+        "原「HchatExtraFeature.scheduleInstall 的 3 个共享任务读取可变 hooker；缺少独占票据及捕获实例」已消除：改为每个启用区间独占一个 HchatExtraRuntime，三张独立 Installation 票据 + isCurrent(target) 代际校验。",
+        "原「HchatExtraHooker 自身直接 Hook 未释放且无关闭门；旧 Hook 可迟到注册」已消除：全部句柄登记 OwnedHooks 并在 destroy 末步逆序卸载，install/hookOnce/hookAfterOnce/回调首行均判 destroyed。",
+        "原「listen helper 遍历缺失败隔离」已消除：destroy 全链逐项 releaseSafely，头像详情间距与子视图 clip 还原均改为逐项 try/catch。",
+        "原「1492 行 list.postDelayed(timeout,1550L) 未判返回值」已消除：改为 if (!list.postDelayed(timeout, 1550L)) finish()，被拒立即拆除 preDraw/attach 监听。",
+        "原「postDelayed 拒绝未处理」已消除：MessageDetailsPendingLayoutObserver 的 posted/polling 两个单向锁存器在被拒时归位，ForwardedRecordTypeLabels 的 refresh/detach 与消息详情颜色/布局/附着刷新全部判返回值并走 logThrottled。",
+        "ForwardedRecordTypeLabels 不再裸用 HookRegistry：安装失败返回 false 交回票据有限重试，而不是把失败态记成已安装。"
       ],
       "findingReview": [
         {
-          "finding": "HchatExtraFeature.scheduleInstall的3个共享任务读取可变hooker；缺少独占票据及捕获实例",
-          "category": "真实待实现/继续核查",
+          "finding": "全量 109 入口最终核准仍为 0/109；本条目只证明第27号自身闭环，不能外推到其他入口",
+          "category": "验收边界",
           "evidence": [
-            "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt:onFeatureInstall",
-            "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt"
+            "docs/RESOURCE_LIFECYCLE_FEATURE_AUDIT.json:features[107]",
+            "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.HchatExtraFeature"
           ],
           "remainingOpen": true,
-          "boundary": "核实入口安装、调度、退出路径；运行时全部依赖与设备行为未闭环。"
+          "boundary": "第27号三处证据已闭环，但整体核准需要全部 109 入口逐项完成并经用户实机验收。"
         },
         {
-          "finding": "HchatExtraHooker.destroy未释放自身直接Hook，多个View listener集合只clear未逐项remove；监听注销/子runtime异常可阻断剩余清理",
-          "category": "源码核实：真实缺口/纠正泛化并保留验收边界",
+          "finding": "真实微信 8.0.78 设备上的回调线程、View 复用与内存回收未抓取，deviceAcceptance 保持 false",
+          "category": "设备验收缺口",
           "evidence": [
-            "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt:371-394,559-588,662-689; MessageDetailsPreDrawQueue.kt:57-71,104-108; MessageDetailsLayoutObserver.kt:31-34,112-119; MessageDetailsPendingLayoutObserver.kt:26-29,100-105"
+            "/tmp/pl-stage1-20261103-hchatextra/test_hchat_extra_scope.log",
+            "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:deviceAcceptance"
           ],
           "remainingOpen": true,
-          "boundary": "旧原文“多个View listener集合只clear未逐项remove”不准确：各helper.clear会快照遍历remove/dispose，移除attach/preDraw/globalLayout与pending回调。真实缺口是Hooker自身直接Hook未释放/无closed门、destroy串行子runtime/注销/恢复可因异常截断，helper清理也缺逐entry失败隔离。"
-        },
-        {
-          "finding": "1492行list.postDelayed(timeout,1550L)及消息布局/颜色/位置监听需逐一核查实际移除链",
-          "category": "源码核实：真实缺口/纠正泛化并保留验收边界",
-          "evidence": [
-            "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt:1403-1493; MessageDetailsPreDrawQueue.kt:57-71; MessageDetailsLayoutObserver.kt:98-119; MessageDetailsPendingLayoutObserver.kt:88-105"
-          ],
-          "remainingOpen": true,
-          "boundary": "1550ms timeout对应finish会移除旧/当前observer预绘制、attach listener及timeout；onDetach、token不符、bind不符、1500ms deadline或6次修正也finish。destroy只清tailRepairTokens，不直接持有finish句柄，依赖下次preDraw/timeout触发；postDelayed拒绝未处理。普通布局/位置/颜色helper具有实际移除链，但关闭后旧Hook重注册和逐项异常隔离仍开放。"
-        },
-        {
-          "finding": "HchatExtraHooker自身直接Hook未释放且无关闭门；监听helper.clear已有逐项remove/dispose，但destroy及helper遍历缺失败隔离，旧Hook可迟到注册。",
-          "category": "一致性补录：已核准剩余缺口/验收边界",
-          "evidence": [
-            "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt",
-            "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt:onFeatureInstall",
-            "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt:371-394,559-588,662-689; MessageDetailsPreDrawQueue.kt:57-71,104-108; MessageDetailsLayoutObserver.kt:31-34,112-119; MessageDetailsPendingLayoutObserver.kt:26-29,100-105",
-            "app/src/main/java/t/mma/hooks/items/hchatextra/HchatExtraFeature.kt:1403-1493; MessageDetailsPreDrawQueue.kt:57-71; MessageDetailsLayoutObserver.kt:98-119; MessageDetailsPendingLayoutObserver.kt:88-105"
-          ],
-          "remainingOpen": true,
-          "boundary": "既有源码核准及六类字段中的剩余边界；不新增测试通过声明，完整依赖与实机未验收。"
+          "boundary": "本功能全部证据来自合成平台边界下的生产代码真执行与源码不变量检查；未运行 Gradle/Android/R8 构建，未在真机验证。"
         }
       ],
-      "sharedRootCauseRefs": [
-        "shared-schedule-mutable-runtime"
-      ]
+      "sharedRootCauseRefs": []
     },
     {
       "feature": "ScriptPluginFeature",
       "source": "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt",
-      "status": "运行时关闭/观察器/执行器重建及代际隔离已实现；共享Hook安装任务所有权与实机验收待闭环",
+      "status": "每个启用区间新建 ScriptHookGeneration 独占四张 DexInstallScheduler.Installation 票据、ScriptMessageHook/ScriptMemberChangeHook 两份本代订阅与好友申请监听租约；关闭顺序固定为取消票据->撤销本代订阅->关闭运行时->归还租约；未启动的代 close() 为空操作，取得租约期间被关闭则就地归还租约。共享安装点（视频号详情、发送按钮）只由本代发起、不撤销。四阶段专项验证全绿（test_script_plugin_scope.py，1164 行，exit=0），19 条突变全部捕获（mutate_script_plugin_scope.py，19/19，ALL MUTANTS CAUGHT），已登记回归清单 131 项；实机验收待闭环",
       "evidence": [
         "17: registerSettingsProvider(ScriptPluginSettingsProvider())",
         "20: override fun onFeatureInstall(context: FeatureContext) {",
@@ -5584,19 +5692,21 @@
         "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyFeature.kt:62",
         "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt:scheduleDexHooks"
       ],
-      "ownership": "Feature.onFeatureDestroy调用进程内ScriptPluginRuntime.close；Runtime持有插件、目录观察器、reload任务及五组执行器；共享Hook不在此销毁",
-      "cleanup": "close关闭门并递增代际，停止观察器和reload，卸载插件、释放WaBridge并关闭执行器；install重建执行器",
+      "ownership": "ScriptPluginFeature 只持有 generation 字段并在 onFeatureDestroy 断引用；ScriptHookGeneration 持有四张票据（menus/message/new_friend/member_change）、ScriptNewFriendHook 的 OWNER_SCRIPT 租约与本代脚本运行时；ScriptSharedDexKeys 的两个共享键所有权不属于脚本插件",
+      "cleanup": "close() 锁内置 closed 并一次性取走票据与租约，再按票据->ownHooks->运行时->租约顺序释放；FeatureResourceScope.trackResource 兜底调用 created.close()；重复 close 幂等",
       "inFlight": "SNS及下载返回后检查代际；宿主已进入业务/native不由本阶段强制中断；完整并发行为待验收",
-      "lateCallbacks": "initial/appbrand/reload/observer/SNS/图片/视频/Finder/Protobuf路径捕获运行时代际；共享安装任务另列未完成",
-      "bounds": "五组有界执行器沿用既有预算；旧脚本原始DexKit全局变量按进程保活，卸载不释放raw pin；全部容器预算未完成",
+      "lateCallbacks": "四张票据关闭后不再重试；每个 installXxx() 首行 isClosed() 早退；关闭期间取得的租约立即归还；共享安装闭包内 isClosed() 返回 false 阻止迟到安装",
+      "bounds": "脚本消息分发沿用 128/32 容量与既有丢弃计数；共享 DexInstallScheduler owner=null 通用边界归第2项",
       "tests": [
         "scripts/run_script_lifecycle_tests.cjs /tmp/pl-kotlin-libs",
         "scripts/test_script_resource_scope.py",
-        "scripts/test_dex_query_consumers.py"
+        "scripts/test_dex_query_consumers.py",
+        "scripts/test_script_plugin_scope.py",
+        "scripts/mutate_script_plugin_scope.py"
       ],
       "openFindings": [
-        "2026-11-01补证：ScriptNewFriendHook.install/subscribe由AutoReplyFeature.kt:62-63同时消费；脚本退出不得直接清nativeListeners或关闭该共享监听，需租约/共同进程所有者。",
-        "真实待实现/核查：菜单、消息、好友、成员安装任务仍采用schedule；共享Hook所有者及退出后迟到安装需逐链核实。"
+        "109 入口最终核准仍 0/109、七阶段 0/7；本条目专项通过不等于实机验收。",
+        "未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话验证回调线程、View 复用与内存回收；deviceAcceptance 仍为 false。"
       ],
       "resolvedFindingEvidence": [
         {
@@ -5650,35 +5760,65 @@
             "scripts/test_script_resource_scope.py"
           ],
           "boundary": "directed JVM/ABI validation and Actions build; not full shared-hook/device acceptance"
+        },
+        {
+          "finding": "2026-11-01补证：ScriptNewFriendHook.install/subscribe由AutoReplyFeature.kt:62-63同时消费；脚本退出不得直接清nativeListeners或关闭该共享监听，需租约/共同进程所有者。",
+          "category": "已解决有证据",
+          "evidence": [
+            "app/src/main/java/t/mma/hooks/core/SharedHookLease.kt",
+            "app/src/main/java/t/mma/hooks/items/script/ScriptNewFriendHook.kt:acquire/release",
+            "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt:installNewFriend",
+            "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyFeature.kt:acquire/release",
+            "scripts/test_script_plugin_scope.py",
+            "scripts/mutate_script_plugin_scope.py"
+          ],
+          "boundary": "directed JVM/ABI validation and Actions build; not full shared-hook/device acceptance"
+        },
+        {
+          "finding": "真实待实现/核查：菜单、消息、好友、成员安装任务仍采用schedule；共享Hook所有者及退出后迟到安装需逐链核实。",
+          "category": "已解决有证据",
+          "evidence": [
+            "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt:ScriptHookGeneration.start/scheduleInstall/close",
+            "app/src/main/java/t/mma/hooks/items/script/ScriptMessageHook.kt:uninstall",
+            "app/src/main/java/t/mma/hooks/items/script/ScriptMemberChangeHook.kt:uninstall",
+            "scripts/test_script_plugin_scope.py",
+            "scripts/mutate_script_plugin_scope.py"
+          ],
+          "boundary": "directed JVM/ABI validation and Actions build; not full shared-hook/device acceptance"
+        },
+        {
+          "finding": "2026-11-03 收口补证：突变第一轮 15/19，漏检的 4 条经逐条定性——「lease close is not idempotent」判定为等价突变（关闭守卫在 register/acquire/close 三层都在，单删一处不改变可观察行为），已替换为「lease close leaves the host hook installed」；其余 3 条为测试真实盲区，已分别补齐断言：uninstall 不清登记表→监听解绑次数、成员快照跨代沿用→重装首个群事件必须重建基线、取得租约期间被关闭不归还→onAcquired 回调触发并发 close。补强后重跑 19/19 全捕获。",
+          "category": "已解决有证据",
+          "evidence": [
+            "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.ScriptPluginFeature.mutationChecks",
+            "/tmp/pl-stage1-20261103-scriptplugin/mutate_script_plugin_scope.log",
+            "/tmp/pl-stage1-20261103-scriptplugin/test_script_plugin_scope.log",
+            "scripts/test_script_plugin_scope.py",
+            "scripts/mutate_script_plugin_scope.py"
+          ],
+          "boundary": "directed JVM/ABI validation: 合成边界下真执行生产代码切片与源码不变量；not Android/R8 build and not device acceptance"
         }
       ],
       "findingReview": [
         {
-          "finding": "2026-11-01补证：ScriptNewFriendHook.install/subscribe由AutoReplyFeature.kt:62-63同时消费；脚本退出不得直接清nativeListeners或关闭该共享监听，需租约/共同进程所有者。",
-          "category": "真实待实现/继续核查",
+          "finding": "109 入口最终核准仍 0/109、七阶段 0/7；本条目专项通过不等于实机验收。",
+          "category": "验收边界",
           "evidence": [
-            "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyFeature.kt:62",
-            "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt:scheduleDexHooks"
+            "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json",
+            "docs/RESOURCE_LIFECYCLE_STAGE1_PROGRESS.md"
           ],
           "remainingOpen": true,
-          "boundary": "源码核实资源持有和退出条件；未执行业务/Root配置操作，缓存/真实并发行为仍按开放项验收。"
+          "boundary": "专项定向验证与突变检验通过，但未执行 Android/R8 构建与实机内存验收。"
         },
         {
-          "finding": "真实待实现/核查：菜单、消息、好友、成员安装任务仍采用schedule；共享Hook所有者及退出后迟到安装需逐链核实。",
-          "category": "一致性补录：已核准剩余缺口/验收边界",
+          "finding": "未运行 Gradle/Android/R8 构建，未在真实微信 8.0.78 会话验证回调线程、View 复用与内存回收；deviceAcceptance 仍为 false。",
+          "category": "验收边界",
           "evidence": [
-            "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt",
-            "app/src/main/java/t/mma/hooks/items/autoreply/AutoReplyFeature.kt:62",
-            "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt:scheduleDexHooks",
-            "dfadf36",
-            "42eeca9",
-            "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt:onFeatureDestroy",
-            "app/src/main/java/t/mma/hooks/items/script/ScriptPluginRuntime.kt:close",
-            "scripts/run_script_lifecycle_tests.cjs",
-            "scripts/test_script_resource_scope.py"
+            "scripts/test_script_plugin_scope.py",
+            "scripts/mutate_script_plugin_scope.py"
           ],
           "remainingOpen": true,
-          "boundary": "既有源码核准及六类字段中的剩余边界；不新增测试通过声明，完整依赖与实机未验收。"
+          "boundary": "缓存 ABI 为旧产物且缺多个宿主类；只能声称定向编译并执行通过。"
         }
       ]
     }

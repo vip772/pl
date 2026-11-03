@@ -15,11 +15,10 @@ import t.mma.dexkit.DexMethodCache
 import t.mma.event.Events
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
-import t.mma.hooks.core.FeatureResourceScope
+import t.mma.hooks.core.OwnedHooks
 import t.mma.hooks.core.PreferenceRuntimeOwner
 import t.mma.preferences.HchatStorage
 import t.mma.hooks.core.FeatureContext
-import t.mma.hooks.core.HookRegistry
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
@@ -50,9 +49,9 @@ class RoundAvatarFeature : BaseFeature() {
             create = { resources ->
                 val installed = RoundAvatarRuntime(context)
                 runtime = installed
-                resources.register { installed.destroy(); if (runtime === installed) runtime = null }
+                resources.register { try { installed.destroy() } finally { if (runtime === installed) runtime = null } }
                 val ticket = DexInstallScheduler.installation(ID + ":runtime", "圆角头像")
-                resources.register { ticket.close(); schedule = null }
+                resources.register { try { ticket.close() } finally { schedule = null } }
                 installed.installNotificationHooks()
                 schedule = { if (!resources.isClosed()) ticket.schedule { installed.installWeChatHooks() } }
                 schedule?.invoke()
@@ -74,21 +73,26 @@ private class RoundAvatarRuntime(
     private val context: FeatureContext
 ) {
     @Volatile private var destroyed = false
-    private val hookResources = FeatureResourceScope { HLog.e("[Hchat:Avatar] Hook释放失败", it) }
-    private fun hookOwned(member: java.lang.reflect.Member, callback: XC_MethodHook): XC_MethodHook.Unhook {
-        check(!destroyed) { "头像运行时已销毁" }
-        val handle = HookRegistry.get().hook(member, callback)
-        hookResources.register { HookRegistry.get().unhook(handle) }
-        return handle
+    @Volatile private var generation = 0
+    private var hooks = newHooks()
+    private var installFailed = false
+    private fun newHooks() = OwnedHooks { error ->
+        try { HLog.e("[Hchat:RoundAvatar] Hook释放失败", error) } catch (_: Throwable) { }
     }
-
-
+    private fun hookOwned(member: Member, callback: XC_MethodHook): Boolean {
+        if (destroyed) return false
+        val handle = hooks.hook(member, callback)
+        if (handle == null) { installFailed = true; return false }
+        return true
+    }
     @Synchronized fun destroy() {
         if (destroyed) return
         destroyed = true
-        hookResources.close()
-        hookedMembers.clear(); notificationHookedMembers.clear(); weChatInstalled = false
-        RoundAvatarBitmapProcessor.clear()
+        generation++
+        try { hooks.close() } finally {
+            hookedMembers.clear(); notificationHookedMembers.clear(); weChatInstalled = false
+            RoundAvatarBitmapProcessor.clear()
+        }
     }
     private val methodPrefs = DexMethodCache.prefs(context.hostContext(), "Hchat_round_avatar_method_cache")
     private val hookedMembers = ConcurrentHashMap.newKeySet<Member>()
@@ -96,8 +100,10 @@ private class RoundAvatarRuntime(
 
     @Volatile private var weChatInstalled = false
 
-    fun installNotificationHooks() {
-        if (destroyed) return
+    @Synchronized fun installNotificationHooks(): Boolean {
+        if (destroyed) return false
+        installFailed = false
+        try {
         hookNotificationBitmap()
         hookNotificationIcon()
         hookNotificationPost(
@@ -117,12 +123,22 @@ private class RoundAvatarRuntime(
                 Notification::class.java
             )
         )
+        } catch (error: Throwable) {
+            installFailed = true
+            try { HLog.e("$TAG 安装通知头像Hook失败", error) } catch (_: Throwable) { }
+        }
+        if (destroyed || installFailed) { rollbackHooks(); return false }
+        return true
     }
 
     @Synchronized
     fun installWeChatHooks(): Boolean {
         if (destroyed) return false
         if (weChatInstalled) return true
+        if (!installNotificationHooks()) return false
+        installFailed = false
+        val epoch = generation
+        try {
         val members = locateAvatarMembers() ?: run {
             HLog.e("$TAG 定位微信全局头像入口失败")
             return false
@@ -136,16 +152,34 @@ private class RoundAvatarRuntime(
         val modifyHooked = members.workerModify?.let { method ->
             hookRadius(method, radiusIndex = 3, maskIndex = lastIntParameterIndex(method.parameterTypes))
         } ?: true
-        weChatInstalled = loadHooked && constructorHooked && modifyHooked
+        weChatInstalled = loadHooked && constructorHooked && modifyHooked && !installFailed && !destroyed && generation == epoch
+        if (!weChatInstalled) rollbackHooks()
         return weChatInstalled
+        } catch (error: Throwable) {
+            rollbackHooks()
+            try { HLog.e("$TAG 安装微信头像Hook失败", error) } catch (_: Throwable) { }
+            return false
+        }
+    }
+
+    @Synchronized private fun rollbackHooks() {
+        generation++
+        try { hooks.close() } catch (error: Throwable) {
+            try { HLog.e("$TAG 回滚Hook失败", error) } catch (_: Throwable) { }
+        } finally {
+            if (!destroyed) hooks = newHooks()
+            hookedMembers.clear(); notificationHookedMembers.clear(); weChatInstalled = false
+            RoundAvatarBitmapProcessor.clear()
+        }
     }
 
     private fun hookRadius(member: Member, radiusIndex: Int, maskIndex: Int): Boolean {
         if (hookedMembers.contains(member)) return true
+        val epoch = generation
         return runCatching {
-            hookOwned(member, object : XC_MethodHook() {
+            if (!hookOwned(member, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (destroyed) return
+                    if (destroyed || generation != epoch) return
                     if (!RoundAvatarSettings.enabled(context.hostContext())) return
                     if (radiusIndex !in param.args.indices) return
                     param.args[radiusIndex] = RoundAvatarSettings.radiusFactor(context.hostContext())
@@ -154,16 +188,18 @@ private class RoundAvatarRuntime(
                         param.args[maskIndex] = mask and DEFAULT_RADIUS_MASK.inv()
                     }
                 }
-            })
+            })) return false
             hookedMembers += member
             true
         }.getOrElse {
+            installFailed = true
             HLog.e("$TAG 安装头像弧度 Hook 失败: $member, error=${it.message}", it)
             false
         }
     }
 
     private fun hookNotificationBitmap() {
+        val epoch = generation
         val method = KavaReflector.findMethod(
             Notification.Builder::class.java,
             "setLargeIcon",
@@ -171,9 +207,9 @@ private class RoundAvatarRuntime(
         ) ?: return
         if (!notificationHookedMembers.add(method)) return
         runCatching {
-            hookOwned(method, object : XC_MethodHook() {
+            if (!hookOwned(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (destroyed) return
+                    if (destroyed || generation != epoch) return
                     if (!RoundAvatarSettings.enabled(context.hostContext())) return
                     val source = param.args.firstOrNull() as? Bitmap ?: return
                     param.args[0] = RoundAvatarBitmapProcessor.round(
@@ -181,14 +217,16 @@ private class RoundAvatarRuntime(
                         RoundAvatarSettings.radiusFactor(context.hostContext())
                     )
                 }
-            })
+            })) notificationHookedMembers.remove(method)
         }.onFailure {
+            installFailed = true
             notificationHookedMembers.remove(method)
             HLog.e("$TAG 安装通知 Bitmap 头像 Hook 失败: ${it.message}", it)
         }
     }
 
     private fun hookNotificationIcon() {
+        val epoch = generation
         val method = KavaReflector.findMethod(
             Notification.Builder::class.java,
             "setLargeIcon",
@@ -196,9 +234,9 @@ private class RoundAvatarRuntime(
         ) ?: return
         if (!notificationHookedMembers.add(method)) return
         runCatching {
-            hookOwned(method, object : XC_MethodHook() {
+            if (!hookOwned(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (destroyed) return
+                    if (destroyed || generation != epoch) return
                     if (!RoundAvatarSettings.enabled(context.hostContext())) return
                     val icon = param.args.firstOrNull() as? Icon ?: return
                     val source = KavaReflector.invokeMethod(icon, "getBitmap") as? Bitmap ?: return
@@ -208,19 +246,21 @@ private class RoundAvatarRuntime(
                     )
                     if (rounded !== source) param.args[0] = Icon.createWithBitmap(rounded)
                 }
-            })
+            })) notificationHookedMembers.remove(method)
         }.onFailure {
+            installFailed = true
             notificationHookedMembers.remove(method)
             HLog.e("$TAG 安装通知 Icon 头像 Hook 失败: ${it.message}", it)
         }
     }
 
     private fun hookNotificationPost(method: Method?) {
+        val epoch = generation
         if (method == null || !notificationHookedMembers.add(method)) return
         runCatching {
-            hookOwned(method, object : XC_MethodHook() {
+            if (!hookOwned(method, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (destroyed) return
+                    if (destroyed || generation != epoch) return
                     if (!RoundAvatarSettings.enabled(context.hostContext())) return
                     val notification = param.args.firstOrNull { it is Notification } as? Notification ?: return
                     val source = notification.largeIcon ?: return
@@ -229,8 +269,9 @@ private class RoundAvatarRuntime(
                         RoundAvatarSettings.radiusFactor(context.hostContext())
                     )
                 }
-            })
+            })) notificationHookedMembers.remove(method)
         }.onFailure {
+            installFailed = true
             notificationHookedMembers.remove(method)
             HLog.e("$TAG 安装通知提交头像 Hook 失败: ${it.message}", it)
         }

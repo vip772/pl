@@ -28,22 +28,35 @@ class MemberTitleRenderer(
 ) {
     private var nativeNicknameGate: NativeGroupNicknameGate? = null
     private val active = java.util.concurrent.atomic.AtomicBoolean(true)
+    private val generation = generationSequence.incrementAndGet()
     private val resources = FeatureResourceScope { logger("群员头衔资源释放失败", it) }
     private val pendingApplyKeys = ConcurrentHashMap.newKeySet<String>()
-    fun destroy() {
+    @Synchronized fun destroy() {
         if (!active.compareAndSet(true, false)) return
-        resources.close()
-        nativeNicknameGate?.release()
-        nativeNicknameGate = null
-        pendingApplyKeys.toList().forEach { WeChatApis.tasks()?.cancel(it) }
-        pendingApplyKeys.clear()
+        fun release(block: () -> Unit) {
+            try { block() } catch (error: Throwable) {
+                try { logger("群员头衔资源释放失败", error) } catch (_: Throwable) { }
+            }
+        }
+        release { resources.close() }
+        val gate = nativeNicknameGate; nativeNicknameGate = null
+        release { gate?.release() }
+        val keys = pendingApplyKeys.toList(); pendingApplyKeys.clear()
+        keys.forEach { key -> release { WeChatApis.tasks()?.cancel(key) } }
         val views = synchronized(boundViews) { boundViews.keys.toList().also { boundViews.clear() } }
-        msgSenderCache.clear()
-        holderTextFieldCache.clear()
-        likelyMsgCache.clear()
-        val cleanup = { views.forEach { view -> runCatching { removeTitleOnly(view) }.onFailure { logger("群员头衔界面恢复失败", it) } } }
-        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) cleanup()
-        else android.os.Handler(android.os.Looper.getMainLooper()).post { cleanup() }
+        release { msgSenderCache.clear() }
+        release { holderTextFieldCache.clear() }
+        release { likelyMsgCache.clear() }
+        release { inSetText.remove() }
+        val cleanup = {
+            if (generationSequence.get() == generation) {
+                views.forEach { view -> release { removeTitleOnly(view) } }
+            }
+        }
+        release {
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) cleanup()
+            else android.os.Handler(android.os.Looper.getMainLooper()).post { cleanup() }
+        }
     }
     private val msgSenderCache = Collections.synchronizedMap(WeakHashMap<Any, String>())
     private val boundViews = Collections.synchronizedMap(WeakHashMap<TextView, Target>())
@@ -109,9 +122,9 @@ class MemberTitleRenderer(
     private fun installUsernameBindHook(): Boolean {
         if (usernameBindInstalled) return true
         val method = locateUsernameBindMethod() ?: return false
-        if (nativeNicknameGate == null) nativeNicknameGate = NativeGroupNicknameGate.acquire(context, method, logger)
-        if (nativeNicknameGate == null) return false
         return try {
+            if (nativeNicknameGate == null) nativeNicknameGate = NativeGroupNicknameGate.acquire(context, method, logger)
+            if (nativeNicknameGate == null) return false
             val unhook = HookRegistry.get().hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     handleUsernameBind(param)
@@ -122,7 +135,12 @@ class MemberTitleRenderer(
             usernameBindInstalled = true
             true
         } catch (e: Throwable) {
-            logger("群员头衔Hook安装失败", e)
+            val gate = nativeNicknameGate
+            nativeNicknameGate = null
+            try { gate?.release() } catch (releaseError: Throwable) {
+                try { logger("群员头衔门控回滚失败", releaseError) } catch (_: Throwable) { }
+            }
+            try { logger("群员头衔Hook安装失败", e) } catch (_: Throwable) { }
             false
         }
     }
@@ -489,6 +507,7 @@ class MemberTitleRenderer(
     private data class Target(val roomId: String, val sender: String)
 
     companion object {
+        private val generationSequence = java.util.concurrent.atomic.AtomicLong()
         private const val OLD_BADGE_OBJECT = "\uFFFC"
         // Weak keys keep only the last known room/member identity for visible rows across
         // feature generations; this enables re-enable restoration without scanning adapters.

@@ -15,7 +15,8 @@ import android.widget.TextView
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.core.FeatureContext
-import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.core.OwnedHandler
+import t.mma.hooks.core.OwnedHooks
 import t.mma.utils.KavaReflector
 import org.luckypray.dexkit.query.FindMethod
 import org.luckypray.dexkit.query.matchers.MethodMatcher
@@ -35,11 +36,18 @@ internal class ForwardedRecordTypeLabels(
     private data class Targets(val bind: Method, val detail: Class<*>, val dataType: Field)
     private data class RowState(val label: WeakReference<TextView>, var type: Int? = null)
 
-    private val main = Handler(Looper.getMainLooper())
+    private val main = OwnedHandler({ error -> logger("聊天记录类型投递失败", error) })
+    /** 摘除投递专用：main 在 destroy 时先关闭，这一步必须走不受本代关闭影响的通道。 */
+    private val detachHandler = Handler(Looper.getMainLooper())
+    /**
+     * 本代独占的 Hook 句柄。HookRegistry 只做进程级兜底，不能证明单个功能关闭时已释放；
+     * 句柄与主线程投递都必须由本类自己持有，destroy 时能证明全部撤销。
+     */
+    private val ownedHooks = OwnedHooks { logger("聊天记录类型Hook句柄异常", it) }
     // Values must not strongly retain a descendant of the weak row key.
     private val rows = WeakHashMap<View, RowState>()
     private val adapters = WeakHashMap<BaseAdapter, Boolean>()
-    private var unhook: XC_MethodHook.Unhook? = null
+    private var installed = false
     @Volatile private var destroyed = false
     private var lastFailure = 0L
 
@@ -47,12 +55,13 @@ internal class ForwardedRecordTypeLabels(
     @Synchronized
     fun install(): Boolean {
         if (destroyed) return false
-        if (unhook != null) return true
+        if (installed) return true
         return try {
             val targets = locate() ?: return false
-            unhook = HookRegistry.get().hook(targets.bind, object : XC_MethodHook() {
+            // 句柄登记到 OwnedHooks：安装失败由它上报并返回 null，交由票据做有限重试。
+            val handle = ownedHooks.hook(targets.bind, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (Looper.myLooper() != Looper.getMainLooper()) return
+                    if (destroyed || Looper.myLooper() != Looper.getMainLooper()) return
                     (param.args.getOrNull(1) as? View)?.let(::clearRow)
                 }
 
@@ -78,7 +87,9 @@ internal class ForwardedRecordTypeLabels(
                     }
                 }
             })
-            true
+            // 安装失败返回 false，交回票据做有限重试；不把失败态记成已安装。
+            installed = handle != null
+            installed
         } catch (error: Throwable) {
             logger("聊天记录类型Hook安装失败", error)
             false
@@ -86,34 +97,48 @@ internal class ForwardedRecordTypeLabels(
     }
 
     fun refresh() {
-        main.post {
-            if (destroyed) return@post
-            try {
-                rows.values.forEach { state ->
-                    state.label.get()?.let { label ->
-                        if (!enabled() || state.type == null) label.visibility = View.GONE
-                        else applyStyle(label, MessageTypeLabels.recordLabel(state.type!!))
+        // 投递被拒（本代已关闭或队列拒绝）时只是这一次刷新丢了，登记表本身不受污染。
+        if (!main.post {
+                if (destroyed) return@post
+                try {
+                    rows.values.forEach { state ->
+                        state.label.get()?.let { label ->
+                            if (!enabled() || state.type == null) label.visibility = View.GONE
+                            else applyStyle(label, MessageTypeLabels.recordLabel(state.type!!))
+                        }
                     }
+                    // Rebind visible rows when enabling after their first bind ran with the option off.
+                    adapters.keys.toList().forEach { it.notifyDataSetChanged() }
+                } catch (error: Throwable) {
+                    logFailure("聊天记录类型刷新失败", error)
                 }
-                // Rebind visible rows when enabling after their first bind ran with the option off.
-                adapters.keys.toList().forEach { it.notifyDataSetChanged() }
-            } catch (error: Throwable) {
-                logFailure("聊天记录类型刷新失败", error)
-            }
+            }) {
+            logFailure("聊天记录类型刷新投递被拒", IllegalStateException("main queue rejected refresh"))
         }
     }
 
     @Synchronized
     fun destroy() {
+        // 先置门：此后 Hook 回调与安装一律拒绝，不能复活本代。
+        if (destroyed) return
         destroyed = true
-        HookRegistry.get().unhook(unhook)
-        unhook = null
-        main.post {
-            rows.values.forEach { state ->
-                state.label.get()?.let { label -> (label.parent as? ViewGroup)?.removeView(label) }
-            }
-            rows.clear()
-            adapters.clear()
+        // 句柄按注册逆序卸载，单项失败只上报。
+        ownedHooks.close()
+        // 撤销本代全部未执行投递；此后本类不再接受新投递。
+        main.close()
+        val labels = rows.values.mapNotNull { it.label.get() }
+        rows.clear()
+        adapters.clear()
+        if (labels.isEmpty()) return
+        // label 是本类挂进宿主视图的，必须摘除；不在主线程时投递一次，被拒说明主队列已停，
+        // 宿主视图随之销毁，label 不会独立存活，只上报不重试。
+        val detach = Runnable {
+            labels.forEach { label -> (label.parent as? ViewGroup)?.removeView(label) }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            detach.run()
+        } else if (!detachHandler.post(detach)) {
+            logger("聊天记录类型摘除投递被拒", null)
         }
     }
 

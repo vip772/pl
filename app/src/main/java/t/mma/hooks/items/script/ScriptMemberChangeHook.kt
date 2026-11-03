@@ -2,6 +2,7 @@ package t.mma.hooks.items.script
 
 import t.mma.hooks.api.contact.WeChatChatroomChangeApi
 import t.mma.hooks.api.core.WeChatApis
+import t.mma.hooks.api.message.WeChatMessageObserveApi
 import t.mma.hooks.core.FeatureContext
 import java.util.concurrent.ConcurrentHashMap
 
@@ -9,6 +10,8 @@ object ScriptMemberChangeHook {
     private const val DEDUP_WINDOW_MS = 5000L
     @Volatile
     private var installed = false
+    /** 本代持有的宿主侧订阅句柄：群成员变动与消息观察，撤销时逐个还回。 */
+    private val hostSubscriptions = ArrayList<AutoCloseable>()
     private val memberSnapshots = ConcurrentHashMap<String, Set<String>>()
     private val memberNameCache = ConcurrentHashMap<String, String>()
     private val recentEvents = ConcurrentHashMap<String, Long>()
@@ -21,18 +24,50 @@ object ScriptMemberChangeHook {
             return false
         }
         runCatching { preloadSnapshots() }
-        changeApi.subscribe { change ->
+        val changeListener = WeChatChatroomChangeApi.Listener { change ->
             dispatchDiff(change)
+        }
+        val changeSubscription = changeApi.subscribe(changeListener)
+        if (changeSubscription == null) return false
+        hostSubscriptions += AutoCloseable {
+            changeApi.unsubscribe(changeListener)
+            changeSubscription.unsubscribe()
         }
         val observeApi = runCatching { WeChatApis.messageObserve() }.getOrNull()
         if (observeApi != null && observeApi.isAvailable()) {
             runCatching { observeApi.install() }
-            observeApi.subscribe { message ->
+            val observeListener = WeChatMessageObserveApi.Listener { message ->
                 handleObservedMessage(ScriptMessageBean(message))
+            }
+            val observeSubscription = observeApi.subscribe(observeListener)
+            if (observeSubscription != null) {
+                hostSubscriptions += AutoCloseable {
+                    observeApi.unsubscribe(observeListener)
+                    observeSubscription.unsubscribe()
+                }
             }
         }
         installed = true
         return true
+    }
+
+    /**
+     * 撤销本代安装的宿主侧订阅。与 [install] 对称，单项撤销异常只记录不阻断其余项，
+     * 重复调用幂等；成员快照缓存一并丢弃，避免下一代沿用旧群成员基线。
+     */
+    @Synchronized
+    fun uninstall() {
+        installed = false
+        val pending = hostSubscriptions.toList().also { hostSubscriptions.clear() }
+        pending.forEach { closeable ->
+            try {
+                closeable.close()
+            } catch (error: Throwable) {
+                t.mma.utils.HLog.e("[Hchat:Script] 成员变动监听撤销失败: ${error.message}", error)
+            }
+        }
+        memberSnapshots.clear()
+        recentEvents.clear()
     }
 
     private fun dispatchDiff(change: WeChatChatroomChangeApi.ChatroomChange) {

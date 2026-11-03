@@ -33,8 +33,11 @@ class HomeSidePanelFeature : BaseFeature() {
         trackResource {
             synchronized(this) {
                 active = false
-                preferences.unregisterOnSharedPreferenceChangeListener(listener)
-                stopRuntime()
+                try {
+                    preferences.unregisterOnSharedPreferenceChangeListener(listener)
+                } finally {
+                    stopRuntime()
+                }
             }
         }
         preferences.registerOnSharedPreferenceChangeListener(listener)

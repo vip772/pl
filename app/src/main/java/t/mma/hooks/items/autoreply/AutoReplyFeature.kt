@@ -27,8 +27,11 @@ class AutoReplyFeature : BaseFeature() {
         trackResource {
             synchronized(this) {
                 active = false
-                prefs.unregisterOnSharedPreferenceChangeListener(listener)
-                stopRuntime()
+                try {
+                    prefs.unregisterOnSharedPreferenceChangeListener(listener)
+                } finally {
+                    stopRuntime()
+                }
             }
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
@@ -59,7 +62,8 @@ class AutoReplyFeature : BaseFeature() {
                     }
                 }
             }
-            ScriptNewFriendHook.install(context)
+            ScriptNewFriendHook.acquire(context, ScriptNewFriendHook.OWNER_AUTO_REPLY)
+            resources.register { ScriptNewFriendHook.release(ScriptNewFriendHook.OWNER_AUTO_REPLY) }
             val subscription = ScriptNewFriendHook.subscribe { event ->
                 if (!resources.isClosed()) AutoReplyRuntime.handleNewFriend(context.hostContext(), event.wxid, event.ticket, event.scene)
             }

@@ -64,18 +64,23 @@ internal class MessageDetailsPendingLayoutObserver {
         private fun scheduleAction() {
             if (!active || entries[root] !== this || !root.isAttachedToWindow || posted) return
             posted = true
-            root.post {
+            val accepted = root.post {
                 posted = false
                 if (!active || entries[root] !== this || !root.isAttachedToWindow) return@post
                 if (action()) cancel(root) else schedulePoll()
             }
+            // 投递被拒必须让 posted 归位：否则该行后续 globalLayout 全部被这里早退挡掉。
+            if (!accepted) posted = false
         }
 
         private fun schedulePoll() {
             if (!active || entries[root] !== this || !root.isAttachedToWindow || polling || pollsRemaining <= 0) return
             pollsRemaining--
             polling = true
-            root.postDelayed(poll, 32L)
+            if (!root.postDelayed(poll, 32L)) {
+                // 被拒时 polling 必须归位，否则后续 schedulePoll 永久早退；轮询次数已经扣掉，不重来。
+                polling = false
+            }
         }
 
         private fun onPoll() {

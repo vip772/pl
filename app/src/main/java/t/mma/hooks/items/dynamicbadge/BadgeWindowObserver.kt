@@ -6,7 +6,8 @@ import android.view.ViewTreeObserver
 /** A registration belongs to a window observer, not permanently to a recycled row. */
 internal class BadgeWindowObserver(
     private val host: View,
-    private val action: () -> Unit
+    private val onError: (Throwable) -> Unit = {},
+    private var action: () -> Unit
 ) {
     private var observer: ViewTreeObserver? = null
     private var disposed = false
@@ -21,21 +22,32 @@ internal class BadgeWindowObserver(
         if (observer === current) return
         detach()
         if (current.isAlive) {
-            current.addOnPreDrawListener(listener)
             observer = current
+            try { current.addOnPreDrawListener(listener) } catch (error: Throwable) {
+                detach()
+                throw error
+            }
         }
     }
 
-    fun detach() {
-        observer?.takeIf { it.isAlive }?.removeOnPreDrawListener(listener)
-        // Android may merge a dead observer's listeners into its new window.
-        val current = host.viewTreeObserver
-        if (current !== observer && current.isAlive) current.removeOnPreDrawListener(listener)
-        observer = null
+    private fun release(block: () -> Unit) {
+        try { block() } catch (error: Throwable) {
+            try { onError(error) } catch (_: Throwable) { }
+        }
     }
-
+    fun detach() {
+        val old = observer
+        observer = null
+        release { old?.takeIf { it.isAlive }?.removeOnPreDrawListener(listener) }
+        release {
+            val current = host.viewTreeObserver
+            if (current !== old && current.isAlive) current.removeOnPreDrawListener(listener)
+        }
+    }
     fun dispose() {
+        if (disposed) return
         disposed = true
+        action = {}
         detach()
     }
 }

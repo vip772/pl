@@ -72,7 +72,21 @@ public final class RedPacketAnnouncer {
         if (TextUtils.isEmpty(text)) return;
         String key = announceKey(nativeUrl);
         if (!markPending(key)) return;
-        mainHandler.post(() -> speakOnMain(new PendingSpeech(key, text, 0)));
+        PendingSpeech pending = new PendingSpeech(key, text, 0);
+        if (!postToMain(() -> speakOnMain(pending))) {
+            // A refused posting can never run: release the key so the same packet can be retried.
+            releasePending(pending);
+            logError("红包播报投递被拒绝: " + text, null);
+        }
+    }
+
+    private boolean postToMain(Runnable task) {
+        try {
+            return mainHandler.post(task);
+        } catch (Throwable error) {
+            logError("红包播报主线程投递异常: " + error.getMessage(), error);
+            return false;
+        }
     }
 
     private boolean markPending(String key) {
@@ -117,8 +131,15 @@ public final class RedPacketAnnouncer {
         try {
             Context context = hostContext.getApplicationContext();
             if (context == null) context = hostContext;
-            tts = new TextToSpeech(context, status ->
-                    mainHandler.post(() -> onTtsInit(status)));
+            tts = new TextToSpeech(context, status -> {
+                // A refused init callback would strand ttsInitializing=true forever.
+                if (!postToMain(() -> onTtsInit(status))) {
+                    ttsInitializing = false;
+                    safeShutdown();
+                    logError("红包播报初始化回调投递被拒绝: status=" + status, null);
+                    retryPendingSpeeches("初始化回调丢失");
+                }
+            });
         } catch (Throwable e) {
             ttsInitializing = false;
             logError("红包播报初始化失败: " + e.getMessage(), e);
@@ -218,7 +239,19 @@ public final class RedPacketAnnouncer {
             return;
         }
         pendingSpeeches.offer(new PendingSpeech(speech.key, speech.text, speech.retryCount + 1));
-        mainHandler.postDelayed(this::ensureTtsOnMain, TTS_RETRY_DELAY_MS);
+        boolean queued;
+        try {
+            queued = mainHandler.postDelayed(this::ensureTtsOnMain, TTS_RETRY_DELAY_MS);
+        } catch (Throwable error) {
+            logError("红包播报重试投递异常: " + error.getMessage(), error);
+            queued = false;
+        }
+        if (!queued) {
+            // No retry will run: drop the queued speech instead of withholding its announce key.
+            PendingSpeech dropped = pendingSpeeches.poll();
+            if (dropped != null) releasePending(dropped);
+            logError("红包播报重试投递被拒绝: " + reason, null);
+        }
     }
 
     private void retryPendingSpeeches(String reason) {
@@ -236,18 +269,51 @@ public final class RedPacketAnnouncer {
             pendingSpeeches.offer(new PendingSpeech(speech.key, speech.text, speech.retryCount + 1));
         }
         if (!pendingSpeeches.isEmpty()) {
-            mainHandler.postDelayed(this::ensureTtsOnMain, TTS_RETRY_DELAY_MS);
+            boolean queued;
+            try {
+                queued = mainHandler.postDelayed(this::ensureTtsOnMain, TTS_RETRY_DELAY_MS);
+            } catch (Throwable error) {
+                logError("红包播报重试投递异常: " + error.getMessage(), error);
+                queued = false;
+            }
+            if (!queued) {
+                // No retry can run: drain the queue so no announce key stays withheld forever.
+                PendingSpeech dropped;
+                while ((dropped = pendingSpeeches.poll()) != null) releasePending(dropped);
+                logError("红包播报重试投递被拒绝: " + reason, null);
+            }
         }
     }
 
     public void destroy() {
         destroyed = true;
-        mainHandler.removeCallbacksAndMessages(null);
-        mainHandler.post(() -> {
-            pendingSpeeches.clear(); pendingKeys.clear(); announcedKeys.clear();
+        try {
+            mainHandler.removeCallbacksAndMessages(null);
+        } catch (Throwable error) {
+            HLog.e(TAG + " 清理播报主线程任务失败: " + error.getMessage(), error);
+        }
+        // TTS shutdown releases an engine-bound native speaker; if the posting is refused, shut it
+        // down inline so the engine is never leaked behind a dropped message.
+        Runnable cleanup = () -> {
+            pendingSpeeches.clear();
+            pendingKeys.clear();
+            announcedKeys.clear();
             ttsInitializing = false;
             safeShutdown();
-        });
+        };
+        try {
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                cleanup.run();
+                return;
+            }
+            if (!mainHandler.post(cleanup)) {
+                logError("红包播报清理投递被拒绝，就地清理", null);
+                cleanup.run();
+            }
+        } catch (Throwable error) {
+            logError("红包播报清理失败: " + error.getMessage(), error);
+            try { cleanup.run(); } catch (Throwable ignored) { }
+        }
     }
     private void safeShutdown() {
         try {

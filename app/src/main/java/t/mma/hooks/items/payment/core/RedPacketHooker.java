@@ -68,7 +68,13 @@ public class RedPacketHooker {
     private String sFastMyWxid = "";
 
     private boolean mLogEnabled = false;
-    private boolean observeSubscribed = false;
+    private volatile boolean observeSubscribed = false;
+    private volatile boolean destroyed = false;
+
+    /** True once destroy() ran; the scheduler must not install a released generation. */
+    public boolean isDestroyed() {
+        return destroyed || resources.isClosed();
+    }
 
     public RedPacketHooker(Context context, ClassLoader classLoader, DexFinder dexFinder) {
         this.hostContext = context;
@@ -144,8 +150,8 @@ public class RedPacketHooker {
 
     // ==================== 入口 ====================
 
-    public List<Object> hookAll() {
-        if (resources.isClosed()) return java.util.Collections.emptyList();
+    public synchronized List<Object> hookAll() {
+        if (isDestroyed()) return java.util.Collections.emptyList();
         List<Object> subscriptions = new ArrayList<>();
         mLogEnabled = settings.getBoolean(RedPacketSettings.KEY_LOG_ENABLE, false);
         refreshFastSettingsCache();
@@ -477,21 +483,30 @@ public class RedPacketHooker {
     }
 
     private void scheduleOnMain(String key, long delay, Runnable runnable) {
-        if (runnable == null || resources.isClosed()) return;
-        resources.post(key, delay, () -> {
-            if (!resources.isClosed() && settings.isEnabled()) runnable.run();
+        if (runnable == null || isDestroyed()) return;
+        boolean accepted = resources.post(key, delay, () -> {
+            if (!isDestroyed() && settings.isEnabled()) runnable.run();
         });
+        if (!accepted) {
+            logx("ERROR 红包任务投递被拒绝: " + key);
+        }
     }
     private void ownSubscription(Object subscription) {
         resources.register(() -> KavaReflector.invoke(
                 KavaReflector.findMethod(subscription.getClass(), "unsubscribe"), subscription));
     }
-    public void destroy() {
-        resources.close();
-        for (Runnable release : new Runnable[]{messageHook::destroy, databaseHook::destroy,
-                uiAutomator::destroy, fakePacketHook::destroy, silentHandler::destroy,
-                autoReply::destroy, announcer::destroy, notifier::destroy, networkDispatcher::destroy,
-                newGroupBlocker::destroy}) {
+    public synchronized void destroy() {
+        // Mark first: a scheduler retry that enters from now on must not install into this instance.
+        destroyed = true;
+        try {
+            resources.close();
+        } catch (Throwable error) {
+            XposedBridge.log(error);
+        }
+        for (Runnable release : new Runnable[]{newGroupBlocker::destroy, notifier::destroy,
+                announcer::destroy, autoReply::destroy, silentHandler::destroy,
+                fakePacketHook::destroy, uiAutomator::destroy, databaseHook::destroy,
+                messageHook::destroy, networkDispatcher::destroy}) {
             try { release.run(); } catch (Throwable error) { XposedBridge.log(error); }
         }
     }

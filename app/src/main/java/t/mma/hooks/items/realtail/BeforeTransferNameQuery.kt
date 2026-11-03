@@ -4,7 +4,7 @@ import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
-import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.core.OwnedHooks
 import t.mma.utils.KavaReflector
 import java.lang.reflect.Constructor
 import java.lang.reflect.Method
@@ -18,9 +18,16 @@ class BeforeTransferNameQuery(
 ) {
     @Volatile private var closed = false
     private var ownedHook: XC_MethodHook.Unhook? = null
+    private val hooks = OwnedHooks { error ->
+        try { logger("实名查询Hook操作失败", error) } catch (_: Throwable) { }
+    }
     @Synchronized fun destroy() {
+        if (closed) return
         closed = true
-        try { HookRegistry.get().unhook(ownedHook) } finally { ownedHook = null; pending.clear() }
+        try { hooks.close() } finally {
+            ownedHook = null; pending.clear(); initialized = false
+            sceneClass = null; sceneCtor = null; callbackMethod = null
+        }
     }
     fun interface Callback {
         fun onResult(maskedName: String)
@@ -41,7 +48,7 @@ class BeforeTransferNameQuery(
         return runCatching {
             locateScene()
             setupCallbackHook()
-            initialized = sceneCtor != null && callbackMethod != null
+            initialized = !closed && sceneCtor != null && callbackMethod != null && ownedHook != null
             initialized
         }.getOrElse {
             logger("实名查询初始化失败", it)
@@ -49,19 +56,27 @@ class BeforeTransferNameQuery(
         }
     }
 
-    @Synchronized fun query(wxid: String, roomId: String, callback: Callback): Boolean {
+    fun query(wxid: String, roomId: String, callback: Callback): Boolean {
         if (closed || !RealNameTailStore.isSupportedQueryId(wxid)) return false
+        // DexKit's serial lock must be acquired before this instance monitor.
         if (!ensureReady()) return false
-        val ctor = sceneCtor ?: return false
-        return runCatching {
-            val scene = KavaReflector.newInstance(ctor, wxid, roomId) ?: return@runCatching false
-            pending[scene] = callback
-            val sent = WeChatApis.network()?.sendRequest(scene) == true
-            if (!sent) pending.remove(scene)
-            sent
-        }.getOrElse {
-            logger("实名查询请求失败", it)
-            false
+        return synchronized(this) {
+            if (closed) return@synchronized false
+            val ctor = sceneCtor ?: return@synchronized false
+            runCatching {
+                val scene = KavaReflector.newInstance(ctor, wxid, roomId) ?: return@runCatching false
+                pending[scene] = callback
+                var sent = false
+                try {
+                    sent = WeChatApis.network()?.sendRequest(scene) == true
+                    sent
+                } finally {
+                    if (!sent) pending.remove(scene)
+                }
+            }.getOrElse {
+                try { logger("实名查询请求失败", it) } catch (_: Throwable) { }
+                false
+            }
         }
     }
 
@@ -134,7 +149,7 @@ class BeforeTransferNameQuery(
     private fun setupCallbackHook() {
         val method = callbackMethod ?: return
         if (closed || ownedHook != null) return
-        ownedHook = HookRegistry.get().hook(method, object : XC_MethodHook() {
+        ownedHook = hooks.hook(method, object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (closed) return
                 val scene = param.thisObject ?: return

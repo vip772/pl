@@ -130,30 +130,33 @@ public class SettingsInjector implements AutoCloseable {
             plusMenuAdapterViewHookedClasses.clear();
         }
         ownedHooks.close();
-        main.removeCallbacksAndMessages(null);
-        final java.util.ArrayList<Map.Entry<View, LongPressBinding>> bindings;
-        synchronized (this) {
-            bindings = new java.util.ArrayList<>(longPressBindings.entrySet());
-            longPressBindings.clear();
-        }
-        Runnable restore = () -> {
-            for (Map.Entry<View, LongPressBinding> entry : bindings) {
-                View view = entry.getKey(); LongPressBinding binding = entry.getValue();
-                try {
-                    Object info = KavaReflector.readField(view, "mListenerInfo");
-                    Object current = info == null ? null : KavaReflector.readField(info, "mOnLongClickListener");
-                    if (current == binding.installed) {
-                        view.setOnLongClickListener(binding.original);
-                        view.setLongClickable(binding.longClickable);
-                    }
-                } catch (Throwable ignored) { }
-                try {
-                    if (Boolean.TRUE.equals(view.getTag(HCHAT_PLUS_LONG_PRESS_TAG)))
-                        view.setTag(HCHAT_PLUS_LONG_PRESS_TAG, binding.tag);
-                } catch (Throwable ignored) { }
+        try {
+            main.removeCallbacksAndMessages(null);
+        } finally {
+            final java.util.ArrayList<Map.Entry<View, LongPressBinding>> bindings;
+            synchronized (this) {
+                bindings = new java.util.ArrayList<>(longPressBindings.entrySet());
+                longPressBindings.clear();
             }
-        };
-        if (Looper.myLooper() == Looper.getMainLooper()) restore.run(); else main.post(restore);
+            Runnable restore = () -> {
+                for (Map.Entry<View, LongPressBinding> entry : bindings) {
+                    View view = entry.getKey(); LongPressBinding binding = entry.getValue();
+                    try {
+                        Object info = KavaReflector.readField(view, "mListenerInfo");
+                        Object current = info == null ? null : KavaReflector.readField(info, "mOnLongClickListener");
+                        if (current == binding.installed) {
+                            view.setOnLongClickListener(binding.original);
+                            view.setLongClickable(binding.longClickable);
+                        }
+                    } catch (Throwable ignored) { }
+                    try {
+                        if (Boolean.TRUE.equals(view.getTag(HCHAT_PLUS_LONG_PRESS_TAG)))
+                            view.setTag(HCHAT_PLUS_LONG_PRESS_TAG, binding.tag);
+                    } catch (Throwable ignored) { }
+                }
+            };
+            if (Looper.myLooper() == Looper.getMainLooper()) restore.run(); else main.post(restore);
+        }
     }
     private XC_MethodHook.Unhook contextGetStringUnhook;
     private volatile Class<?> modernLocationParentClass;

@@ -8,7 +8,7 @@ import de.robv.android.xposed.XC_MethodHook
 import t.mma.dexkit.DexMethodCache
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.FeatureContext
-import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.core.OwnedHooks
 import t.mma.hooks.items.chatname.NativeGroupNicknameGate
 import t.mma.hooks.items.chatname.ChatNameDecorationLayout
 import t.mma.hooks.items.groupnicknamecolor.GroupNicknameColorStore
@@ -28,7 +28,14 @@ class RealNameTailRenderer(
     private val logger: (String, Throwable?) -> Unit
 ) {
     private val active = java.util.concurrent.atomic.AtomicBoolean(true)
-    private var bindHook: XC_MethodHook.Unhook? = null
+    private fun release(action: () -> Unit) {
+        try { action() } catch (error: Throwable) {
+            try { logger("实名尾字资源释放失败", error) } catch (_: Throwable) { }
+        }
+    }
+    private val hooks = OwnedHooks { error ->
+        try { logger("实名尾字Hook操作失败", error) } catch (_: Throwable) { }
+    }
     private var nativeNicknameGate: NativeGroupNicknameGate? = null
     private val msgSenderCache = Collections.synchronizedMap(WeakHashMap<Any, String>())
     private val boundViews = Collections.synchronizedMap(WeakHashMap<TextView, String>())
@@ -40,39 +47,59 @@ class RealNameTailRenderer(
     @Volatile private var installed = false
     var profilePrefetcher: ContactProfilePrefetcher? = null
 
-    fun destroy() {
+    @Synchronized fun destroy() {
         if (!active.compareAndSet(true, false)) return
-        HookRegistry.get().unhook(bindHook)
-        bindHook = null
-        nativeNicknameGate?.release()
+        release { hooks.close() }
+        val gate = nativeNicknameGate
         nativeNicknameGate = null
+        release { gate?.release() }
+        installed = false
+        profilePrefetcher = null
         val views = synchronized(boundViews) { boundViews.keys.toList().also { boundViews.clear() } }
         views.forEach { view ->
-            WeChatApis.tasks()?.cancel("real_tail_apply_${System.identityHashCode(view)}")
-            colorRebinds.remove(view)?.let(view::removeCallbacks)
+            release { WeChatApis.tasks()?.cancel("real_tail_apply_${System.identityHashCode(view)}") }
+            release { colorRebinds.remove(view)?.let(view::removeCallbacks) }
         }
-        WeChatApis.tasks()?.runOnMain { views.forEach { view -> hideTail(view); hideNicknameColor(view) } }
+        release { msgSenderCache.clear() }
+        release { holderTextFieldCache.clear() }
+        release { likelyMsgCache.clear() }
+        release { colorRebinds.clear() }
+        release { inSetText.remove() }
+        release { WeChatApis.tasks()?.runOnMain {
+            views.forEach { view ->
+                release { hideTail(view) }
+                release { hideNicknameColor(view) }
+            }
+        } }
     }
-
     fun install(): Boolean {
         return installUsernameBindHook()
     }
 
-    private fun installUsernameBindHook(): Boolean {
+    @Synchronized private fun installUsernameBindHook(): Boolean {
         if (!active.get()) return false
         if (installed) return true
         val method = locateUsernameBindMethod() ?: return false
         if (nativeNicknameGate == null) nativeNicknameGate = NativeGroupNicknameGate.acquire(context, method, logger)
         if (nativeNicknameGate == null) return false
         return try {
-            bindHook = HookRegistry.get().hook(method, object : XC_MethodHook() {
+            val handle = hooks.hook(method, object : XC_MethodHook() {
                 override fun afterHookedMethod(param: MethodHookParam) {
                     handleUsernameBind(param)
                 }
             })
+            if (handle == null || !active.get() || hooks.isClosed()) {
+                val gate = nativeNicknameGate
+                nativeNicknameGate = null
+                release { gate?.release() }
+                return false
+            }
             installed = true
             true
         } catch (e: Throwable) {
+            val gate = nativeNicknameGate
+            nativeNicknameGate = null
+            release { gate?.release() }
             logger("实名尾字Hook安装失败", e)
             false
         }

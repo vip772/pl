@@ -14,10 +14,47 @@ class ContactProfilePrefetcher(
     private val onProfileUpdated: (String) -> Unit
 ) {
     private val taskPrefix = "real_tail_profile_${java.util.UUID.randomUUID()}_"
+    private val workers = java.util.Collections.synchronizedSet(HashSet<Thread>())
+    private fun launchOwnedWorker(action: () -> Unit): Boolean {
+        if (closed) return false
+        val worker = try {
+            Thread({
+                try { if (!closed) action() }
+                catch (error: Throwable) {
+                    try { logger("实名尾字线程执行失败", error) } catch (_: Throwable) { }
+                } finally { workers.remove(Thread.currentThread()) }
+            }, "Hchat-RealTail-ContactProfilePrefetcher")
+        } catch (error: Throwable) {
+            try { logger("实名尾字线程创建失败", error) } catch (_: Throwable) { }
+            return false
+        }
+        synchronized(workers) {
+            if (closed) return false
+            workers.add(worker)
+            try { worker.start() } catch (error: Throwable) {
+                workers.remove(worker)
+                try { logger("实名尾字线程启动失败", error) } catch (_: Throwable) { }
+                return false
+            }
+        }
+        return true
+    }
+    private fun stopOwnedWorkers() {
+        val pending = synchronized(workers) { workers.toList().also { workers.clear() } }
+        pending.forEach { worker ->
+            try { worker.interrupt() }
+            catch (error: Throwable) { try { logger("实名尾字线程关闭失败", error) } catch (_: Throwable) { } }
+        }
+    }
     @Volatile private var closed = false
     @Synchronized fun destroy() {
+        if (closed) return
         closed = true
-        lastRequestAt.keys.toList().forEach { WeChatApis.tasks()?.cancel("${taskPrefix}$it") }
+        stopOwnedWorkers()
+        lastRequestAt.keys.toList().forEach { key ->
+            try { WeChatApis.tasks()?.cancel("${taskPrefix}$key") }
+            catch (error: Throwable) { try { logger("联系人资料任务清理失败", error) } catch (_: Throwable) { } }
+        }
         lastRequestAt.clear(); sceneClass = null
     }
     private val lastRequestAt = ConcurrentHashMap<String, Long>()
@@ -32,7 +69,7 @@ class ContactProfilePrefetcher(
         val last = lastRequestAt[id] ?: 0L
         if (now - last < REQUEST_COOLDOWN_MS) return
         lastRequestAt[id] = now
-        WeChatApis.tasks()?.runAsync { requestProfile(id) } ?: Thread { requestProfile(id) }.start()
+        if (!launchOwnedWorker { requestProfile(id) }) lastRequestAt.remove(id)
     }
 
     private fun profileMissing(wxid: String): Boolean {

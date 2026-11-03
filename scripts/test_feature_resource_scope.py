@@ -5,7 +5,7 @@ r=Path(__file__).resolve().parents[1]
 libs=Path('/tmp/pl-kotlin-libs');std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
 fixtures={
 'Log.kt': '''package t.mma.utils
-object HLog {fun d(s:String){};fun i(s:String){};fun w(s:String){};fun e(s:String,t:Throwable?){}}
+object HLog {var fail=false;fun d(s:String){};fun i(s:String){if(fail)error("log")};fun w(s:String){};fun e(s:String,t:Throwable?){if(fail)error("log")}}
 object KavaReflector {fun findMethod(c:Class<*>,n:String)=c.getMethod(n);fun invoke(m:java.lang.reflect.Method,o:Any)=m.invoke(o)}''',
 'Event.kt': '''package t.mma.event
 fun interface EventHandler<E>{fun handleEvent(e:E)}
@@ -44,7 +44,7 @@ class ScheduledTaskRuntime(c:Any,log:(String,Throwable?)->Unit){fun start(){if(S
 interface SharedPreferences{fun getBoolean(k:String,d:Boolean):Boolean;fun registerOnSharedPreferenceChangeListener(l:OnSharedPreferenceChangeListener);fun unregisterOnSharedPreferenceChangeListener(l:OnSharedPreferenceChangeListener);fun interface OnSharedPreferenceChangeListener{fun onSharedPreferenceChanged(p:SharedPreferences,k:String?)}}
 ''',
 'Toolbar.kt': '''package t.mma.hooks.items.chattoolbar
-class Prefs:android.content.SharedPreferences{var enabled=false;val listeners=mutableListOf<android.content.SharedPreferences.OnSharedPreferenceChangeListener>();override fun getBoolean(k:String,d:Boolean)=enabled;override fun registerOnSharedPreferenceChangeListener(l:android.content.SharedPreferences.OnSharedPreferenceChangeListener){listeners+=l};override fun unregisterOnSharedPreferenceChangeListener(l:android.content.SharedPreferences.OnSharedPreferenceChangeListener){listeners-=l};fun toggle(v:Boolean){enabled=v;listeners.toList().forEach{it.onSharedPreferenceChanged(this,"enable")}}}
+class Prefs:android.content.SharedPreferences{var enabled=false;var failRemove=false;val listeners=mutableListOf<android.content.SharedPreferences.OnSharedPreferenceChangeListener>();override fun getBoolean(k:String,d:Boolean)=enabled;override fun registerOnSharedPreferenceChangeListener(l:android.content.SharedPreferences.OnSharedPreferenceChangeListener){listeners+=l};override fun unregisterOnSharedPreferenceChangeListener(l:android.content.SharedPreferences.OnSharedPreferenceChangeListener){listeners-=l;if(failRemove)error("injected unregister failure")};fun toggle(v:Boolean){enabled=v;listeners.toList().forEach{it.onSharedPreferenceChanged(this,"enable")}}}
 object ChatToolbarSettings{const val KEY_ENABLE="enable";const val DEFAULT_ENABLE=false;val prefs=Prefs();fun preferences(c:Any)=prefs}
 class ChatToolbarSettingsProvider:t.mma.ui.FeatureSettingsProvider{override fun featureId()="chat_toolbar"}
 object ToolbarState{var created=0;var destroyed=0;var fail=false;var last:ChatToolbarRuntime?=null}
@@ -119,6 +119,12 @@ fun main(){
  check(enabled.installs==1 && disabledFeature.inits==1 && c.ui.count==1)
  m.destroyAll(c);check(enabled.destroys==1&&disabledFeature.ends==1&&c.ui.count==0&&c.bus.count==0)
  m.installAll(c);check(enabled.installs==2);m.destroyAll(c)
+ val cleanupManager=FeatureManager();var cleaned=0
+ cleanupManager.register(object:Feature{override fun featureId()="clean";override fun install(c:FeatureContext){};override fun onDestroy(c:FeatureContext){cleaned++}})
+ cleanupManager.register(object:Feature{override fun featureId()="failure";override fun install(c:FeatureContext){};override fun onDestroy(c:FeatureContext){error("cleanup")}})
+ cleanupManager.installAll(c);t.mma.utils.HLog.fail=true;cleanupManager.destroyAll(c);cleanupManager.destroyAll(c);t.mma.utils.HLog.fail=false
+ check(cleaned==1&&cleanupManager.installedFeatures().isEmpty())
+
  t.mma.hooks.items.musicorder.QQMusicOrderSettings.prefs.enabled=true
  t.mma.hooks.items.musicorder.State.fail=true
  val music=t.mma.hooks.items.musicorder.QQMusicOrderFeature()
@@ -163,9 +169,59 @@ fun main(){
  val homeOld=homePrefs.listeners.single();home.onDestroy(c);home.install(c)
  val homeBefore=t.mma.hooks.items.homesidepanel.HomeState.created;homeOld.onSharedPreferenceChanged(homePrefs,"enable");check(t.mma.hooks.items.homesidepanel.HomeState.created==homeBefore)
  home.onDestroy(c);check(homePrefs.listeners.isEmpty()&&c.ui.count==0&&t.mma.hooks.api.core.WeChatApis.events.subscriptions==0&&t.mma.hooks.api.core.WeChatApis.chats.subscriptions==0)
+
+ // Exercise complete production features, not only extracted cleanup closures.
+ run {
+  val owner=t.mma.hooks.items.chattoolbar.ChatToolbarFeature()
+  prefs.enabled=true;owner.install(c)
+  val previous=prefs.listeners.single()
+  val stopped=t.mma.hooks.items.chattoolbar.ToolbarState.destroyed
+  prefs.failRemove=true;owner.onDestroy(c);owner.onDestroy(c)
+  check(t.mma.hooks.items.chattoolbar.ToolbarState.destroyed==stopped+1)
+  check(c.ui.count==0&&c.bus.count==0&&prefs.listeners.isEmpty())
+  check(t.mma.hooks.api.core.WeChatApis.events.subscriptions==0)
+  prefs.failRemove=false;owner.install(c)
+  val created=t.mma.hooks.items.chattoolbar.ToolbarState.created
+  previous.onSharedPreferenceChanged(prefs,"enable")
+  check(t.mma.hooks.items.chattoolbar.ToolbarState.created==created)
+  owner.onDestroy(c)
+ }
+ run {
+  val owner=t.mma.hooks.items.homesidepanel.HomeSidePanelFeature()
+  homePrefs.enabled=true;owner.install(c)
+  val previous=homePrefs.listeners.single()
+  val stopped=t.mma.hooks.items.homesidepanel.HomeState.destroyed
+  homePrefs.failRemove=true;owner.onDestroy(c);owner.onDestroy(c)
+  check(t.mma.hooks.items.homesidepanel.HomeState.destroyed==stopped+1)
+  check(c.ui.count==0&&homePrefs.listeners.isEmpty())
+  check(t.mma.hooks.api.core.WeChatApis.events.subscriptions==0&&t.mma.hooks.api.core.WeChatApis.chats.subscriptions==0)
+  homePrefs.failRemove=false;owner.install(c)
+  val created=t.mma.hooks.items.homesidepanel.HomeState.created
+  previous.onSharedPreferenceChanged(homePrefs,"enable")
+  check(t.mma.hooks.items.homesidepanel.HomeState.created==created)
+  owner.onDestroy(c)
+ }
+ run {
+  val owner=t.mma.hooks.items.musicorder.QQMusicOrderFeature()
+  val musicPrefs=t.mma.hooks.items.musicorder.QQMusicOrderSettings.prefs
+  musicPrefs.enabled=true;owner.install(c)
+  val previous=musicPrefs.listeners.single()
+  val stopped=t.mma.hooks.items.musicorder.State.closed
+  musicPrefs.failRemove=true;owner.onDestroy(c);owner.onDestroy(c)
+  check(t.mma.hooks.items.musicorder.State.closed==stopped+1)
+  check(t.mma.hooks.items.musicorder.State.sub==null&&musicPrefs.listeners.isEmpty()&&c.ui.count==0)
+  musicPrefs.failRemove=false;owner.install(c)
+  val fresh=t.mma.hooks.items.musicorder.State.sub
+  previous.onSharedPreferenceChanged(musicPrefs,"qq_music_order_enable")
+  check(t.mma.hooks.items.musicorder.State.sub===fresh)
+  owner.onDestroy(c)
+ }
+ println("PASS full production toolbar/home/music features: unregister throws, runtime closes once, subscriptions detach, reinstall succeeds, stale listeners inert")
  println("PASS lifecycle: reverse cleanup, failure isolation, late/racing registration, duplicate install/destroy, restart, partial failure, initialized-only release")
 }
 '''}
+# ABI fixtures only: process-owner behavior is outside this feature-scope test.
+fixtures.update({'MediaProcess.kt': 'package t.mma.hooks.api.media\nobject WeChatImageApi {fun openMarsRuntime(){};fun closeMarsRuntime(){}}', 'FloatingProcess.kt': 'package t.mma.hooks.items.floatingshortcut\nobject FloatingShortcutRuntime {fun destroy(){}}', 'BottomProcess.kt': 'package t.mma.hooks.items.custombottombar\nobject CustomBottomBarFeature {fun destroyEarlyRuntimes(){}}\nobject CustomBottomBarIconPicker {fun destroy(){}}', 'LocationProcess.kt': 'package t.mma.hooks.items.fakelocation\nobject FakeLocationFeature {fun destroyProcessHooks(){}}', 'VideoProcess.kt': 'package t.mma.hooks.items.miniprogramvideoad\nobject SkipMiniProgramVideoAdsFeature {fun destroyProcessHooks(){}}', 'SplashProcess.kt': 'package t.mma.hooks.items.miniprogramsplashad\nobject SkipGlobalMiniProgramSplashAdsFeature {fun destroyProcessHooks(){}}'})
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)
  music=(r/'app/src/main/java/t/mma/hooks/items/musicorder/QQMusicOrderFeature.kt').read_text()

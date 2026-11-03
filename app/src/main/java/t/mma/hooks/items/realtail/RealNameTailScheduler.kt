@@ -11,16 +11,55 @@ class RealNameTailScheduler(
     private val onTailSaved: (String) -> Unit
 ) {
     private val taskPrefix = "real_tail_${java.util.UUID.randomUUID()}_"
+    private val workers = java.util.Collections.synchronizedSet(HashSet<Thread>())
+    private fun launchOwnedWorker(action: () -> Unit): Boolean {
+        if (closed) return false
+        val worker = try {
+            Thread({
+                try { if (!closed) action() }
+                catch (error: Throwable) {
+                    try { logger("实名尾字线程执行失败", error) } catch (_: Throwable) { }
+                } finally { workers.remove(Thread.currentThread()) }
+            }, "Hchat-RealTail-RealNameTailScheduler")
+        } catch (error: Throwable) {
+            try { logger("实名尾字线程创建失败", error) } catch (_: Throwable) { }
+            return false
+        }
+        synchronized(workers) {
+            if (closed) return false
+            workers.add(worker)
+            try { worker.start() } catch (error: Throwable) {
+                workers.remove(worker)
+                try { logger("实名尾字线程启动失败", error) } catch (_: Throwable) { }
+                return false
+            }
+        }
+        return true
+    }
+    private fun stopOwnedWorkers() {
+        val pending = synchronized(workers) { workers.toList().also { workers.clear() } }
+        pending.forEach { worker ->
+            try { worker.interrupt() }
+            catch (error: Throwable) { try { logger("实名尾字线程关闭失败", error) } catch (_: Throwable) { } }
+        }
+    }
     @Volatile private var closed = false
-    fun destroy() {
+    private fun release(action: () -> Unit) {
+        try { action() } catch (error: Throwable) {
+            try { logger("实名尾字调度清理失败", error) } catch (_: Throwable) { }
+        }
+    }
+    @Synchronized fun destroy() {
+        if (closed) return
         closed = true
+        stopOwnedWorkers()
         synchronized(lock) { queue.clear(); scheduled.clear(); running = false; busy = false }
         val keys = (renderQueryPending.keys + retryUntil.keys + activeTokens.keys).toSet()
         keys.forEach { key ->
-            WeChatApis.tasks()?.cancel("${taskPrefix}visible_$key")
-            WeChatApis.tasks()?.cancel("${taskPrefix}retry_$key")
+            release { WeChatApis.tasks()?.cancel("${taskPrefix}visible_$key") }
+            release { WeChatApis.tasks()?.cancel("${taskPrefix}retry_$key") }
         }
-        WeChatApis.tasks()?.cancel("${taskPrefix}resume")
+        release { WeChatApis.tasks()?.cancel("${taskPrefix}resume") }
         activeTokens.clear(); querying.clear(); retryCount.clear(); retryUntil.clear()
         renderQueryTs.clear(); renderQueryPending.clear(); messageQueryTs.clear()
     }
@@ -112,7 +151,7 @@ class RealNameTailScheduler(
             if (closed || running) return
             running = true
         }
-        WeChatApis.tasks()?.runAsync { runSchedulerLoop() } ?: Thread { runSchedulerLoop() }.start()
+        if (!launchOwnedWorker { runSchedulerLoop() }) synchronized(lock) { running = false }
     }
 
     private fun resumeSchedulerSoon() {
@@ -240,16 +279,16 @@ class RealNameTailScheduler(
     }
 
     private fun startWatchdog(roomId: String, wxid: String, token: Long) {
-        Thread {
+        launchOwnedWorker watchdog@ {
             sleepQuietly(QUERY_TIMEOUT_MS)
             val key = taskKey(roomId, wxid)
-            if (!isActiveToken(key, token) || !querying.contains(wxid)) return@Thread
+            if (!isActiveToken(key, token) || !querying.contains(wxid)) return@watchdog
             clearToken(key, token)
             querying.remove(wxid)
             setBusy(false)
             onTaskNoResult(roomId, wxid)
             resumeSchedulerSoon()
-        }.start()
+        }
     }
 
     private fun onTaskFailed(roomId: String, wxid: String) {

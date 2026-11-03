@@ -551,9 +551,14 @@ public class RedPacketSilentHandler {
     }
 
     private void runDelayed(String key, long delayMs, Runnable runnable) {
-        resources.post(key, delayMs, () -> {
+        if (runnable == null) return;
+        boolean accepted = resources.post(key, delayMs, () -> {
             if (!resources.isClosed() && settings.isEnabled()) runnable.run();
         });
+        if (!accepted) {
+            // The retry/timeout chain depends on this posting; log so a silent stall is diagnosable.
+            log("ERROR 静默红包任务投递被拒绝: " + key);
+        }
     }
     private void cancelTask(String key) { resources.cancel(key); }
     private String receiveTimeoutKey(String sendId) {

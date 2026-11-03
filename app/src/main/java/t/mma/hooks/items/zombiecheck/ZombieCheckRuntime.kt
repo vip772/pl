@@ -278,6 +278,11 @@ class ZombieCheckRuntime(
         } }.onFailure { if (!closed) logger("检测结果入队失败", it) }
     }
     fun close() {
+        fun release(block: () -> Unit) {
+            try { block() } catch (error: Throwable) {
+                try { logger("检测资源释放失败", error) } catch (_: Throwable) { }
+            }
+        }
         synchronized(lock) {
             if (closed) return
             closed = true
@@ -288,16 +293,19 @@ class ZombieCheckRuntime(
             actionGeneration++
             pendingResults.values.forEach { queue.addFirst(it) }
             pendingResults.clear()
-            activeProbe?.let { it.timeout?.cancel(false); queue.addFirst(it.item) }
-            activeProbe = null
-            persistLocked()
+            val probe = activeProbe; activeProbe = null
+            if (probe != null) {
+                queue.addFirst(probe.item)
+                release { probe.timeout?.cancel(false) }
+            }
+            release { persistLocked() }
         }
-        releaseWakeLock()
-        cancelNotification()
-        worker.queue.clear()
-        actionWorker.queue.clear()
-        worker.shutdown()
-        actionWorker.shutdown()
+        release { releaseWakeLock() }
+        release { cancelNotification() }
+        release { worker.queue.clear() }
+        release { actionWorker.queue.clear() }
+        release { worker.shutdown() }
+        release { actionWorker.shutdown() }
         hooker = null
     }
 
