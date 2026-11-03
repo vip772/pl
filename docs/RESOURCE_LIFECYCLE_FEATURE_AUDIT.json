@@ -5680,7 +5680,7 @@
     {
       "feature": "ScriptPluginFeature",
       "source": "app/src/main/java/t/mma/hooks/items/script/ScriptPluginFeature.kt",
-      "status": "每个启用区间新建 ScriptHookGeneration 独占四张 DexInstallScheduler.Installation 票据、ScriptMessageHook/ScriptMemberChangeHook 两份本代订阅与好友申请监听租约；关闭顺序固定为取消票据->撤销本代订阅->关闭运行时->归还租约；未启动的代 close() 为空操作，取得租约期间被关闭则就地归还租约。共享安装点（视频号详情、发送按钮）只由本代发起、不撤销。五阶段专项验证全绿（test_script_plugin_scope.py，1181 行，exit=0，新增 Phase C2 真编译闸门），20 条突变全部捕获（mutate_script_plugin_scope.py，20/20，ALL MUTANTS CAUGHT），已登记回归清单 132 项；CI 实跑 Gradle 曾在此条目抓出 ScriptNewFriendHook.kt:362:23 编译错误并已修复；实机验收待闭环",
+      "status": "每个启用区间新建 ScriptHookGeneration 独占四张 DexInstallScheduler.Installation 票据、ScriptMessageHook/ScriptMemberChangeHook 两份本代订阅与好友申请监听租约；关闭顺序固定为取消票据->撤销本代订阅->关闭运行时->归还租约；未启动的代 close() 为空操作，取得租约期间被关闭则就地归还租约。共享安装点（视频号详情、发送按钮）只由本代发起、不撤销。五阶段专项验证全绿（test_script_plugin_scope.py，1181 行，exit=0，新增 Phase C2 真编译闸门），20 条突变全部捕获（mutate_script_plugin_scope.py，20/20，ALL MUTANTS CAUGHT），已登记回归清单 132 项；CI 实跑 Gradle 曾在此条目抓出 ScriptNewFriendHook.kt:362:23 编译错误并已修复，修复后 CI run 41578229852 整条工作流 success；实机验收待闭环",
       "evidence": [
         "17: registerSettingsProvider(ScriptPluginSettingsProvider())",
         "20: override fun onFeatureInstall(context: FeatureContext) {",
@@ -5707,7 +5707,7 @@
       ],
       "openFindings": [
         "109 入口最终核准仍 0/109、七阶段 0/7；本条目专项通过不等于实机验收。",
-        "CI 实跑 Gradle 已抓出并修复一例真实编译错误，但本地未复跑完整 Gradle/Android/R8 构建，构建转绿与真实微信 8.0.78 会话（回调线程、View 复用、内存回收）均待验证；deviceAcceptance 仍为 false。"
+        "CI 已实跑 Gradle：修复前失败、修复后 run 41578229852 success；但本地未复跑完整 Gradle/Android/R8 构建，真实微信 8.0.78 会话（回调线程、View 复用、内存回收）仍待验证；deviceAcceptance 仍为 false。"
       ],
       "resolvedFindingEvidence": [
         {
@@ -5833,7 +5833,7 @@
             "docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.ScriptPluginFeature.buildEvidence"
           ],
           "remainingOpen": true,
-          "boundary": "CI 已实跑 Gradle 并据此修掉一例真实编译错误；本地仍只有定向 K2JVMCompiler 编译与合成 JVM 边界执行，不等于 Android/R8 构建通过，也不等于实机验收。"
+          "boundary": "CI 已实跑 Gradle 并在修复后转绿（run 41578229852 success）；本地仍只有定向 K2JVMCompiler 编译与合成 JVM 边界执行，不等于实机验收。"
         }
       ]
     }

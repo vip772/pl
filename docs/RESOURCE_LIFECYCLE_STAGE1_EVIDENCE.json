@@ -1878,7 +1878,18 @@
         "fix": "decodeXml 回退为 b20c093^ 的字面 replace 写法（429 -> 426 行）",
         "gradleWrapper": "9.7.0",
         "localGradleRun": false,
-        "note": "这是本项目唯一一次真实 Gradle 证据，来源为 CI 实跑日志，不是本地构建；构建是否转绿需等 CI 复跑。"
+        "note": "CI 实跑是本项目唯一的真实 Gradle 证据（非本地构建）。修复前 run 41568047302 于 :app:compileReleaseKotlin 失败；修复后 run 41578229852（headSha 43aa6ec）整条工作流 success，构建当前频道 APK 步骤 success，无失败步骤。本地仍未跑 Gradle/Android/R8，实机验收仍为 0。",
+        "ciRunAfterFix": {
+          "id": 41578229852,
+          "workflow": "安卓单频道构建",
+          "headSha": "43aa6eccb83ed8fb5ccec2e73eae90797a5d0f62",
+          "conclusion": "success",
+          "startedAt": "2026-11-03T04:27:25Z",
+          "updatedAt": "2026-11-03T04:35:56Z",
+          "jobConclusion": "success",
+          "buildStep": "构建当前频道 APK",
+          "failedSteps": 0
+        }
       }
     }
   },

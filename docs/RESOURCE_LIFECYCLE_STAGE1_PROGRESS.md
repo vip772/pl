@@ -2,7 +2,7 @@
 
 - 固定基准：`caa675c`。当前工作分支：`dev`。代码收口提交 `b20c093`（第22～28号，79 文件），其后文档勘误 `ea46e35`、`0ea165e`，随后 CI 编译失败修复 `d6fb05a`（ScriptNewFriendHook 回退 decodeXml + 真编译闸门）；恢复时一律用 `git -C /root/pl log --oneline -3` 与 `git status --porcelain` 实测当场 HEAD 与工作区，不要照抄本行哈希。
 - 当前阶段：**第1项进行中，总清单0/7（0%阶段完成）**。109项历史首轮复核不等于109项最终闭环；第1项内 109 个入口的最终核准仍为 **0/109**。
-- 第22～28号累计改动（79 文件）已在 `b20c093` 一次性中文提交并推送；文档勘误以 `ea46e35`/`0ea165e` 推送。`b20c093` 树本身在 GitHub Actions 上编译失败（`:app:compileReleaseKotlin`，唯一 Kotlin 错误 ScriptNewFriendHook.kt:362:23 Unresolved reference `'single'`），已由 `d6fb05a` 修复并推送；构建是否转绿以 CI 复跑为准。
+- 第22～28号累计改动（79 文件）已在 `b20c093` 一次性中文提交并推送；文档勘误以 `ea46e35`/`0ea165e` 推送。`b20c093` 树本身在 GitHub Actions 上编译失败（`:app:compileReleaseKotlin`，唯一 Kotlin 错误 ScriptNewFriendHook.kt:362:23 Unresolved reference `'single'`），已由 `d6fb05a` 修复并推送；修复后 CI run `41578229852`（headSha `43aa6ec`）整条工作流 success、构建 APK 步骤 success，构建已转绿。
 - 首个检查点当时的「不提交、不推送」约定已作废；后续每个大项完成后统一中文提交并推送，不得把单个入口的专项通过当作大项完成。
 - 阅读规则：`## 接续：第N号…` 各小节是**当时的归档记录**，里面出现的「未提交未推送」「下一入口第M号」只描述该次收口瞬间，不是当前状态；当前状态以上面三行 + 文末「编号勘误」为准。
 
@@ -252,3 +252,4 @@
 - 全树同类排查：`b20c093` 新增 11067 行，扫描 928 个 `.kt`/`.java` 文件的六种 `Char` 误用形态（`single/first/last/toList/toCharArray/joinToString`）全部 none，转义损坏只有已修的这一处。
 - 证据：`docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json`:featureContinuations.ScriptPluginFeature 已换为修复后的两份日志（`test_script_plugin_scope.log` 1276 字节 SHA256 `e46b83678988dc4a0c58e2aa17b1f0c6b2f12d2cb028f521d401209e5ee9182b`、`mutate_script_plugin_scope.log` 4165 字节 SHA256 `076e92bbb7237e4dbff6267366c93ce7e8a09ef6b7d02fb5cef24e263da350e8`，原始日志在 `/tmp/pl-stage1-20261103-scriptplugin2/`），10 个源码指纹、5 条突变定性记录、8 条 deferred，并新增 `buildEvidence` 记录本次 CI 故障。
 - 边界：这是本项目唯一一次真实 Gradle 证据，来源是 CI 实跑，不是本地构建；本地未跑 Gradle/Android/R8，构建转绿须等 CI 复跑验证。仍未做设备验收，109 入口核准仍 0/109，七阶段 0/7，`deviceAcceptance` 仍 false。`ContactProfilePrefetcher.kt` 是 `b20c093` 改动的 35 个 `.kt` 里唯一仍无真实编译覆盖的文件（`test_realtail_workers.py` 只把源码当字符串拼进 `Check.kt`），同型闸门尚未补。
+- CI 转绿实测（2026-11-03）：`gh run view 41578229852` 返回 `conclusion=success`、`headSha=43aa6eccb83ed8fb5ccec2e73eae90797a5d0f62`、耗时 8m31s；作业 `build` 结论 success，步骤「构建当前频道 APK」success，全工作流无失败步骤（修复前 run `41568047302` 为 failure）。这条记录已写入 `docs/RESOURCE_LIFECYCLE_STAGE1_EVIDENCE.json:featureContinuations.ScriptPluginFeature.buildEvidence.ciRunAfterFix`。仍须明确：这是 CI 上的 Gradle 构建证据，不是本地构建，也不是实机验收；`deviceAcceptance` 仍为 false。
