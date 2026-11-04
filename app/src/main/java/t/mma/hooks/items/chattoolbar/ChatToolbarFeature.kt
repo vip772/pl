@@ -39,28 +39,25 @@ class ChatToolbarFeature : BaseFeature() {
         preferences.registerOnSharedPreferenceChangeListener(listener)
         subscribe(Events.DexReady::class.java) {
             synchronized(this) {
-                val current = runtime
-                if (active && current != null) installation?.schedule { current.installDexHooks() }
+                if (active) updateRuntime(context, preferences)
             }
         }
         updateRuntime(context, preferences)
     }
     @Synchronized
     private fun updateRuntime(context: FeatureContext, preferences: SharedPreferences) {
-        if (!preferences.getBoolean(ChatToolbarSettings.KEY_ENABLE, ChatToolbarSettings.DEFAULT_ENABLE)) {
-            stopRuntime()
+        // Footer positioning also covers the toolbar-OFF input-row case. Only
+        // native grid installation is enable-gated; its ticket is renewed on re-enable.
+        if (runningResources != null) {
+            updateGridInstallation(preferences)
             return
         }
-        if (runningResources != null) return
         val resources = FeatureResourceScope { logError("工具栏运行时释放失败", it) }
         runningResources = resources
         try {
             val current = ChatToolbarRuntime(context, ::logRuntimeError)
             runtime = current
             resources.register { current.destroy(); if (runtime === current) runtime = null }
-            val ownedInstall = DexInstallScheduler.installation(ID, name())
-            installation = ownedInstall
-            resources.register { ownedInstall.close(); if (installation === ownedInstall) installation = null }
             current.installBaseHooks()
             val subscription = WeChatApis.lifecycle()?.subscribe { event ->
                 if (event.isDestroy) current.onActivityDestroyed(event.activity)
@@ -68,13 +65,25 @@ class ChatToolbarFeature : BaseFeature() {
             if (subscription != null) resources.register {
                 KavaReflector.invoke(KavaReflector.findMethod(subscription.javaClass, "unsubscribe"), subscription)
             }
-            ownedInstall.schedule { current.installDexHooks() }
+            updateGridInstallation(preferences)
         } catch (error: Throwable) {
             stopRuntime()
             logError("工具栏运行时启动失败", error)
         }
     }
+    private fun updateGridInstallation(preferences: SharedPreferences) {
+        if (!preferences.getBoolean(ChatToolbarSettings.KEY_ENABLE, ChatToolbarSettings.DEFAULT_ENABLE)) {
+            installation?.close()
+            installation = null
+            return
+        }
+        val current = runtime ?: return
+        val ticket = installation ?: DexInstallScheduler.installation(ID, name()).also { installation = it }
+        ticket.schedule { current.installDexHooks() }
+    }
     private fun stopRuntime() {
+        installation?.close()
+        installation = null
         val resources = runningResources
         runningResources = null
         resources?.close()

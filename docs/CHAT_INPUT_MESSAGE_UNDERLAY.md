@@ -4,12 +4,20 @@
 
 ## 聊天工具栏与新消息提示避让
 
-在微信 8.0.78 解码证据中，`ss.xml` 的 `ChattingContent`（`bki`）包含右下角新消息提示 `bm2`，`ChatFooter`（`k52`）是其后续同级输入区；微信原生 `hh.R0(IZ)` 会按提示状态更新其 `FrameLayout.LayoutParams` bottom margin，提示点击监听仍由微信设置。聊天工具栏模块则把 `Hchat:ChatToolbar` 注入 `ChatFooter` 子树。
+### 2026-11-04 实际目标容器纠正
 
-2026-11-04 容器修正：避让责任移至工具栏所有的 `ChatToolbarNewMessagePosition`，不再依赖悬浮标题栏启用或刷新。仅在微信 **8.0.78/3180**，沿 footer 祖先确认 `ChattingUILayout`，并校验 `bki` 的真实类型为 `ChattingContent`、`bm2` 直接属于该容器且使用底部 gravity 后生效。
-工具栏可见且附着时登记预绘制监听，按实际屏幕坐标让提示底部屏幕Y坐标不超过工具栏顶部减 8dp；**提示完全位于工具栏下方、尚未相交也需要上移**。只修改自有 `translationY`，不写微信 bottomMargin，不更换原生 LayoutParams、点击监听或父容器。原生位置/外部 translation 改写后重新记录基线；恢复仅在当前值仍为模块最后写入值时进行，避免覆盖外部更新。
-关闭工具栏、空工具栏、脱离窗口、Activity 销毁和运行时销毁均移除监听并恢复自有位移；重新显示时幂等附着。稳定可见帧不请求布局、不重复写属性，已找到的提示直接缓存，不每帧遍历 footer；错误限频记录。未验证版本或容器不符不修改。
-验证：`test_chat_toolbar_new_message_chip.py` 执行完整生产协调器的合成容器回归（完全位于下方、10000个整数/小数基线稳定帧、原生位置变化、DPI、隐藏、gravity、外部所有权、延迟出现、错误容器、版本门、关闭重开）；`check_chat_toolbar_chip_contract_sdk.py` 编译完整协调器并保留私有常量访问负向测试；`check_chat_toolbar_runtime_sdk.py` 编译完整生产工具栏及标题栏接线，依赖项目桩和真实 Android SDK/DexKit 类型。**定向通过不代表 Android 绘制/触摸或微信实机通过**，最终构建与实机状态见本轮独立证据文件，不沿用旧提交构建结果。
+上一轮把 `bm2` 当成“条新消息”，并引用 `hh.R0(IZ)` 作为其行为依据，这是错误对应。重新核对微信 **8.0.78/3180** 的原始 APK 二进制布局 `r/p/ss.xml`、资源表和 Smali：
+- `hh.a()` 取 `0x7f0a0fc0`（`bm4`），`hh.S0(I)` 使用 `b2_`（`%d条新消息`）更新文本并设置原生点击监听，`hh.R0(IZ)` 在同一 View 上切换顶部/底部 gravity；这是截图中实际的新消息/历史消息提示。
+- `sk.a()` 取 `0x7f0a0fbd`（`bm2`），源码标识 `QuoteMsgTongueComponent`，这是引用消息提示，不能用它代替新消息提醒。
+- 两者均直接属于 `ChattingContent`（`bki`）；`ChatFooter`（`k52`）是 `ChattingScrollLayout` 内后续同级。沉浸式 underlay 扩展 content，但保留 footer 原生布局及触摸区域，故只避开工具栏可见条目、不避开 footer 整体命中范围，不能充分约束点击位置。
+
+`ChatToolbarNewMessagePosition` 现在分别记录两个 View 的位移所有权，仅处理可见底部 gravity；顶部历史消息提示继续交给原生和既有悬浮标题栏。工具栏可见时以工具栏顶部为锚，关闭/空工具栏时以 `ssr` 输入行为锚，同时约束在 footer 顶部和 content 底边之上，留 8dp 间隔，且整个提示必须留在原生 content 父容器内。不重挂提示、不改原生 LayoutParams、margin、点击/触摸监听，不强行提升 Z 或拦截全局触摸。
+
+定位观察者归 footer 生命周期所有，而非工具栏显示状态；关闭工具栏仅隐藏自有行并清除其按钮，保留输入框避让。工具面板 Dex 安装票据关闭并清空，采集/主动初始化/测量改写均检查启用状态；重新启用更新票据并初始化已知面板。detach、Activity 销毁、功能销毁或异常时释放观察者并只恢复仍归本模块所有的位移。
+
+稳定帧不请求布局、不重复设置相同位移；两个目标按 childCount/旧 View 脱离来失效缓存，隐藏或仅顶部提示时不读取屏幕坐标；复用坐标数组，无轮询、无新增线程或延迟任务。未验证微信版本或容器不符不移动提示。以上为源码约束，不能代替实机流畅度测量。
+
+本次用户明确不做本地构建，因此**未执行 Gradle、Kotlin/SDK 编译、APK/R8 构建或需要编译的旧测试**。执行 `scripts/check_chat_new_message_position_static.py`：源码契约、旧提交错误目标负向检查、180 个独立几何模型用例（180000 次稳定迭代）、原生资源/Smali 对照均通过。独立 Python 模型不是生产 Kotlin 执行，更不是 Android 绘制/触摸验证。既有 Kotlin 合成容器测试已更新 bm4、关闭工具栏、键盘及 footer 边界夹具，本轮未运行，不沿用历史通过结论。完整证据与待验收矩阵见 [本轮修复记录](CHAT_NEW_MESSAGE_CONTAINER_FIX_20261104.md)。
 
 ## 逆向依据
 
@@ -44,7 +52,7 @@ footer内结构性ViewGroup统一禁用整块按压反馈，避免原生pressed�
 ## 实机验收后的诊断清理
 用户确认输入栏透明及贴底运行正常。移除CHROMEINPUT_DIAG快照、祖先链、遮挡子树扫描、仅用于诊断的EditText查找与缓存，以及CHROMEINPUT/CHATPART相关调试输出。保留screenRect/intersectionRect：它们参与底部尾部覆盖计算，属于功能。保留布局、透明及错误恢复逻辑。清理后真实SDK编译和模型回归通过。
 
-## 2026-11-04 统一提交前避让复核
+## 历史记录：2026-11-04 统一提交前避让复核（目标对应已被上文纠正）
 原始屏幕重叠判断会在模块抬高提示后读取已修改的位置，下次布局可能恢复原值并来回振荡。现从当前坐标加回模块已施加的边距差，重建原生基线，并核查完整矩形交叠；待布局时不重复改写。回归直接提取执行生产apply/restore方法，覆盖5000次稳定布局、工具栏移动、横纵不交叠、关闭、待布局、原生改写及恢复。使用最小View桩，非微信实机或完整标题栏SDK/APK验收。
 
 ## 2026-11-04 构建失败纠正

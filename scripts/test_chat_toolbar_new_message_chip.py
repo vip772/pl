@@ -1,3 +1,4 @@
+# Updated fixtures are intentionally NOT executed in the 2026-11-04 fix: user forbids local builds.
 """Execute the complete production coordinator with deterministic native-container fixtures."""
 from pathlib import Path
 import subprocess,tempfile
@@ -7,7 +8,7 @@ runtime=(src.parent/'ChatToolbarRuntime.kt').read_text()
 header=(src.parent.parent/'floatingchat/FloatingChatHeaderFeature.kt').read_text()
 assert 'applyBottomNewMessageChip' not in header and 'newMessageChipMargins' not in header
 assert 'binding.chipPosition.close()' in runtime
-assert runtime.count('chipPosition.attach()')==3 and 'chipPosition.close()' in runtime
+assert runtime.count('chipPosition.attach()')==4 and 'chipPosition.close()' in runtime
 stubs={
 'Package.kt':'''package android.content.pm
 class Info {var versionName="8.0.78";var longVersionCode=3180L;val versionCode=3180}
@@ -21,7 +22,7 @@ class Context {val packageName="com.tencent.mm";val packageManager=android.conte
 ''',
 'Resources.kt':'''package android.content.res
 class Metrics {var density=1f}
-class Resources {val displayMetrics=Metrics();fun getIdentifier(n:String,t:String,p:String)=when(n){"bki"->1;"bm2"->2;else->0}}
+class Resources {val displayMetrics=Metrics();fun getIdentifier(n:String,t:String,p:String)=when(n){"bki"->1;"bm2"->2;"bm4"->3;"ssr"->4;else->0}}
 ''',
 'View.kt':'''package android.view
 import android.content.Context
@@ -35,7 +36,7 @@ open class View {
  open fun <T:View> findViewById(id:Int):T?=if(this.id==id)this as T else null
  fun getLocationOnScreen(out:IntArray){out[0]=left;out[1]=kotlin.math.round(top+translationY).toInt()}
 }
-open class ViewGroup:View(){val children=mutableListOf<View>();fun add(v:View){children+=v;v.parent=this};override fun <T:View> findViewById(id:Int):T? {if(this.id==id)return this as T;for(v in children){v.findViewById<T>(id)?.let{return it}};return null}}
+open class ViewGroup:View(){val children=mutableListOf<View>();val childCount get()=children.size;fun add(v:View){children+=v;v.parent=this};override fun <T:View> findViewById(id:Int):T? {if(this.id==id)return this as T;for(v in children){v.findViewById<T>(id)?.let{return it}};return null}}
 object Gravity {const val BOTTOM=80;const val TOP=48;const val VERTICAL_GRAVITY_MASK=112}
 class ViewTreeObserver {var isAlive=true;val listeners=mutableListOf<OnPreDrawListener>();fun interface OnPreDrawListener{fun onPreDraw():Boolean};fun addOnPreDrawListener(l:OnPreDrawListener){listeners+=l};fun removeOnPreDrawListener(l:OnPreDrawListener){listeners-=l};fun frame(){listeners.toList().forEach{check(it.onPreDraw())}}}
 ''',
@@ -51,39 +52,48 @@ import android.view.*
 import android.widget.FrameLayout
 import com.tencent.mm.pluginsdk.ui.chat.*
 fun main(){
- val root=ChattingUILayout();val content=ChattingContent().apply{id=1};val footer=ViewGroup();val toolbar=View().apply{top=700;width=900;height=55};val chip=View().apply{id=2;left=700;top=765;height=40;width=180}
- root.add(content);root.add(footer);footer.add(toolbar);content.add(chip)
+ val root=ChattingUILayout();val content=ChattingContent().apply{id=1;height=900;width=1000};val footer=ViewGroup().apply{top=700;height=500;width=1000};val toolbar=View().apply{top=700;width=900;height=55};val chip=View().apply{id=2;left=700;top=765;height=40;width=180}
+ val input=View().apply{id=4;top=755;height=60;width=900};val history=View().apply{id=3;left=700;top=780;height=40;width=180;isShown=false}
+ root.add(content);root.add(footer);footer.add(input);footer.add(toolbar);content.add(chip);content.add(history)
  var errors=0;val owner=ChatToolbarNewMessagePosition(footer,toolbar){errors++}
- owner.attach();owner.attach();check(toolbar.viewTreeObserver.listeners.size==1)
- fun frame()=toolbar.viewTreeObserver.frame()
+ owner.attach();owner.attach();check(footer.viewTreeObserver.listeners.size==1)
+ fun frame()=footer.viewTreeObserver.frame()
  frame();check(chip.top+chip.translationY+chip.height==692f) // entirely BELOW toolbar, not overlapping
  val first=chip.translationY;val writes=chip.writes
  repeat(5000){frame();check(chip.translationY==first)};check(chip.writes==writes)
  chip.top=735;frame();check(chip.top+chip.translationY+chip.height==692f) // native margin/position rewrite
  toolbar.top=600;frame();check(chip.top+chip.translationY+chip.height==592f)
- toolbar.resources.displayMetrics.density=2f;frame();check(chip.top+chip.translationY+chip.height==584f)
+ footer.resources.displayMetrics.density=2f;frame();check(chip.top+chip.translationY+chip.height==584f)
  chip.top=400;frame();check(chip.translationY==0f) // native already above
- chip.top=765;frame();toolbar.isShown=false;frame();check(chip.translationY==0f)
+ chip.top=765;frame();toolbar.isShown=false;frame();check(chip.top+chip.translationY+chip.height==684f) // input fallback outside footer hit area
  toolbar.isShown=true;frame();check(chip.translationY<0f)
  (chip.layoutParams as FrameLayout.LayoutParams).gravity=Gravity.TOP;frame();check(chip.translationY==0f)
  (chip.layoutParams as FrameLayout.LayoutParams).gravity=Gravity.BOTTOM;frame()
  chip.translationY=7f;owner.close();check(chip.translationY==7f) // native owns unexpected translation
- check(toolbar.viewTreeObserver.listeners.isEmpty())
+ check(footer.viewTreeObserver.listeners.isEmpty())
  chip.translationY=0f;owner.attach();frame();owner.close();check(chip.translationY==0f)
  owner.close();check(errors==0)
  chip.translationY=0.25f;owner.attach();frame();val fractional=chip.translationY;val fractionalWrites=chip.writes
  repeat(5000){frame();check(chip.translationY==fractional)};check(chip.writes==fractionalWrites);owner.close();check(chip.translationY==0.25f)
- chip.translationY=0f;chip.left=1200;owner.attach();frame();check(chip.translationY==0f);owner.close();chip.left=700
+ chip.translationY=0f;chip.left=1200;owner.attach();frame();check(chip.translationY<0f);owner.close();chip.left=700
  content.children.remove(chip);chip.parent=null;owner.attach();frame();check(chip.translationY==0f)
  content.add(chip);frame();check(chip.translationY<0f);owner.close();check(chip.translationY==0f)
+ // Actual new-message target: top/history stays native; bottom/new-message moves.
+ owner.attach();history.isShown=true;(history.layoutParams as FrameLayout.LayoutParams).gravity=Gravity.TOP
+ frame();check(history.translationY==0f);(history.layoutParams as FrameLayout.LayoutParams).gravity=Gravity.BOTTOM
+ frame();check(history.top+history.translationY+history.height==584f)
+ toolbar.isShown=false;frame();check(history.top+history.translationY+history.height==684f)
+ footer.top=500;input.top=500;frame();check(history.top+history.translationY+history.height==484f) // keyboard
+ footer.isShown=false;frame();check(history.translationY==0f);footer.isShown=true
+ owner.close();check(history.translationY==0f);toolbar.isShown=true;footer.top=700;input.top=755
  val fake=ViewGroup().apply{id=1};root.children.remove(content);content.parent=null;root.add(fake)
- owner.attach();check(toolbar.viewTreeObserver.listeners.isEmpty());owner.close()
+ owner.attach();check(footer.viewTreeObserver.listeners.isEmpty());owner.close()
  root.children.remove(fake);root.add(content)
- footer.context.packageManager.info.versionName="8.0.77";owner.attach();check(toolbar.viewTreeObserver.listeners.isEmpty())
- footer.context.packageManager.info.versionName="8.0.78";footer.context.packageManager.info.longVersionCode=3181;owner.attach();check(toolbar.viewTreeObserver.listeners.isEmpty())
+ footer.context.packageManager.info.versionName="8.0.77";owner.attach();check(footer.viewTreeObserver.listeners.isEmpty())
+ footer.context.packageManager.info.versionName="8.0.78";footer.context.packageManager.info.longVersionCode=3181;owner.attach();check(footer.viewTreeObserver.listeners.isEmpty())
 
  check((chip.layoutParams as FrameLayout.LayoutParams).bottomMargin==24)
- println("PASS complete production toolbar coordinator: below-toolbar regression, 5000 no-write stable frames, native position rewrite, DPI, hide, top-gravity, translation ownership, idempotent cleanup and reattach; synthetic containers only")
+ println("PASS complete production footer coordinator: bm4 actual new-message vs bm2 quote, top-gravity preserved, toolbar-off fallback, keyboard/footer hit bounds, 10000 stable frames, native translation ownership and cleanup; synthetic containers only")
 }
 '''
 }

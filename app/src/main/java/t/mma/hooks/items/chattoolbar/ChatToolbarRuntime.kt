@@ -130,7 +130,11 @@ class ChatToolbarRuntime(
     fun installDexHooks(): Boolean {
         if (!active) return false
         val baseReady = installBaseHooks()
-        if (gridHookInstalled) return baseReady
+        if (!toolbarEnabled()) return baseReady
+        if (gridHookInstalled) {
+            runOnMain(::initializeKnownPanels)
+            return baseReady
+        }
         val initMethod = locateInitAppGridMethod() ?: return false
         val measureMethod = locatePanelMeasureMethod() ?: return false
         if (!active) return false
@@ -138,7 +142,7 @@ class ChatToolbarRuntime(
             hookResources.register(HookRegistry.get().hook(initMethod, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     panelFromHook(param)?.let { panel ->
-                        measureMethod?.let { preparePanelMeasure(panel, it) }
+                        if (toolbarEnabled()) preparePanelMeasure(panel, measureMethod)
                     }
                 }
 
@@ -197,6 +201,7 @@ class ChatToolbarRuntime(
                 setPadding(dp(activity, 8), dp(activity, 4), dp(activity, 8), dp(activity, 4))
             }
             val root = HorizontalScrollView(activity).apply {
+                visibility = View.GONE
                 tag = ChatToolbarSettings.TOOLBAR_TAG
                 isHorizontalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
@@ -242,7 +247,7 @@ class ChatToolbarRuntime(
                     bindings.remove(footer)
                 }
             })
-            if (root.isAttachedToWindow) chipPosition.attach()
+            if (footer.isAttachedToWindow) chipPosition.attach()
             rebuild(binding)
             panel?.let {
                 panelState(it)
@@ -285,9 +290,13 @@ class ChatToolbarRuntime(
         }
     }
 
+    private fun toolbarEnabled(): Boolean =
+        active && preferences.getBoolean(ChatToolbarSettings.KEY_ENABLE, ChatToolbarSettings.DEFAULT_ENABLE)
+
     private fun scheduleGridWatchdog(panel: View) {
+        if (!toolbarEnabled()) return
         mainHandler.postDelayed({
-            if (!active || panelState(panel).tools.isNotEmpty()) return@postDelayed
+            if (!toolbarEnabled() || panelState(panel).tools.isNotEmpty()) return@postDelayed
             val gridContainer = childAtPath(panel, 0, 0, 0) as? ViewGroup
             if (gridContainer != null && gridContainer.childCount > 0) {
                 scheduleSnapshot(panel)
@@ -299,6 +308,7 @@ class ChatToolbarRuntime(
     }
 
     private fun invokeInitAppGrid(panel: View) {
+        if (!toolbarEnabled()) return
         val method = initAppGridMethod ?: return
         runCatching {
             if (Modifier.isStatic(method.modifiers)) {
@@ -310,13 +320,13 @@ class ChatToolbarRuntime(
     }
 
     private fun scheduleSnapshot(panel: View, delayMs: Long = 0L) {
-        if (!active) return
+        if (!toolbarEnabled()) return
         val action = Runnable { snapshotTools(panel) }
         if (delayMs > 0L) mainHandler.postDelayed(action, delayMs) else panel.post(action)
     }
 
     private fun snapshotTools(panel: View) {
-        if (!active) return
+        if (!toolbarEnabled()) return
         val state = panelState(panel)
         val elapsed = SystemClock.uptimeMillis() - state.lastSnapshotAt
         if (state.lastSnapshotAt > 0L && elapsed < SNAPSHOT_DEBOUNCE_MS) {
@@ -333,6 +343,7 @@ class ChatToolbarRuntime(
     }
 
     private fun snapshotToolsNow(panel: View) {
+        if (!toolbarEnabled()) return
         val grids = ArrayList<GridView>()
         collectViews(panel) { view -> if (view is GridView) grids += view }
         if (grids.isEmpty()) return
@@ -403,9 +414,10 @@ class ChatToolbarRuntime(
 
     private fun rebuild(binding: ToolbarBinding) {
         val activity = binding.activity.get() ?: return
-        if (!preferences.getBoolean(ChatToolbarSettings.KEY_ENABLE, ChatToolbarSettings.DEFAULT_ENABLE)) {
+        if (!toolbarEnabled()) {
             binding.root.visibility = View.GONE
-            binding.chipPosition.close()
+            binding.row.removeAllViews()
+            if (binding.footer.get()?.isAttachedToWindow == true) binding.chipPosition.attach()
             return
         }
         val configs = ChatToolbarSettings.loadItems(preferences)
@@ -434,7 +446,7 @@ class ChatToolbarRuntime(
         val targetMinimum = if (row.childCount > 0 || waitingForNative) dp(activity, 48) else 0
         if (binding.root.minimumHeight != targetMinimum) binding.root.minimumHeight = targetMinimum
         binding.root.visibility = if (row.childCount > 0 || waitingForNative) View.VISIBLE else View.GONE
-        if (binding.root.isAttachedToWindow && binding.root.visibility == View.VISIBLE) {
+        if (binding.footer.get()?.isAttachedToWindow == true) {
             binding.chipPosition.attach()
         } else binding.chipPosition.close()
     }

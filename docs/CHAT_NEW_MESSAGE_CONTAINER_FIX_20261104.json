@@ -1,0 +1,25 @@
+{
+  "baseline": "5a24858fd1147b4ca09f33a9e8d0f687ed353f5c",
+  "branch": "dev",
+  "host_verified": "8.0.78/3180",
+  "scope": "新消息目标、footer/input避让和工具栏开关生命周期；不修改沉浸式背景及悬浮标题栏实现",
+  "runtime_log_sha256": "8d94a58d4a35bd9797b3868f0062a9303534dc675bef76ec5ff560e20e14e834",
+  "static_command": "python3 scripts/check_chat_new_message_position_static.py --decoded /sdcard/Download/wechat8078_decoded --apk /sdcard/Download/微信8078.apk",
+  "static_stdout": "PASS source contracts: bm4/bm2, footer-off ownership, scheduler renewal, native click preservation, bounded lookups, cleanup; old revision fails bm4 contract\nPASS independent geometry model: 180 cases, 180000 stable frames, footer/content bounds and keyboard/multiline anchor changes; not Android touch validation\nPASS native evidence: hh owns bm4/new-message text and bottom gravity; sk owns bm2/quote hint; both present in original binary XML\n{\"APK:r/p/ss.xml\": \"b61142fa5bdcd89cb550347695d628ff9a149411dd98ac242a46f38d79b3c0f1\", \"res/values/public.xml\": \"869d7d87973580fa8fb076d667007e7023831e61ffc965c16650c6f4b8c5f8c3\", \"smali_classes11/com/tencent/mm/ui/chatting/component/hh.smali\": \"bffb417e1261833062c6c1a5fdad5a8e3a67a87bc2549fc5cdae9ab22e628689\", \"smali_classes8/com/tencent/mm/ui/chatting/component/sk.smali\": \"66bbde669a8a88447133a554091b4eaae552c353a5e91ccededa21f31af86241\"}\nBOUNDARY: no Gradle, Kotlin/SDK compilation, APK build, R8 or device acceptance performed\n",
+  "source_sha256": {
+    "app/src/main/java/t/mma/hooks/items/chattoolbar/ChatToolbarFeature.kt": "89049d7468d07f9f664e7f393e703695f2bdf7379ed0488cc571975c9a17886f",
+    "app/src/main/java/t/mma/hooks/items/chattoolbar/ChatToolbarRuntime.kt": "d9bcc2a3680040a259ef56cb5c287a6a604959c7bbfe90d7405bba13c26d2718",
+    "app/src/main/java/t/mma/hooks/items/chattoolbar/ChatToolbarNewMessagePosition.kt": "14eb1d8059f1678d58b9ed9ecd8b5a4b31d553a7f1e666f635d40d7ca22b9c9f"
+  },
+  "not_performed": [
+    "Gradle",
+    "Kotlin/SDK编译",
+    "需编译的合成容器测试",
+    "APK/R8构建",
+    "微信实机点击验收",
+    "流畅度/帧耗时测量",
+    "其他微信版本横向验收"
+  ],
+  "device_acceptance_count": 0,
+  "note": "静态契约和独立数学模型通过不等于生产代码执行或实机验收。仅当前用户日志对应8.0.78/3180启用；不扩展未经核实的混淆资源映射。"
+}
