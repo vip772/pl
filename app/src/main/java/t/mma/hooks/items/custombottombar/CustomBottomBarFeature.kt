@@ -1894,7 +1894,13 @@ private class BottomBarNavigationAppearance(private val window: Window) {
 
     fun restore() {
         if (!applied) return
-        window.decorView.systemUiVisibility = originalSystemUiVisibility
+        // Restore only the navigation layout bits this owner writes. Replaying
+        // the whole snapshot erases a later background owner's LAYOUT_FULLSCREEN.
+        val layoutFlags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE or
+            View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+        val decor = window.decorView
+        decor.systemUiVisibility = (decor.systemUiVisibility and layoutFlags.inv()) or
+            (originalSystemUiVisibility and layoutFlags)
         window.navigationBarColor = originalNavigationBarColor
         if (!originalDrawsSystemBarBackgrounds) {
             window.clearFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS)

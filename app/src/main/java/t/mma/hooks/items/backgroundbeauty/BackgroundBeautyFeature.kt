@@ -665,13 +665,13 @@ private class BackgroundBeautyRuntime(
             findWechatVerifiedMethod(clazz, "B0")?.let { method ->
                 installed = hookOnce(method, after = { param ->
                     val activity = findActivity(param.thisObject) ?: return@hookOnce
-                    applyWechatStatusMasks(activity)
+                    applyWechatStatusMasks(activity, param.thisObject)
                 }) || installed
             }
             findWechatVerifiedMethod(clazz, "onConfigurationChanged", android.content.res.Configuration::class.java)?.let { method ->
                 installed = hookOnce(method, after = { param ->
                     val activity = findActivity(param.thisObject) ?: return@hookOnce
-                    applyWechatStatusMasks(activity)
+                    applyWechatStatusMasks(activity, param.thisObject)
                 }) || installed
             }
         }
@@ -3108,16 +3108,32 @@ private class BackgroundBeautyRuntime(
         if (view.minimumWidth != snapshot.originalMinimumWidth) view.minimumWidth = snapshot.originalMinimumWidth
         if (view.minimumHeight != snapshot.originalMinimumHeight) view.minimumHeight = snapshot.originalMinimumHeight
     }
-    private fun applyWechatStatusMasks(activity: Activity) {
+    private fun applyWechatStatusMasks(activity: Activity, mainUi: Any? = null) {
         if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY ||
             !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
             !hasBackgroundImage(BackgroundBeautySettings.Slot.WECHAT)) return
         val state = states[activity] ?: ensureState(activity)
-        // B0's og9 is a controller sibling, so page-root and cached-root scans miss it.
+        val decor = activity.window.decorView
+        // 8.0.78 B0 owns og9 through controller.g; nhm is MainUI.r. Resolve
+        // those actual instances even when their subtree is not attached to decor yet.
+        val controllerContainer = if (mainUi != null && chatChromeVersionName() == "8.0.78") {
+            KavaReflector.findMethodRecursive(mainUi.javaClass, "getController")
+                ?.let { KavaReflector.invoke(it, mainUi) }
+                ?.let { readNativeField(it, "g") as? View }
+        } else null
+        val nativeInset = if (controllerContainer != null) readNativeField(mainUi, "r") as? View else null
+        val masks = LinkedHashSet<View>()
         listOf("og9", "nhm").forEach { name ->
             val id = resourceId(name)
             if (id == 0) return@forEach
-            val mask = activity.window.decorView.findViewById<View>(id) ?: return@forEach
+            val nativeMask = if (name == "nhm") nativeInset?.takeIf { it.id == id }
+                else controllerContainer?.findViewById<View>(id)
+            (nativeMask ?: decor.findViewById<View>(id))?.let(masks::add)
+        }
+        val repairParents = resolveTarget(activity) == BackgroundBeautySettings.Slot.WECHAT &&
+            state.loadedBitmaps[BackgroundBeautySettings.Slot.WECHAT]?.bitmap?.isRecycled == false
+        val visited = Collections.newSetFromMap(IdentityHashMap<View, Boolean>())
+        masks.forEach { mask ->
             val owner = surfaceOwners[mask]
             if (owner !== state) {
                 if (owner != null) owner.surfaces.remove(mask)
@@ -3125,6 +3141,19 @@ private class BackgroundBeautyRuntime(
                 surfaceOwners.remove(mask)
             }
             setTransparentSurface(state, mask, BackgroundBeautySettings.Slot.WECHAT, clearForeground = true)
+            if (repairParents) applyWechatStatusParents(state, mask, visited)
+        }
+    }
+    private fun applyWechatStatusParents(state: HostState, mask: View, visited: MutableSet<View>) {
+        val decor = state.activity.window.decorView
+        var parent = mask.parent as? View
+        // Follow only the two native masks' ancestors, never their list/row siblings.
+        // Decor owns the bitmap; an embedded chat or another bitmap owns its subtree.
+        while (parent != null && parent !== decor && visited.add(parent)) {
+            val snapshot = state.surfaces[parent]
+            if (snapshot?.appliedBitmap != null || snapshot?.slot == BackgroundBeautySettings.Slot.CHAT) return
+            setTransparentSurface(state, parent, BackgroundBeautySettings.Slot.WECHAT)
+            parent = parent.parent as? View
         }
     }
     private fun applySystemBars(state: HostState) {
