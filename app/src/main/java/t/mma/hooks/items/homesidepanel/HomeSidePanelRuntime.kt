@@ -320,7 +320,16 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 if (wrap.layoutParams.width != side || wrap.layoutParams.height != side) {
                     wrap.layoutParams = LinearLayout.LayoutParams(side, side)
                 }
+                val image = wrap.findViewWithTag<View>("hchat_home_avatar") ?: avatar
+                if (image != null) {
+                    val imageSide = minOf(dp(38), side)
+                    val imageLp = image.layoutParams as? android.widget.FrameLayout.LayoutParams
+                    if (imageLp == null || imageLp.width != imageSide || imageLp.height != imageSide || imageLp.gravity != Gravity.CENTER) {
+                        image.layoutParams = android.widget.FrameLayout.LayoutParams(imageSide, imageSide, Gravity.CENTER)
+                    }
+                }
             }
+
             val nick = name ?: return false
             if (host.width <= 0 || host.height < dp(38)) return false
             val buttonsId = hostResourceId("coz")

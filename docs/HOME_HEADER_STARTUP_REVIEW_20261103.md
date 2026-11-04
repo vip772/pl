@@ -56,3 +56,11 @@ python3 -S scripts/test_weather_moments_surface.py --native-dir /tmp/pl-card-nat
 修复仅作用于昵称头像：`sizeHeader()` 返回宿主是否具备有效宽度和至少 `38dp` 高度；`refresh()` 在尺寸未就绪时将自定义标题根设为 `INVISIBLE`，保留布局占位，宿主下一次已有全局布局回调达到条件后再显示。没有新增线程、计时器、扫描或监听器；每次原有刷新只增加一次布尔尺寸判定。头像本体仍为 `38dp`，没有改动收藏卡片时间、其它首页功能或共享背景功能。
 
 源码契约回归：`python3 -S scripts/test_home_profile_header_ready.py` 通过。该回归不替代 Android/R8 构建和实机重启、切页、滚动验收。
+
+## 头像半裁剪复核与针对性修复（2026-11-04）
+
+复核截图问题后发现上述修复没有约束头像子视图尺寸：`sizeHeader()` 将 `avatarWrap` 缩至宿主高度，但内部 `ImageView` 仍固定为 `38dp` 并居中。当宿主在启动/布局切换期间高度小于 `38dp` 时，即使标题根已延迟显示，子视图仍可能超出 wrapper 并被宿主裁剪；原有契约只验证宿主门槛及初始 38dp 值，未检查运行时父子尺寸关系。
+
+本次在原有 `sizeHeader()` 调整点同步将头像 ImageView 限制为 `min(38dp, wrapperSide)`，仅在宽高/Gravity 参数变化时更新 LayoutParams。宿主稳定时头像仍保持 38dp；窄/矮宿主期间不再让子视图越出 wrapper。未修改图片解码、头像效果 foreground、名称/状态文本、抽屉入口、滚动标题及共享首页背景逻辑；每次既有刷新仅多做一次轻量参数比较，不增加回调、线程、计时器或扫描。
+
+源码契约已扩展并通过：`python3 -S scripts/test_home_profile_header_ready.py` 验证运行时子头像尺寸不超过 wrapper。当前环境无 `android.jar`，未能执行 Android SDK 定向编译；静态契约检查不是编译或实机验收。仍需用户设备冷启动及页面切换实测确认视觉结果。

@@ -23,8 +23,12 @@ assert "View.INVISIBLE" in refresh
 for forbidden in ("Thread(", "Thread.sleep", "postDelayed", "postOnAnimation", "ViewTreeObserver"):
     assert forbidden not in size, forbidden
 
-# The avatar remains a stable 38dp child; only its wrapper is resized to the host.
+# Keep the image inside the dynamically sized wrapper to avoid clipping by an ancestor.
+assert "val imageSide = minOf(dp(38), side)" in size
+assert "imageLp.width != imageSide || imageLp.height != imageSide" in size
+assert "FrameLayout.LayoutParams(imageSide, imageSide, Gravity.CENTER)" in size
 assert "FrameLayout.LayoutParams(dp(38), dp(38), Gravity.CENTER)" in text
 print("PASS profile header readiness: undersized host stays invisible, stable host becomes visible")
-print("PASS profile header cost: one size check per existing refresh, no new timer/thread/listener")
+print("PASS avatar bounds: image dimensions never exceed the wrapper, preserving the normal 38dp avatar")
+print("PASS profile header cost: bounded parameter comparison per existing refresh, no new timer/thread/listener")
 print("BOUNDARY: source contract only; no Android/R8 build or device UI verification")
