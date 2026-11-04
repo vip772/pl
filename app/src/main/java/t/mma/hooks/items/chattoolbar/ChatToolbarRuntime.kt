@@ -187,7 +187,7 @@ class ChatToolbarRuntime(
                 logOnce("toolbar_host", "未找到聊天输入框工具栏挂载容器")
                 return@runOnMain
             }
-            val old = host.findViewWithTag<View>(TOOLBAR_TAG)
+            val old = host.findViewWithTag<View>(ChatToolbarSettings.TOOLBAR_TAG)
             if (old != null) return@runOnMain
             val panel = findViewByClassName(footer, APP_PANEL_CLASS)
             val row = LinearLayout(activity).apply {
@@ -196,7 +196,7 @@ class ChatToolbarRuntime(
                 setPadding(dp(activity, 8), dp(activity, 4), dp(activity, 8), dp(activity, 4))
             }
             val root = HorizontalScrollView(activity).apply {
-                tag = TOOLBAR_TAG
+                tag = ChatToolbarSettings.TOOLBAR_TAG
                 isHorizontalScrollBarEnabled = false
                 overScrollMode = View.OVER_SCROLL_NEVER
                 isFillViewport = false
@@ -760,7 +760,6 @@ class ChatToolbarRuntime(
         const val CHAT_FOOTER_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChatFooter"
         const val APP_PANEL_CLASS = "com.tencent.mm.pluginsdk.ui.chat.AppPanel"
         const val CHAT_PACKAGE = "com.tencent.mm.pluginsdk.ui.chat"
-        const val TOOLBAR_TAG = "Hchat:ChatToolbar"
         const val CACHE_SCHEMA = "chat_toolbar_v1"
         const val CACHE_INIT_APP_GRID = "init_app_grid"
         const val CACHE_PANEL_MEASURE = "panel_measure"

@@ -54,6 +54,6 @@ libs=Path('/tmp/pl-kotlin-libs');std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
 with tempfile.TemporaryDirectory() as td:
  p=Path(td);(p/'Test.kt').write_text(fixture)
  (p/'Gravity.kt').write_text('package android.view\nobject Gravity {const val BOTTOM=80;const val TOP=48;const val RIGHT=5;const val VERTICAL_GRAVITY_MASK=112;const val HORIZONTAL_GRAVITY_MASK=7}')
- (p/'Toolbar.kt').write_text('package t.mma.hooks.items.chattoolbar\nobject ChatToolbarSettings {const val KEY_ENABLE="enable";const val DEFAULT_ENABLE=false};object ChatToolbarRuntime {const val TOOLBAR_TAG="toolbar"}')
+ (p/'Toolbar.kt').write_text('package t.mma.hooks.items.chattoolbar\nobject ChatToolbarSettings {const val KEY_ENABLE="enable";const val DEFAULT_ENABLE=false;internal const val TOOLBAR_TAG="toolbar"}')
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(p/'test.jar')]+[str(x) for x in p.glob('*.kt')],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{p/"test.jar"}:{std}','TestKt'],check=True,timeout=15)

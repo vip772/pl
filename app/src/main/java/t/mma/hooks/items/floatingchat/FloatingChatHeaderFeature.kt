@@ -784,7 +784,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
             t.mma.hooks.items.chattoolbar.ChatToolbarSettings.DEFAULT_ENABLE
         )
         val toolbar = if (toolbarEnabled) find(layout) {
-            it.tag == t.mma.hooks.items.chattoolbar.ChatToolbarRuntime.TOOLBAR_TAG
+            it.tag == t.mma.hooks.items.chattoolbar.ChatToolbarSettings.TOOLBAR_TAG
         } as? View else null
         val toolbarVisible = toolbar?.visibility == View.VISIBLE && toolbar.height > 0 && toolbar.isShown
         if (!toolbarEnabled || !toolbarVisible || !chip.isShown) {

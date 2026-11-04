@@ -45,3 +45,7 @@ footer内结构性ViewGroup统一禁用整块按压反馈，避免原生pressed�
 
 ## 2026-11-04 统一提交前避让复核
 原始屏幕重叠判断会在模块抬高提示后读取已修改的位置，下次布局可能恢复原值并来回振荡。现从当前坐标加回模块已施加的边距差，重建原生基线，并核查完整矩形交叠；待布局时不重复改写。回归直接提取执行生产apply/restore方法，覆盖5000次稳定布局、工具栏移动、横纵不交叠、关闭、待布局、原生改写及恢复。使用最小View桩，非微信实机或完整标题栏SDK/APK验收。
+
+## 2026-11-04 构建失败纠正
+完整检查用户提供的 `logs_113357264731.zip`（SHA256 `cab4306880402b367e8aeaf924095b1f1b64a83821a192b62d6ceee0fab9f24f`）全部18个文件；汇总日志与APK步骤重复报告同一个Kotlin错误：`FloatingChatHeaderFeature.kt:787:72` 访问 `ChatToolbarRuntime` 的private companion。缓存ReserveCacheError发生于失败后的post步骤；SDK37/AGP、原生库strip、Gradle10、Node/action弃用、wrapper权限为其他警告，不是此次Kotlin失败原因。不通过升级依赖或屏蔽警告掩盖源码错误。
+将工具栏View标记移至既有 `ChatToolbarSettings` 的internal常量；挂载、查重、避让三个调用点统一引用，标记字符串保持不变，运行时companion继续private。旧测试把运行时替换成公开object，未保留访问边界，导致漏检。新增 `check_chat_toolbar_chip_contract_sdk.py` 用真实设置源文件与原样private companion编译生产apply/restore方法，并用旧提交原样声明做负向控制，确认同类错误确实能被拦截。该检查不是完整APK或R8验收。

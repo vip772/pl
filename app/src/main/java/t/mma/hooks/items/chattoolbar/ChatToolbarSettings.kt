@@ -11,6 +11,8 @@ data class ChatToolbarItemConfig(
 )
 
 object ChatToolbarSettings {
+    // Shared View identity for toolbar attachment and cross-feature layout coordination.
+    internal const val TOOLBAR_TAG = "Hchat:ChatToolbar"
     const val PREFS_NAME = "Hchat_chat_toolbar_config"
     const val KEY_ENABLE = "enable"
     const val KEY_DISPLAY_MODE = "display_mode"
