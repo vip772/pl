@@ -666,6 +666,10 @@ private class BackgroundBeautyRuntime(
                 installed = hookOnce(method, after = { param ->
                     val activity = findActivity(param.thisObject) ?: return@hookOnce
                     applyWechatStatusMasks(activity, "main-tab-resume")
+                    // B0 lays out the status mask after returning; repair once after that frame.
+                    activity.window.decorView.postOnAnimation {
+                        if (!destroyed) applyWechatStatusMasks(activity, "main-tab-resume-frame")
+                    }
                 }) || installed
             }
             findWechatVerifiedMethod(clazz, "onConfigurationChanged", android.content.res.Configuration::class.java)?.let { method ->
