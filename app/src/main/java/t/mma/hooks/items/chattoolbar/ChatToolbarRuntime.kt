@@ -167,6 +167,7 @@ class ChatToolbarRuntime(
         runOnMain {
             synchronized(bindings) {
                 bindings.values.toList().forEach { binding ->
+                    runCatching { binding.chipPosition.close() }.onFailure { logger("新消息提示资源释放失败", it) }
                     runCatching { (binding.root.parent as? ViewGroup)?.removeView(binding.root) }
                 }
                 bindings.clear()
@@ -208,12 +209,16 @@ class ChatToolbarRuntime(
                     )
                 )
             }
+            val chipPosition = ChatToolbarNewMessagePosition(footer, root) {
+                logger("聊天工具栏新消息提示定位失败", it)
+            }
             val binding = ToolbarBinding(
                 activity = WeakReference(activity),
                 footer = WeakReference(footer),
                 panel = WeakReference<View>(panel),
                 root = root,
-                row = row
+                row = row,
+                chipPosition = chipPosition
             )
             bindings[footer] = binding
             host.addView(
@@ -226,13 +231,18 @@ class ChatToolbarRuntime(
             )
             root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
                 override fun onViewAttachedToWindow(view: View) {
-                    if (active) bindings[footer] = binding
+                    if (active) {
+                        bindings[footer] = binding
+                        chipPosition.attach()
+                    }
                 }
 
                 override fun onViewDetachedFromWindow(view: View) {
+                    chipPosition.close()
                     bindings.remove(footer)
                 }
             })
+            if (root.isAttachedToWindow) chipPosition.attach()
             rebuild(binding)
             panel?.let {
                 panelState(it)
@@ -395,6 +405,7 @@ class ChatToolbarRuntime(
         val activity = binding.activity.get() ?: return
         if (!preferences.getBoolean(ChatToolbarSettings.KEY_ENABLE, ChatToolbarSettings.DEFAULT_ENABLE)) {
             binding.root.visibility = View.GONE
+            binding.chipPosition.close()
             return
         }
         val configs = ChatToolbarSettings.loadItems(preferences)
@@ -423,6 +434,9 @@ class ChatToolbarRuntime(
         val targetMinimum = if (row.childCount > 0 || waitingForNative) dp(activity, 48) else 0
         if (binding.root.minimumHeight != targetMinimum) binding.root.minimumHeight = targetMinimum
         binding.root.visibility = if (row.childCount > 0 || waitingForNative) View.VISIBLE else View.GONE
+        if (binding.root.isAttachedToWindow && binding.root.visibility == View.VISIBLE) {
+            binding.chipPosition.attach()
+        } else binding.chipPosition.close()
     }
 
     private fun createToolButton(
@@ -639,6 +653,7 @@ class ChatToolbarRuntime(
                     .filter { it.value.activity.get() === activity }
                     .map { it.key to it.value }
                 targets.forEach { (footer, binding) ->
+                    binding.chipPosition.close()
                     (binding.root.parent as? ViewGroup)?.removeView(binding.root)
                     bindings.remove(footer)
                     binding.panel.get()?.let { panelStates.remove(it) }
@@ -715,7 +730,8 @@ class ChatToolbarRuntime(
         val footer: WeakReference<ViewGroup>,
         val panel: WeakReference<View>,
         val root: HorizontalScrollView,
-        val row: LinearLayout
+        val row: LinearLayout,
+        val chipPosition: ChatToolbarNewMessagePosition
     )
 
     private class PanelState {

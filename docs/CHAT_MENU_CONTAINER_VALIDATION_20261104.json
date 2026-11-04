@@ -1,0 +1,159 @@
+{
+  "baseline": "0963c9921a2eeca143af97cb4cfb0a76002edeeb",
+  "created_at": "2026-11-04T14:27:32.851201+00:00",
+  "scope": "仅修复新消息提示工具栏所有权和长按菜单原生包装入口；已验收天气与分组横栏保持不变",
+  "checks": [
+    {
+      "script": "scripts/check_message_menu_grid_sdk.py",
+      "returncode": 0,
+      "stdout": "PASS complete production MessageMenuGridRuntime + settings Android SDK compilation; dependency stubs only; not APK/R8/host execution\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_message_menu_native_container.py",
+      "returncode": 0,
+      "stdout": "PASS COMPLETE production menu Hook runtime: concrete f5 entry, e5 wrapper, 5/6/7/8 columns, all-item capture past 15, scroll viewport, original click/index, callback/flag restoration, failed-show rollback, wrapper fallback, disabled native rows, cleanup; synthetic Android only\nPASS negative control: previous base Hook plus wrapper-as-root fallback fails native-container fixture with native rows instead of ScrollView\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_message_menu_grid_geometry.py",
+      "returncode": 0,
+      "stdout": "PASS 5544 production geometry density/window/column/row/item cases; no Android rendering or click validation\nEVIDENCE native 8.0.78 bij.xml 9410b26f607718f81fb2d2f803595aeec08199f7900540db974076743ed4b297\nEVIDENCE native 8.0.78 c_6.xml d5c4f513068c9020a54f43da8edff76f39ab631b1bb3d8ea275159f971eca788\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_menu_extension_lifecycle.py",
+      "returncode": 0,
+      "stdout": "PASS actual menu extension feature: disabled startup, close/reopen, stale installer isolated, same feature reinstall, listeners/tickets/runtime released\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_chat_toolbar_new_message_chip.py",
+      "returncode": 0,
+      "stdout": "PASS complete production toolbar coordinator: below-toolbar regression, 5000 no-write stable frames, native position rewrite, DPI, hide, top-gravity, translation ownership, idempotent cleanup and reattach; synthetic containers only\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/check_chat_toolbar_chip_contract_sdk.py",
+      "returncode": 0,
+      "stdout": "PASS negative control rejects exact 80c4ed2 private-companion access with real Kotlin compiler\nPASS complete production coordinator and real shared declarations Android SDK compilation; historical private-access negative control retained\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/check_chat_toolbar_runtime_sdk.py",
+      "returncode": 0,
+      "stdout": "PASS full production toolbar/runtime/settings/glyph/coordinator + header/capsule/visuals/resource scope SDK compilation; real DexKit types, project dependency fixtures; no APK/R8/device claim\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_floating_header_card_position.py",
+      "returncode": 0,
+      "stdout": "PASS production card margin: status bar, differing screen origins, original restore values and stable repeated placement\nPASS native tips visibility entry is wired to relayout\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_floating_header_top_inset.py",
+      "returncode": 0,
+      "stdout": "PASS: production top-inset helpers: 129px removal, idle no-op, redispatch, independent restore, side/bottom preservation\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_floating_header_viewport_inset.py",
+      "returncode": 0,
+      "stdout": "PASS header overlap/nonaccumulation/1000 idle calls cached; preserve footer padding; restore and pending-layout guard\nPASS real apply wiring and wrapper/recycler resolution contract\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_floating_header_background_owner.py",
+      "returncode": 0,
+      "stdout": "PASS three independent layers, 1000 idle claims without writes, native rewrite suppression/latest restore, null and unrelated host\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_chat_toolbar_glyph.py",
+      "returncode": 0,
+      "stdout": "PASS all 16 tool geometries nonempty; 1000 draws each do not rebuild paths; native actions retained\nPASS production Canvas Drawable SDK compile\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_chat_layout_capsule_sdk.py",
+      "returncode": 0,
+      "stdout": "PASS: full production controller, exact measurement/layout/touch hook integration and production time background method compile against Android SDK (dependencies stubbed)\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_chat_input_underlay.py",
+      "returncode": 0,
+      "stdout": "PASS: real measurement ownership, visible appends, offscreen/deletion protection, touch cancellation and stable 10000 refreshes\nPASS: bottom anchor across repeated native layouts and window resize; history, short lists and changed data untouched\nPASS: native footer position preserved, no negative margin, zero-height blr, repeated native layouts, panel exclusion, multiline, offsets, visibility, padding, restore, native resize\n",
+      "stderr": "app/src/main/java/t/mma/hooks/items/backgroundbeauty/ChatInputMessageUnderlay.kt:182:56: warning: elvis operator (?:) always returns the left operand of non-nullable type 'View'.\n        val row = list.getChildAt(list.childCount - 1) ?: return null\n                                                       ^^^^^^^^^^^^^^\napp/src/main/java/t/mma/hooks/items/backgroundbeauty/ChatInputMessageUnderlay.kt:195:56: warning: elvis operator (?:) always returns the left operand of non-nullable type 'View'.\n        val row = list.getChildAt(list.childCount - 1) ?: return\n                                                       ^^^^^^^^^\n"
+    },
+    {
+      "script": "scripts/tests/config_backup/archive.py",
+      "returncode": 0,
+      "stdout": "PASS: message menu all 12 column/row configurations production archive round trip\nPASS: private-chat skip default off, true/false archive round trip, runtime excluded\nPASS: moments card two default-off toggles and three colors true/false round trip; runtime excluded\nPASS: shortcut label background blank/single/three/alpha colors round trip; text/icon unchanged; runtime excluded\nPASS: calendar resource, opacity, zoom and offsets round trip; temporary files excluded\nPASS: music background, opacity, persistent revision and transform round trip; temporary excluded\nPASS: five Me switches true/false round trip, runtime cache excluded\nPASS: voice-to-text toggle true/false round trip and runtime exclusion\nPASS nickname width default-off and true/false round trip, runtime exclusion\nPASS: group bar default/off/on, style, transparency, ordered group/member JSON, next number round trip; runtime cache excluded\nPASS bidirectional grouping exclusion for direct/quick preference writes; both group configurations preserved\nPASS removed input settings excluded from export/legacy import; header settings preserved\nPASS: automatic new/unopened stores; runtime exclusion; all value types; resources; path relocation; legacy JSON; validation; commit rollback; traversal and links\n",
+      "stderr": "app/src/main/java/t/mma/preferences/HchatStorage.kt:17:53: warning: elvis operator (?:) always returns the left operand of non-nullable type 'Context'.\n        val appContext = context.applicationContext ?: context\n                                                    ^^^^^^^^^^\napp/src/main/java/t/mma/preferences/HchatStorage.kt:28:53: warning: elvis operator (?:) always returns the left operand of non-nullable type 'Context'.\n        val appContext = context.applicationContext ?: context\n                                                    ^^^^^^^^^^\napp/src/main/java/t/mma/ui/miuix/HchatConfigBackup.kt:98:78: warning: elvis operator (?:) always returns the left operand of non-nullable type 'FileOutputStream'.\n            val output = context.contentResolver.openOutputStream(uri, \"wt\") ?: error(\"无法写入备份文件\")\n                                                                             ^^^^^^^^^^^^^^^^^^^^\napp/src/main/java/t/mma/ui/miuix/HchatConfigBackup.kt:108:69: warning: unnecessary safe call on a non-null receiver of type 'FileInputStream'.\n            val input = context.contentResolver.openInputStream(uri)?.buffered() ?: error(\"无法读取配置文件\")\n                                                                    ^^\n"
+    },
+    {
+      "script": "scripts/test_group_bar_fixed_geometry.py",
+      "returncode": 0,
+      "stdout": "PASS 189 footer cases; fixed upward/downward/return frames; 5000 stable frames without writes; hidden/cold/inset/disable gates\nPASS native footer contract ConversationListView.smali; SHA256=aa9886018e467134ea53cb6788267736e7df9046eba53b6edbe8bbe611c82c90\nPASS native footer contract ConversationRecyclerView.smali; SHA256=1d46795ee513db236759679589ad05c81efadeb403f2825bb4688bafb713f7c4\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/check_group_bar_sdk.py",
+      "returncode": 0,
+      "stdout": "PASS production group bar store, feature and runtime Android SDK compile\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_sidebar_weather_refresh.py",
+      "returncode": 0,
+      "stdout": "PASS production click gate: saved coordinates, invalid/missing/boundary inputs, busy/detach guards; sidebar never enters location, homepage still does\nPASS sidebar opt-in, unchanged homepage call/default/location path, isolated cache/request/listener key\nPASS full production HomeWeather.kt Android SDK compile (project services stubbed); no Gradle/APK/device execution\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_weather_county_schedule_source.py",
+      "returncode": 0,
+      "stdout": "PASS source: shared 3h TTL, single attached callback, detach cancellation, request dedup/backoff\nPASS source: district first, coordinate reverse lookup, persisted selection and generation guards\nPASS reference models: 7 district cases; fresh/expired/failure/clock-skew schedule bounds (not Android execution)\nPASS source: bounded white timeline ownership/restore, unchanged card geometry and avatar cadence; Python syntax\nPASS native resource emh.xml SHA256 436dc74cb8d201e46f9e06808c5a3168f1644a93083eb27aa4cb2eabea77fcf1\nPASS native resource bl3.xml SHA256 fa65a913df008e445d9041ba16375ea860fe87decf9a115ae4e9beb6c3d6d60a\nBOUNDARY: no Kotlin/SDK/Gradle compilation, no installation or device acceptance\n",
+      "stderr": ""
+    },
+    {
+      "script": "scripts/test_weather_moments_surface.py",
+      "returncode": 0,
+      "stdout": "PASS source: shared weather layout, icon before city, compact status below, 48dp refresh action retained\nPASS source: unchanged modern binds allowed, bounded state and original cleanup retained\nPASS source: opaque shader paint, fixed #F3F3F3, 6dp gap, 2dp stroke, 32dp capsule-like corners\nPASS source/geometry: white timeline/gutters and gray cards in both themes, 6dp gap, no draw-time shader allocation\nPASS Python syntax: updated Android synthetic harness (NOT compiled or executed)\nSKIP native evidence (supply --native-dir with targeted baksmali output)\n",
+      "stderr": ""
+    }
+  ],
+  "passed": 20,
+  "total": 20,
+  "native_evidence_sha256": {
+    "res/layout/ss.xml": "a553f97cb7dfab792a71d0fb96e31c0f3bd1b373e3146cb7e23e0f5d6a6357eb",
+    "res/layout/bij.xml": "9410b26f607718f81fb2d2f803595aeec08199f7900540db974076743ed4b297",
+    "res/layout/c_6.xml": "d5c4f513068c9020a54f43da8edff76f39ab631b1bb3d8ea275159f971eca788",
+    "smali_classes8/kj5/f5.smali": "74f73febdbbd5a9cd06d34866e8fef348c406004a9914e9bbfc0927a71de4d2a",
+    "smali_classes10/kj5/e5.smali": "57e1a555e80bbc9378a215a41178faa2b5d2f8878f2fcfe11c539c7b11777cce",
+    "smali_classes8/eu5/s0.smali": "77406dd499b35d91d2518f29a9d20fa8dcbdc99509da67fd04f6e019129fd6ed"
+  },
+  "production_sha256": {
+    "app/src/main/java/t/mma/hooks/items/chattoolbar/ChatToolbarRuntime.kt": "d37864959e2aed85673fa29c9498fe54c1c2ecbc6945ca8c1da031a2832b9240",
+    "app/src/main/java/t/mma/hooks/items/chattoolbar/ChatToolbarNewMessagePosition.kt": "5480246e43bb446425873564323280fa1c7c9f08645a3ccddef935a8bfd58403",
+    "app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatHeaderFeature.kt": "89f4a11bd44cd50c6f0f3f235e802470e59077352b92366d2d68240724388cfc",
+    "app/src/main/java/t/mma/hooks/items/messagemenuextension/MessageMenuGridRuntime.kt": "e12763123bbb357ae7a5be1d6477a241978c638092991176057ace8e93f5ffac"
+  },
+  "limitations": [
+    "本地未运行Gradle",
+    "定向Android SDK编译使用项目依赖桩，不替代完整Gradle/R8",
+    "容器行为测试使用合成Android/Xposed，不替代Android绘制、滚动、触摸或实机",
+    "原生兼容依据仅微信8.0.78/3180，缺少其他APK",
+    "本轮尚待提交推送后完整CI及用户实机验收"
+  ],
+  "ci": {
+    "status": "pending_after_push"
+  },
+  "device_acceptance": {
+    "new_message_position": "pending",
+    "menu_columns": "pending",
+    "weather": "previously_accepted_unchanged",
+    "group_bar": "previously_accepted_unchanged"
+  }
+}

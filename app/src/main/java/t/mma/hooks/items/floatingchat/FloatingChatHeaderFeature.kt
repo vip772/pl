@@ -101,9 +101,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private val layoutTrackers = WeakHashMap<ViewGroup, HeaderLayoutTracker>()
     private val tipsCardBottoms = WeakHashMap<ViewGroup, Int>()
     private val chatListPaddings = WeakHashMap<ViewGroup, Pair<ViewGroup, Int>>()
-    private val newMessageChipMargins = WeakHashMap<View, ChipMarginState>()
-    private val toolbarPrefs = t.mma.hooks.items.chattoolbar.ChatToolbarSettings.preferences(context.hostContext())
-    private val newMessageChipLocation = IntArray(2)
     private var reparentFailureReported = false
 
     private var installed = false
@@ -117,7 +114,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (closed) return
         layoutTrackers.keys.toList().forEach {
             if (isEnabled()) scheduleApply(it) else {
-                restoreBottomNewMessageChip(it)
                 restore(it)
             }
         }
@@ -329,7 +325,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (closed) return
         drainPendingRestores()
         if (!isEnabled()) {
-            restoreBottomNewMessageChip(sourceLayout)
             restore(sourceLayout)
             visibleChatLayout(sourceLayout)?.takeIf { it !== sourceLayout }?.let(::restore)
             return
@@ -382,7 +377,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         tipsCardBottoms.remove(layout)
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
-        applyBottomNewMessageChip(layout)
         val split = (header as? ViewGroup)?.let { capsule.apply(it, backgroundTransparency) } == true
         val tracker = layoutTrackers.getOrPut(layout) { HeaderLayoutTracker() }
 
@@ -752,114 +746,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         return lp.gravity and android.view.Gravity.VERTICAL_GRAVITY_MASK == android.view.Gravity.TOP
     }
 
-    private fun applyBottomNewMessageChip(layout: ViewGroup) {
-        val contentId = resourceId(layout, "bki")
-        val content = if (contentId != 0) layout.findViewById<ViewGroup>(contentId) else null
-        if (content == null) {
-            restoreBottomNewMessageChip(layout)
-            return
-        }
-        val chipId = resourceId(layout, "bm2")
-        val chip = if (chipId != 0) content.findViewById<View>(chipId) else null
-        if (chip == null) {
-            restoreBottomNewMessageChip(layout)
-            return
-        }
-        val lp = chip.layoutParams as? FrameLayout.LayoutParams ?: return
-        val bottomGravity = lp.gravity and android.view.Gravity.VERTICAL_GRAVITY_MASK == android.view.Gravity.BOTTOM &&
-            lp.gravity and android.view.Gravity.HORIZONTAL_GRAVITY_MASK == android.view.Gravity.RIGHT
-        if (!bottomGravity) {
-            restoreBottomNewMessageChipView(chip)
-            return
-        }
-        val saved = newMessageChipMargins.getOrPut(chip) {
-            ChipMarginState(lp.bottomMargin)
-        }
-        if (lp.bottomMargin != saved.appliedBottom) {
-            saved.bottom = lp.bottomMargin
-            saved.appliedBottom = lp.bottomMargin
-        }
-        val toolbarEnabled = toolbarPrefs.getBoolean(
-            t.mma.hooks.items.chattoolbar.ChatToolbarSettings.KEY_ENABLE,
-            t.mma.hooks.items.chattoolbar.ChatToolbarSettings.DEFAULT_ENABLE
-        )
-        val toolbar = if (toolbarEnabled) find(layout) {
-            it.tag == t.mma.hooks.items.chattoolbar.ChatToolbarSettings.TOOLBAR_TAG
-        } as? View else null
-        val toolbarVisible = toolbar?.visibility == View.VISIBLE && toolbar.height > 0 && toolbar.isShown
-        if (!toolbarEnabled || !toolbarVisible || !chip.isShown) {
-            restoreBottomNewMessageChipView(chip)
-            return
-        }
-        val footerId = resourceId(layout, "k52")
-        val footer = if (footerId != 0) layout.findViewById<View>(footerId) else null
-        if (footer == null || !footer.isShown ||
-            !isDescendantOf(toolbar, footer) || !isDescendantOf(chip, content)
-        ) {
-            restoreBottomNewMessageChipView(chip)
-            return
-        }
-        toolbar.getLocationOnScreen(newMessageChipLocation)
-        val toolbarTop = newMessageChipLocation[1]
-        chip.getLocationOnScreen(newMessageChipLocation)
-        val chipBottom = newMessageChipLocation[1] + chip.height
-        // Reconstruct the native position: the observed chip already includes our previous margin.
-        // Otherwise the next layout sees no overlap, restores, and oscillates forever.
-        if (chip.isLayoutRequested) return
-        val nativeBottom = chipBottom + saved.appliedBottom - saved.bottom
-        val nativeTop = nativeBottom - chip.height
-        val toolbarBottom = toolbarTop + toolbar.height
-        toolbar.getLocationOnScreen(newMessageChipLocation)
-        val toolbarLeft = newMessageChipLocation[0]
-        chip.getLocationOnScreen(newMessageChipLocation)
-        val chipLeft = newMessageChipLocation[0]
-        val intersects = chipLeft < toolbarLeft + toolbar.width && chipLeft + chip.width > toolbarLeft &&
-            nativeTop < toolbarBottom && nativeBottom > toolbarTop
-        if (!intersects) {
-            restoreBottomNewMessageChipView(chip)
-            return
-        }
-        val overlap = nativeBottom - toolbarTop
-        val gap = dp(CHAT_TOOLBAR_CHIP_GAP_DP)
-        val target = saved.bottom + overlap + gap
-        saved.appliedBottom = target
-        if (lp.bottomMargin != target) {
-            lp.bottomMargin = target
-            chip.layoutParams = lp
-        }
-    }
-
-    private fun isDescendantOf(view: View, ancestor: View): Boolean {
-        var current: View? = view
-        repeat(24) {
-            if (current === ancestor) return true
-            current = current?.parent as? View ?: return false
-        }
-        return false
-    }
-
-    private fun restoreBottomNewMessageChip(layout: ViewGroup) {
-        val contentId = resourceId(layout, "bki")
-        val content = if (contentId != 0) layout.findViewById<ViewGroup>(contentId) else null
-        val chipId = resourceId(layout, "bm2")
-        val chip = if (contentId != 0 && chipId != 0) content?.findViewById<View>(chipId) else null
-        chip?.let(::restoreBottomNewMessageChipView)
-    }
-
-    private fun restoreBottomNewMessageChipView(chip: View) {
-        val saved = newMessageChipMargins[chip] ?: return
-        val lp = chip.layoutParams as? FrameLayout.LayoutParams ?: run {
-            newMessageChipMargins.remove(chip)
-            return
-        }
-        if (lp.bottomMargin != saved.appliedBottom) saved.bottom = lp.bottomMargin
-        if (lp.bottomMargin != saved.bottom) {
-            lp.bottomMargin = saved.bottom
-            chip.layoutParams = lp
-        }
-        newMessageChipMargins.remove(chip)
-    }
-
     private fun isNewMessageChip(view: View): Boolean {
         val group = view as? LinearLayout ?: return false
         var hasText = false
@@ -972,7 +858,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
     }
 
     private fun restore(layout: ViewGroup) {
-        releaseSafely { restoreBottomNewMessageChip(layout) }
         releaseSafely { restoreChatListTopInset(layout) }
         releaseSafely { restoreChatTopInset(layout) }
         releaseSafely { restoreChatStatusWrapper(layout) }
@@ -1041,14 +926,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         chatTopPaddings.clear()
         states.keys.toList().forEach { view -> releaseSafely { restoreView(view) } }
         states.clear()
-        releaseEntries(newMessageChipMargins) { chip, saved ->
-            val lp = chip.layoutParams as? FrameLayout.LayoutParams ?: return@releaseEntries
-            if (lp.bottomMargin != saved.appliedBottom) saved.bottom = lp.bottomMargin
-            if (lp.bottomMargin != saved.bottom) {
-                lp.bottomMargin = saved.bottom
-                chip.layoutParams = lp
-            }
-        }
         releaseEntries(headerZoneStates) { _, state ->
             state.originalMargins.forEach { (view, margins) ->
                 releaseSafely {
@@ -1140,7 +1017,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
             is ViewGroup.MarginLayoutParams -> ViewGroup.MarginLayoutParams(params)
             else -> ViewGroup.LayoutParams(params)
         }
-    private data class ChipMarginState(var bottom: Int, var appliedBottom: Int = bottom)
 
     private data class HeaderLayoutTracker(
 
@@ -1229,7 +1105,6 @@ private class HeaderRuntime(private val context: FeatureContext) {
         private const val TIPS_RECYCLER_CLASS = "com.tencent.mm.view.recyclerview.MaxHeightWxRecyclerView"
         private const val WE_IMAGE_VIEW_CLASS = "com.tencent.mm.ui.widget.imageview.WeImageView"
         private const val CHATTING_SCROLL_LAYOUT_CLASS = "com.tencent.mm.pluginsdk.ui.chat.ChattingScrollLayout"
-        private const val CHAT_TOOLBAR_CHIP_GAP_DP = 8
         private const val ELEVATION_DP = 4
         private const val CORNER_RADIUS_DP = 24
     }

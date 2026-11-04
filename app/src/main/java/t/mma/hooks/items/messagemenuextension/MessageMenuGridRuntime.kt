@@ -39,6 +39,7 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
     private lateinit var binding: Field
     private lateinit var model: Field
     private lateinit var popup: Field
+    private lateinit var setContent: Method
     private lateinit var anchorField: Field
     private lateinit var flag: Field
     private lateinit var bindMethod: Method
@@ -61,6 +62,10 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
             popup = requireNotNull(KavaReflector.findDeclaredField(owner, "m"))
             anchorField = requireNotNull(KavaReflector.findDeclaredField(owner, "f"))
             flag = requireNotNull(KavaReflector.findDeclaredField(owner, "F"))
+            // f5.setContentView wraps bij in e5 before calling PopupWindow.setContentView.
+            // Intercept the verified concrete override, not the base method's wrapper argument.
+            setContent = requireNotNull(KavaReflector.findDeclaredMethod(popup.type, "setContentView", View::class.java))
+            check(setContent.declaringClass.name == "kj5.f5") { "Unsupported popup content owner" }
             check(binding.type.isInterface && flag.type == java.lang.Boolean.TYPE)
             bindMethod = KavaReflector.declaredMethods(binding.type).single {
                 it.returnType == Void.TYPE && it.parameterTypes.contentEquals(arrayOf(View::class.java, Integer.TYPE, MenuItem::class.java))
@@ -78,7 +83,7 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
                     }
                 })
             }
-            hook(requireNotNull(KavaReflector.findDeclaredMethod(PopupWindow::class.java, "setContentView", View::class.java)), object : XC_MethodHook() {
+            hook(setContent, object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     val frame = target(param.thisObject) ?: return
                     val content = param.args.getOrNull(0) as? View ?: return
@@ -90,7 +95,11 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
                     val frame = target(param.thisObject) ?: return
                     attempt("beforeShow") {
                         val window = param.thisObject as PopupWindow
-                        if (!frame.changed) window.contentView?.let { reflow(frame, it) }
+                        if (!frame.changed) window.contentView?.let { wrapped ->
+                            val row = wrapped.findViewById<View>(ROW_IDS.first())
+                            val menuRoot = (row?.parent as? View)?.parent as? View
+                            if (menuRoot != null) reflow(frame, menuRoot)
+                        }
                         if (frame.changed) fitPosition(window, param)
                     }
                 }
