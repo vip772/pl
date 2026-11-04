@@ -5,6 +5,8 @@ const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 const cache = process.argv[2] || path.join(os.homedir(), '.gradle/caches/modules-2/files-2.1');
 function jar(group, name, version) {
+    const flat = path.join(cache, name + '-' + version + '.jar');
+    if (fs.existsSync(flat)) return flat;
     const directory = path.join(cache, group, name, version);
     for (const hash of fs.readdirSync(directory)) {
         const candidate = path.join(directory, hash, name + '-' + version + '.jar');
@@ -33,8 +35,8 @@ function run(args) {
 }
 run(['-Xmx256m', '-cp', compiler.join(path.delimiter), 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler',
     '-no-stdlib', '-no-reflect', '-classpath', [stdlib, xml].join(path.delimiter), '-d', artifact,
-    'app/src/main/java/h/Hchat/hooks/api/model/WeChatMessageTypes.kt',
-    'app/src/main/java/h/Hchat/hooks/items/hchatextra/MessageTypeLabels.kt',
+    'app/src/main/java/t/mma/hooks/api/model/WeChatMessageTypes.kt',
+    'app/src/main/java/t/mma/hooks/items/hchatextra/MessageTypeLabels.kt',
     'scripts/tests/message_type_labels/MessageTypeLabelsRegression.kt']);
-run(['-cp', [artifact, stdlib, xml].join(path.delimiter), 'h.Hchat.hooks.items.hchatextra.MessageTypeLabelsRegressionKt']);
+run(['-cp', [artifact, stdlib, xml].join(path.delimiter), 't.mma.hooks.items.hchatextra.MessageTypeLabelsRegressionKt']);
 console.log('Test artifacts: ' + output);

@@ -39,6 +39,9 @@ internal object MessageDetailsCardHierarchy {
             return false
         }
         // Text/media/reference rows retain their native time/content anchor.
-        return appSubtype !in setOf(1, 2, 8, 24, 57, 87)
+        return when (appSubtype) {
+            1, 2, 8, 57, 87 -> false
+            else -> true
+        }
     }
 }

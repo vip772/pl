@@ -3681,6 +3681,16 @@ private class HchatExtraHooker(
         val card = KavaReflector.readField(field, holder) as? android.widget.FrameLayout ?: return null
         return card.takeIf { isViewWithinRoot(it, row) }
     }
+    private fun noteCardContainer(holder: Any, row: ViewGroup): View? {
+        // 8.0.78 kn5.h4.b owns stp in both receive e1w and send e2b layouts.
+        // Resolve the semantic declared type, never the nickname/time/header geometry.
+        val fields = messageContentFields(holder)
+        val noteField = fields.firstOrNull {
+            it.type.name == "com.tencent.mm.ui.chatting.viewitems.mvvmview.ChattingNoteMvvmView"
+        } ?: return holderMainContentView(holder, row)
+        val note = KavaReflector.readField(noteField, holder) as? View ?: return null
+        return note.takeIf { it.visibility == View.VISIBLE && isViewWithinRoot(it, row) }
+    }
     private fun forwardedRecordContainer(holder: Any, row: ViewGroup): View? {
         // 8.0.78 runtime diagnostic: kn5.z4.b is the complete 917x531 record card.
         // Resolve the declaring class explicitly so a subclass cannot shadow its field.
@@ -3709,11 +3719,14 @@ private class HchatExtraHooker(
             findHolderAvatarView(holder)?.let { directChildOf(row, it) }?.let(::add)
             findChattingAvatarView(root)?.let { directChildOf(row, it) }?.let(::add)
         }
-        // Forwarded chat records are complete app cards, not native time/header rows.
+        // Forwarded records and favorite notes require their complete semantic card body.
         // Require the semantic container and wait for layout rather than guessing a branch.
-        val forwardedRecord = appSubtype == 19
-        val holderCard = (if (forwardedRecord) forwardedRecordContainer(holder, row)
-            else holderCardContainer(holder, row))
+        val completeRecordCard = appSubtype == 19 || appSubtype == 24
+        val holderCard = (when (appSubtype) {
+            19 -> forwardedRecordContainer(holder, row)
+            24 -> noteCardContainer(holder, row)
+            else -> holderCardContainer(holder, row)
+        })
             ?: if (WeChatMessageTypes.isLocation(type) ||
                 WeChatMessageTypes.normalize(type) in setOf(42, 66)) {
                 holderMainContentView(holder, row) ?: messageContentView(holder, row)
@@ -3733,8 +3746,8 @@ private class HchatExtraHooker(
             else -> false
         }
         // A verified card holder must never fall back to a guessed X2C/TextView branch.
-        // Wait for its FrameLayout field to attach and let the existing retry handle it.
-        val branch = holderBranch ?: if (knownCardHolder || forwardedRecord) null else run {
+        // Wait for its verified content to attach and let the existing retry handle it.
+        val branch = holderBranch ?: if (knownCardHolder || completeRecordCard) null else run {
             val candidates = buildList<View> {
                 for (index in 0 until row.childCount) add(row.getChildAt(index))
             }
@@ -3836,14 +3849,17 @@ private class HchatExtraHooker(
         return messageContentView(holder, parent)
     }
 
-    private fun messageContentView(holder: Any, parent: ViewGroup, excluded: View? = null): View? {
-        val rootView = findRootView(holder)
-        val clickArea = findHolderView(holder, "clickArea", holderClickAreaFieldCache)
-        val fields = holderContentFieldCache.getOrPut(holder.javaClass) {
+    private fun messageContentFields(holder: Any): List<Field> =
+        holderContentFieldCache.getOrPut(holder.javaClass) {
             fieldsRecursive(holder.javaClass)
                 .filter { View::class.java.isAssignableFrom(it.type) }
                 .filterNot { isAuxiliaryMessageViewField(it.name) }
         }
+
+    private fun messageContentView(holder: Any, parent: ViewGroup, excluded: View? = null): View? {
+        val rootView = findRootView(holder)
+        val clickArea = findHolderView(holder, "clickArea", holderClickAreaFieldCache)
+        val fields = messageContentFields(holder)
         return fields
             .asSequence()
             .mapNotNull { KavaReflector.readField(it, holder) as? View }

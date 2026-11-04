@@ -31,6 +31,9 @@ fun main() {
     same("图片", MessageTypeLabels.label(33, card(115)))
     same("系统消息（future_notice）", MessageTypeLabels.label(10002, "<sysmsg type=\"future_notice\"/>"))
 
+    same(24, MessageTypeLabels.subtype(49, card(24), card(24)))
+    same(24, MessageTypeLabels.subtype(49, "<appmsg><recorditem><![CDATA[<appmsg><type>19</type></appmsg>]]></recorditem><type>24</type></appmsg>", ""))
+    same("收藏笔记", MessageTypeLabels.label(49, card(24)))
     // Outer type wins over embedded record, reply and CDATA payloads.
     val nested = "<msg><appmsg><recorditem><appmsg><type>115</type></appmsg></recorditem><type>19</type></appmsg></msg>"
     same(19, MessageTypeLabels.appType(nested))
