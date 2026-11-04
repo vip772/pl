@@ -27,11 +27,13 @@ assert 'view.background === old.installedBackground?.get()' in card
 assert 'view.setPadding(old.left, old.top, old.right, old.bottom)' in card
 assert 'OnScrollListener' not in card and 'ValueAnimator' not in card
 print('PASS source: unchanged modern binds allowed, bounded state and original cleanup retained')
-draw = card.split('override fun draw(canvas: Canvas)', 1)[1].split('override fun setAlpha', 1)[0]
+draw = card.split('internal class MomentsCardDrawable(', 1)[1].split('override fun draw(canvas: Canvas)', 1)[1].split('override fun setAlpha', 1)[0]
 assert draw.index('canvas.drawRect(surroundRect') < draw.index('canvas.drawRoundRect(rect')
 assert 'Paint(' not in draw and 'LinearGradient(' not in draw
 assert 'surround = Color.WHITE' in card
-assert 'ColorDrawable(Color.WHITE)' in card
+assert 'ColorDrawable(timelineColor(resources))' in card
+assert card.count('themeResources = view.resources') == 2
+assert 'Configuration.UI_MODE_NIGHT_YES' in card
 assert 'view.background === installed' in card
 assert 'view.background = installed.original' in card
 assert 'view.removeOnAttachStateChangeListener(rowAttachListener)' in card
@@ -53,7 +55,7 @@ assert 'color = if (colors == null) fill else Color.WHITE' in card
 assert 'rect.height().coerceAtLeast(0f) / 2' in card
 page = (BASE / 'ui/miuix/MomentsCardMiuixPage.kt').read_text()
 assert '卡片间距 6dp' in page and '添加 2dp 三色渐变描边' in page
-print('PASS source: opaque shader paint, fixed #F3F3F3, 6dp gap, 2dp stroke, 32dp capsule-like corners')
+print('PASS source: opaque shader paint, light #F3F3F3 and theme-aware dark surfaces, 6dp gap, 2dp stroke, 32dp capsule-like corners')
 # Numeric geometry check only, not an execution of Kotlin/Android drawing.
 for density in (1, 2, 3):
     side, gap = int(6*density+.5), int(6*density+.5)
@@ -64,7 +66,7 @@ for density in (1, 2, 3):
     if density == 2:
         assert padding == (37, 26, 39, 40)
     assert 0xFFFFFFFF != 0xFFF3F3F3
-print('PASS source/geometry: white timeline/gutters and gray cards in both themes, 6dp gap, no draw-time shader allocation')
+print('PASS source/geometry: theme-aware timeline/gutters and cards, 6dp gap, no draw-time shader allocation')
 ast.parse((ROOT / 'scripts/test_moments_card.py').read_text())
 print('PASS Python syntax: updated Android synthetic harness (NOT compiled or executed)')
 parser = argparse.ArgumentParser()

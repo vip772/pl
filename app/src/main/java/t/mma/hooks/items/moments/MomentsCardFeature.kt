@@ -1,5 +1,7 @@
 package t.mma.hooks.items.moments
 
+import android.content.res.Configuration
+import android.content.res.Resources
 import android.graphics.*
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.LayerDrawable
@@ -79,12 +81,19 @@ internal class MomentsCardRuntime(
     private val ownerToken = Any()
     // Weak index; the installed drawable owns the original background, not the runtime.
     private val listBackgrounds = WeakHashMap<View, WeakReference<TimelineBackground>>()
-    private class TimelineBackground(val original: Drawable?) : android.graphics.drawable.ColorDrawable(Color.WHITE)
+    private class TimelineBackground(val original: Drawable?, private val resources: Resources) :
+        android.graphics.drawable.ColorDrawable(timelineColor(resources)) {
+        override fun draw(canvas: Canvas) {
+            val next = timelineColor(resources)
+            if (color != next) color = next
+            super.draw(canvas)
+        }
+    }
     private val rowAttachListener = object : View.OnAttachStateChangeListener {
-        override fun onViewAttachedToWindow(view: View) { whitenTimeline(view) }
+        override fun onViewAttachedToWindow(view: View) { styleTimeline(view) }
         override fun onViewDetachedFromWindow(view: View) {}
     }
-    private fun whitenTimeline(row: View) {
+    private fun styleTimeline(row: View) {
         if (closed) return
         var ancestor = row.parent
         repeat(12) {
@@ -93,7 +102,7 @@ internal class MomentsCardRuntime(
             if (view is android.widget.AbsListView ||
                 view.javaClass.name == "com.tencent.mm.plugin.sns.ui.improve.view.ImproveRecyclerView") {
                 if (listBackgrounds[view]?.get() != null || listBackgrounds.size >= 16) return
-                val background = TimelineBackground(view.background)
+                val background = TimelineBackground(view.background, view.resources)
                 listBackgrounds[view] = WeakReference(background)
                 view.background = background
                 return
@@ -180,7 +189,7 @@ internal class MomentsCardRuntime(
         if (originals.size >= MAX_VIEWS) return
         // A retired generation may still be awaiting its main-thread cleanup.
         if (tagged != null) restore(view, tagged)
-        whitenTimeline(view)
+        styleTimeline(view)
         val density = view.resources.displayMetrics.density
         val side = (6 * density + .5f).toInt()
         val gap = (MomentsCardSettings.GAP_DP * density + .5f).toInt()
@@ -196,7 +205,7 @@ internal class MomentsCardRuntime(
         view.addOnAttachStateChangeListener(rowAttachListener)
         original.installedBackground = WeakReference(MomentsCardDrawable(
             density, gap, side, MomentsCardSettings.CARD_BACKGROUND, null, original,
-            surround = Color.WHITE
+            surround = Color.WHITE, themeResources = view.resources
         ))
         applyStyle(view, original)
     }
@@ -207,7 +216,7 @@ internal class MomentsCardRuntime(
         val inset = (MomentsCardSettings.CONTENT_INSET_DP * density + .5f).toInt()
         val fill = original.installedBackground?.get() ?: MomentsCardDrawable(
             density, gap, side, MomentsCardSettings.CARD_BACKGROUND, null, original,
-            surround = Color.WHITE
+            surround = Color.WHITE, themeResources = view.resources
         ).also { original.installedBackground = WeakReference(it) }
         if (view.background !== fill) view.background = fill
         if (border) {
@@ -287,7 +296,8 @@ internal class MomentsCardDrawable(
     fill: Int, private val colors: IntArray?,
     // Keeps restoration state alive exactly as long as the host owns this drawable.
     @Suppress("unused") private val restorationState: Any? = null,
-    private val surround: Int = Color.TRANSPARENT
+    private val surround: Int = Color.TRANSPARENT,
+    private val themeResources: Resources? = null
 ) : Drawable() {
     private val rect = RectF()
     private val surroundRect = RectF()
@@ -313,6 +323,23 @@ internal class MomentsCardDrawable(
         }
     }
     override fun draw(canvas: Canvas) {
+        // Constant-time host configuration read; already-bound rows follow theme changes.
+        themeResources?.let { resources ->
+            val nextFill = cardColor(resources)
+            if (colors == null && paint.color != nextFill) {
+                val alpha = paint.alpha
+                paint.color = nextFill
+                paint.alpha = alpha
+            }
+            val nextSurround = timelineColor(resources)
+            surroundPaint?.let {
+                if (it.color != nextSurround) {
+                    val alpha = it.alpha
+                    it.color = nextSurround
+                    it.alpha = alpha
+                }
+            }
+        }
         surroundPaint?.let { canvas.drawRect(surroundRect, it) }
         if (!rect.isEmpty) canvas.drawRoundRect(rect, drawRadius, drawRadius, paint)
     }
@@ -325,3 +352,13 @@ internal class MomentsCardDrawable(
     @Deprecated("Drawable opacity is deprecated")
     override fun getOpacity() = PixelFormat.TRANSLUCENT
 }
+
+// Read the row's host configuration, not the module/application configuration.
+private fun isNight(resources: Resources): Boolean =
+    resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+
+private fun cardColor(resources: Resources): Int =
+    if (isNight(resources)) MomentsCardSettings.CARD_BACKGROUND_DARK else MomentsCardSettings.CARD_BACKGROUND
+
+private fun timelineColor(resources: Resources): Int =
+    if (isNight(resources)) MomentsCardSettings.TIMELINE_BACKGROUND_DARK else Color.WHITE

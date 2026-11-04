@@ -18,6 +18,7 @@ b = body.index('    private fun style(', a)
 body = body[:a] + body[b:]
 imports = '''package t.mma.hooks.items.moments
 import android.content.res.Configuration
+import android.content.res.Resources
 import android.graphics.*
 import android.graphics.drawable.*
 import android.os.*
@@ -60,7 +61,7 @@ abstract class Drawable {var callback:Any?=null
  open fun setAlpha(a:Int){};open fun setColorFilter(f:ColorFilter?){};open fun getOpacity()=0
  fun invalidateSelf(){};fun bounds(l:Int,t:Int,r:Int,b:Int){onBoundsChange(Rect(l,t,r,b))}
 }
-open class ColorDrawable(val color:Int):Drawable(){override fun draw(c:Canvas){}}
+open class ColorDrawable(var color:Int):Drawable(){override fun draw(c:Canvas){}}
 class LayerDrawable(val children:Array<Drawable>):Drawable(){override fun draw(c:Canvas){children.forEach{it.draw(c)}}}
 class HostDrawable:Drawable(){override fun draw(c:Canvas){}}
 ''',
@@ -143,9 +144,15 @@ fun main(){
  val surface=Canvas();val outlined=MomentsCardDrawable(2f,12,12,0xFFF3F3F3.toInt(),null,surround=Color.WHITE)
  outlined.bounds(0,0,200,100);outlined.draw(surface)
  check(surface.ops==listOf("rect" to Color.WHITE,"round" to 0xFFF3F3F3.toInt()))
- val dark=Canvas();val darkCard=MomentsCardDrawable(2f,12,12,0xFFF3F3F3.toInt(),null,surround=Color.WHITE)
+ val theme=android.content.res.Resources();theme.configuration.uiMode=32
+ val dark=Canvas();val darkCard=MomentsCardDrawable(2f,12,12,0xFFF3F3F3.toInt(),null,surround=Color.WHITE,themeResources=theme)
  darkCard.bounds(0,0,200,100);darkCard.draw(dark)
- check(dark.ops==listOf("rect" to Color.WHITE,"round" to 0xFFF3F3F3.toInt()))
+ check(dark.ops==listOf("rect" to 0xFF191919.toInt(),"round" to 0xFF232323.toInt()))
+ darkCard.setAlpha(128);theme.configuration.uiMode=16
+ val switched=Canvas();darkCard.draw(switched)
+ check(switched.ops==listOf("rect" to Color.WHITE,"round" to 0xFFF3F3F3.toInt()) && switched.lastAlpha==128)
+ theme.configuration.uiMode=32;val switchedBack=Canvas();darkCard.draw(switchedBack)
+ check(switchedBack.ops==listOf("rect" to 0xFF191919.toInt(),"round" to 0xFF232323.toInt()) && switchedBack.lastAlpha==128)
  val list=android.widget.AbsListView();val listOriginal=HostDrawable();list.background=listOriginal
  val row=View();row.parent=list;val owner=runtime(false);apply(owner,row)
  check(list.background is ColorDrawable);owner.close();check(list.background===listOriginal && row.attachListeners.isEmpty())
