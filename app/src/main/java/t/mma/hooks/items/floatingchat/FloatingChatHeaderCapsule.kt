@@ -70,11 +70,16 @@ internal class FloatingChatHeaderCapsule {
     }
     @Volatile private var closed = false
 
+    // Capability is independent of transient native title/menu readiness.
+    fun supportsHost(): Boolean = hostVersionName() == "8.0.78"
+
+    // An unresolved version must wait, never install a legacy surface first.
+    fun usesLegacyPresentation(): Boolean = hostVersionName()?.let { it != "8.0.78" } == true
+
     fun apply(header: ViewGroup, transparency: Int = -1): Boolean {
         if (closed) return false
         if (header.width <= 0 || header.height <= 0) return fail(header)
-        val version = hostVersionName()
-        if (version != "8.0.78") return fail(header)
+        if (!supportsHost()) return fail(header)
         fun named(name: String): View? {
             val id = resourceId(header, name, "id")
             return if (id == 0) null else header.findViewById<View>(id)

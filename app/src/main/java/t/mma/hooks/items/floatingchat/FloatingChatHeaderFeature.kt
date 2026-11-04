@@ -378,13 +378,16 @@ private class HeaderRuntime(private val context: FeatureContext) {
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
         val split = (header as? ViewGroup)?.let { capsule.apply(it, backgroundTransparency) } == true
+        // Native menu/title readiness must not select a full-width grey fallback
+        // on a verified capsule host. Keep native children until the capsule is ready.
+        val legacyCard = capsule.usesLegacyPresentation() && !split
         val tracker = layoutTrackers.getOrPut(layout) { HeaderLayoutTracker() }
 
-        val elevation = if (split) 0f else dp(ELEVATION_DP).toFloat()
+        val elevation = if (legacyCard) dp(ELEVATION_DP).toFloat() else 0f
         if (header.elevation != elevation) header.elevation = elevation
         if (header.outlineProvider !== FloatingHeaderOutlineProvider) header.outlineProvider = FloatingHeaderOutlineProvider
-        if (header.clipToOutline != !split) header.clipToOutline = !split
-        if (!split) FloatingChatCardVisuals.apply(header, CORNER_RADIUS_DP, transparency = backgroundTransparency)
+        if (header.clipToOutline != legacyCard) header.clipToOutline = legacyCard
+        if (legacyCard) FloatingChatCardVisuals.apply(header, CORNER_RADIUS_DP, transparency = backgroundTransparency)
         applyChatListTopInset(layout, header)
         val headerParent = header.parent as? ViewGroup
         if (headerParent != null && headerParent.getChildAt(headerParent.childCount - 1) !== header) {
