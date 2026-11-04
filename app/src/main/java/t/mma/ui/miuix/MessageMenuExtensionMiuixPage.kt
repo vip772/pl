@@ -23,6 +23,8 @@ import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 internal fun MessageMenuExtensionMiuixPage(context: Context, provider: FeatureSettingsProvider, onBack: () -> Unit) {
     val prefs = remember { MessageMenuExtensionSettings.preferences(context) }
     var enabled by remember { mutableStateOf(prefs.getBoolean(MessageMenuExtensionSettings.KEY_ENABLE, false)) }
+    var columns by remember { mutableStateOf(MessageMenuExtensionSettings.columns(prefs)) }
+    var maxRows by remember { mutableStateOf(MessageMenuExtensionSettings.maxRows(prefs)) }
     val listState = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
@@ -31,9 +33,11 @@ internal fun MessageMenuExtensionMiuixPage(context: Context, provider: FeatureSe
         scrollBehavior = scrollBehavior,
         bottomBar = {
             BottomActionBar("保存设置", {
-                val saved = prefs.edit().putBoolean(MessageMenuExtensionSettings.KEY_ENABLE, enabled).commit()
+                val saved = prefs.edit().putInt(MessageMenuExtensionSettings.KEY_COLUMNS, columns)
+                    .putInt(MessageMenuExtensionSettings.KEY_MAX_ROWS, maxRows)
+                    .putBoolean(MessageMenuExtensionSettings.KEY_ENABLE, enabled).commit()
                 if (saved) {
-                    HLog.i("[Hchat:消息菜单扩展诊断] stage=settingsSave enabled=$enabled mode=grid requested=6x5")
+                    HLog.i("[Hchat:消息菜单扩展诊断] stage=settingsSave enabled=$enabled mode=grid requested=${columns}x$maxRows")
                 } else {
                     HLog.e("[Hchat:消息菜单扩展诊断] stage=settingsSave failed")
                 }
@@ -47,7 +51,19 @@ internal fun MessageMenuExtensionMiuixPage(context: Context, provider: FeatureSe
             contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp, bottom = padding.calculateBottomPadding() + 12.dp)
         ) {
             item {
-                SwitchRow(enabled, "消息菜单扩展", "开启后每排6个、最多5排；关闭使用原生每排5个、最多3排。新增项目自动换行，最多显示30项。保存开关后需完全重启微信。", onCheckedChange = { enabled = it })
+                SwitchRow(enabled, "消息菜单扩展", "自定义菜单列数和可见排数，默认5列、3排；超出可见排数可上下滚动。关闭后使用微信原生布局。保存后下次打开菜单生效。", onCheckedChange = { enabled = it })
+            }
+            if (enabled) {
+                item {
+                    PopupChoiceRow("横向图标数量", "每排图标按钮数量，默认5个",
+                        (5..8).map { PopupChoice("${it}个", it.toString()) },
+                        columns.toString(), { columns = it.toInt() })
+                }
+                item {
+                    PopupChoiceRow("竖向最多排数", "默认3排，超出后滚动查看",
+                        (3..5).map { PopupChoice("${it}排", it.toString()) },
+                        maxRows.toString(), { maxRows = it.toInt() })
+                }
             }
         }
     }

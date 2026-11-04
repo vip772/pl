@@ -1,0 +1,81 @@
+{
+  "baseline": "8cd489cbbedc65f7e7e350708d1d25b827340367",
+  "branch": "dev",
+  "validation": "SDK/stub and controlled fixtures; no APK/R8/device acceptance",
+  "results": [
+    {
+      "script": "check_group_bar_sdk.py",
+      "exitCode": 0,
+      "checks": [
+        "PASS production group bar store, feature and runtime Android SDK compile"
+      ]
+    },
+    {
+      "script": "test_group_bar_fixed_geometry.py",
+      "exitCode": 0,
+      "checks": [
+        "PASS 189 footer cases; fixed upward/downward/return frames; 5000 stable frames without writes; hidden/cold/inset/disable gates",
+        "PASS native footer contract ConversationListView.smali; SHA256=aa9886018e467134ea53cb6788267736e7df9046eba53b6edbe8bbe611c82c90",
+        "PASS native footer contract ConversationRecyclerView.smali; SHA256=1d46795ee513db236759679589ad05c81efadeb403f2825bb4688bafb713f7c4"
+      ]
+    },
+    {
+      "script": "test_group_bar_native_offset.py",
+      "exitCode": 0,
+      "checks": [
+        "PASS idempotent reserve, native recompute, taskbar parity, disable restore, open-header preservation and zero resting title translation"
+      ]
+    },
+    {
+      "script": "test_group_bar_first_layout.py",
+      "exitCode": 0,
+      "checks": [
+        "PASS cold-start delayed rows, pending layout, selection settlement, 2000 stable frames and gesture/open gates"
+      ]
+    },
+    {
+      "script": "test_group_bar_background_geometry.py",
+      "exitCode": 0,
+      "checks": [
+        "PASS production geometry: background repair preserves live home padding, ordinary surfaces restore, relative title coordinates ignore parent/shared bounce"
+      ]
+    },
+    {
+      "script": "test_group_bar_gesture_lifecycle.py",
+      "exitCode": 0,
+      "checks": [
+        "PASS no old-result reset; synchronous single data-completion selection; gesture/open/dispose cancel",
+        "PASS open-only visibility, vertical sequence handoff and all reload-source gesture gate integration"
+      ]
+    },
+    {
+      "script": "test_groupbar_install_lifecycle.py",
+      "exitCode": 0,
+      "checks": [
+        "PASS actual group bar feature: retry cancellation, stale callback inert after reinstall, install/destroy serialization"
+      ]
+    },
+    {
+      "script": "check_group_bar_viewport_baseline.py",
+      "exitCode": 0,
+      "checks": [
+        "PASS eight production geometry/selection methods match c9932b0; no added padding/clipping/selection-argument hook",
+        "PASS later bar ordering/coordinates/lifecycle retained; three rejected status fixes exactly removed"
+      ]
+    },
+    {
+      "script": "check_group_bar_integration.py",
+      "exitCode": 0,
+      "checks": [
+        "PASS production integration and actual smali: both native loaders, S2 resets, scoped SQL, incremental membership, mutual exclusion/restore guards and detach cleanup",
+        "PASS native viewport/rules retained; native list padding retained and taskbar offsets coordinated; deferred detach",
+        "PASS 8.0.78 ListView/RecyclerView offset and taskbar contracts, animation translation excluded, native header visibility gates",
+        "PASS native open-only visibility, no forced close/deadline, touches cancel deferred tab reset",
+        "PASS initial visible-row alignment, pre-native-selection reserve, drag-only ordering, removed menus/arrows and action spacing",
+        "PASS startup priority retains bridge readiness; native old-final comparison retained; both taskbar owner fields verified",
+        "PASS direct lifecycle registration with queued failure retry; synchronous result positioning; native selection arguments retained",
+        "PASS temporary diagnostic hooks, frame reflection and trace timers removed; native index rewrite remains absent"
+      ]
+    }
+  ]
+}

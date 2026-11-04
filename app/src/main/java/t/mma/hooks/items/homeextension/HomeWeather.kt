@@ -167,14 +167,21 @@ internal object HomeWeather {
         return listOfNotNull(district, address?.locality, address?.adminArea)
             .filter { it.isNotBlank() }.distinct().joinToString(" · ").takeIf { it.isNotBlank() }
     }
-    fun card(context: Context, compact: Boolean = false, settings: android.content.SharedPreferences? = null): LinearLayout {
+    fun card(
+        context: Context,
+        compact: Boolean = false,
+        settings: android.content.SharedPreferences? = null,
+        locateOnRefresh: Boolean = true
+    ): LinearLayout {
         val prefs = settings ?: HomeExtensionSettings.preferences(context)
         val storage = HchatStorage.preferences(context, "Hchat_home_qweather_v1_cache")
         var name = prefs.getString("weather_city", "").orEmpty()
         var lat = prefs.getString("weather_lat", "").orEmpty()
         var lon = prefs.getString("weather_lon", "").orEmpty()
         val showWeek = prefs.getBoolean("weather_seven_day", false)
-        var key = "$lat,$lon" + if (showWeek) ":week7" else ""
+        // Keep sidebar requests, cache and notifications independent of the homepage.
+        val cachePrefix = if (locateOnRefresh) "" else "sidebar:"
+        var key = cachePrefix + "$lat,$lon" + if (showWeek) ":week7" else ""
         var locating = false
         var locationRequest = 0L
         var locationCleanup: (() -> Unit)? = null
@@ -259,7 +266,7 @@ internal object HomeWeather {
                     android.content.res.ColorStateList.valueOf(0x22777777), null,
                     GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) }
                 )
-                contentDescription = "定位并刷新天气"
+                contentDescription = if (locateOnRefresh) "定位并刷新天气" else "刷新当前地区天气"
                 isEnabled = !locating && !inFlight.contains(key)
                 alpha = if (isEnabled) 1f else 0.45f
                 setOnClickListener { manualRefresh() }
@@ -469,6 +476,17 @@ val sky = LinearLayout(context).apply {
         manualRefresh = manual@{
             if (locating || inFlight.contains(key) || !panel.isAttachedToWindow) return@manual
             fun message(value: String) = android.widget.Toast.makeText(context, value, android.widget.Toast.LENGTH_SHORT).show()
+            if (!locateOnRefresh) {
+                val latitude = lat.toDoubleOrNull()
+                val longitude = lon.toDoubleOrNull()
+                if (latitude == null || !latitude.isFinite() || latitude !in -90.0..90.0 ||
+                    longitude == null || !longitude.isFinite() || longitude !in -180.0..180.0) {
+                    message("请先在侧边栏天气设置中选择城市")
+                    return@manual
+                }
+                fetch(force = true)
+                return@manual
+            }
             val fine = context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
             val coarse = context.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
             if (!fine && !coarse) {

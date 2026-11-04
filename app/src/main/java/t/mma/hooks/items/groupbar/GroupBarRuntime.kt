@@ -188,6 +188,20 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                     sessions.values.forEach { it.beforeTaskBarResize(param.thisObject) }
                 }
             })
+            // Both native lists fill the viewport using only native chrome heights.
+            fun hookFooterSpace(owner: Class<*>, name: String) {
+                val method = KavaReflector.findMethodRecursive(owner, name,
+                    Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, Boolean::class.javaPrimitiveType!!)
+                    ?: error("Missing native footer calculator: $name(IIZ)")
+                hooks += HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        val session = sessions[param.thisObject as? View] ?: return
+                        val space = param.result as? Float ?: return
+                        param.result = session.availableFooterSpace(space)
+                    }
+                })
+            }
+            hookFooterSpace(list, "g")
             nativeListHook(list, "C", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
             nativeListHook(list, "setSelection", Int::class.javaPrimitiveType!!, before = { it.beforeNativeSelection() })
             nativeListHook(list, "o", after = { it.headerState(true) })
@@ -197,6 +211,7 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
             nativeListHook(list, "onScroll", android.widget.AbsListView::class.java, Int::class.javaPrimitiveType!!,
                 Int::class.javaPrimitiveType!!, Int::class.javaPrimitiveType!!, after = { it.syncHeaderVisibility() })
             val recycler = type("com.tencent.mm.ui.conversation.recycler.ConversationRecyclerView")
+            hookFooterSpace(recycler, "j1")
             hookAttach(recycler, "setAdapter", type("androidx.recyclerview.widget.f2")); hookAttach(recycler, "onAttachedToWindow")
             nativeListHook(recycler, "y1", before = { it.beforeNativeOffset() }, after = { it.afterNativeOffset() })
             nativeListHook(recycler, "setSelectionWithOffset", Int::class.javaPrimitiveType!!, before = { it.beforeNativeSelection() })
@@ -386,10 +401,12 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
         private var floatingInset = 0
         private var titleAnchor: View? = null
         private var stableTitleTop: Int? = null
+        private var stableWindowTop: Int? = null
+        private val barPosition = IntArray(2)
         private var positionDirty = true
         private var titleChain = emptyList<View>()
         private val preDrawListener = android.view.ViewTreeObserver.OnPreDrawListener {
-            if (!disposed) { syncHeaderVisibility(); ensureBarOnTop() }
+            if (!disposed) { syncHeaderVisibility(); ensureBarOnTop(); syncFixedPosition() }
             true
         }
         private val titlePosition = IntArray(2)
@@ -682,6 +699,15 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 bar.elevation = maxOf(bar.elevation, dp(1).toFloat())
             }
         }
+        // No layout, reflection, allocations or list selection on the scrolling path.
+        private fun syncFixedPosition() {
+            if (bar.visibility != View.VISIBLE) return
+            val target = stableWindowTop ?: return
+            bar.getLocationInWindow(barPosition)
+            val delta = target + floatingInset - barPosition[1]
+            if (delta != 0) bar.translationY += delta.toFloat()
+        }
+        fun availableFooterSpace(nativeSpace: Float): Float = nativeSpace - appliedScrollInset
         private fun safePosition() {
             runCatching { positionBar() }.onFailure { HLog.e("[Hchat:GroupBar] 横栏定位失败", it) }
         }
@@ -699,7 +725,10 @@ internal class GroupBarRuntime(private val context: FeatureContext) {
                 anchor.getLocationInWindow(titlePosition)
                 parent.getLocationInWindow(parentPosition)
                 val measured = (titlePosition[1] + anchor.height - titleTranslation(anchor) - parentPosition[1] + titleTranslation(parent) - parent.paddingTop).coerceAtLeast(0)
-                if (measured > 0) stableTitleTop = measured
+                if (measured > 0) {
+                    stableTitleTop = measured
+                    stableWindowTop = titlePosition[1] + anchor.height - titleTranslation(anchor)
+                }
                 stableTitleTop ?: return
             } else stableTitleTop ?: return
             val top = titleBottom + floatingInset

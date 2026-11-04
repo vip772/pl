@@ -11,7 +11,7 @@ c = (BASE / 'hooks/items/moments/MomentsCardFeature.kt').read_text()
 assert 'private const val CACHE_TTL = 3 * 60 * 60_000L' in w
 assert '6 * 60 * 60_000L' not in w
 assert 'HomeWeather.card(ctx, compactCard)' in (BASE / 'hooks/items/homeextension/HomeExtensionRuntime.kt').read_text()
-assert 'HomeWeather.card(activity, settings = prefs)' in (BASE / 'hooks/items/homesidepanel/HomeSidePanelDrawer.kt').read_text()
+assert 'HomeWeather.card(activity, settings = prefs, locateOnRefresh = false)' in (BASE / 'hooks/items/homesidepanel/HomeSidePanelDrawer.kt').read_text()
 assert 'if (!inFlight.add(requestKey))' in w
 assert 'failures[key] ?: 0L) < 5 * 60_000L' in w
 assert 'main.postDelayed(automaticUpdate, delay.coerceIn(60_000L, CACHE_TTL))' in w

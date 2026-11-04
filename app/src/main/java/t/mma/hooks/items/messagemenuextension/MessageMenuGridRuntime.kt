@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.PopupWindow
+import android.widget.ScrollView
 import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.api.message.SingleMessageMenuLocator
 import t.mma.hooks.core.FeatureContext
@@ -38,6 +39,7 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
     private lateinit var binding: Field
     private lateinit var model: Field
     private lateinit var popup: Field
+    private lateinit var anchorField: Field
     private lateinit var flag: Field
     private lateinit var bindMethod: Method
     private var installed = false
@@ -57,6 +59,7 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
             binding = requireNotNull(KavaReflector.findDeclaredField(owner, "t"))
             model = requireNotNull(KavaReflector.findDeclaredField(owner, "x"))
             popup = requireNotNull(KavaReflector.findDeclaredField(owner, "m"))
+            anchorField = requireNotNull(KavaReflector.findDeclaredField(owner, "f"))
             flag = requireNotNull(KavaReflector.findDeclaredField(owner, "F"))
             check(binding.type.isInterface && flag.type == java.lang.Boolean.TYPE)
             bindMethod = KavaReflector.declaredMethods(binding.type).single {
@@ -124,7 +127,7 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
                 }
             })
             installed = true
-            HLog.i("$TAG stage=install version=8.0.78/3180 mode=grid columns=6 maxRows=5")
+            HLog.i("$TAG stage=install version=8.0.78/3180 mode=grid configurable=true")
             return true
         } catch (error: Throwable) {
             hooks.forEach { HookRegistry.get().unhook(it) }; hooks.clear()
@@ -178,18 +181,34 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
         val indices = rows.map { parent.indexOfChild(it) }
         check(indices.all { it >= 0 } && indices.distinct().size == rows.size) { "Invalid native row indices" }
         check(allViews.all { it.parent == null || it.parent in rows }) { "Unexpected item parent" }
-        val selected = allViews.take(30)
-        val count = (selected.size + 5) / 6
+        val columns = MessageMenuExtensionSettings.columns(prefs)
+        val maxRows = MessageMenuExtensionSettings.maxRows(prefs)
+        val count = (allViews.size + columns - 1) / columns
+        val anchor = KavaReflector.readField(anchorField, frame.owner) as? View ?: error("Anchor unavailable")
+        val outer = parent.parent as? LinearLayout ?: error("Unsupported popup root")
+        check(outer === content) { "Unexpected popup hierarchy" }
+        val parentIndex = outer.indexOfChild(parent)
+        val parentParams = parent.layoutParams
+        val separators = (0 until parent.childCount).map { parent.getChildAt(it) }.filter { it !in rows }
+        val separatorVisibility = separators.associateWith { it.visibility }
         val window = KavaReflector.readField(popup, frame.owner) as? PopupWindow ?: error("Popup unavailable")
         val childSnapshots = rows.map { row -> (0 until row.childCount).map { row.getChildAt(it) } }
         check(childSnapshots.flatten().all { it in allViews }) { "Uncaptured row child" }
         val rowParams = rows.map { LinearLayout.LayoutParams(it.layoutParams) }
         val rowVisibility = rows.map { it.visibility }
         val itemParams = allViews.associateWith { it.layoutParams }
+        val resizedChildren = IdentityHashMap<View, ViewGroup.LayoutParams>()
+        var viewport: ScrollView? = null
         val extra = mutableListOf<LinearLayout>()
         frame.originalFlag = KavaReflector.readField(flag, frame.owner)
         frame.originalHeight = window.height; frame.originalWidth = window.width
         val restore = {
+            viewport?.let { scroll ->
+                scroll.removeView(parent); outer.removeView(scroll)
+                if (parent.parent == null) outer.addView(parent, parentIndex, parentParams)
+            }
+            resizedChildren.forEach { (view, params) -> view.layoutParams = params }
+            separatorVisibility.forEach { (view, visibility) -> view.visibility = visibility }
             extra.forEach { it.removeAllViews(); parent.removeView(it) }
             rows.forEach { it.removeAllViews() }
             allViews.forEach { view -> (view.parent as? ViewGroup)?.removeView(view); itemParams[view]?.let { view.layoutParams = it } }
@@ -203,25 +222,53 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
         }
         frame.undo = restore
         try {
-            val density = content.resources.displayMetrics.density
-            val visibleFrame = Rect().also { content.getWindowVisibleDisplayFrame(it) }
-            val screenWidth = visibleFrame.width().takeIf { it > 0 }
-                ?: content.resources.displayMetrics.widthPixels
-            val available = (screenWidth - (24 * density).toInt()).coerceAtLeast(6)
-            val existingWidth = rows.first().measuredWidth.takeIf { it > 0 }
-                ?: rows.first().layoutParams.width.takeIf { it > 0 }
-                ?: available
-            val horizontalPadding = rows.first().paddingLeft + rows.first().paddingRight
-            val nativeContentWidth = (existingWidth - horizontalPadding).coerceAtLeast(5)
-            val rowWidth = minOf(
-                available,
-                nativeContentWidth * 6 / 5 + horizontalPadding
-            ).coerceAtLeast(6)
-            val itemWidth = ((rowWidth - horizontalPadding) / 6).coerceAtLeast(1)
-            val rowHeight = rows.first().measuredHeight.takeIf { it > 0 }
-                ?: allViews.maxOf { it.measuredHeight }.takeIf { it > 0 }
-                ?: rows.first().layoutParams.height
-            check(rowHeight > 0) { "Unmeasured native row" }
+            // Native setContentView precedes native measurement. Use this anchor's current window.
+            val metrics = anchor.resources.displayMetrics
+            val visibleFrame = Rect().also { anchor.getWindowVisibleDisplayFrame(it) }
+            if (visibleFrame.isEmpty) visibleFrame.set(0, 0, metrics.widthPixels, metrics.heightPixels)
+            val gap = (12 * metrics.density).toInt()
+            val available = (visibleFrame.width() - 2 * gap).coerceAtLeast(columns)
+            val unspecified = View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            content.measure(unspecified, unspecified)
+            allViews.forEach { it.measure(unspecified, unspecified) }
+            val horizontalPadding = parent.paddingLeft + parent.paddingRight +
+                rows.first().paddingLeft + rows.first().paddingRight + content.paddingLeft + content.paddingRight
+            val nativeItemWidth = allViews.maxOf { it.measuredWidth }.coerceAtLeast(1)
+            val geometry = MessageMenuGridGeometry.width(available, horizontalPadding,
+                rows.first().paddingLeft + rows.first().paddingRight, columns, nativeItemWidth)
+            val itemWidth = geometry.item
+            val rowWidth = geometry.row
+            // c_6's fixed-width inner LinearLayout must shrink with its outer clickable View.
+            allViews.forEach { view ->
+                if (view is LinearLayout) {
+                    for (index in 0 until view.childCount) {
+                        val child = view.getChildAt(index)
+                        val lp = child.layoutParams
+                        if (lp.width > itemWidth) {
+                            resizedChildren[child] = lp
+                            child.layoutParams = LinearLayout.LayoutParams(lp).apply { width = ViewGroup.LayoutParams.MATCH_PARENT }
+                        }
+                        // Also fit fixed-size icons inside the now-narrower native inner container.
+                        if (child is LinearLayout) {
+                            for (innerIndex in 0 until child.childCount) {
+                                val inner = child.getChildAt(innerIndex)
+                                val innerParams = inner.layoutParams
+                                val innerWidth = (itemWidth - child.paddingLeft - child.paddingRight).coerceAtLeast(1)
+                                if (innerParams.width > innerWidth) {
+                                    resizedChildren[inner] = innerParams
+                                    inner.layoutParams = LinearLayout.LayoutParams(innerParams).apply {
+                                        width = innerWidth
+                                        if (innerParams.height == innerParams.width) height = innerWidth
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                view.measure(View.MeasureSpec.makeMeasureSpec(itemWidth, View.MeasureSpec.EXACTLY), unspecified)
+            }
+            val rowHeight = allViews.maxOf { it.measuredHeight } + rows.first().paddingTop + rows.first().paddingBottom
+            check(rowHeight > 0) { "Unmeasured native items" }
             rows.forEach { it.removeAllViews() }
             while (rows.size + extra.size < count) {
                 val row = LinearLayout(content.context).apply {
@@ -240,10 +287,32 @@ internal class MessageMenuGridRuntime(private val context: FeatureContext) {
             (rows + extra).forEachIndexed { index, row ->
                 row.visibility = if (index < count) View.VISIBLE else View.GONE
                 row.layoutParams = LinearLayout.LayoutParams(rowWidth, rowHeight)
-                selected.drop(index * 6).take(6).forEach { view ->
-                    row.addView(view, LinearLayout.LayoutParams(itemWidth, rowHeight))
+                allViews.drop(index * columns).take(columns).forEach { view ->
+                    row.addView(view, LinearLayout.LayoutParams(itemWidth, rowHeight - row.paddingTop - row.paddingBottom))
                 }
             }
+            separators.forEach { separator ->
+                val index = parent.indexOfChild(separator)
+                val precedingRows = rows.count { parent.indexOfChild(it) < index }
+                separator.visibility = if (precedingRows in 1 until count) View.VISIBLE else View.GONE
+            }
+            parent.measure(View.MeasureSpec.makeMeasureSpec(rowWidth + parent.paddingLeft + parent.paddingRight, View.MeasureSpec.EXACTLY), unspecified)
+            val chromeHeight = content.paddingTop + content.paddingBottom +
+                (0 until outer.childCount).map { outer.getChildAt(it) }
+                    .filter { it !== parent && it.visibility != View.GONE }.sumOf { it.measuredHeight }
+            val maxHeight = (visibleFrame.height() - 2 * gap - chromeHeight).coerceAtLeast(1)
+            val viewportHeight = MessageMenuGridGeometry.viewport(parent.measuredHeight, rowHeight, maxRows,
+                parent.paddingTop + parent.paddingBottom,
+                separators.filter { it.visibility == View.VISIBLE }.sumOf { it.measuredHeight }, maxHeight)
+            val scroll = ScrollView(content.context).apply {
+                isFillViewport = false
+                isHorizontalScrollBarEnabled = false
+                isVerticalScrollBarEnabled = true
+            }
+            viewport = scroll
+            outer.removeView(parent)
+            scroll.addView(parent, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            outer.addView(scroll, parentIndex, LinearLayout.LayoutParams(rowWidth + parent.paddingLeft + parent.paddingRight, viewportHeight))
             check(KavaReflector.writeField(flag, frame.owner, false)) { "Cannot override popup height flag" }
             window.height = ViewGroup.LayoutParams.WRAP_CONTENT
             window.width = ViewGroup.LayoutParams.WRAP_CONTENT

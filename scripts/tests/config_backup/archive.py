@@ -110,6 +110,22 @@ fun main(args:Array<String>){
  File(Store.resourceDirectory(only,"new"),"icon").writeText("icon")
  val onlyZip=File(base,"only.zip");check(HchatConfigBackup.exportToUri(only,Uri(onlyZip)).items==0)
  check(HchatConfigBackup.importFromUri(b,Uri(onlyZip)).resources==1)
+ // Message menu layout values use the existing automatically discovered config store.
+ val menu=Context(File(base,"menu"),"com.menu")
+ val menuOut=Context(File(base,"menu-out"),"com.menu.out")
+ for (columns in 5..8) for (rows in 3..5) {
+  val menuPrefs=Store.preferences(menu,"Hchat_message_menu_extension_config")
+  menuPrefs.edit().putBoolean("message_menu_extension_enable",true)
+   .putInt("message_menu_extension_columns",columns).putInt("message_menu_extension_max_rows",rows).commit()
+  val menuZip=File(base,"menu-$columns-$rows.zip")
+  check(HchatConfigBackup.exportToUri(menu,Uri(menuZip)).items==3)
+  HchatConfigBackup.importFromUri(menuOut,Uri(menuZip))
+  val restoredMenu=Store.preferences(menuOut,"Hchat_message_menu_extension_config")
+  check(restoredMenu.getBoolean("message_menu_extension_enable",false))
+  check(restoredMenu.getInt("message_menu_extension_columns",0)==columns)
+  check(restoredMenu.getInt("message_menu_extension_max_rows",0)==rows)
+ }
+ println("PASS: message menu all 12 column/row configurations production archive round trip")
  // Global private-chat switch: absent defaults off; true and false survive archive restore.
  val hb=Context(File(base,"redpacket"),"com.redpacket")
  val hbOut=Context(File(base,"redpacket-restored"),"com.redpacket.restored")

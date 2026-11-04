@@ -339,7 +339,7 @@ internal class HomeSidePanelDrawer(
                 Row("▢","悬浮底栏","底部导航栏样式") { MiuixSettingsPage.showFeature(activity,"custom_bottom_bar"); onNavigate() }
             ));cardViews["hchat"] = hchat
             if (prefs.getBoolean(SidePanelAppearance.cardEnabled("weather"), false)) {
-                cardViews["weather"] = t.mma.hooks.items.homeextension.HomeWeather.card(activity, settings = prefs)
+                cardViews["weather"] = t.mma.hooks.items.homeextension.HomeWeather.card(activity, settings = prefs, locateOnRefresh = false)
             }
             SidePanelAppearance.order(activity).filter { prefs.getBoolean(SidePanelAppearance.cardEnabled(it), it != "weather") }.forEach { id ->
                 val card = cardViews.getValue(id); card.tag = id

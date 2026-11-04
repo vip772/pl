@@ -16,7 +16,7 @@ assert 'LinearLayout.LayoutParams(dp(48), dp(48))' in heading
 assert 'if (compact) orientation = LinearLayout.VERTICAL' in heading
 assert heading.index('labels.addView(cityRow') < heading.index('labels.addView(text(status')
 assert 'HomeWeather.card(ctx, compactCard)' in (BASE / 'hooks/items/homeextension/HomeExtensionRuntime.kt').read_text()
-assert 'HomeWeather.card(activity, settings = prefs)' in (BASE / 'hooks/items/homesidepanel/HomeSidePanelDrawer.kt').read_text()
+assert 'HomeWeather.card(activity, settings = prefs, locateOnRefresh = false)' in (BASE / 'hooks/items/homesidepanel/HomeSidePanelDrawer.kt').read_text()
 print('PASS source: shared weather layout, icon before city, compact status below, 48dp refresh action retained')
 modern = card.split('if (!improveInstalled)', 1)[1].split('private fun style(', 1)[0]
 assert 'param.result' not in modern

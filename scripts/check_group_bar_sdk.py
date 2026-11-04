@@ -4,7 +4,7 @@ import subprocess,tempfile
 r=Path(__file__).resolve().parents[1];libs=Path('/tmp/pl-kotlin-libs');std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
 sources={
 'Core.kt':'''package t.mma.hooks.core
-open class BaseFeature {open fun featureId()="";open fun name()="";open fun onFeatureInit(context:FeatureContext){};open fun onFeatureInstall(context:FeatureContext){};open fun onFeatureDestroy(context:FeatureContext){};fun registerSettingsProvider(p:Any){}}
+open class BaseFeature {open fun featureId()="";open fun name()="";open fun onFeatureInit(context:FeatureContext){};open fun onFeatureInstall(context:FeatureContext){};open fun onFeatureDestroy(context:FeatureContext){};fun registerSettingsProvider(p:Any){};fun trackResource(release:()->Unit){}}
 class FeatureContext {fun hostContext():android.content.Context=TODO();fun hostClassLoader():ClassLoader=TODO()}
 object HookRegistry {fun get()=this;fun hook(m:java.lang.reflect.Member,h:de.robv.android.xposed.XC_MethodHook):de.robv.android.xposed.XC_MethodHook.Unhook=TODO();fun unhook(h:de.robv.android.xposed.XC_MethodHook.Unhook?){}}
 ''',

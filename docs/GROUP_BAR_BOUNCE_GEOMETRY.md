@@ -43,3 +43,24 @@ BackgroundBeautyRuntime.restoreSurfaceGeometry每次背景重设或恢复时会�
 验证：check_group_bar_viewport_baseline.py、check_group_bar_integration.py 和 git diff --check 通过。集成检查直接读取已解码的 8.0.78 smali；修正了该脚本中早于当前生命周期改造的 candidate.install 断言，改为检查当前 attempt/ticket 与关闭路径。更新原偏移 JVM 夹具以符合不改 padding 的逻辑，但遵守只做静态检查，本轮不执行 Kotlin/JVM 编译、SDK 编译、Gradle 或 APK 构建。
 
 边界：以上确认源码回归点与恢复范围，没有本轮修复包的实机视图树、各组逐帧结果或滚动性能数据；不能声称唯一遮挡贡献层已实测或所有分组已验收。需覆盖全部/好友/群聊/服务号/未读/自定义组，含空、短、长结果，上下滚动、顶部回弹、切组及小程序收起；同时复查首行与横栏遮挡。只核实 8.0.78。
+
+
+## 2026-11-04 固定横栏与短列表页脚修正（未提交）
+
+基线：`8cd489cbbedc65f7e7e350708d1d25b827340367`，工作分支 `dev`。用户要求横栏在上滑到底及回弹期间固定，回弹后的首会话在横栏下面；本轮明确禁止提交和推送。
+
+### 原生证据与修正范围
+
+微信 8.0.78 `ConversationListView.g(IIZ)F` 的剩余高度计算为视口高度减会话高度、原生 action bar 和状态区高度，不读取已经加上横栏预留的 `s`。`h()` 消费该结果，区分长短结果并设置空白页脚高度。因此单独增加 `s`/控制器 `n`，无法让短结果的原生页脚计算包含横栏预留。现代列表 `j1(IIZ)F` 同样只扣原生 action bar 与 `G2`，经 `k1()/m1()` 交给 `i1(FZ)` 设置页脚，未使用最终 `v2`。
+
+本次分别在这两个已确认的计算方法返回后，对已登记 Session 的结果扣除 `appliedScrollInset`。关闭时预留为零，保持原值；不改原生列表 padding、裁剪、索引、selection 参数或八个既有偏移协调方法。首次布局及原生后续布局会执行 `h()/m1()`，切组仍沿既有新数据页脚协调路径执行。
+
+横栏现有定位只计算静态父容器 margin，不能单凭该值保证父链变化后的窗口坐标。本轮记录去除标题链 translation 的窗口底边，在既有 pre-draw 回调中比较横栏窗口坐标，仅在存在差值时调整横栏自身 translationY。复用 `IntArray(2)`；不添加定时器，不逐帧搜索视图、反射、重算页脚或回顶。该路径使用 `getLocationInWindow`，其内部父链坐标计算仍有开销，未测量实机耗时。未取得截图现场的父链位移数值，不能将某个宿主动画声明为已证实的现场唯一根因。
+
+### 验证
+
+九项检查通过：`check_group_bar_sdk.py`、`test_group_bar_fixed_geometry.py`、`test_group_bar_native_offset.py`、`test_group_bar_first_layout.py`、`test_group_bar_background_geometry.py`、`test_group_bar_gesture_lifecycle.py`、`test_groupbar_install_lifecycle.py`、`check_group_bar_viewport_baseline.py`、`check_group_bar_integration.py`。
+
+新增夹具读取两种原生 smali 契约，并执行生产固定位置/页脚修正方法：189 组几何组合、上下位移与归位、隐藏/未定位/坐标更新/关闭、5000 稳定帧无位置写入。页脚布局部分为按 smali 建模的受控模型，不是 Android ListView 实际布局执行。SDK 检查使用真实 Android API 和项目服务桩；原测试桩缺失当前已有的 `trackResource`，已补齐。证据摘要见 `GROUP_BAR_FIXED_GEOMETRY_20261104.json`。
+
+边界：没有 Gradle、APK/R8 构建或新包实机验收，没有滚动帧耗时数据；只能确认源码修复与上述受控验证完成。当前仅有 8.0.78 解码证据，未验证其他版本。实机仍须覆盖空/短/长分组的上下滑动、到底回弹、首行位置、切组、小程序开合及横竖屏。全部改动保留在工作区，不提交、不推送。
