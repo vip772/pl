@@ -310,9 +310,9 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             walk(decor, false, 0)
         }
-        private fun sizeHeader() {
-            val root = header ?: return
-            val host = root.parent as? ViewGroup ?: return
+        private fun sizeHeader(): Boolean {
+            val root = header ?: return false
+            val host = root.parent as? ViewGroup ?: return false
             val verticalPadding = ((host.height - dp(58)) / 2).coerceIn(0, dp(9))
             if (root.paddingTop != verticalPadding) root.setPadding(dp(13), verticalPadding, dp(18), verticalPadding)
             header?.findViewWithTag<View>("hchat_home_avatar_effect")?.let { wrap ->
@@ -321,8 +321,8 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                     wrap.layoutParams = LinearLayout.LayoutParams(side, side)
                 }
             }
-            val nick = name ?: return
-            if (host.width <= 0) return
+            val nick = name ?: return false
+            if (host.width <= 0 || host.height < dp(38)) return false
             val buttonsId = hostResourceId("coz")
             val buttons = if (buttonsId != 0) host.findViewById<View>(buttonsId) else null
             val right = if (buttons != null && buttons.visibility == View.VISIBLE && buttons.width > 0) buttons.left - dp(8) else host.width - dp(14)
@@ -343,6 +343,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                     root.layoutParams = lp
                 }
             }
+            return true
         }
         private var avatar: ImageView? = null
         private var name: TextView? = null
@@ -403,7 +404,12 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             val headerVisible = enabled && isWechatTab() && (!chatVisible || retainsHomeTitle())
             if (headerVisible && !chatVisible) ensureHeader()
             val profileVisible = headerVisible && showProfile()
-            val targetVisibility = if (profileVisible) View.VISIBLE else View.GONE
+            val headerReady = if (headerVisible) sizeHeader() else false
+            val targetVisibility = when {
+                !profileVisible -> View.GONE
+                headerReady -> View.VISIBLE
+                else -> View.INVISIBLE
+            }
             if (header?.visibility != targetVisibility) header?.visibility = targetVisibility
             updateTitleSpace(profileVisible)
             bindNativeTitle(headerVisible)
@@ -424,7 +430,6 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 titleScanAt = now + 1000L
                 updateScrollableTitle(headerVisible)
             }
-            if (headerVisible) sizeHeader()
             if (Build.VERSION.SDK_INT >= 29 && lastEdgeEnabled != edgeEnabled) {
                 decor.setSystemGestureExclusionRects(
                     if (edgeEnabled) listOf(Rect(0, 0, dp(64), decor.height.coerceAtLeast(1))) else emptyList()
