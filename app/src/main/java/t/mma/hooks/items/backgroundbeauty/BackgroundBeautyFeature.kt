@@ -665,20 +665,13 @@ private class BackgroundBeautyRuntime(
             findWechatVerifiedMethod(clazz, "B0")?.let { method ->
                 installed = hookOnce(method, after = { param ->
                     val activity = findActivity(param.thisObject) ?: return@hookOnce
-                    applyWechatStatusMasks(activity, "main-tab-resume")
-                    // B0 lays out the status mask after returning; repair once after that frame.
-                    activity.window.decorView.postOnAnimation {
-                        if (!destroyed) applyWechatStatusMasks(activity, "main-tab-resume-frame")
-                    }
+                    applyWechatStatusMasks(activity)
                 }) || installed
             }
             findWechatVerifiedMethod(clazz, "onConfigurationChanged", android.content.res.Configuration::class.java)?.let { method ->
                 installed = hookOnce(method, after = { param ->
                     val activity = findActivity(param.thisObject) ?: return@hookOnce
-                    applyWechatStatusMasks(activity, "main-configuration")
-                    activity.window.decorView.postOnAnimation {
-                        if (!destroyed) applyWechatStatusMasks(activity, "main-configuration-frame")
-                    }
+                    applyWechatStatusMasks(activity)
                 }) || installed
             }
         }
@@ -3115,23 +3108,27 @@ private class BackgroundBeautyRuntime(
         if (view.minimumWidth != snapshot.originalMinimumWidth) view.minimumWidth = snapshot.originalMinimumWidth
         if (view.minimumHeight != snapshot.originalMinimumHeight) view.minimumHeight = snapshot.originalMinimumHeight
     }
-    private fun applyWechatStatusMasks(activity: Activity, phase: String) {
+    private fun applyWechatStatusMasks(activity: Activity) {
         if (destroyed || activity.javaClass.name != LAUNCHER_ACTIVITY ||
             !prefs.getBoolean(BackgroundBeautySettings.KEY_ENABLE, BackgroundBeautySettings.DEFAULT_ENABLE) ||
             !hasBackgroundImage(BackgroundBeautySettings.Slot.WECHAT)) return
-        val state = states[activity] ?: return
-        // og9 belongs to MainUI's controller; nhm is MainUIView's own inset mask.
-        // Find from decor rather than the fragment root or the current tab's scan.
+        val state = states[activity] ?: ensureState(activity)
+        // B0's og9 is a controller sibling, so page-root and cached-root scans miss it.
         listOf("og9", "nhm").forEach { name ->
             val id = resourceId(name)
             if (id == 0) return@forEach
             val mask = activity.window.decorView.findViewById<View>(id) ?: return@forEach
+            val owner = surfaceOwners[mask]
+            if (owner !== state) {
+                if (owner != null) owner.surfaces.remove(mask)
+                state.surfaces.remove(mask)
+                surfaceOwners.remove(mask)
+            }
             setTransparentSurface(state, mask, BackgroundBeautySettings.Slot.WECHAT, clearForeground = true)
-
         }
     }
     private fun applySystemBars(state: HostState) {
-        applyWechatStatusMasks(state.activity, "apply-bars")
+        applyWechatStatusMasks(state.activity)
         val window = state.activity.window
         surfaceMutationDepth++
         try {
