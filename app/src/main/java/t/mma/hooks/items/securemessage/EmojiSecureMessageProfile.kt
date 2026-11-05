@@ -15,6 +15,10 @@ internal data class EmojiSecureMessageProfile(
                 sourceOwner = "ft1.d1",
                 emojiScene = "k52.y"
             )
+            name == "8.0.78" && code == 3180L -> EmojiSecureMessageProfile(
+                sourceOwner = "vu1.d1",
+                emojiScene = "c72.y"
+            )
             else -> null
         }
     }

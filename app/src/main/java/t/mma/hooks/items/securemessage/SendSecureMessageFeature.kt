@@ -81,6 +81,8 @@ private class SendSecureMessageRuntime(
     private val installedMembers = LinkedHashSet<String>()
     private var insertInstalled = false
     private var mediaInstalled = false
+    private var videoSourceInstalled = false
+    private var imageSourceInstalled = false
     private var mergeInstalled = false
     private var emojiSourceInstalled = false
     private var emojiDispatchInstalled = false
@@ -112,6 +114,8 @@ private class SendSecureMessageRuntime(
         closed = true
         insertInstalled = false
         mediaInstalled = false
+        videoSourceInstalled = false
+        imageSourceInstalled = false
         mergeInstalled = false
         emojiSourceInstalled = false
         emojiDispatchInstalled = false
@@ -150,9 +154,11 @@ private class SendSecureMessageRuntime(
         val insertReady = installInsertHook(insert)
         val mergeReady = installSourceMergeHooks(insert)
         val mediaReady = installMediaEncodingHooks()
+        val videoReady = installVideoSourceHooks()
+        val imageReady = installImageSourceHook()
         val emojiReady = installEmojiHooks()
         val emojiCheckReady = if (emojiCheckInstalled) true else installEmojiSelfCheckHooks(runtimeKey)
-        return insertReady && mergeReady && mediaReady && emojiReady && emojiCheckReady
+        return insertReady && mergeReady && mediaReady && videoReady && imageReady && emojiReady && emojiCheckReady
     }
 
     /**
@@ -222,6 +228,56 @@ private class SendSecureMessageRuntime(
         }.getOrElse { report("图片安全消息 PB3 编码入口安装失败", it); false }
         mediaInstalled = complete && imageReady
         return mediaInstalled
+    }
+
+    /** Normal image preparation constructs n95.e instead of calling vu1.d1.a. */
+    private fun installImageSourceHook(): Boolean {
+        if (imageSourceInstalled) return true
+        val version = WeChatApis.version()?.current() ?: return false
+        if (version.versionName != "8.0.78" || version.versionCode != 3180L) return true
+        val loader = context.hostClassLoader()
+        val ready = runCatching {
+            val owner = requireNotNull(KavaReflector.loadClass("oa0.d", loader))
+            val target = requireNotNull(KavaReflector.findMethodRecursive(owner, "invokeSuspend", Any::class.java))
+            hookOnce(target, object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (closed || !enabled() || param.hasThrowable()) return
+                    val coroutine = param.thisObject ?: return
+                    val args = KavaReflector.readField(coroutine, "f") ?: return
+                    val upload = KavaReflector.readField(args, "d") ?: return
+                    val source = KavaReflector.readField(upload, "f") as? String
+                    if (!KavaReflector.writeField(upload, "f", SecureMessageSource.addMarker(source))) {
+                        report("图片准备结果 MsgSource 不可写", null)
+                    }
+                }
+            })
+        }.getOrElse { report("图片 MsgSource 生成入口安装失败", it); false }
+        imageSourceInstalled = ready
+        return ready
+    }
+
+    /** Verified 8.0.78 video source builders discard the local message policy. */
+    private fun installVideoSourceHooks(): Boolean {
+        if (videoSourceInstalled) return true
+        val version = WeChatApis.version()?.current() ?: return false
+        if (version.versionName != "8.0.78" || version.versionCode != 3180L) return true
+        val loader = context.hostClassLoader()
+        val ready = runCatching {
+            val videoInfo = requireNotNull(KavaReflector.loadClass("s61.v2", loader))
+            listOf("qi0.o3" to "a", "s61.q1" to "I").map { (className, name) ->
+                val owner = requireNotNull(KavaReflector.loadClass(className, loader))
+                val method = requireNotNull(KavaReflector.findMethodRecursive(owner, name, videoInfo))
+                check(method.returnType == String::class.java)
+                hookOnce(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(param: MethodHookParam) {
+                        if (closed || !enabled() || param.hasThrowable()) return
+                        param.result = SecureMessageSource.addMarker(param.result as? String)
+                    }
+                })
+            }.all { it }
+        }.getOrElse { report("视频 MsgSource 生成入口安装失败", it); false }
+        videoSourceInstalled = ready
+        return ready
     }
 
     private fun hookOnce(method: Method, callback: XC_MethodHook): Boolean {
@@ -314,7 +370,7 @@ private class SendSecureMessageRuntime(
 
     /**
      * 表情发送会在本地消息入库后重新生成 MsgSource，因此通用入库 Hook 不足以覆盖
-     * 最终网络请求。这里按已确认的 8.0.76/8.0.77 链路补写两次标记。
+     * 最终网络请求。这里按已确认的版本链路补写生成结果与最终分发请求。
      */
     private fun installEmojiHooks(): Boolean {
         if (emojiSourceInstalled && emojiDispatchInstalled) return true
@@ -411,13 +467,13 @@ private class SendSecureMessageRuntime(
             override fun afterHookedMethod(param: MethodHookParam) {
                 if (closed || !enabled() || param.hasThrowable()) return
                 val message = param.args?.getOrNull(0) ?: return
-                if (readNumber(message, "field_type", "type", "getType", "getMsgType")?.toInt() != EMOJI_TYPE) {
-                    return
-                }
+                // 8.0.78 shares this source builder with image uploads. Gate on
+                // outgoing messages so receive-side queries never acquire the policy.
+                if (!isSupportedOutgoingMessage(message)) return
                 param.result = SecureMessageSource.addMarker(param.result as? String)
                 if (!emojiSourceTriggeredLogged) {
                     emojiSourceTriggeredLogged = true
-                    log("表情 MsgSource 安全标记已写入")
+                    log("媒体 MsgSource 生成结果已补齐安全标记")
                 }
             }
         })

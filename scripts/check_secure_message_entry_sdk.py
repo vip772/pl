@@ -27,7 +27,7 @@ assert 'antiPrefs, SecureMessageSettings.KEY_ENABLE, "反安全消息"' in page_
 registry = (base / 'hooks/core/FeatureRegistry.kt').read_text()
 for name in ('SendSecureMessageFeature', 'AntiSecureMessageFeature', 'SpecialMessageFeature'):
     assert f'.register({name}())' in registry
-for name in ('SecureMessageSettings.kt', 'AntiSecureMessageFeature.kt', 'EmojiSecureMessageProfile.kt'):
+for name in ('SecureMessageSettings.kt', 'AntiSecureMessageFeature.kt'):
     path = send.parent / name
     assert path.read_bytes() == subprocess.check_output(['git', 'show', '9366061:' + str(path.relative_to(r))], cwd=r), name
 # Verified media mappings cover both size calculation and encoding.
@@ -38,10 +38,14 @@ for token in ('version?.versionName != "8.0.78" || version.versionCode != 3180L'
               'request.javaClass != imageClass || closed || !enabled()',
               'KavaReflector.invoke(getter, request, 9)',
               'KavaReflector.invokeSuccessfully(setter, request, 9,',
-              'val mediaReady = installMediaEncodingHooks()', 'mediaReady && emojiReady'):
+              'val mediaReady = installMediaEncodingHooks()', 'mediaReady && videoReady && imageReady && emojiReady'):
     assert token in send_text, token
 assert send_text.count('mediaInstalled = false') == 2
-print('PASS static removal, sole special-message route, direct switches, preserved preferences/anti/legacy emoji profile')
+profile = (send.parent / 'EmojiSecureMessageProfile.kt').read_text()
+assert 'sourceOwner = "vu1.d1"' in profile and 'emojiScene = "c72.y"' in profile
+assert 'listOf("qi0.o3" to "a", "s61.q1" to "I")' in send_text
+assert send_text.count('videoSourceInstalled = false') == 2
+print('PASS static removal, sole special-message route, direct switches, preserved preferences/anti and legacy profiles; added 8.0.78 media source profile')
 print('PASS version-gated media mappings, PB3 type gate, encoding/size coverage and lifecycle reset (static only)')
 if '--static-only' in sys.argv:
     raise SystemExit(0)
