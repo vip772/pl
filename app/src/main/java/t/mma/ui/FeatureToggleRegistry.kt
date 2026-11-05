@@ -30,6 +30,7 @@ object FeatureToggleRegistry {
         "anti_recall" to Toggle("Hchat_anti_recall_config", "anti_recall_enable"),
         "block_at_all_notification" to Toggle("Hchat_block_at_all_notification_config", "block_at_all_notification_enable"),
         "auto_message_forward" to Toggle("Hchat_auto_message_forward_config", "enabled"),
+        "auto_merge" to Toggle("Hchat_auto_merge_config", "auto_merge_enable"),
         "auto_original_image" to Toggle("Hchat_auto_original_image_config", "auto_original_image_enable"),
         "auto_reply" to Toggle("Hchat_auto_reply_config", "auto_reply_enable"),
         "auto_view_original" to Toggle("Hchat_auto_view_original_config", "auto_view_original_enable"),

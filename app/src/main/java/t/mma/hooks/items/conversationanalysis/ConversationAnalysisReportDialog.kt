@@ -187,7 +187,7 @@ internal object ConversationAnalysisReportDialog {
         root.addView(limitTitle)
         val seek = SeekBar(activity).apply { max = 50000; progress = store.sampleLimit(); progressTintList = android.content.res.ColorStateList.valueOf(0xffffa13a.toInt()); thumbTintList = android.content.res.ColorStateList.valueOf(0xffffa13a.toInt()); setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener { override fun onProgressChanged(b: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) limitValue.text = if (p == 0) "自动" else p.toString() }; override fun onStartTrackingTouch(b: SeekBar?) = Unit; override fun onStopTrackingTouch(b: SeekBar?) = Unit }) }
         root.addView(seek, LinearLayout.LayoutParams(-1, dp(activity, 54)))
-        root.addView(label(activity, "注：设为 0 时根据容量自动计算（3000 条）。当指定时段的消息总数超出上限时，会自动进行全局均匀抽样，保障整体逻辑连贯。", 14f, if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff77716d.toInt(), false).apply { setLineSpacing(4f, 1f) }, marginParams(activity, -1, 0, 0, 12, 0, 18))
+        root.addView(label(activity, "注：设为 0 时优先快速生成，128K/256K/512K/1M/2M 分别均匀抽样最多 300/600/1200/2500/5000 条。抽样可能遗漏细节；需要更广覆盖可手动调高，上限越大等待越久。", 14f, if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff77716d.toInt(), false).apply { setLineSpacing(4f, 1f) }, marginParams(activity, -1, 0, 0, 12, 0, 18))
         lateinit var dialog: Dialog
         val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         actions.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(0, dp(activity, 54), 1f))
@@ -554,18 +554,51 @@ internal object ConversationAnalysisReportDialog {
     private fun divider(activity: Activity) = View(activity).apply { setBackgroundColor(0xffeee2d6.toInt()) }
     private fun LinearLayout.children(): List<View> = (0 until childCount).map { getChildAt(it) }
 
-    private fun showModelPicker(activity: Activity, models: List<String>, onSelected: (String) -> Unit) {
-        val dialog = Dialog(activity)
-        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 22), dp(activity, 18), dp(activity, 22), dp(activity, 14)); background = rounded(pageColor(activity), dp(activity, 22)) }
-        root.addView(label(activity, "选择模型", 21f, textColor(activity), true), marginParams(activity, -1, 46, 0, 0, 0, 10))
-        val list = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
-        models.forEach { model ->
-            list.addView(label(activity, model, 15f, textColor(activity), false).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(dp(activity, 12), 0, dp(activity, 12), 0); setOnClickListener { onSelected(model); dialog.dismiss() } }, LinearLayout.LayoutParams(-1, dp(activity, 48)))
-            list.addView(divider(activity), LinearLayout.LayoutParams(-1, dp(activity, 1)))
+    private fun showModelPicker(activity: Activity, models: List<String>, onSelected: (String) -> Unit): Dialog {
+        lateinit var dialog: Dialog
+        val root = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(activity, 22), dp(activity, 18), dp(activity, 22), dp(activity, 14))
+            background = rounded(pageColor(activity), dp(activity, 22))
         }
-        root.addView(ScrollView(activity).apply { isFillViewport = true; addView(list) }, LinearLayout.LayoutParams(-1, dp(activity, 240)))
-        root.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(-1, dp(activity, 50)))
-        dialog.setContentView(root); dialog.window?.setBackgroundDrawableResource(android.R.color.transparent); dialog.window?.setWindowAnimations(0); dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .86f).toInt(), (activity.resources.displayMetrics.heightPixels * .72f).toInt()) }; dialog.show()
+        root.addView(label(activity, "选择模型", 21f, textColor(activity), true), marginParams(activity, -1, 46, 0, 0, 0, 10))
+        models.forEachIndexed { index, model ->
+            root.addView(label(activity, model, 15f, textColor(activity), false).apply {
+                gravity = Gravity.CENTER_VERTICAL
+                minHeight = dp(activity, 48)
+                setPadding(dp(activity, 12), dp(activity, 10), dp(activity, 12), dp(activity, 10))
+                setOnClickListener { onSelected(model); dialog.dismiss() }
+            }, LinearLayout.LayoutParams(-1, -2))
+            if (index < models.lastIndex) root.addView(divider(activity), LinearLayout.LayoutParams(-1, dp(activity, 1)))
+        }
+        root.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply {
+            gravity = Gravity.CENTER
+            setOnClickListener { dialog.dismiss() }
+        }, LinearLayout.LayoutParams(-1, dp(activity, 50)))
+        dialog = showContentDialog(activity, root, .86f)
+        return dialog
+    }
+
+    /** Filled triangle with a native View click target, independent of font glyphs. */
+    private class ProfileDropdownView(context: android.content.Context) : View(context) {
+        private val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+            color = 0xffffa13a.toInt()
+            style = android.graphics.Paint.Style.FILL
+        }
+        private val path = android.graphics.Path()
+        override fun onDraw(canvas: android.graphics.Canvas) {
+            super.onDraw(canvas)
+            val half = 6f * resources.displayMetrics.density
+            val cx = width / 2f
+            val cy = height / 2f
+            path.reset()
+            path.moveTo(cx - half, cy - half / 2f)
+            path.lineTo(cx + half, cy - half / 2f)
+            path.lineTo(cx, cy + half / 2f)
+            path.close()
+            paint.alpha = if (isEnabled) 255 else 100
+            canvas.drawPath(path, paint)
+        }
     }
 
     private fun showAiConfig(activity: Activity) {
@@ -573,64 +606,153 @@ internal object ConversationAnalysisReportDialog {
         val configMain = Handler(Looper.getMainLooper())
         val store = ConversationAnalysisAiConfigStore(activity)
         var selected = store.activeProfileId()
-        val root = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(activity, 26), dp(activity, 22), dp(activity, 26), dp(activity, 18)); background = rounded(pageColor(activity), dp(activity, 26)) }
+        val drafts = ai.profiles().associateBy { it.id }.toMutableMap()
+        var closed = false
+        var busy = false
+        var requestEpoch = 0L
+        var modelPicker: Dialog? = null
+        var profileMenu: android.widget.PopupMenu? = null
+        lateinit var dialog: Dialog
+        lateinit var testButton: TextView
+        lateinit var fetchButton: TextView
+        lateinit var saveButton: TextView
+        val root = LinearLayout(activity).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(activity, 26), dp(activity, 22), dp(activity, 26), dp(activity, 18))
+            background = rounded(pageColor(activity), dp(activity, 26))
+        }
         val titleRow = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
-        titleRow.addView(label(activity, "API 接口配置", 24f, textColor(activity), true), LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
-        titleRow.addView(label(activity, "▾", 22f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER }, LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 52)))
+        val title = label(activity, "API 接口配置", 24f, textColor(activity), true)
+        titleRow.addView(title, LinearLayout.LayoutParams(0, dp(activity, 52), 1f))
+        val dropdown = ProfileDropdownView(activity).apply {
+            contentDescription = "选择API方案"
+            isFocusable = true
+        }
+        titleRow.addView(dropdown, LinearLayout.LayoutParams(dp(activity, 52), dp(activity, 52)))
         root.addView(titleRow)
-        val profileBar = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL; background = rounded(panelColor(activity), dp(activity, 14)); setPadding(dp(activity, 4), dp(activity, 4), dp(activity, 4), dp(activity, 4)) }
-        val fields = arrayOf(EditText(activity), EditText(activity), EditText(activity), EditText(activity), EditText(activity))
+        val currentProfile = label(activity, "", 14f, 0xffffa13a.toInt(), true)
+        root.addView(currentProfile, LinearLayout.LayoutParams(-1, -2))
+        val fields = Array(5) { EditText(activity) }
         val fieldNames = listOf("方案名称", "API 地址", "API 路径", "API Key（Bearer Token）", "模型名称")
         fields.forEachIndexed { index, field ->
             root.addView(label(activity, fieldNames[index], 16f, if (isDark(activity)) 0xffd0cbd2.toInt() else 0xff5c5652.toInt(), true), marginParams(activity, -1, 30, 0, 10, 0, 2))
             field.hint = fieldNames[index]
-            field.setTextColor(textColor(activity)); field.setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt()); field.setPadding(dp(activity, 14), 0, dp(activity, 14), 0); field.background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1)); root.addView(field, marginParams(activity, -1, 58, 0, 0, 0, 2))
+            field.setTextColor(textColor(activity))
+            field.setHintTextColor(if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff8b8178.toInt())
+            field.setPadding(dp(activity, 14), 0, dp(activity, 14), 0)
+            field.background = strokeRounded(cardColor(activity), if (isDark(activity)) 0xff77737d.toInt() else 0xffead8c5.toInt(), dp(activity, 14), dp(activity, 1))
+            root.addView(field, marginParams(activity, -1, 58, 0, 0, 0, 2))
         }
-// API configuration does not edit sampling values; sampling has its own dialog.
-
-        fun loadProfile(id: Int) { selected = id; val p = ai.profiles()[id - 1]; fields[0].setText(p.name); fields[1].setText(p.address); fields[2].setText(p.path); fields[3].setText(p.key); fields[4].setText(p.model) }
-        (1..2).forEach { id -> profileBar.addView(label(activity, "方案$id", 15f, if (id == selected) 0xffffa13a.toInt() else textColor(activity), true).apply { gravity = Gravity.CENTER; setOnClickListener { loadProfile(id) } }, LinearLayout.LayoutParams(0, dp(activity, 38), 1f)) }
-        root.addView(profileBar, 1)
-        lateinit var dialog: Dialog
-        lateinit var testButton: TextView
+        fun readProfile() = ConversationAiProfile(selected, fields[0].text.toString(), fields[1].text.toString(), fields[2].text.toString(), fields[3].text.toString(), fields[4].text.toString())
+        fun loadProfile(id: Int) {
+            selected = id
+            val p = drafts.getValue(id)
+            listOf(p.name, p.address, p.path, p.key, p.model).forEachIndexed { index, value -> fields[index].setText(value) }
+            currentProfile.text = "当前选择：方案$id（保存后使用）"
+            dropdown.contentDescription = "选择API方案，当前方案$id"
+        }
+        dropdown.setOnClickListener {
+            if (!busy && !closed) {
+                drafts[selected] = readProfile()
+                profileMenu?.dismiss()
+                profileMenu = android.widget.PopupMenu(activity, dropdown).apply {
+                    (1..ConversationAnalysisAiConfigStore.PROFILE_COUNT).forEach { id ->
+                        menu.add(1, id, id, "方案$id · ${drafts.getValue(id).name}").apply {
+                            isCheckable = true
+                            isChecked = id == selected
+                        }
+                    }
+                    menu.setGroupCheckable(1, true, true)
+                    setOnMenuItemClickListener { item -> loadProfile(item.itemId); true }
+                    show()
+                }
+            }
+        }
+        fun setBusy(value: Boolean) {
+            busy = value
+            testButton.isEnabled = !value
+            fetchButton.isEnabled = !value
+            saveButton.isEnabled = !value
+            dropdown.isEnabled = !value
+            dropdown.invalidate()
+            fields.forEach { it.isEnabled = !value }
+        }
+        fun canApply(epoch: Long) = !closed && epoch == requestEpoch && dialog.isShowing && !activity.isFinishing && !activity.isDestroyed
+        fun styleUtility(button: TextView) {
+            button.background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 18), dp(activity, 2))
+            button.setTextColor(0xffffa13a.toInt())
+        }
         val utilityButtons = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         testButton = actionButton(activity, "测试连接", 0x00ffffff) {
-            testButton.isEnabled = false
-            testButton.text = "测试中…"
-            ai.testConnection(fields[1].text.toString(), fields[2].text.toString(), fields[3].text.toString()) { ok, _ ->
-                testButton.text = if (ok) "连接成功" else "连接失败"
-                testButton.setTextColor(if (ok) 0xff4caf50.toInt() else 0xffd94b4b.toInt())
-                configMain.postDelayed({
-                    if (testButton.isAttachedToWindow) {
-                        testButton.text = "测试连接"
-                        testButton.setTextColor(0xffffa13a.toInt())
-                        testButton.isEnabled = true
+            if (!busy) {
+                val profile = readProfile()
+                val epoch = ++requestEpoch
+                setBusy(true)
+                testButton.text = "测试中…"
+                ai.testConnection(profile.address, profile.path, profile.key) { ok, _ ->
+                    if (canApply(epoch)) {
+                        setBusy(false)
+                        testButton.text = if (ok) "连接成功" else "连接失败"
+                        testButton.setTextColor(if (ok) 0xff4caf50.toInt() else 0xffd94b4b.toInt())
+                        configMain.postDelayed({
+                            if (canApply(epoch)) {
+                                testButton.text = "测试连接"
+                                testButton.setTextColor(0xffffa13a.toInt())
+                            }
+                        }, 1500L)
                     }
-                }, 1500L)
+                }
             }
-        }.apply {
-            background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 18), dp(activity, 2))
-            setTextColor(0xffffa13a.toInt())
-        }
+        }.also(::styleUtility)
+        fetchButton = actionButton(activity, "获取模型", 0x00ffffff) {
+            if (!busy) {
+                val profile = readProfile()
+                val epoch = ++requestEpoch
+                setBusy(true)
+                fetchButton.text = "获取中…"
+                ai.fetchModels(profile.address, profile.key) { models, error ->
+                    if (canApply(epoch)) {
+                        setBusy(false)
+                        fetchButton.text = "获取模型"
+                        if (models.isNotEmpty()) {
+                            modelPicker?.dismiss()
+                            modelPicker = showModelPicker(activity, models) { model ->
+                                if (canApply(epoch) && selected == profile.id) fields[4].setText(model)
+                            }
+                        } else Toast.makeText(activity, "获取模型失败：${error ?: "返回为空"}", Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }.also(::styleUtility)
         utilityButtons.addView(testButton, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
-        utilityButtons.addView(actionButton(activity, "获取模型", 0x00ffffff) { ai.fetchModels(fields[1].text.toString(), fields[3].text.toString()) { models, error -> if (models.isNotEmpty()) showModelPicker(activity, models) { fields[4].setText(it) } else Toast.makeText(activity, "获取模型失败：${error ?: "返回为空"}", Toast.LENGTH_SHORT).show() } }.apply { background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 18), dp(activity, 2)); setTextColor(0xffffa13a.toInt()) }, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
+        utilityButtons.addView(fetchButton, LinearLayout.LayoutParams(0, dp(activity, 48), 1f))
         root.addView(utilityButtons, marginParams(activity, -1, 48, 0, 14, 0, 0))
         val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL; setPadding(0, dp(activity, 8), 0, 0) }
-        val cancel = label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 14), dp(activity, 1)); setOnClickListener { dialog.dismiss() } }
-        val save = actionButton(activity, "保存", 0xffffa13a.toInt()) { ai.saveProfile(ConversationAiProfile(selected, fields[0].text.toString(), fields[1].text.toString(), fields[2].text.toString(), fields[3].text.toString(), fields[4].text.toString())); ai.selectProfile(selected); dialog.dismiss() }
+        val cancel = label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply {
+            gravity = Gravity.CENTER
+            background = strokeRounded(0x00ffffff, 0xffffa13a.toInt(), dp(activity, 14), dp(activity, 1))
+            setOnClickListener { dialog.dismiss() }
+        }
+        saveButton = actionButton(activity, "保存", 0xffffa13a.toInt()) {
+            if (!busy) {
+                ai.saveProfile(readProfile())
+                dialog.dismiss()
+            }
+        }
         actions.addView(cancel, LinearLayout.LayoutParams(0, dp(activity, 50), 1f).apply { setMargins(0, 0, dp(activity, 6), 0) })
-        actions.addView(save, LinearLayout.LayoutParams(0, dp(activity, 50), 1f).apply { setMargins(dp(activity, 6), 0, 0, 0) })
+        actions.addView(saveButton, LinearLayout.LayoutParams(0, dp(activity, 50), 1f).apply { setMargins(dp(activity, 6), 0, 0, 0) })
         root.addView(actions)
-        dialog = Dialog(activity)
-        dialog.setContentView(ScrollView(activity).apply { isFillViewport = true; addView(root) })
-        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        dialog.window?.setWindowAnimations(0)
-        dialog.setOnShowListener { dialog.window?.setLayout((activity.resources.displayMetrics.widthPixels * .92f).toInt(), (activity.resources.displayMetrics.heightPixels * .88f).toInt()) }
-        dialog.setOnDismissListener { ai.close(); configMain.removeCallbacksAndMessages(null) }
-        dialog.show()
         loadProfile(selected)
+        dialog = showContentDialog(activity, root, .92f)
+        dialog.setOnDismissListener {
+            closed = true
+            requestEpoch++
+            profileMenu?.dismiss()
+            modelPicker?.dismiss()
+            ai.close()
+            configMain.removeCallbacksAndMessages(null)
+        }
     }
-
     private fun showAi(activity: Activity, reportDialog: Dialog, talker: String, days: Int, logger: (String, Throwable?) -> Unit, reportHost: LinearLayout, screenshot: TextView) {
         if (!reportDialog.isShowing || activity.isFinishing || activity.isDestroyed) return
         val tasks = pageTasks[reportDialog] ?: return

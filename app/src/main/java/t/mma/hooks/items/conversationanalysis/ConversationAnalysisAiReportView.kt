@@ -26,6 +26,7 @@ import java.util.Locale
 
 internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout(context) {
     private val body = LinearLayout(context)
+    private val reportText = TextView(context)
     private var memberCount = 0
     private var speakerCount = 0
     private var sampleCount = 0
@@ -40,6 +41,14 @@ internal class ConversationAnalysisAiReportView(context: Context) : LinearLayout
 
         body.orientation = VERTICAL
         body.setPadding(dp(12), dp(8), dp(12), dp(8))
+        reportText.apply {
+            textSize = 10.8f
+            setTextColor(Color.rgb(36, 43, 55))
+            setLineSpacing(0f, 1.28f)
+            gravity = Gravity.LEFT or Gravity.TOP
+            setPadding(dp(2), dp(2), dp(2), dp(2))
+        }
+        body.addView(reportText, LayoutParams(-1, LayoutParams.WRAP_CONTENT))
         addView(body, LayoutParams(-1, LayoutParams.WRAP_CONTENT))
     }
 
@@ -133,14 +142,15 @@ fun updateMeta(talker: String, days: Int, memberCount: Int, speakerCount: Int) {
     fun update(talker: String, days: Int, text: String) {
         reportDays = days
         if (reportTalker.isBlank()) reportTalker = talker
-        currentText = text
-        body.removeAllViews()
-        renderStructured(text)
+        val normalized = cleanMemberIdentifiers(ConversationAnalysisText.normalize(text))
+        if (currentText == normalized) return
+        currentText = normalized
+        renderStructured(normalized)
         requestLayout()
     }
 
     private fun renderStructured(source: String) {
-        val text = cleanMemberIdentifiers(source)
+        val text = source
         val styled = SpannableStringBuilder(text)
         val lines = text.split("\n")
         var offset = 0
@@ -162,17 +172,8 @@ fun updateMeta(talker: String, days: Int, memberCount: Int, speakerCount: Int) {
             }
             offset += line.length + 1
         }
-        body.removeAllViews()
-        body.addView(TextView(context).apply {
-            setText(styled)
-            textSize = 10.8f
-            setTextColor(Color.rgb(36, 43, 55))
-            setLineSpacing(0f, 1.28f)
-            gravity = Gravity.LEFT or Gravity.TOP
-            setPadding(dp(2), dp(2), dp(2), dp(2))
-        }, LayoutParams(-1, LayoutParams.WRAP_CONTENT))
+        reportText.text = styled
     }
-
     private fun cleanMemberIdentifiers(text: String): String {
         return text.replace(Regex("wxid_[A-Za-z0-9_-]+"), "群成员")
             .replace(Regex("[A-Za-z0-9._-]+@(chatroom|im\\.chatroom)"), "群聊")

@@ -212,6 +212,7 @@ import t.mma.hooks.items.autoreply.XiaozhiAgentOption
 import t.mma.hooks.items.autoreply.XiaozhiConsoleApi
 import t.mma.hooks.items.autoreply.XiaozhiModelOption
 import t.mma.hooks.items.autoreply.XiaozhiVoiceOption
+import t.mma.hooks.items.automerge.AutoMergeFeature
 import t.mma.hooks.items.autooriginal.AutoOriginalImageFeature
 import t.mma.hooks.items.autooriginal.AutoOriginalImageSettings
 import t.mma.hooks.items.autovieworiginal.AutoViewOriginalFeature
@@ -1113,6 +1114,7 @@ internal fun FeatureSettingsPage(
         TypingReportBlockFeature.ID -> TypingReportBlockMiuixPage(context, provider, onBack)
         PatBlockFeature.ID -> PatBlockMiuixPage(context, provider, onBack)
         AutoOriginalImageFeature.ID -> AutoOriginalImageMiuixPage(context, provider, onBack)
+        AutoMergeFeature.ID -> AutoMergeMiuixPage(context, provider, onBack)
         AutoViewOriginalFeature.ID -> AutoViewOriginalMiuixPage(context, provider, onBack)
         RemoveForwardLimitFeature.ID -> RemoveForwardLimitMiuixPage(context, provider, onBack)
         AtAllNotificationBlockFeature.ID -> AtAllNotificationBlockMiuixPage(context, provider, onBack)

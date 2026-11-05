@@ -6,6 +6,7 @@ import t.mma.hooks.items.antirecall.AntiRecallFeature
 import t.mma.hooks.items.atallnotify.AtAllNotificationBlockFeature
 import t.mma.hooks.items.automessageforward.AutoMessageForwardFeature
 import t.mma.hooks.items.autoreply.AutoReplyFeature
+import t.mma.hooks.items.automerge.AutoMergeFeature
 import t.mma.hooks.items.autooriginal.AutoOriginalImageFeature
 import t.mma.hooks.items.autovieworiginal.AutoViewOriginalFeature
 import t.mma.hooks.items.backgroundbeauty.BackgroundBeautyFeature
@@ -163,6 +164,7 @@ object FeatureRegistry {
             .register(TypingReportBlockFeature())
             .register(PatBlockFeature())
             .register(AutoOriginalImageFeature())
+            .register(AutoMergeFeature())
             .register(AutoViewOriginalFeature())
             .register(RemoveForwardLimitFeature())
             .register(AtAllNotificationBlockFeature())

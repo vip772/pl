@@ -1,0 +1,87 @@
+{
+  "baseline": "2f1226b0b0b32f17f6655afc57aefb76d08c43aa",
+  "branch": "dev",
+  "checks": [
+    {
+      "check": "scripts/test_analysis_generation.py",
+      "exit": 0,
+      "output": "PASS real text: escaped/double escapes, CRLF, repeated /n, cross-chunk, URL/path protection, idempotence; bounded uniform samples; real renderer 1000 updates reuse one TextView and skip identical content\n",
+      "log_sha256": "5bcdfc45c3dde535ee80201a1b4fdb54e5edfecc51500bdfcbd4515c3133079b"
+    },
+    {
+      "check": "scripts/test_analysis_stream.py",
+      "exit": 0,
+      "output": "PASS real SSE first partial before EOF; CRLF/multiline/heartbeat/DONE/finish/interrupt/cancel; 1000 chunks -> 4 snapshots; 3000 nickname lookups -> 1 per request\n",
+      "log_sha256": "65c0980bf65d47e611b347847029df232bcdc9a551c1311d742b3d3296435035"
+    },
+    {
+      "check": "scripts/test_analysis_period_linkage.py",
+      "exit": 0,
+      "output": "PASS calendar day/week/month/all, year/leap/DST edges, 60-day slider; shared selection; real summary/five-chart queries and production AI read/sample/empty guard\nPASS UI selection to generation and all deep-chart refresh routing; AI filters before sampling and refuses empty records before HTTP\n",
+      "log_sha256": "3f56b5581c70e7f7687b12bdc2cf444e805f8390cd8af9387032eec84c505ae8"
+    },
+    {
+      "check": "scripts/test_analysis_page_lifecycle.py",
+      "exit": 0,
+      "output": "PASS production page close/queue removal/non-interruption/reopen; extracted AI replace/cancel/close; dialog isolation\n",
+      "log_sha256": "80fb36dbb8d70d879a3aa4c94aec9b136ac5b00ab4d4a10a044fe0f201ff395c"
+    },
+    {
+      "check": "scripts/test_analysis_ui_icons_layout.py",
+      "exit": 0,
+      "output": "PASS real icon View/painter and menu Drawable compile; all nine icon kinds draw; density, bounds, alpha/filter and canvas restoration\nPASS extracted production dialog helper: short content wraps, overflow bounded, parent limits and unspecified measurement; 54 combinations\nPASS icon routing, accessibility labels, unchanged sampling save and compact-dialog contracts\n",
+      "log_sha256": "e62889608de510ad2685c859cf4610a8baed883349a51f8ef71765f1c2c08e5e"
+    },
+    {
+      "check": "scripts/test_analysis_api_config.py",
+      "exit": 0,
+      "output": "/tmp/tmplpbm14fx/Ui.kt:57:29: warning: the corresponding parameter in the supertype 'View' is named 'c'. This may cause problems when calling this function with named arguments.\n        override fun onDraw(canvas: android.graphics.Canvas) {\n                            ^^^^^^\nPASS production dialog/store: single dropdown and checked active slot, two independent drafts, cancel/reopen, atomic save+activation, immediate loading and duplicate blocking, error/empty recovery, selected model, test current profile, late callback and dismiss cleanup\nPASS compact model/config helper contracts; Android sizing/rendering and live API excluded\n",
+      "log_sha256": "b7c2ba09350a457a6970d4949a18004cd162a8e21e12afac7fe9aeb8d61f11b1"
+    },
+    {
+      "check": "scripts/test_auto_merge.py",
+      "exit": 0,
+      "output": "app/src/main/java/t/mma/hooks/items/automerge/AutoMergeFeature.kt:14:32: warning: the corresponding parameter in the supertype 'BaseFeature' is named 'c'. This may cause problems when calling this function with named arguments.\n    override fun onFeatureInit(context: FeatureContext) {\n                               ^^^^^^^\napp/src/main/java/t/mma/hooks/items/automerge/AutoMergeFeature.kt:18:35: warning: the corresponding parameter in the supertype 'BaseFeature' is named 'c'. This may cause problems when calling this function with named arguments.\n    override fun onFeatureInstall(context: FeatureContext) {\n                                  ^^^^^^^\napp/src/main/java/t/mma/hooks/items/automerge/AutoMergeFeature.kt:29:35: warning: the corresponding parameter in the supertype 'BaseFeature' is named 'c'. This may cause problems when calling this function with named arguments.\n    override fun onFeatureDestroy(context: FeatureContext) {\n                                  ^^^^^^^\napp/src/main/java/t/mma/hooks/items/automerge/AutoMergeRuntime.kt:33:48: warning: the corresponding parameter in the supertype 'XC_MethodHook' is named 'p'. This may cause problems when calling this function with named arguments.\n                override fun afterHookedMethod(param: MethodHookParam) {\n                                               ^^^^^\nPASS production runtime: media threshold 1/2/3/4, 2-photo+1-video, 1-photo+2-video, pure video, unknown types, selected preview paths, native sending state, idempotence, manual uncheck, business/visibility/thread/destroy guards, default-off, 20 enable/disable cycles, destroy cleanup and unverified version rejection\nPASS registration, chat/new feature provider, search, enabled aggregation and route source contracts; UI rendering not verified\n",
+      "log_sha256": "b1a8f87ff045c20706330f0480068f6a96eaf717c82102bce5e07c9e4477c728"
+    },
+    {
+      "check": "scripts/test_auto_merge_sdk.py",
+      "exit": 0,
+      "output": "PASS complete auto merge feature/runtime/settings/provider and production owner/scope/hook registry/BaseFeature SDK36 + cached dependency ABI compile; synthetic enabled-aggregation boundary; UI/Gradle/R8/device excluded\n",
+      "log_sha256": "93705a288650b81d8a548144395c62ddaff92223b952a4a5bb76bfab366732a3"
+    },
+    {
+      "check": "scripts/test_home_avatar_circle.py",
+      "exit": 0,
+      "output": "PASS circle background/outline, measured +2dp orbit source contracts, density geometry reference, home-side-panel SDK + cached ABI compilation with synthetic navigation/weather/settings boundaries; not Android/R8/device\n",
+      "log_sha256": "433f935fb30f1d2fe343f692f76194c09d404b44158c1becb3a333ccfd5f4dbc"
+    },
+    {
+      "check": "scripts/tests/config_backup/archive.py",
+      "exit": 0,
+      "output": "app/src/main/java/t/mma/preferences/HchatStorage.kt:17:53: warning: elvis operator (?:) always returns the left operand of non-nullable type 'Context'.\n        val appContext = context.applicationContext ?: context\n                                                    ^^^^^^^^^^\napp/src/main/java/t/mma/preferences/HchatStorage.kt:28:53: warning: elvis operator (?:) always returns the left operand of non-nullable type 'Context'.\n        val appContext = context.applicationContext ?: context\n                                                    ^^^^^^^^^^\napp/src/main/java/t/mma/ui/miuix/HchatConfigBackup.kt:98:78: warning: elvis operator (?:) always returns the left operand of non-nullable type 'FileOutputStream'.\n            val output = context.contentResolver.openOutputStream(uri, \"wt\") ?: error(\"无法写入备份文件\")\n                                                                             ^^^^^^^^^^^^^^^^^^^^\napp/src/main/java/t/mma/ui/miuix/HchatConfigBackup.kt:108:69: warning: unnecessary safe call on a non-null receiver of type 'FileInputStream'.\n            val input = context.contentResolver.openInputStream(uri)?.buffered() ?: error(\"无法读取配置文件\")\n                                                                    ^^\nPASS mention-all: all four independent switch combinations and custom/default command archive round trip; runtime excluded\nPASS: message menu all 12 column/row configurations production archive round trip\nPASS: private-chat skip default off, true/false archive round trip, runtime excluded\nPASS: moments card two default-off toggles and three colors true/false round trip; runtime excluded\nPASS: shortcut label background blank/single/three/alpha colors round trip; text/icon unchanged; runtime excluded\nPASS: calendar resource, opacity, zoom and offsets round trip; temporary files excluded\nPASS: music background, opacity, persistent revision and transform round trip; temporary excluded\nPASS: five Me switches true/false round trip, runtime cache excluded\nPASS extra visibility: default off, four independent combinations archive round trip; runtime excluded\nPASS: voice-to-text toggle true/false round trip and runtime exclusion\nPASS nickname width default-off and true/false round trip, runtime exclusion\nPASS auto merge actual settings: default-off, true/false export-import ZIP round trip and runtime cache exclusion\nPASS: group bar default/off/on, style, transparency, ordered group/member JSON, next number round trip; runtime cache excluded\nPASS bidirectional grouping exclusion for direct/quick preference writes; both group configurations preserved\nPASS removed input settings excluded from export/legacy import; header settings preserved\nPASS: automatic new/unopened stores; runtime exclusion; all value types; resources; path relocation; legacy JSON; validation; commit rollback; traversal and links\n",
+      "log_sha256": "549e933f4dcfa9fc2ab8967fdbe99aa8f13a321b13cee8e6a82b0fad32601689"
+    },
+    {
+      "check": "/tmp/pl-period-sdk.py",
+      "exit": 0,
+      "output": "PASS complete report UI, repositories, AI, renderer, period, page owner SDK + cached ABI compile; not Gradle/R8/device\n",
+      "log_sha256": "3c6a3ae2cf7d4bc7ecf0610ec0029f1110ff9dab00bc0b6af5c5bede4dbaad89"
+    }
+  ],
+  "limits": [
+    "未运行Gradle或R8构建",
+    "未构建安装APK",
+    "未发送真实模型请求",
+    "未完成实机及耗时验收"
+  ],
+  "preserved_prior_files": 17,
+  "source_sha256": {
+    "ConversationAnalysisAi.kt": "24a389cec3fdb850b6933c76824d013a01993e2e4600246afaf991f7e6bfe6c3",
+    "ConversationAnalysisInput.kt": "bee5281766c29b08d75f476e559618fb9568c51c109800a6a4d4bb58476d529c",
+    "ConversationAnalysisText.kt": "b0562b4c2339f1a3572623d3731765d24f787d644a9e23e0b4d976bb81c73e78",
+    "ConversationAnalysisAiReportView.kt": "3942f42f23f90ecb4d8c22314808b11df291d0249c6edd66e37e8c08672ce826",
+    "ConversationAnalysisStream.kt": "0c8a4fa5659e97ec702b423fa3a881a4c09df939da1b0511998b9ac8f615f855",
+    "ConversationAnalysisReportDialog.kt": "21e5f64d0971c9ebcfeb630ad110c6064f9f1a6081fc5bf496f552eedf59c787"
+  }
+}

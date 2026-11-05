@@ -212,6 +212,7 @@ import t.mma.hooks.items.autoreply.XiaozhiAgentOption
 import t.mma.hooks.items.autoreply.XiaozhiConsoleApi
 import t.mma.hooks.items.autoreply.XiaozhiModelOption
 import t.mma.hooks.items.autoreply.XiaozhiVoiceOption
+import t.mma.hooks.items.automerge.AutoMergeSettings
 import t.mma.hooks.items.autooriginal.AutoOriginalImageFeature
 import t.mma.hooks.items.autooriginal.AutoOriginalImageSettings
 import t.mma.hooks.items.autovieworiginal.AutoViewOriginalFeature
@@ -623,6 +624,46 @@ internal fun AutoOriginalImageMiuixPage(
                         "自动勾选原图",
                         "进入聊天图片发送界面时自动选择原图",
                         AutoOriginalImageSettings.DEFAULT_ENABLE
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+internal fun AutoMergeMiuixPage(
+    context: Context,
+    provider: FeatureSettingsProvider,
+    onBack: () -> Unit
+) {
+    val sp = remember { HchatStorage.preferences(context, AutoMergeSettings.PREFS_NAME) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+
+    PageScaffold(
+        title = provider.title(),
+        largeTitle = provider.title(),
+        scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar("返回", onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = PaddingValues(
+                top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 12.dp
+            )
+        ) {
+            item { SmallTitle(text = "聊天图片") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        sp,
+                        AutoMergeSettings.KEY_ENABLE,
+                        "自动勾选合并",
+                        "照片和视频合计选中3项及以上时自动勾选发送后合并展示；仅微信8.0.78",
+                        AutoMergeSettings.DEFAULT_ENABLE
                     )
                 }
             }

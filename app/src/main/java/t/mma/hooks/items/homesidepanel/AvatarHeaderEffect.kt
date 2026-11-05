@@ -16,6 +16,7 @@ import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.widget.TextView
+import android.widget.ImageView
 import t.mma.hooks.items.antirecall.DynamicRecallGradient
 import t.mma.hooks.items.dynamicbadge.DynamicBadgeSettings
 
@@ -73,6 +74,14 @@ internal class AvatarHeaderEffect(private val host: View, private val content: V
         period = speed.coerceIn(DynamicBadgeSettings.MIN_SPEED, DynamicBadgeSettings.MAX_SPEED)
         contentRect.set(0f, 0f, host.width.toFloat(), host.height.toFloat())
         val text = content as? TextView
+        val circularAvatar = content is ImageView
+        if (circularAvatar && host is ViewGroup) {
+            contentLocation.set(0, 0, content.width, content.height)
+            host.offsetDescendantRectToMyCoords(content, contentLocation)
+            contentRect.set(contentLocation)
+            val gap = 2f * host.resources.displayMetrics.density
+            contentRect.inset(-gap, -gap)
+        }
         if (text != null && host is ViewGroup) {
             val layout = text.layout
             if (layout != null && layout.lineCount > 0) {
@@ -108,9 +117,12 @@ internal class AvatarHeaderEffect(private val host: View, private val content: V
             val density = host.resources.displayMetrics.density
             val inset = (customInset ?: if (lightning) 9f else strokeDp / 2f + 2f) * density
             rect.set(contentRect)
-            if (text == null) rect.inset(inset, inset)
+            if (text == null && !circularAvatar) rect.inset(inset, inset)
             outline.reset()
-            if (rect.width() > 0 && rect.height() > 0) outline.addRoundRect(rect, rect.height() / 2f, rect.height() / 2f, Path.Direction.CW)
+            if (rect.width() > 0 && rect.height() > 0) {
+                if (circularAvatar) outline.addOval(rect, Path.Direction.CW)
+                else outline.addRoundRect(rect, rect.height() / 2f, rect.height() / 2f, Path.Direction.CW)
+            }
             measure.setPath(outline, true)
             perimeter = measure.length
             boltTick = -1L
@@ -158,12 +170,14 @@ internal class AvatarHeaderEffect(private val host: View, private val content: V
             val count = (perimeter / (5f * density)).toInt().coerceIn(48, 256)
             for (i in 0 until count) {
                 measure.getPosTan(perimeter * i / count, point, tangent)
-                val displacement = noise(i, tick) * 2.4f * density
+                // Clockwise oval normals point inward; keep avatar bolts outside the 2dp orbit.
+                val jitter = noise(i, tick)
+                val displacement = (if (content is ImageView) -kotlin.math.abs(jitter) else jitter) * 2.4f * density
                 val x = point[0] - tangent[1] * displacement
                 val y = point[1] + tangent[0] * displacement
                 if (i == 0) bolt.moveTo(x, y) else bolt.lineTo(x, y)
                 if (i % 9 == 0) {
-                    val reach = (2f + kotlin.math.abs(noise(i + 7, tick)) * 1.8f) * density
+                    val reach = (2f + kotlin.math.abs(noise(i + 7, tick)) * 1.8f) * density * if (content is ImageView) -1f else 1f
                     branches.moveTo(x, y)
                     branches.lineTo(x - tangent[1] * reach + tangent[0] * density,
                         y + tangent[0] * reach + tangent[1] * density)

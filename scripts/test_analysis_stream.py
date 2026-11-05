@@ -6,7 +6,7 @@ ai=(b/'ConversationAnalysisAi.kt').read_text()
 assert '.put("stream", true)' in ai
 assert 'text/event-stream, application/json' in ai
 assert 'if (isJson)' in ai and 'json.optJSONArray("choices")' in ai
-assert 'postResult { if (token == requestToken.get()) onUpdate(partial) }' in ai
+assert 'postResult { if (token == requestToken.get()) onUpdate(ConversationAnalysisText.normalize(partial)) }' in ai
 assert 'val names = mutableMapOf<String, String>()' in ai
 normal=ai[ai.index('    private fun normalizeRecord('):ai.index('    private fun buildPrompt(')].replace('private fun normalizeRecord','fun normalizeRecord')
 api='''package t.mma.hooks.api.core
@@ -40,6 +40,14 @@ fun main() {
  check(partial.await(2,TimeUnit.SECONDS));check(done.count==1L)
  pipe.write("data: 后到正文\n\ndata: [DONE]\n\n");pipe.flush()
  check(done.await(2,TimeUnit.SECONDS));check(failure==null&&text=="先到正文后到正文");pipe.close();input.close()
+ // A finish_reason is sufficient; the provider may keep HTTP open without [DONE].
+ val finishPipe=PipedWriter();val finishInput=PipedReader(finishPipe).buffered()
+ val finishDone=CountDownLatch(1);var finishText="";var finishError:Throwable?=null
+ val finishThread=Thread {try{finishText=ConversationAnalysisStream.read(finishInput,{},::decode){}}catch(e:Throwable){finishError=e}finally{finishDone.countDown()}}
+ finishThread.start();finishPipe.write("data: 完成正文\n\ndata: finish\n\n");finishPipe.flush()
+ val finishedBeforeEof=finishDone.await(2,TimeUnit.SECONDS)
+ finishPipe.close();finishThread.join(2000);finishInput.close()
+ check(finishedBeforeEof && finishError==null && finishText=="完成正文")
  var active=true
  check(runCatching {ConversationAnalysisStream.read("data: a\n\ndata: b\n\n".reader().buffered(),{check(active){"取消"}},::decode){active=false}}.exceptionOrNull()?.message=="取消")
  val normal=Normalizer();val names=mutableMapOf<String,String>()

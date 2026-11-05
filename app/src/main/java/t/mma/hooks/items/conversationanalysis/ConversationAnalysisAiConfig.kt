@@ -43,7 +43,11 @@ internal class ConversationAnalysisAiConfigStore(context: Context) {
         prefs.edit().putString(KEY_CONTEXT_WINDOW, contextWindow).putInt(KEY_SAMPLE_LIMIT, sampleLimit.coerceIn(0, 50_000)).apply()
     }
 
-    fun save(profile: ConversationAiProfile) {
+    fun save(profile: ConversationAiProfile) = saveProfile(profile, activate = false)
+
+    fun saveAndActivate(profile: ConversationAiProfile) = saveProfile(profile, activate = true)
+
+    private fun saveProfile(profile: ConversationAiProfile, activate: Boolean) {
         val id = profile.id.coerceIn(1, PROFILE_COUNT)
         val suffix = "_$id"
         prefs.edit()
@@ -52,7 +56,7 @@ internal class ConversationAnalysisAiConfigStore(context: Context) {
             .putString(KEY_PATH + suffix, profile.path.trim().ifBlank { "/chat/completions" })
             .putString(KEY_KEY + suffix, profile.key.trim())
             .putString(KEY_MODEL + suffix, profile.model.trim())
-            .putInt(KEY_ACTIVE_PROFILE, activeProfileId())
+            .putInt(KEY_ACTIVE_PROFILE, if (activate) id else activeProfileId())
             .apply()
     }
 

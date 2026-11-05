@@ -68,7 +68,7 @@ internal class ConversationAnalysisAi(context: Context) {
         configStore.save(current.copy(address = address, path = path, key = key, model = model))
     }
 
-    fun saveProfile(profile: ConversationAiProfile) = configStore.save(profile)
+    fun saveProfile(profile: ConversationAiProfile) = configStore.saveAndActivate(profile)
     @Synchronized
     fun testConnection(address: String, path: String, key: String, onResult: (Boolean, String) -> Unit) {
         if (closed) return
@@ -159,35 +159,50 @@ internal class ConversationAnalysisAi(context: Context) {
 7. 所有列表统一使用“💥 ”，不要使用菱形、星号、短横线或数字列表；每个主题末尾必须有独立的“结论：”行。
 8. 不要输出模板说明或占位词；“主题标题”“关键词或人物”等必须替换为聊天记录中的真实内容。
 9. 群成员只能使用记录中确认的昵称，禁止输出微信 ID、wxid 或群聊 ID；无法确认时写“群成员”。
+10. 使用真实换行排版，不输出反斜杠n、/n等换行标记，不连续堆叠空行。
 
 【聊天记录开始】
 ${records.joinToString("\n")}
 【聊天记录结束】
     """.trimIndent()
-private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (String) -> Unit): String {
+    private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (String) -> Unit): String {
         check(!closed && token == requestToken.get()) { "生成已取消" }
         val cfg = config()
         require(configured()) { "请先配置 AI 地址、密钥和模型" }
         val db = WeChatApis.database() ?: error("数据库API尚未初始化")
         require(db.prepare()) { "消息数据库尚未就绪" }
         val period = aiPeriodRange(days)
-        val rows = db.query("SELECT content,isSend,type FROM message WHERE talker = ? AND type = 1 AND createTime >= ? AND createTime <= ? ORDER BY createTime ASC", arrayOf(talker, period.first.toString(), period.last.toString()))
         val configuredLimit = configStore.sampleLimit()
         val limit = if (configuredLimit == 0) autoMessageLimit(configStore.contextWindow()) else configuredLimit
-        val sampledRows = if (limit > 0 && rows.size > limit) {
-            if (limit == 1) listOf(rows.last()) else (0 until limit).map { index -> rows[kotlin.math.round(index.toDouble() * (rows.size - 1) / (limit - 1)).toInt()] }
-        } else rows
+        postResult { if (token == requestToken.get()) onUpdate("正在读取所选时段消息…") }
+        // A cursor still scans the selected period, but only sampled bodies become Java strings/maps.
+        val cursor = db.rawQuery("SELECT content,isSend,type FROM message WHERE talker = ? AND type = 1 AND createTime >= ? AND createTime <= ? ORDER BY createTime ASC", arrayOf(talker, period.first.toString(), period.last.toString()))
+            ?: error("消息查询失败，请检查数据库状态")
+        val sampledRows = cursor.use {
+            val contentColumn = it.getColumnIndexOrThrow("content")
+            val sentColumn = it.getColumnIndexOrThrow("isSend")
+            ConversationAnalysisInput.positions(it.count, limit).map { position ->
+                check(!closed && token == requestToken.get()) { "生成已取消" }
+                check(it.moveToPosition(position)) { "聊天记录读取失败" }
+                mapOf("content" to it.getString(contentColumn).orEmpty(), "isSend" to it.getInt(sentColumn))
+            }
+        }
         val names = mutableMapOf<String, String>()
-        val records = sampledRows.mapNotNull { row -> normalizeRecord(talker, row["content"].toString(), row["isSend"].toString() == "1", names).takeIf { it.isNotBlank() } }
+        val records = sampledRows.mapNotNull { row ->
+            check(!closed && token == requestToken.get()) { "生成已取消" }
+            normalizeRecord(talker, row["content"].toString(), row["isSend"].toString() == "1", names)
+                .takeIf { it.isNotBlank() }
+        }
         sampleCount = records.size
         require(records.isNotEmpty()) { "所选时段暂无文本消息" }
+        postResult { if (token == requestToken.get()) onUpdate("已抽样 ${records.size} 条消息，正在请求AI，等待首段正文…") }
         val body = JSONObject().put("model", cfg.model).put("temperature", 0.55).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", buildPrompt(records)))).put("stream", true)
         val conn = URL(join(cfg.address, cfg.path)).openConnection() as HttpURLConnection
         activeConnection = conn
         try {
             check(!closed && token == requestToken.get()) { "生成已取消" }
             conn.requestMethod = "POST"; conn.doOutput = true; conn.connectTimeout = 20000; conn.readTimeout = 120000
-            conn.setRequestProperty("Authorization", "Bearer ${cfg.key}"); conn.setRequestProperty("Content-Type", "application/json; charset=utf-8"); conn.setRequestProperty("Accept", "text/event-stream, application/json")
+            conn.setRequestProperty("Authorization", "Bearer ${cfg.key}"); conn.setRequestProperty("Content-Type", "application/json; charset=utf-8"); conn.setRequestProperty("Accept", "text/event-stream, application/json"); conn.setRequestProperty("Cache-Control", "no-cache")
             conn.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
             if (conn.responseCode !in 200..299) error("HTTP ${conn.responseCode}: ${conn.errorStream?.bufferedReader()?.readText()}")
             val isJson = conn.contentType.orEmpty().substringBefore(';').trim().equals("application/json", true)
@@ -206,12 +221,12 @@ private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (
                             choice != null && !choice.isNull("finish_reason") && choice.optString("finish_reason").isNotBlank()
                         )
                     }) { partial ->
-                        postResult { if (token == requestToken.get()) onUpdate(partial) }
+                        postResult { if (token == requestToken.get()) onUpdate(ConversationAnalysisText.normalize(partial)) }
                     }
                 }
             }
             check(!closed && token == requestToken.get()) { "生成已取消" }
-            return response.ifBlank { error("AI 返回内容为空") }
+            return ConversationAnalysisText.normalize(response).ifBlank { error("AI 返回内容为空") }
 
         } finally {
             if (activeConnection === conn) activeConnection = null
@@ -219,14 +234,7 @@ private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (
         }
     }
 
-    private fun autoMessageLimit(capacity: String): Int = when (capacity) {
-        "256k" -> 6000
-        "512k" -> 12000
-        "1m" -> 25000
-        "2m" -> 50000
-        else -> 3000
-    }
-
+    private fun autoMessageLimit(capacity: String): Int = ConversationAnalysisInput.autoLimit(capacity)
     private fun aiPeriodRange(days: Int): LongRange = ConversationAnalysisPeriod.range(days)
     private fun config() = configStore.activeProfile()
     private fun join(address: String, path: String) = address.trimEnd('/') + "/" + path.trimStart('/')

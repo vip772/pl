@@ -36,7 +36,7 @@ internal object ConversationAnalysisStream {
                 lastUpdate = now
             }
         }
-        while (!terminal) {
+        while (!terminal && !finished) {
             checkActive()
             val line = reader.readLine() ?: break
             if (line.isEmpty()) dispatch()

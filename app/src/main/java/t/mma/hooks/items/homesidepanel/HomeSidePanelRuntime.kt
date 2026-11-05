@@ -232,13 +232,13 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
                 if (root.foreground === avatarEffect) root.foreground = null
                 return
             }
-            val effect = avatarEffect ?: AvatarHeaderEffect(root, if (showProfile()) null else effectContent).also { avatarEffect = it }
+            val effect = avatarEffect ?: AvatarHeaderEffect(root, if (showProfile()) avatar else effectContent).also { avatarEffect = it }
             if (root.foreground !== effect) root.foreground = effect
             effect.update(effectPrefs.getString(keys.KEY_AVATAR_COLOR,
                 t.mma.hooks.items.antirecall.DynamicRecallGradient.DEFAULT).orEmpty(),
                 effectPrefs.getInt(keys.KEY_AVATAR_SPEED, 2400),
                 effectPrefs.getFloat(keys.KEY_AVATAR_WIDTH, 1.4f),
-                effectPrefs.getBoolean(keys.KEY_AVATAR_LIGHTNING, false), avatarInsetDp = if (showProfile()) ((root.width / activity.resources.displayMetrics.density - 38f) / 2f - 3f).coerceAtLeast(0f) else null)
+                effectPrefs.getBoolean(keys.KEY_AVATAR_LIGHTNING, false))
         }
         private val replacedTitles = WeakHashMap<View, Int>()
         private val scrollTitles = WeakHashMap<View, Int>()
@@ -513,7 +513,7 @@ internal class HomeSidePanelRuntime(private val context: FeatureContext) {
             }
             val iv = ImageView(activity).apply {
                 tag = "hchat_home_avatar"
-                setImageDrawable(GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.rgb(210, 210, 210)) })
+                background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.rgb(210, 210, 210)) }
                 scaleType = ImageView.ScaleType.CENTER_CROP
                 clipToOutline = true
                 outlineProvider = ViewOutlineProvider.BACKGROUND

@@ -22,7 +22,7 @@ assert ai.index('require(records.isNotEmpty())') < ai.index('val conn = URL(join
 # Compile the real AI read/filter/sample prefix; stop before HTTP/JSON construction.
 prefix=ai[ai.index('        val db = WeChatApis.database()',ai.index('private fun requestStreaming')):ai.index('        val body = JSONObject()',ai.index('private fun requestStreaming'))]
 normalize=ai[ai.index('    private fun normalizeRecord('):ai.index('    private fun buildPrompt(')]
-ai_probe='package t.mma.hooks.items.conversationanalysis\nimport t.mma.hooks.api.core.WeChatApis\nclass Config { fun sampleLimit()=1;fun contextWindow()="128k" }\nclass AiReadProbe {\n val configStore=Config(); var sampleCount=0\n fun autoMessageLimit(s:String)=3000\n fun aiPeriodRange(days:Int)=ConversationAnalysisPeriod.range(days)\n fun read(talker:String,days:Int):List<String> {\n' + prefix + "\nreturn records\n}\n" + normalize + "\n}"
+ai_probe='package t.mma.hooks.items.conversationanalysis\nimport t.mma.hooks.api.core.WeChatApis\nclass Config { fun sampleLimit()=1;fun contextWindow()="128k" }\nclass AiReadProbe {\n var closed=false; val requestToken=java.util.concurrent.atomic.AtomicLong(1); val token=1L; fun postResult(f:()->Unit)=f();fun onUpdate(s:String)=Unit\n val configStore=Config(); var sampleCount=0\n fun autoMessageLimit(s:String)=3000\n fun aiPeriodRange(days:Int)=ConversationAnalysisPeriod.range(days)\n fun read(talker:String,days:Int):List<String> {\n' + prefix + "\nreturn records\n}\n" + normalize + "\n}"
 details=(b/'ConversationAnalysisDetails.kt').read_text()
 details='package t.mma.hooks.items.conversationanalysis\nimport t.mma.hooks.api.core.WeChatApis\nimport java.util.Calendar\nimport java.util.Locale\n'+details[details.index('internal data class ConversationRankingRow'):details.index('internal object ConversationAnalysisDetailsDialog')]
 api='''package t.mma.hooks.api.core
@@ -44,6 +44,22 @@ class WeChatDatabaseApi {
  data class Message(val time:Long,val content:String,val sender:String="a")
  var messages = listOf<Message>()
  val calls = mutableListOf<Pair<String,List<String>>>()
+ var lastCursor: MessageCursor? = null
+ var failQuery=false
+ var cancelOnRead: (() -> Unit)? = null
+ fun rawQuery(sql:String,args:Array<String>):MessageCursor? {
+  if(failQuery) return null
+  return MessageCursor(query(sql,args)) { cancelOnRead?.invoke() }.also {lastCursor=it}
+ }
+ class MessageCursor(val data:List<Map<String,Any?>>,val onRead:()->Unit):java.io.Closeable {
+  var closed=false;var reads=0;var position=0
+  val count get()=data.size
+  fun getColumnIndexOrThrow(s:String)=if(s=="content") 0 else 1
+  fun moveToPosition(p:Int):Boolean {position=p;return p in data.indices}
+  fun getString(c:Int):String {reads++;onRead();return data[position]["content"].toString()}
+  fun getInt(c:Int)=0
+  override fun close() {closed=true}
+ }
  fun prepare() = true
  fun query(sql:String,args:Array<String>):List<Map<String,Any?>> {
   calls.add(sql to args.toList())
@@ -111,6 +127,14 @@ fun main() {
   val probe=AiReadProbe()
   val records=probe.read("test@chatroom",code)
   check(records.size==1&&!records.single().contains("OUTSIDE")&&probe.sampleCount==1)
+   check(db.lastCursor!!.closed && db.lastCursor!!.reads==1)
+   db.failQuery=true
+   check(runCatching {probe.read("g",code)}.exceptionOrNull()?.message=="消息查询失败，请检查数据库状态")
+   db.failQuery=false
+   db.cancelOnRead={probe.closed=true}
+   check(runCatching {probe.read("g",code)}.exceptionOrNull()?.message=="生成已取消")
+   check(db.lastCursor!!.closed)
+   db.cancelOnRead=null;probe.closed=false
   db.messages=emptyList()
   check(runCatching { probe.read("test@chatroom",code) }.exceptionOrNull()?.message=="所选时段暂无文本消息")
   check(ConversationAnalysisDetailsRepository().load("test@chatroom",code).deep.hourly.sum()==0)
@@ -122,7 +146,7 @@ libs=Path('/tmp/pl-kotlin-libs'); std=next(libs.glob('kotlin-stdlib-[0-9]*.jar')
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)
  for name,content in [('Api.kt',api),('Db.kt',db),('Details.kt',details),('AiProbe.kt',ai_probe),('Test.kt',test)]: (p/name).write_text(content)
- sources=[*p.glob('*.kt'),b/'ConversationAnalysisPeriod.kt',b/'ConversationAnalysisRepository.kt']
+ sources=[*p.glob('*.kt'),b/'ConversationAnalysisPeriod.kt',b/'ConversationAnalysisRepository.kt',b/'ConversationAnalysisInput.kt']
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(p/'test.jar'),*map(str,sources)],check=True,timeout=90)
  subprocess.run(['java','-cp',f'{p/"test.jar"}:{std}','t.mma.hooks.items.conversationanalysis.TestKt'],check=True,timeout=20)
 print('PASS UI selection to generation and all deep-chart refresh routing; AI filters before sampling and refuses empty records before HTTP')

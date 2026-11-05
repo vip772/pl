@@ -296,6 +296,27 @@ fun main(args:Array<String>){
  }
  println("PASS nickname width default-off and true/false round trip, runtime exclusion")
 
+ // Auto merge is a new ordinary store: actual settings constants, on/off ZIP round trip.
+ val merge=Context(File(base,"merge"),"com.merge.source")
+ val mergeOut=Context(File(base,"merge-out"),"com.merge.dest")
+ val mergePrefs=t.mma.hooks.items.automerge.AutoMergeSettings.preferences(merge)
+ val mergeDest=t.mma.hooks.items.automerge.AutoMergeSettings.preferences(mergeOut)
+ val mergeKey=t.mma.hooks.items.automerge.AutoMergeSettings.KEY_ENABLE
+ check(!mergePrefs.getBoolean(mergeKey,t.mma.hooks.items.automerge.AutoMergeSettings.DEFAULT_ENABLE))
+ Store.runtimePreferences(merge,"Hchat_auto_merge_method_cache").edit().putString("descriptor","exclude").commit()
+ val mergeZip=File(base,"merge.zip")
+ for (enabled in listOf(true,false)) {
+  mergePrefs.edit().putBoolean(mergeKey,enabled).commit()
+  check(HchatConfigBackup.exportToUri(merge,Uri(mergeZip)).stores==1)
+  ZipFile(mergeZip).use { z ->
+   val manifest=JSONObject(z.getInputStream(z.getEntry("config.json")).bufferedReader().readText())
+   check(!manifest.getJSONObject("prefs").has("Hchat_auto_merge_method_cache"))
+  }
+  HchatConfigBackup.importFromUri(mergeOut,Uri(mergeZip))
+  check(mergeDest.getBoolean(mergeKey,!enabled)==enabled)
+ }
+ check(!Store.backupPreferenceNames(mergeOut).contains("Hchat_auto_merge_method_cache"))
+ println("PASS auto merge actual settings: default-off, true/false export-import ZIP round trip and runtime cache exclusion")
  // Empty stores also round trip.
  val c=Context(File(base,"c"),"com.test.c");HchatConfigBackup.importFromUri(c,Uri(backup))
  fun legacy(value:JSONObject):File {
@@ -390,6 +411,6 @@ with tempfile.TemporaryDirectory() as td:
  p=Path(td)
  for n,s in sources.items():(p/n).write_text(s)
  jar=p/'test.jar'
- production=[repo/'app/src/main/java/t/mma/preferences/HchatStorage.kt',repo/'app/src/main/java/t/mma/preferences/ConversationGroupingExclusion.kt',repo/'app/src/main/java/t/mma/ui/miuix/HchatConfigBackup.kt']
+ production=[repo/'app/src/main/java/t/mma/hooks/items/automerge/AutoMergeSettings.kt',repo/'app/src/main/java/t/mma/preferences/HchatStorage.kt',repo/'app/src/main/java/t/mma/preferences/ConversationGroupingExclusion.kt',repo/'app/src/main/java/t/mma/ui/miuix/HchatConfigBackup.kt']
  subprocess.run(['java','-Xmx384m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',f'{stdlib}:{jsonjar}','-d',str(jar),*[str(p/n) for n in sources],*map(str,production)],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{jar}:{stdlib}:{jsonjar}','t.mma.ui.miuix.MainKt',str(p/'data')],check=True,timeout=30)

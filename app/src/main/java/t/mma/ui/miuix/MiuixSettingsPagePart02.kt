@@ -212,6 +212,7 @@ import t.mma.hooks.items.autoreply.XiaozhiAgentOption
 import t.mma.hooks.items.autoreply.XiaozhiConsoleApi
 import t.mma.hooks.items.autoreply.XiaozhiModelOption
 import t.mma.hooks.items.autoreply.XiaozhiVoiceOption
+import t.mma.hooks.items.automerge.AutoMergeFeature
 import t.mma.hooks.items.autooriginal.AutoOriginalImageFeature
 import t.mma.hooks.items.autooriginal.AutoOriginalImageSettings
 import t.mma.hooks.items.autovieworiginal.AutoViewOriginalFeature
@@ -1198,6 +1199,7 @@ internal fun practicalFeatureGroups(
                 TypingReportBlockFeature.ID,
                 PatBlockFeature.ID,
                 AutoOriginalImageFeature.ID,
+                AutoMergeFeature.ID,
                 AutoViewOriginalFeature.ID,
                 RemoveForwardLimitFeature.ID,
                 MessageBlockFeature.ID,
@@ -2015,6 +2017,7 @@ internal fun featureSubSearchTerms(featureId: String): List<String> {
             "艾特我", "@我", "艾特全体", "@所有人", "允许入库", "消息入库", "模板", "名单", "批量绑定", "标签好友", "未知类型"
         )
         QuickMarkReadFeature.ID -> listOf("快捷已读", "一键已读", "长按已读", "通知已读", "会话已读")
+        AutoMergeFeature.ID -> listOf("自动勾选合并", "发送后合并展示", "发送后合并显示", "相册", "照片", "视频", "混合", "3项", "3张", "聊天图片")
         AutoOriginalImageFeature.ID -> listOf("自动勾选原图", "原图发送", "聊天图片原图", "发送图片")
         AutoViewOriginalFeature.ID -> listOf(
             "自动查看原图", "查看原图", "自动查看原视频", "查看原视频", "聊天图片", "聊天视频", "原画质"
