@@ -76,7 +76,7 @@ internal class ExtraEntryVisibilityRuntime(private val context: FeatureContext) 
         }
         if (voiceRequested) {
             if (!voice.installed) installVoice()
-            voice.owners.toList().forEach { safe("ChatFooter.q/refresh") { applyVoice(it) } }
+            voice.owners.toList().forEach { safe("SpeechInputLayout/refresh") { applyVoice(it) } }
         } else voice.close()
         if (computerRequested) {
             if (!computer.installed) installComputer()
@@ -87,55 +87,60 @@ internal class ExtraEntryVisibilityRuntime(private val context: FeatureContext) 
     private fun installVoice() {
         val attempt = ArrayList<XC_MethodHook.Unhook>()
         try {
-            val clazz = requireNotNull(KavaReflector.loadClass(FOOTER, context.hostClassLoader()))
-            val field = requireNotNull(KavaReflector.findFieldRecursive(clazz, "q"))
-            val initialize = requireNotNull(KavaReflector.findMethod(clazz, "Z0",
+            val footerClass = requireNotNull(KavaReflector.loadClass(FOOTER, context.hostClassLoader()))
+            val speechClass = requireNotNull(KavaReflector.loadClass(SPEECH_INPUT, context.hostClassLoader()))
+            val initialize = requireNotNull(KavaReflector.findMethod(footerClass, "Z0",
                 android.content.Context::class.java, android.util.AttributeSet::class.java))
-            val image = requireNotNull(KavaReflector.findMethod(clazz, "M2", Int::class.javaPrimitiveType!!))
-            val hide = requireNotNull(KavaReflector.findMethod(clazz, "m0"))
-            val attached = requireNotNull(KavaReflector.findMethod(clazz, "onAttachedToWindow"))
+            val attached = requireNotNull(KavaReflector.findMethod(footerClass, "onAttachedToWindow"))
+            val status = requireNotNull(KavaReflector.findMethod(speechClass, "c", Int::class.javaPrimitiveType!!))
+            val window = requireNotNull(KavaReflector.findMethod(speechClass, "onWindowVisibilityChanged",
+                Int::class.javaPrimitiveType!!))
             val callback = object : XC_MethodHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (destroyed || !voiceRequested) return
-                    safe("ChatFooter.q/before") {
-                        (KavaReflector.readField(field, param.thisObject) as? View)?.let(voice::restore)
+                    safe("SpeechInputLayout/before") {
+                        rightVoiceView(param.thisObject)?.let(voice::restore)
                     }
                 }
                 override fun afterHookedMethod(param: MethodHookParam) {
                     if (destroyed || !voiceRequested || param.hasThrowable()) return
-                    safe("ChatFooter.q/after") {
-                        voice.owners.add(param.thisObject)
-                        if (param.method == image) {
-                            // Keep the keyboard return icon available in voice mode.
-                            voice.audioIcons[param.thisObject] = param.args[0] == ExtraEntryVisibility.VOICE_DRAWABLE
-                        }
-                        applyVoice(param.thisObject)
-                    }
+                    safe("SpeechInputLayout/after") { applyVoice(param.thisObject) }
                 }
             }
-            listOf(initialize, image, hide, attached).forEach { attempt.add(hook(it, callback)) }
+            listOf(initialize, attached, status, window).forEach { attempt.add(hook(it, callback)) }
             voice.hooks.addAll(attempt)
             voice.installed = true
-            // Only on explicit enable: one bounded search, never on scrolling/layout.
+            // One bounded lookup on enable; never inspect the scrolling message list repeatedly.
             WeChatApis.currentActivity()?.currentActivity()?.window?.decorView?.let { root ->
-                findFooter(root)?.let { footer -> voice.owners.add(footer); applyVoice(footer) }
+                findFooter(root)?.let(::applyVoice)
             }
         } catch (error: Throwable) {
-            // Once transferred, close owns the handles; never release them twice.
             if (!voice.installed) attempt.forEach { unhook(it) }
             voice.close()
-            report("ChatFooter.Z0/M2/m0/onAttachedToWindow/install", error)
+            report("ChatFooter.Z0/attach/SpeechInputLayout.c/window/install", error)
         }
     }
 
-    private fun applyVoice(owner: Any) {
-        val button = KavaReflector.readField(owner, "q") as? View ?: return
-        val audio = voice.audioIcons[owner] ?: run {
-            // Mode 1 is text/voice icon; mode 2 is recording/keyboard icon.
-            val mode = KavaReflector.findMethod(owner.javaClass, "getMode") ?: return
-            KavaReflector.invokeOrThrow(mode, owner) == 1
+    /** Only the right-hand w2n control owned by a ChatFooter, never shared search inputs. */
+    private fun rightVoiceView(owner: Any): View? {
+        val view = owner as? View ?: return null
+        if (view.javaClass.name == FOOTER) {
+            return view.findViewById<View>(ExtraEntryVisibility.RIGHT_VOICE_ID)
+                ?.takeIf { it.javaClass.name == SPEECH_INPUT }
         }
-        if (audio && voiceRequested && !destroyed) voice.hide(button) else voice.restore(button)
+        if (view.javaClass.name != SPEECH_INPUT || view.id != ExtraEntryVisibility.RIGHT_VOICE_ID) return null
+        var parent = view.parent
+        while (parent is View) {
+            if (parent.javaClass.name == FOOTER) return view
+            parent = parent.parent
+        }
+        return null
+    }
+
+    private fun applyVoice(owner: Any) {
+        val button = rightVoiceView(owner) ?: return
+        voice.owners.add(owner)
+        if (voiceRequested && !destroyed) voice.hide(button) else voice.restore(button)
     }
 
     private fun installComputer() {
@@ -250,7 +255,6 @@ internal class ExtraEntryVisibilityRuntime(private val context: FeatureContext) 
         var installed = false
         val hooks = ArrayList<XC_MethodHook.Unhook>()
         val owners = Collections.newSetFromMap(WeakHashMap<Any, Boolean>())
-        val audioIcons = WeakHashMap<Any, Boolean>()
         // Weak keys, scalar values: never retain an Activity through its views.
         val originals = WeakHashMap<View, Int>()
         fun hide(view: View) {
@@ -268,12 +272,12 @@ internal class ExtraEntryVisibilityRuntime(private val context: FeatureContext) 
             originals.keys.toList().forEach { view -> safe("restore") { restore(view) } }
             originals.clear()
             owners.clear()
-            audioIcons.clear()
             installed = false
         }
     }
 
     companion object {
+        private const val SPEECH_INPUT = "com.tencent.mm.pluginsdk.ui.SpeechInputLayout"
         private const val FOOTER = "com.tencent.mm.pluginsdk.ui.chat.ChatFooter"
         private const val BANNER = "com.tencent.mm.ui.conversation.banner.l0"
     }

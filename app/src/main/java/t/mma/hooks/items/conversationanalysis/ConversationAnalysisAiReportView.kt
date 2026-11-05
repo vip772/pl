@@ -123,15 +123,7 @@ fun updateMeta(talker: String, days: Int, memberCount: Int, speakerCount: Int) {
         }
         return StaticLayout(styled, paint, width, Layout.Alignment.ALIGN_NORMAL, 1.28f, 0f, false)
     }
-    private fun dateRange(days: Int): String {
-        if (days == 0 || days >= 60) return "全部历史消息"
-        val start = java.util.Calendar.getInstance().apply {
-            set(java.util.Calendar.HOUR_OF_DAY, 0); set(java.util.Calendar.MINUTE, 0); set(java.util.Calendar.SECOND, 0); set(java.util.Calendar.MILLISECOND, 0)
-            add(java.util.Calendar.DAY_OF_YEAR, -maxOf(0, days - 1))
-        }
-        val format = SimpleDateFormat("yyyy/MM/dd", Locale.CHINA)
-        return "${format.format(start.time)} ~ ${format.format(Date())}"
-    }
+    private fun dateRange(days: Int): String = ConversationAnalysisPeriod.label(days, "yyyy/MM/dd")
     private fun fitLine(value: String, paint: Paint, maxWidth: Float): String {
         var text = value
         if (paint.measureText(text) <= maxWidth) return text

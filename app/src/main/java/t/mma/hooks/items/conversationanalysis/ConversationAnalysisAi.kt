@@ -9,7 +9,6 @@ import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
-import java.util.Calendar
 import java.util.concurrent.atomic.AtomicLong
 
 internal class ConversationAnalysisAi(context: Context) {
@@ -38,7 +37,7 @@ internal class ConversationAnalysisAi(context: Context) {
         val token = requestToken.incrementAndGet()
         activeConnection?.disconnect()
         executor.execute {
-            if (closed) return@execute
+            if (closed || token != requestToken.get()) return@execute
             val result = runCatching { requestStreaming(talker, days, token, onUpdate) }
                 .getOrElse { "AI 总结失败：${it.message ?: it.javaClass.simpleName}" }
             postResult { if (token == requestToken.get()) onFinished(result) }
@@ -110,14 +109,16 @@ internal class ConversationAnalysisAi(context: Context) {
             postResult { onResult(result.first, result.second) }
         }
     }
-    private fun normalizeRecord(talker: String, raw: String, isSend: Boolean): String {
+    private fun normalizeRecord(talker: String, raw: String, isSend: Boolean, names: MutableMap<String, String> = mutableMapOf()): String {
         val split = raw.indexOf(":\n").takeIf { it in 1..80 } ?: -1
         val senderId = if (split > 0) raw.substring(0, split) else ""
         var content = (if (split > 0) raw.substring(split + 2) else raw).replace('\n', ' ').replace('\r', ' ').trim()
         if (content.isBlank()) return ""
         val speaker = if (isSend) "我" else if (senderId.isNotBlank()) {
-            WeChatApis.contacts()?.getGroupMemberDisplayName(talker, senderId).orEmpty()
-                .takeIf { it.isNotBlank() && it != senderId } ?: "群成员"
+            names.getOrPut(senderId) {
+                WeChatApis.contacts()?.getGroupMemberDisplayName(talker, senderId).orEmpty()
+                    .takeIf { it.isNotBlank() && it != senderId } ?: "群成员"
+            }
         } else "群成员"
         content = content.replace(Regex("wxid_[A-Za-z0-9_-]+"), "群成员")
             .replace(Regex("[A-Za-z0-9._-]+@(chatroom|im\\.chatroom)"), "群聊")
@@ -176,21 +177,42 @@ private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (
         val sampledRows = if (limit > 0 && rows.size > limit) {
             if (limit == 1) listOf(rows.last()) else (0 until limit).map { index -> rows[kotlin.math.round(index.toDouble() * (rows.size - 1) / (limit - 1)).toInt()] }
         } else rows
-        val records = sampledRows.mapNotNull { row -> normalizeRecord(talker, row["content"].toString(), row["isSend"].toString() == "1").takeIf { it.isNotBlank() } }
+        val names = mutableMapOf<String, String>()
+        val records = sampledRows.mapNotNull { row -> normalizeRecord(talker, row["content"].toString(), row["isSend"].toString() == "1", names).takeIf { it.isNotBlank() } }
         sampleCount = records.size
         require(records.isNotEmpty()) { "所选时段暂无文本消息" }
-        val body = JSONObject().put("model", cfg.model).put("temperature", 0.55).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", buildPrompt(records)))).put("stream", false)
+        val body = JSONObject().put("model", cfg.model).put("temperature", 0.55).put("messages", JSONArray().put(JSONObject().put("role", "user").put("content", buildPrompt(records)))).put("stream", true)
         val conn = URL(join(cfg.address, cfg.path)).openConnection() as HttpURLConnection
         activeConnection = conn
         try {
             check(!closed && token == requestToken.get()) { "生成已取消" }
             conn.requestMethod = "POST"; conn.doOutput = true; conn.connectTimeout = 20000; conn.readTimeout = 120000
-            conn.setRequestProperty("Authorization", "Bearer ${cfg.key}"); conn.setRequestProperty("Content-Type", "application/json; charset=utf-8"); conn.setRequestProperty("Accept", "application/json")
+            conn.setRequestProperty("Authorization", "Bearer ${cfg.key}"); conn.setRequestProperty("Content-Type", "application/json; charset=utf-8"); conn.setRequestProperty("Accept", "text/event-stream, application/json")
             conn.outputStream.use { it.write(body.toString().toByteArray(StandardCharsets.UTF_8)) }
             if (conn.responseCode !in 200..299) error("HTTP ${conn.responseCode}: ${conn.errorStream?.bufferedReader()?.readText()}")
-            val response = BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { it.readText() }
-            check(token == requestToken.get()) { "生成已取消" }
-            return JSONObject(response).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty().ifBlank { "AI 返回内容为空" }
+            val isJson = conn.contentType.orEmpty().substringBefore(';').trim().equals("application/json", true)
+            val response = BufferedReader(InputStreamReader(conn.inputStream, StandardCharsets.UTF_8)).use { reader ->
+                if (isJson) {
+                    val json = JSONObject(reader.readText())
+                    if (json.has("error")) error("AI接口返回错误")
+                    json.optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")?.optString("content").orEmpty()
+                } else {
+                    ConversationAnalysisStream.read(reader, { check(!closed && token == requestToken.get()) { "生成已取消" } }, { event ->
+                        val json = JSONObject(event)
+                        if (json.has("error")) error("AI流式接口返回错误")
+                        val choice = json.optJSONArray("choices")?.optJSONObject(0)
+                        ConversationAnalysisStream.Piece(
+                            choice?.optJSONObject("delta")?.optString("content").orEmpty(),
+                            choice != null && !choice.isNull("finish_reason") && choice.optString("finish_reason").isNotBlank()
+                        )
+                    }) { partial ->
+                        postResult { if (token == requestToken.get()) onUpdate(partial) }
+                    }
+                }
+            }
+            check(!closed && token == requestToken.get()) { "生成已取消" }
+            return response.ifBlank { error("AI 返回内容为空") }
+
         } finally {
             if (activeConnection === conn) activeConnection = null
             conn.disconnect()
@@ -205,12 +227,7 @@ private fun requestStreaming(talker: String, days: Int, token: Long, onUpdate: (
         else -> 3000
     }
 
-    private fun aiPeriodRange(days: Int): LongRange {
-        if (days == 0 || days >= 60) return 0L..System.currentTimeMillis()
-        val start = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
-        start.add(Calendar.DAY_OF_YEAR, -(days.coerceAtLeast(1) - 1))
-        return start.timeInMillis..System.currentTimeMillis()
-    }
+    private fun aiPeriodRange(days: Int): LongRange = ConversationAnalysisPeriod.range(days)
     private fun config() = configStore.activeProfile()
     private fun join(address: String, path: String) = address.trimEnd('/') + "/" + path.trimStart('/')
 }

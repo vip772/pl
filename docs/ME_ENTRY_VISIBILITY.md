@@ -18,8 +18,13 @@ MeEntryVisibilityFeature 独立注册，不依赖背景总开关、背景图片�
 `MeEntryVisibilityFeature` 同时持有原“我”页运行时和 `ExtraEntryVisibilityRuntime`。新增电脑、语音开关的 Hook、弱引用 owner、可见性快照分开管理；相关偏好刷新在主线程合并，关闭时卸载对应 Hook 并恢复原生状态，销毁时注销监听、移除回调。原五项行为不变。
 
 - 电脑：只处理 8.0.78 `OtherOnlineBanner` 的普通/锁定电脑图标，不退出登录、不改变设备状态；平板、手表、未知图标放行。Hook `l0.i()` / `k(int)`，隐藏 `n` 行及专用 `f/h` 容器，让 BannerHelper 按不可见条目整理。`MainUI.onResume` 经 `x.h()` 刷新已有条目；关闭时卸载后重建已记录的 BannerHelper，恢复共享容器/分组状态。
-- 语音：处理 `ChatFooter.q` 的麦克风切换键，不是加号面板的语音输入入口。Hook `Z0`、`M2`、`m0`、`onAttachedToWindow`；通过资源或 `getMode()` 识别，保留语音模式的键盘返回键。方法执行前撤销覆盖、执行后按宿主新状态应用，关闭不把原生 GONE/INVISIBLE 强制设成 VISIBLE。
+- 语音（目标修正）：只隐藏文本输入框右端、表情按钮左侧的小麦克风，即聊天 `ChatFooter` 内 id 为 `w2n` 的 `SpeechInputLayout`。保留左侧语音/键盘切换、表情、加号和文本内容；不影响其他页面共用的语音输入控件。Hook `ChatFooter.Z0` / `onAttachedToWindow` 与 `SpeechInputLayout.c(int)` / `onWindowVisibilityChanged(int)`；方法前撤销覆盖、方法后应用，关闭恢复原生 GONE/INVISIBLE/VISIBLE 状态。旧 `q/M2/m0/getMode` 目标与图标资源判断已删除，不作兜底。
 - 开销：不使用全局 View Hook、轮询、滚动/布局监听或工作线程；显式开启语音功能时仅一次有界查找（最多4096节点）。页面记录为弱引用，不新增持久缓存。此为代码设计，不是实机性能或内存收益证明。
 - 新键 `hide_home_computer_login` / `hide_input_voice_icon` 写入原 `Hchat_background_beauty_config`，默认 `false`，统一备份自动收录；新增四种独立组合归档往返与运行缓存排除测试。
 
 新增实际生产运行时的定向 JVM/stub 编译、四组合、原生隐藏恢复、键盘保留、非电脑放行、嵌套 i/k、首页容器重建、安装回滚/重试和监听异常清理通过；原“我”页及艾特相关回归、生产备份往返通过。验证记录见 `EXTRA_ENTRY_VISIBILITY_VALIDATION.md`，静态依据见 `ME_ENTRY_VISIBILITY_8078.md`。当前仅对8.0.78安装 Hook；未完成其他版本横向适配。未运行 Gradle、未完成 Android/Compose/R8 全量构建、未生成安装 APK、未实机验收，不将本地通过表述为功能整体验收。
+
+
+### 用户验收反馈与本次修正
+
+用户确认上一版本其他功能验收成功，但指出语音隐藏目标错误，明确应为输入框右侧麦克风，而非左侧切换键。因此旧版语音定向测试只证明了错误目标的实现，不构成需求验收。本次保留原配置键与默认关闭语义，替换目标、更新设置说明并增加右侧/左侧/表情/加号隔离、共享搜索控件排除和已打开聊天即时启停回归。本次修正版尚未构建或实机验收，用户此前验收不自动覆盖本次修改；不提交、不推送。

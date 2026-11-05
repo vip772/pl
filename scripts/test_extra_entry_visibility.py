@@ -27,10 +27,15 @@ class Handler(l:Looper) {
 'Util.kt': 'package android.util\ninterface AttributeSet\n',
 'View.kt': '''package android.view
 open class View {
- var visibility=0;var tag:Any?=null
+ var visibility=0;var tag:Any?=null;var id=0;var parent:View?=null
+ open fun <T:View> findViewById(target:Int):T? = if(id==target) this as T else null
  companion object {const val GONE=8}
 }
-open class ViewGroup:View(){val children=mutableListOf<View>();val childCount get()=children.size;fun getChildAt(i:Int)=children[i]}
+open class ViewGroup:View(){
+ val children=mutableListOf<View>();val childCount get()=children.size;fun getChildAt(i:Int)=children[i]
+ fun add(v:View){children.add(v);v.parent=this}
+ override fun <T:View> findViewById(target:Int):T? = super.findViewById<T>(target) ?: children.firstNotNullOfOrNull{it.findViewById<T>(target)}
+}
 class Window { val decorView=ViewGroup() }
 class Activity { val window=Window() }
 ''',
@@ -93,7 +98,8 @@ import java.lang.reflect.*
 object HLog { val errors=mutableListOf<String>();fun e(s:String,t:Throwable){errors.add(s)} }
 object KavaReflector {
  fun loadClass(n:String,l:ClassLoader):Class<*>?=when(n){
- "com.tencent.mm.pluginsdk.ui.chat.ChatFooter"->fake.Footer::class.java
+ "com.tencent.mm.pluginsdk.ui.chat.ChatFooter"->com.tencent.mm.pluginsdk.ui.chat.ChatFooter::class.java
+ "com.tencent.mm.pluginsdk.ui.SpeechInputLayout"->com.tencent.mm.pluginsdk.ui.SpeechInputLayout::class.java
  "com.tencent.mm.ui.conversation.banner.l0"->fake.Banner::class.java
  "com.tencent.mm.ui.conversation.MainUI"->fake.MainUI::class.java
  else->null }
@@ -106,14 +112,6 @@ object KavaReflector {
 ''',
 'Fake.kt': '''package fake
 import android.view.*
-class Footer:ViewGroup() {
- @JvmField var q=View();var mode=1
- fun Z0(c:android.content.Context,a:android.util.AttributeSet){}
- fun M2(i:Int){}
- fun m0(){}
- fun onAttachedToWindow(){}
- fun getMode()=mode
-}
 class Banner {
  @JvmField var n=View();@JvmField var p=View();@JvmField var f=View();@JvmField var h=View()
  fun i()=true;fun k(v:Int){}
@@ -142,16 +140,38 @@ fun main(){
  HchatStorage.prefs=Prefs();val p=HchatStorage.prefs
  val runtime=ExtraEntryVisibilityRuntime(FeatureContext());runtime.install()
  p.set(ExtraEntryVisibility.VOICE,true)
- val footer=fake.Footer()
- HookRegistry.fire(footer,"onAttachedToWindow"){null};check(footer.q.visibility==8)
- HookRegistry.fire(footer,"M2",0x7f08052d){footer.mode=2;null};check(footer.q.visibility==0)
- HookRegistry.fire(footer,"M2",ExtraEntryVisibility.VOICE_DRAWABLE){footer.mode=1;null};check(footer.q.visibility==8)
- HookRegistry.fire(footer,"m0"){footer.q.visibility=8;null}
- p.set(ExtraEntryVisibility.VOICE,false);check(footer.q.visibility==8 && HookRegistry.handles.isEmpty())
- footer.q.visibility=4;p.set(ExtraEntryVisibility.VOICE,true)
- HookRegistry.fire(footer,"onAttachedToWindow"){null};check(footer.q.visibility==8)
- p.set(ExtraEntryVisibility.VOICE,false);check(footer.q.visibility==4)
- println("PASS microphone hidden, keyboard retained, native GONE/INVISIBLE restored")
+ val footer=com.tencent.mm.pluginsdk.ui.chat.ChatFooter()
+ val right=footer.right
+ HookRegistry.fire(footer,"onAttachedToWindow"){null}
+ check(right.visibility==8 && footer.q.visibility==0 && footer.emoji.visibility==0 && footer.plus.visibility==0)
+ check(HookRegistry.handles.none{it.member.name in listOf("M2","m0")})
+ HookRegistry.fire(right,"c",1){null};check(right.visibility==8 && footer.q.visibility==0)
+ HookRegistry.fire(right,"onWindowVisibilityChanged",0){null};check(right.visibility==8)
+ p.set(ExtraEntryVisibility.VOICE,false)
+ check(right.visibility==0 && footer.q.visibility==0 && HookRegistry.handles.isEmpty())
+ for(native in listOf(4,8)) {
+  right.visibility=native;p.set(ExtraEntryVisibility.VOICE,true)
+  HookRegistry.fire(footer,"onAttachedToWindow"){null};check(right.visibility==8)
+  p.set(ExtraEntryVisibility.VOICE,false);check(right.visibility==native)
+ }
+ right.visibility=0;p.set(ExtraEntryVisibility.VOICE,true)
+ HookRegistry.fire(footer,"onAttachedToWindow"){null}
+ HookRegistry.fire(right,"c",2){right.visibility=4;null}
+ p.set(ExtraEntryVisibility.VOICE,false);check(right.visibility==4)
+ p.set(ExtraEntryVisibility.VOICE,true)
+ val unrelated=com.tencent.mm.pluginsdk.ui.SpeechInputLayout()
+ unrelated.id=ExtraEntryVisibility.RIGHT_VOICE_ID
+ HookRegistry.fire(unrelated,"c",1){null};check(unrelated.visibility==0)
+ val wrong=com.tencent.mm.pluginsdk.ui.SpeechInputLayout();footer.add(wrong)
+ HookRegistry.fire(wrong,"c",1){null};check(wrong.visibility==0)
+ p.set(ExtraEntryVisibility.VOICE,false)
+ // Already-open chat must update on enable, without waiting for another attach.
+ val active=android.view.Activity();active.window.decorView.add(footer)
+ right.visibility=0;WeChatApis.activity=active
+ p.set(ExtraEntryVisibility.VOICE,true);check(right.visibility==8 && footer.q.visibility==0)
+ p.set(ExtraEntryVisibility.VOICE,false);check(right.visibility==0)
+ WeChatApis.activity=null
+ println("PASS right microphone only; left/emoji/plus unchanged; native visibility restored; shared search inputs excluded")
  p.set(ExtraEntryVisibility.COMPUTER,true)
  val banner=fake.Banner();banner.p.tag=0x7f11028b
  check(HookRegistry.fire(banner,"i"){banner.n.visibility=0;true}==false)
@@ -191,17 +211,29 @@ fun main(){
 }
 '''
 }
+sources['Footer.kt'] = '''package com.tencent.mm.pluginsdk.ui.chat
+import android.view.*
+class ChatFooter:ViewGroup() {
+ val q=View();val emoji=View();val plus=View()
+ val right=com.tencent.mm.pluginsdk.ui.SpeechInputLayout()
+ init {right.id=0x7f0a64c1;add(q);add(right);add(emoji);add(plus)}
+ fun Z0(c:android.content.Context,a:android.util.AttributeSet){}
+ fun M2(i:Int){};fun m0(){};fun onAttachedToWindow(){}
+}
+'''
+sources['Speech.kt'] = '''package com.tencent.mm.pluginsdk.ui
+class SpeechInputLayout:android.view.ViewGroup(){fun c(status:Int){};fun onWindowVisibilityChanged(v:Int){}}
+'''
 # Chained public API has two distinct receiver types.
 sources['Apis.kt'] = '''package t.mma.hooks.api.core
 object WeChatApis {
  var version="8.0.78"
+ var activity:android.view.Activity?=null
  fun version()=this;fun versionName()=version
  fun currentActivity()=Current()
- class Current {fun currentActivity():android.view.Activity?=null}
+ class Current {fun currentActivity():android.view.Activity?=activity}
 }
 '''
-# Kotlin property accessor must not clash with the host's explicit getMode method.
-sources['Fake.kt'] = sources['Fake.kt'].replace('var mode=1','@JvmField var mode=1')
 with tempfile.TemporaryDirectory() as td:
     p = Path(td)
     for name, text in sources.items():

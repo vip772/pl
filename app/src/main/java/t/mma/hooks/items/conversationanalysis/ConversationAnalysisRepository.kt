@@ -1,7 +1,6 @@
 package t.mma.hooks.items.conversationanalysis
 
 import t.mma.hooks.api.core.WeChatApis
-import java.util.Calendar
 
 internal data class ConversationAnalysisSummary(
     val talker: String,
@@ -25,8 +24,9 @@ internal class ConversationAnalysisRepository {
         val database = WeChatApis.database() ?: return unavailable(cleanTalker, "微信数据库API尚未初始化")
         if (!database.prepare()) return unavailable(cleanTalker, "微信消息数据库尚未就绪")
 
-        val start = localPeriodStart(days)
-        val end = localPeriodEnd(days)
+        val period = ConversationAnalysisPeriod.range(days)
+        val start = period.first
+        val end = period.last
         val self = WeChatApis.account()?.selfWxId().orEmpty()
         val sql = "SELECT COUNT(*) AS total, " +
             "COUNT(DISTINCT CASE WHEN isSend = 1 THEN ? " +
@@ -76,24 +76,6 @@ internal class ConversationAnalysisRepository {
             .filter { it.isNotEmpty() && !it.endsWith("@chatroom") && !it.endsWith("@im.chatroom") }
             .distinct()
             .count()
-    }
-
-    private fun localPeriodStart(days: Int): Long {
-        val start = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0); set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0) }
-        return when (days) {
-            -1 -> start.apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
-            -7 -> start.apply { add(Calendar.DAY_OF_YEAR, -7) }.timeInMillis
-            -30 -> start.apply { add(Calendar.MONTH, -1); set(Calendar.DAY_OF_MONTH, 1) }.timeInMillis
-            else -> if (days >= 60) 0L else start.apply { add(Calendar.DAY_OF_YEAR, -(days.coerceAtLeast(1) - 1)) }.timeInMillis
-        }
-    }
-    private fun localPeriodEnd(days: Int): Long {
-        val end = Calendar.getInstance().apply { set(Calendar.HOUR_OF_DAY, 23); set(Calendar.MINUTE, 59); set(Calendar.SECOND, 59); set(Calendar.MILLISECOND, 999) }
-        return when (days) {
-            -1, -7 -> end.apply { add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
-            -30 -> end.apply { set(Calendar.DAY_OF_MONTH, 1); add(Calendar.DAY_OF_YEAR, -1) }.timeInMillis
-            else -> if (days >= 60) System.currentTimeMillis() else end.timeInMillis
-        }
     }
 
     private fun number(value: Any?): Long = when (value) {

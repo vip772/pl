@@ -2,8 +2,6 @@ package t.mma.hooks.items.conversationanalysis
 
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.drawable.Drawable
 import android.view.MenuItem
 import android.view.View
@@ -210,31 +208,17 @@ internal class ConversationAnalysisMessageMenuRuntime(
 }
 
 private class AnalysisMenuDrawable(private val density: Float) : Drawable() {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 2.2f * density
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-        color = Color.WHITE
-    }
-
+    private val painter = ConversationAnalysisIconPainter(ConversationAnalysisIconView.Kind.REPORT)
+    private var iconAlpha = 255
+    private var iconFilter: android.graphics.ColorFilter? = null
     override fun draw(canvas: Canvas) {
-        val cx = bounds.exactCenterX()
-        val cy = bounds.exactCenterY()
-        val unit = density
-        canvas.drawRoundRect(cx - 13 * unit, cy - 13 * unit, cx + 13 * unit, cy + 13 * unit, 4 * unit, 4 * unit, paint)
-        canvas.drawLine(cx - 8 * unit, cy + 7 * unit, cx - 8 * unit, cy - 1 * unit, paint)
-        canvas.drawLine(cx, cy + 7 * unit, cx, cy - 6 * unit, paint)
-        canvas.drawLine(cx + 8 * unit, cy + 7 * unit, cx + 8 * unit, cy - 10 * unit, paint)
-        val path = Path().apply {
-            moveTo(cx - 8 * unit, cy - 1 * unit)
-            lineTo(cx, cy - 6 * unit)
-            lineTo(cx + 8 * unit, cy - 10 * unit)
-        }
-        canvas.drawPath(path, paint)
+        val size = minOf(bounds.width().toFloat(), bounds.height().toFloat(), 28f * density)
+        painter.draw(canvas, bounds.exactCenterX() - size / 2f, bounds.exactCenterY() - size / 2f,
+            size, size, Color.WHITE, iconAlpha, iconFilter)
     }
-
-    override fun setAlpha(alpha: Int) { paint.alpha = alpha }
-    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { paint.colorFilter = colorFilter }
+    override fun setAlpha(alpha: Int) { iconAlpha = alpha.coerceIn(0, 255); invalidateSelf() }
+    override fun setColorFilter(colorFilter: android.graphics.ColorFilter?) { iconFilter = colorFilter; invalidateSelf() }
+    override fun getIntrinsicWidth(): Int = (28f * density).toInt()
+    override fun getIntrinsicHeight(): Int = (28f * density).toInt()
     override fun getOpacity(): Int = android.graphics.PixelFormat.TRANSLUCENT
 }

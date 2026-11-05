@@ -23,7 +23,11 @@
 
 ## 新增两项静态依据（2026-11-05）
 
-材料：本机 `wechat8078_decoded`。输入框证据为 `smali_classes3/com/tencent/mm/pluginsdk/ui/chat/ChatFooter.smali`：`Z0(Context,AttributeSet)` 初始化布局 `0x7f0e0339`（t8），按钮 `0x7f0a1061`（bpe）绑定 `q:WeImageButton`，布局使用 `icons_outlined_voice`。`M2(int)` 切换图标，语音 selector `0x7f08052e`（o3）；`getMode` / `u0` 表明模式1为语音图标、模式2为键盘返回；`m0()` 可原生隐藏 q。ntc/kj7 是其他业务图标，不能用于本功能。
+材料：本机 `wechat8078_decoded`。旧版把 `ChatFooter.q`（bpe）左侧语音/键盘切换键认作目标，已由用户图片纠正；旧 q/M2/m0/getMode 隐藏分支与资源判断全部移除。
+
+正确目标见 `res/layout/t8.xml`：文本编辑 `bkk` 右侧覆盖层 `sub` → `w2o` 内为 `SpeechInputLayout`，id `w2n=0x7f0a64c1`，后面紧邻表情按钮 bqr。`smali_classes16/com/tencent/mm/pluginsdk/ui/SpeechInputLayout.smali` 构造器加载 `0x7f0e1c2a=res/layout/ew_.xml`；该布局 `wey/wes/wet` 使用 `mike_on_heavy`，另有 `wew` 的 `mike_on_filled` 及忙碌/波形状态。`c(int)` 更新状态，`onWindowVisibilityChanged(int)` 是该类具体窗口回调。运行时限定控件类、w2n资源ID及 ChatFooter 祖先，隐藏整个目标控件而非其单一灰度图标，不拦截原生触摸/录音业务、不隐藏父级文本框。共享搜索输入也使用此控件，缺少 ChatFooter 所有权的一律放行。
+
+安装仅在语音开关开启时进行。ChatFooter 初始化/挂载与 SpeechInputLayout 状态/窗口回调恢复后重施覆盖；不 Hook 全局 View.setVisibility，不做持续树扫描、不加布局/滚动监听。
 
 电脑证据为 `smali_classes8/com/tencent/mm/ui/conversation/banner/l0.smali`（OtherOnlineBanner）及 `qb5/b.smali`：布局 `0x7f0e1774`（c8u），n 为状态行、p 为设备图标，父类 f/h 是专用容器。i() 返回原生可见性且内嵌 k(int)，后者更新 n；电脑 tag 为 `0x7f11028b`（display_regular）和 `0x7f110289`（display_lock_regular）。该 Banner 同时服务平板/手表/车机，因此未知或非电脑 tag 不过滤。
 

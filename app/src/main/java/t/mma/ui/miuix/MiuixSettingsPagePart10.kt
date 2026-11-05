@@ -2286,7 +2286,7 @@ internal fun MeEntryVisibilityMiuixPage(context: Context, provider: FeatureSetti
             item { SmallTitle(text = "输入框语音图标") }
             item { SettingsCard { ExtraEntryVisibilityControl(sp,
                 t.mma.hooks.items.backgroundbeauty.ExtraEntryVisibility.VOICE,
-                "隐藏输入框语音图标", "仅隐藏语音图标，语音模式的键盘返回键保持可用") } }
+                "隐藏输入框语音图标", "仅隐藏文本输入框右侧麦克风，保留左侧语音切换按钮") } }
         }
     }
 }

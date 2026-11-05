@@ -38,3 +38,23 @@
 - 无实机性能/内存数据，不宣称性能或内存改善；不宣称功能整体验收完成。
 - 未提交、未推送，HEAD保持 `620c9f30b865718e63bfec21575ae78adb4c2d80`。
 - `git diff --check` 通过。
+
+## 右侧麦克风目标修正（本次未提交）
+
+上一版已按用户后续授权提交为 d7da526；用户确认其他功能验收成功，但指出语音隐藏对象错误。上述旧记录为当时历史状态，不代表本次修正版已验收。本次只修正右侧麦克风，不提交、不推送。
+
+- 本次 runtime 验证：退出码0。
+  - PASS four independent switch combinations and idempotent release
+  - PASS right microphone only; left/emoji/plus unchanged; native visibility restored; shared search inputs excluded
+  - PASS computer tags, tablet passthrough, nested i/k snapshots, resume and shared-header restore
+  - PASS partial install rollback/retry, retained-listener failure and unsupported host
+- 本次 me 验证：退出码0。
+- 本次 backup 验证：退出码0。
+
+已覆盖：右侧目标ID/类及聊天祖先校验，左侧/表情/加号不变，共享搜索控件放行，已打开聊天即时启停，原生GONE/INVISIBLE恢复，四组合及电脑提示回归。备份键未变。
+
+- `smali_classes16/com/tencent/mm/pluginsdk/ui/SpeechInputLayout.smali` SHA-256：`d3bd5b62fed79e1b518ed63107f0bd88f2eaa15a927334623ea24114a02c012f`
+- `res/layout/ew_.xml` SHA-256：`990d9a16e12cdd03590e77fc12ed4fd6b298d63b6d3625458e2f9212c2b091de`
+
+未运行Gradle、未构建APK或完成Android/Compose/R8全量编译；定向JVM/stub验证不代替实机验收。当前仅8.0.78有确认依据，未扩张其他版本适配。
+HEAD保持 d7da5265cf8f003deba20dbf549d2f8142268803；修正版待新版统一实机验收。
