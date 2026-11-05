@@ -565,41 +565,37 @@ internal fun isDarkMode(context: Context): Boolean {
 internal const val FAVORITE_BACKGROUND_BATCH_DELAY_MS = 40L
 
 
-// QEchat 特殊消息的原生设置入口，复用 Hchat 页面过渡和名单选择器。
+// 安全消息与反安全消息共享特殊消息主页，各自保存开关。
 @Composable
 internal fun SpecialMessageMiuixPage(context: Context, onBack: () -> Unit) {
-    val sp = remember { HchatStorage.preferences(context, SecureMessageSettings.SEND_PREFS) }
-    val antiSp = remember { HchatStorage.preferences(context, SecureMessageSettings.ANTI_PREFS) }
-    var route by remember { mutableStateOf(0) }
-    val mainList = rememberLazyListState()
-    val safetyList = rememberLazyListState()
-    val back = { if (route == 1) route = 0 else onBack() }
-    RegisterSettingsBackHandler(back)
-    SettingsRouteTransition(targetState = route, label = "SpecialMessageRoute", depthOf = { it }) { current ->
-        val safety = current == 1
-        val behavior = MiuixScrollBehavior()
-        PageScaffold(
-            title = if (safety) "安全消息" else "特殊消息",
-            largeTitle = if (safety) "安全消息" else "特殊消息",
-            scrollBehavior = behavior,
-            bottomBar = { BottomActionBar(primaryText = "返回", onPrimaryClick = back) }
-        ) { padding ->
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().imePadding().nestedScroll(behavior.nestedScrollConnection),
-                state = if (safety) safetyList else mainList,
-                contentPadding = padding
-            ) {
-                item { SmallTitle(text = "功能设置") }
-                item {
-                    SettingsCard {
-                        if (!safety) {
-                            ActionRow("安全消息", "文字、链接、图片、表情和视频") { route = 1 }
-                            InsetDivider()
-                            SwitchRow(antiSp, SecureMessageSettings.KEY_ENABLE, "反安全消息", "恢复安全消息的完整长按菜单", false)
-                        } else {
-                            SwitchRow(sp, SecureMessageSettings.KEY_ENABLE, "安全消息", "发送文字、链接、图片、表情和视频时添加安全标记", false)
-                        }
-                    }
+    val sendPrefs = remember { HchatStorage.preferences(context, SecureMessageSettings.SEND_PREFS) }
+    val antiPrefs = remember { HchatStorage.preferences(context, SecureMessageSettings.ANTI_PREFS) }
+    val listState = rememberLazyListState()
+    val scrollBehavior = MiuixScrollBehavior()
+    PageScaffold(
+        title = "特殊消息",
+        largeTitle = "特殊消息",
+        scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar(primaryText = "返回", onPrimaryClick = onBack) }
+    ) { padding ->
+        LazyColumn(
+            modifier = Modifier.fillMaxSize().imePadding().nestedScroll(scrollBehavior.nestedScrollConnection),
+            state = listState,
+            contentPadding = padding
+        ) {
+            item { SmallTitle(text = "功能设置") }
+            item {
+                SettingsCard {
+                    SwitchRow(
+                        sendPrefs, SecureMessageSettings.KEY_ENABLE, "安全消息",
+                        "发送文字、链接、图片、表情和视频时添加安全标记",
+                        SecureMessageSettings.DEFAULT_ENABLE
+                    )
+                    InsetDivider()
+                    SwitchRow(
+                        antiPrefs, SecureMessageSettings.KEY_ENABLE, "反安全消息",
+                        "恢复安全消息的完整长按菜单", false
+                    )
                 }
             }
         }

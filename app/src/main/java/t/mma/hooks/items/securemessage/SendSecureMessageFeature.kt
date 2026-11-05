@@ -19,15 +19,11 @@ import org.luckypray.dexkit.query.matchers.MethodMatcher
 import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 
-/** Injects the WeChat secure-message marker before outgoing supported messages are stored. */
+/** Runtime backing 特殊消息 → 安全消息; deliberately has no standalone settings provider. */
 class SendSecureMessageFeature : BaseFeature() {
     override fun featureId(): String = SecureMessageSettings.SEND_ID
 
     override fun name(): String = "安全消息"
-
-    override fun onFeatureInit(context: FeatureContext) {
-        registerSettingsProvider(SendSecureMessageSettingsProvider())
-    }
 
     override fun onFeatureInstall(context: FeatureContext) {
         val prefs = HchatStorage.preferences(context.hostContext(), SecureMessageSettings.SEND_PREFS)
@@ -84,6 +80,7 @@ private class SendSecureMessageRuntime(
     private val hooks = ArrayList<XC_MethodHook.Unhook>()
     private val installedMembers = LinkedHashSet<String>()
     private var insertInstalled = false
+    private var mediaInstalled = false
     private var mergeInstalled = false
     private var emojiSourceInstalled = false
     private var emojiDispatchInstalled = false
@@ -114,6 +111,7 @@ private class SendSecureMessageRuntime(
         if (closed) return
         closed = true
         insertInstalled = false
+        mediaInstalled = false
         mergeInstalled = false
         emojiSourceInstalled = false
         emojiDispatchInstalled = false
@@ -151,9 +149,79 @@ private class SendSecureMessageRuntime(
             }
         val insertReady = installInsertHook(insert)
         val mergeReady = installSourceMergeHooks(insert)
+        val mediaReady = installMediaEncodingHooks()
         val emojiReady = installEmojiHooks()
         val emojiCheckReady = if (emojiCheckInstalled) true else installEmojiSelfCheckHooks(runtimeKey)
-        return insertReady && mergeReady && emojiReady && emojiCheckReady
+        return insertReady && mergeReady && mediaReady && emojiReady && emojiCheckReady
+    }
+
+    /**
+     * 8.0.78 rebuilds media MsgSource in its upload tasks, after local insertion.
+     * Patch the verified request field before BOTH size calculation and encoding;
+     * changing only writeFields would invalidate nested protobuf length prefixes.
+     */
+    private fun installMediaEncodingHooks(): Boolean {
+        if (mediaInstalled) return true
+        val version = WeChatApis.version()?.current()
+        if (version?.versionName != "8.0.78" || version.versionCode != 3180L) return true
+        val loader = context.hostClassLoader()
+        var complete = true
+        val fields = mapOf("pc5.ot" to "i", "pc5.h37" to "t",
+            "pc5.q76" to "p", "pc5.kk0" to "p")
+        fields.forEach { (className, fieldName) ->
+            val ready = runCatching {
+                val owner = requireNotNull(KavaReflector.loadClass(className, loader))
+                val field = requireNotNull(KavaReflector.findFieldRecursive(owner, fieldName))
+                check(field.type == String::class.java)
+                val target = KavaReflector.declaredMethods(owner).single {
+                    it.name == "op" && it.returnType == Int::class.javaPrimitiveType &&
+                        it.parameterTypes.contentEquals(arrayOf(Int::class.javaPrimitiveType, Array<Any>::class.java))
+                }
+                hookOnce(target, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        if (closed || !enabled()) return
+                        val operation = param.args?.getOrNull(0) as? Int ?: return
+                        if (operation != 0 && operation != 1) return
+                        val request = param.thisObject ?: return
+                        val source = KavaReflector.readField(field, request) as? String
+                        if (SecureMessageSource.containsMarker(source)) return
+                        if (!KavaReflector.writeField(field, request, SecureMessageSource.addMarker(source))) {
+                            report("媒体请求 MsgSource 不可写: $className.$fieldName", null)
+                        }
+                    }
+                })
+            }.getOrElse { report("媒体安全消息编码入口安装失败: $className", it); false }
+            complete = ready && complete
+        }
+        // PB3 UploadMsgImg uses indexed fields rather than the legacy op() protocol.
+        val imageReady = runCatching {
+            val imageClass = requireNotNull(KavaReflector.loadClass("pc5.v27", loader))
+            val owner = requireNotNull(KavaReflector.loadClass("com.tencent.mm.protobuf.e", loader))
+            check(owner.isAssignableFrom(imageClass))
+            val getter = requireNotNull(KavaReflector.findMethodRecursive(owner, "getString", Int::class.javaPrimitiveType!!))
+            val setter = requireNotNull(KavaReflector.findMethodRecursive(owner, "set", Int::class.javaPrimitiveType!!, Any::class.java))
+            val targets = KavaReflector.declaredMethods(owner).filter {
+                (it.name == "computeSize" && it.parameterCount == 0 && it.returnType == Int::class.javaPrimitiveType) ||
+                    (it.name == "writeFields" && it.parameterCount == 1 && it.returnType == Void.TYPE)
+            }
+            check(targets.size == 2)
+            targets.map { target ->
+                hookOnce(target, object : XC_MethodHook() {
+                    override fun beforeHookedMethod(param: MethodHookParam) {
+                        // Immediate type gate: other PB3 messages do no preference/reflection/XML work.
+                        val request = param.thisObject ?: return
+                        if (request.javaClass != imageClass || closed || !enabled()) return
+                        val source = KavaReflector.invoke(getter, request, 9) as? String
+                        if (SecureMessageSource.containsMarker(source)) return
+                        if (!KavaReflector.invokeSuccessfully(setter, request, 9, SecureMessageSource.addMarker(source))) {
+                            report("图片请求 MsgSource 不可写: pc5.v27[9]", null)
+                        }
+                    }
+                })
+            }.all { it }
+        }.getOrElse { report("图片安全消息 PB3 编码入口安装失败", it); false }
+        mediaInstalled = complete && imageReady
+        return mediaInstalled
     }
 
     private fun hookOnce(method: Method, callback: XC_MethodHook): Boolean {

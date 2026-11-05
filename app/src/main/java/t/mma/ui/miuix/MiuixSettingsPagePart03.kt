@@ -235,7 +235,6 @@ import t.mma.hooks.items.chattime.ChatTimeStyleSettings
 import t.mma.hooks.items.chattoolbar.ChatToolbarFeature
 import t.mma.hooks.items.homesidepanel.HomeSidePanelFeature
 import t.mma.hooks.items.monetgenerator.MonetModuleGeneratorFeature
-import t.mma.hooks.items.securemessage.SecureMessageSettings
 import t.mma.hooks.items.transparentavatar.UploadTransparentAvatarFeature
 import t.mma.hooks.items.conversationgroup.ConversationGroup
 import t.mma.hooks.items.conversationgroup.ConversationGroupFeature
@@ -1190,8 +1189,6 @@ internal fun FeatureSettingsPage(
         t.mma.hooks.items.homeextension.HomeExtensionFeature.ID -> HomeExtensionMiuixPage(context, provider, onBack)
         HomeSidePanelFeature.ID -> HomeSidePanelMiuixPage(context, provider, onBack)
         MonetModuleGeneratorFeature.ID -> MonetModuleGeneratorMiuixPage(context, provider, onBack)
-        SecureMessageSettings.SEND_ID,
-        SecureMessageSettings.ANTI_ID -> SecureMessageMiuixPage(context, provider, onBack)
         UploadTransparentAvatarFeature.ID -> UploadTransparentAvatarMiuixPage(context, provider, onBack)
         InputHintFeature.ID -> InputHintMiuixPage(context, provider, onBack)
         HideChatAvatarFeature.ID -> HideChatAvatarMiuixPage(context, provider, onBack)

@@ -18,7 +18,6 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import t.mma.BuildConfig
 import t.mma.hooks.api.core.WeChatApis
-import t.mma.hooks.items.securemessage.SecureMessageSettings
 import t.mma.hooks.items.chattime.ChatTimeStyleSettings
 import t.mma.hooks.items.swipequote.SwipeQuoteSettings
 import t.mma.hooks.items.transparentavatar.UploadTransparentAvatarSettings
@@ -30,55 +29,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTitle
-
-@Composable
-internal fun SecureMessageMiuixPage(
-    context: Context,
-    provider: FeatureSettingsProvider,
-    onBack: () -> Unit
-) {
-    val isAnti = provider.featureId() == SecureMessageSettings.ANTI_ID
-    val prefsName = if (isAnti) SecureMessageSettings.ANTI_PREFS else SecureMessageSettings.SEND_PREFS
-    val sp = remember { HchatStorage.preferences(context, prefsName) }
-    val title = if (isAnti) "反安全消息" else "安全消息"
-    val summary = if (isAnti) {
-        "恢复安全消息的普通长按菜单和操作"
-    } else {
-        "给文字、链接、卡片、图片、视频和表情包添加安全标记"
-    }
-    val listState = rememberLazyListState()
-    val scrollBehavior = MiuixScrollBehavior()
-    PageScaffold(
-        title = title,
-        largeTitle = title,
-        scrollBehavior = scrollBehavior,
-        bottomBar = { BottomActionBar("返回", onBack) }
-    ) { padding ->
-        LazyColumn(
-            modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
-            state = listState,
-            contentPadding = PaddingValues(
-                top = padding.calculateTopPadding() + 8.dp,
-                bottom = padding.calculateBottomPadding() + 12.dp
-            )
-        ) {
-            item { SmallTitle(text = "消息安全") }
-            item {
-                SettingsCard {
-                    SwitchRow(
-                        sp,
-                        SecureMessageSettings.KEY_ENABLE,
-                        title,
-                        summary,
-                        if (isAnti) false else SecureMessageSettings.DEFAULT_ENABLE
-                    )
-                    InsetDivider()
-                    InfoRow("适配范围", "微信 8.0.49–8.0.77；媒体消息按发送链路处理")
-                }
-            }
-        }
-    }
-}
 
 @Composable
 internal fun UploadTransparentAvatarMiuixPage(

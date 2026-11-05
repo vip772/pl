@@ -1,0 +1,147 @@
+{
+  "pc5.v27.java": {
+    "sha256": "a3c3c37be1e2b6f3bbdeddcc7fe073f402c2dd611015bd50330b525802f37e54",
+    "excerpts": [
+      {
+        "line": 9,
+        "text": "    public v27() {\n        super(new k[]{i.s(1, \"BaseRequest\", pe.class), i.s(2, \"ClientImgId\", q16.class), i.s(3, \"FromUserName\", q16.class), i.s(4, \"ToUserName\", q16.class), i.j(5, \"TotalLen\"), i.j(6, \"StartPos\"), i.j(7, \"DataLen\"), i.s(8, \"ImgData\", p16.class), i.j(9, \"MsgType\"), i.v(10, \"MsgSource\"), i.j(11, \"CompressType\"), i.j(12, \"NetType\"), i.j(13, \"PhotoFrom\"), i.v(14, \"MediaId\"), i.v(15, \"CDNBigImgUrl\"), i.v(16, \"CDNMidImgUrl\"), i.v(17, \"AESKey\"), i.j(18, \"EncryVer\"), i.j(19, \"CDNBigImgSize\"), i.j(20, \"CDNMidImgSize\"), i.v(21, \"CDNThumbImgUrl\"), i.j(22, \"CDNThumbImgSize\"), i.j(23, \"CDNThumbImgHeight\"), i.j(24, \"CDNThumbImgWidth\"), i.v(25, \"CDNThumbAESKey\"), i.j(26, \"ReqTime\"), i.v(27, \"Md5\"), i.j(28, \"CRC32\"), i.j(29, \"MsgForwardType\"), i.j(30, \"HitMd5\"), i.v(31, \"AppId\"), i.v(32, \"MessageAction\"), i.v(33, \"MessageExt\"), i.v(34, \"MediaTagName\"), i.v(35, \"SendMsgTicket\"), i.j(36, \"ImgType\"), i.v(37, \"ImgInfo\"), i.v(38, \"PlatformSignature\"), i.v(39, \"ImgDataHash\"), i.v(40, \"ImgSourceUrl\"), i.j(41, \"HevcMidSize\"), i.v(42, \"RawMd5\"), i.v(43, \"OriginSourceMd5\"), i.s(44, \"ImgSourceInfo\", t44.class), i.s(45, \"ImgWxaInfo\", u44.class), i.v(47, \"SecHashInfoBase64\"), i.j(49, \"LiveDuration\"), i.j(50, \"LiveVideoSize\"), i.v(51, \"LiveVideoMd5\"), i.v(52, \"LiveVideoFileid\"), i.j(53, \"LiveHDVideoSize\"), i.v(54, \"LiveHDVideoMd5\"), i.v(55, \"LiveHDVideoFileid\"), i.v(56, \"ExtCommonInfoXml\"), i.s(57, \"ImgMpInfo\", r44.class), i.j(58, \"LivePhotoStillImageTimeMs\")});\n        ((e) this).__printBytes = true;\n    }\n\n    public final pe getBaseRequest() {"
+      }
+    ]
+  },
+  "sa0.b.simple.java": {
+    "sha256": "eef021a43fb064cbb0517c94b48585c326a34c2063a15c469dbb17b9cf08c50d",
+    "excerpts": [
+      {
+        "line": 103,
+        "text": "        otVar.q = i0Var.e;\n        otVar.i = i0Var.f;\n        otVar.v = dVar.o().getAeskey();\n        h95.b j = dVar.j();\n        f0 f0Var = null;\n        if (j == null) goto L82;"
+      }
+    ]
+  },
+  "qa0.s.simple.java": {
+    "sha256": "6ed355cdc8b6bf88129026900216b7555c21c2f76f692f19265ae87f8f1c56a7",
+    "excerpts": [
+      {
+        "line": 464,
+        "text": "        v27Var.set(1, q16Var);\n        v27Var.set(9, i0Var.f);\n        dVar.r = v27Var;\n        l lVar = new l(dVar, null);\n        jVar.f = 1;\n        obj = b4.c(300000, lVar, jVar);"
+      },
+      {
+        "line": 498,
+        "text": "        i0 i0Var = gVar.g;\n        v27Var.set(9, i0Var.f);\n        v27Var.set(28, Integer.valueOf(i0Var.n));\n        v27Var.set(23, Integer.valueOf(dVar2.o().q()));\n        v27Var.set(22, Integer.valueOf(dVar2.o().n()));\n        v27Var.set(20, dVar2.o().p());"
+      }
+    ]
+  },
+  "pc5.ot.java": {
+    "sha256": "295e4e860e40714df2685e31d5a420e1d87a550e9b587262289a2eb1169af26f",
+    "excerpts": [
+      {
+        "line": 79,
+        "text": "            fVar.e(5, this.f6638h);\n            String str4 = this.i;\n            if (str4 != null) {\n                fVar.j(6, str4);\n            }\n            p16 p16Var = this.m;"
+      }
+    ]
+  },
+  "pc5.h37.java": {
+    "sha256": "b6cc906a39c8613790624c65dee0ac0af5592695433a0fda4cca351c33dc0d59",
+    "excerpts": [
+      {
+        "line": 126,
+        "text": "            fVar.e(14, this.s);\n            String str4 = this.t;\n            if (str4 != null) {\n                fVar.j(15, str4);\n            }\n            String str5 = this.u;"
+      }
+    ]
+  },
+  "pc5.q76.java": {
+    "sha256": "c68cfb2892411850d4ae5209721ce52b82dc2bd0b8757d642650be4631eace21",
+    "excerpts": [
+      {
+        "line": 78,
+        "text": "            fVar.e(10, this.o);\n            String str6 = this.p;\n            if (str6 != null) {\n                fVar.j(11, str6);\n            }\n            String str7 = this.q;"
+      }
+    ]
+  },
+  "pc5.kk0.java": {
+    "sha256": "dd9e9e4a85e4fbc4ad363c28d473a8c6d42e72520260d1c850620cfdba764fbe",
+    "excerpts": [
+      {
+        "line": 66,
+        "text": "            }\n            String str6 = this.p;\n            if (str6 != null) {\n                fVar.j(10, str6);\n            }\n            fVar.e(11, this.q);"
+      }
+    ]
+  },
+  "c72.y.java": {
+    "sha256": "464eb07028a9acc8a7983a1ce93850609a159f04b50580c0788fcf40be4eea32",
+    "excerpts": [
+      {
+        "line": 83,
+        "text": "        kk0Var.f1284h = emojiInfo.field_type;\n        kk0Var.p = ma.n();\n        kk0Var.q = i;\n        kk0Var.s = i2;\n        Log.i(\"MicroMsg.emoji.NetSceneUploadEmoji\", \"NetSceneUploadEmoji: md5 %s, size %s fromScene %d\", new Object[]{emojiInfo.getMd5(), Integer.valueOf(emojiInfo.field_size), Integer.valueOf(kk0Var.s)});\n        if (((k4) n0.c(k4.class)).dj(str2)) {"
+      },
+      {
+        "line": 160,
+        "text": "            if (z.g(str)) {\n                kk0Var.p = vo.a.a.a(k0.yi(this.m, this.i));\n            }\n            Log.i(\"MicroMsg.emoji.NetSceneUploadEmoji\", \"dispatcher, start:\" + emojiInfo.field_start + \", total:\" + emojiInfo.field_size + \", len:\" + length2);\n            return dispatch(sVar, oVar, this);\n        }"
+      }
+    ]
+  },
+  "s61.q1.java": {
+    "sha256": "900abbe5adaeb1e5bbf56988a079d2c68a6986a915ffc983b9c83a582f0cb6b6",
+    "excerpts": [
+      {
+        "line": 175,
+        "text": "        }\n        h37Var.t = I;\n        h37Var.N = v2Var.F;\n        String str6 = this.m;\n        if (str6 != null) {\n            h37Var.p0 = v2Var.c;"
+      }
+    ]
+  },
+  "s61.r1.simple.java": {
+    "sha256": "a011ab042b3c5eb4e65b2ce590c350133a821a1092eb8108d2846e88f5eda65e",
+    "excerpts": [
+      {
+        "line": 827,
+        "text": "    L26:\n        q76Var.p = o;\n        q76Var.q = z6.p(((wb0.b) ((rn3.u0) n0.c(rn3.u0.class))).wj(yi, ou5.e0.s, str, false));\n        q76Var.s = h2.m;\n        q76Var.z = this.i.field_fileId;\n        if (y8.J0(h2.h()) == true) goto L52;"
+      },
+      {
+        "line": 869,
+        "text": "        if (y8.J0(str2) == false) goto L58;\n        o = ma.n();\n        goto L26\n    L58:\n        o = ma.o(str2);\n        goto L26"
+      },
+      {
+        "line": 872,
+        "text": "    L58:\n        o = ma.o(str2);\n        goto L26\n    L16:\n        if (y8.J0(h3.M) == true) goto L59;\n        str2 = h3.M;"
+      }
+    ]
+  },
+  "com.tencent.mm.protobuf.e.java": {
+    "sha256": "474d6985093294a779c8cbe7f9a825c020eae856f809284d4ad5f5075ee581ae",
+    "excerpts": [
+      {
+        "line": 186,
+        "text": "\n    public int computeSize() {\n        int j;\n        try {\n            j[] jVarArr = this.__fields;\n            int length = jVarArr.length;"
+      },
+      {
+        "line": 493,
+        "text": "\n    public void writeFields(zc6.f fVar) {\n        if (fVar == null) {\n            return;\n        }\n        j[] jVarArr = this.__fields;"
+      },
+      {
+        "line": 381,
+        "text": "\n    public final String getString(int i) {\n        return (String) getOrDefault(i);\n    }\n\n    public final j[] get__fields() {"
+      },
+      {
+        "line": 464,
+        "text": "\n    public void set(int i, Object obj) {\n        this.__fields[i].f2864b = obj;\n        this.__hasSetBitSet[i] = true;\n    }\n"
+      }
+    ]
+  },
+  "b41.ma.java": {
+    "sha256": "1de0627f2db8bca459d0c3eda32f6000af50830595cab0f3574a0df9cb3f3331",
+    "excerpts": [
+      {
+        "line": 51,
+        "text": "\n    public static boolean C(e9 e9Var) {\n        Map d2;\n        return (e9Var == null || y8.J0(((c8) e9Var).G) || (d2 = fa.d(((c8) e9Var).G, \"msgsource\", (String) null)) == null || y8.D1((String) d2.get(\".msgsource.sec_msg_node.sfn\"), 0) != 1) ? false : true;\n    }\n"
+      },
+      {
+        "line": 94,
+        "text": "\n    public static String I(String str) {\n        if (y8.J0(str)) {\n            return null;\n        }\n        return \"<sec_msg_node><uuid>\" + str + \"</uuid></sec_msg_node>\";"
+      }
+    ]
+  },
+  "apk": {
+    "path": "/root/menu-research/wechat8078-current/wechat8078.apk",
+    "sha256": "41f7dc1f720767fa78fa20dd13ea034b817bbf6ebd23dfd1324c647499c9c1ba",
+    "version": "8.0.78/3180"
+  }
+}
