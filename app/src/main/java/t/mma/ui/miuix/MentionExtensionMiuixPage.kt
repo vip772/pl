@@ -4,7 +4,6 @@ import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -20,7 +19,6 @@ import t.mma.hooks.items.mentionhighlight.MentionHighlightSettings
 import t.mma.preferences.HchatStorage
 import t.mma.ui.FeatureSettingsProvider
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
-import top.yukonga.miuix.kmp.basic.SmallTitle
 
 @Composable
 internal fun MentionExtensionMiuixPage(
@@ -96,6 +94,19 @@ internal fun MentionExtensionMiuixPage(
                     sp.edit().putBoolean(MentionHighlightSettings.KEY_ENABLE, it).apply()
                 }
             } }
+            if (highlight) {
+                item {
+                    SettingsCard {
+                        ColorPickerRow(
+                            "艾特高亮渐变颜色",
+                            "",
+                            colorSpec,
+                            showSummary = false,
+                            onReset = { colorSpec = MentionHighlightSettings.DEFAULT_COLOR }
+                        ) { colorSpec = it.take(19) }
+                    }
+                }
+            }
             item { SettingsCard {
                 SwitchRow(notice, "艾特提醒", "") {
                     notice = it
@@ -114,20 +125,6 @@ internal fun MentionExtensionMiuixPage(
                         noticePrefs.edit().putString(t.mma.hooks.items.mentionextension.MentionNoticeSettings.COLOR, it).apply()
                     }
                 } }
-            }
-            if (highlight) {
-            item { SmallTitle(modifier = Modifier.padding(top = 10.dp), text = "颜色") }
-            item {
-                SettingsCard {
-                    ColorPickerRow(
-                        "艾特高亮渐变颜色",
-                        "",
-                        colorSpec,
-                        showSummary = false,
-                        onReset = { colorSpec = MentionHighlightSettings.DEFAULT_COLOR }
-                    ) { colorSpec = it.take(19) }
-                }
-            }
             }
         }
     }

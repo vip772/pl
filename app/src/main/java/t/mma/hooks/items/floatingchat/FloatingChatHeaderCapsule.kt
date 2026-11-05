@@ -3,43 +3,26 @@ package t.mma.hooks.items.floatingchat
 import android.content.Context
 import android.content.res.Configuration
 import android.graphics.*
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
-import android.os.Handler
-import android.os.Looper
-import android.os.SystemClock
 import android.text.TextUtils
 import android.view.*
 import android.widget.*
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.utils.HLog
-import java.lang.ref.WeakReference
-import java.net.HttpURLConnection
-import java.net.URL
 import java.util.WeakHashMap
-import java.util.concurrent.ArrayBlockingQueue
-import java.util.concurrent.ThreadPoolExecutor
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.RejectedExecutionException
 
 /** Presentation only: native children keep parents, IDs and click listeners. */
 internal class FloatingChatHeaderCapsule {
     private data class ChildState(val alpha: Float, val accessibility: Int)
-    private class State(val row: LinearLayout, val avatar: ImageView, val title: TextView,
+    private class State(val row: LinearLayout, val title: TextView,
                         val back: Icon, val more: Icon, val center: LinearLayout,
                         val background: Drawable?) {
         val hidden = WeakHashMap<View, ChildState>()
         var backTarget: View? = null
         var moreTarget: View? = null
         var titleTarget: View? = null
-        var talker = ""
-        var generation = 0
-        var nextAttempt = 0L
-        var loading = false
-        var avatarAttempts = 0
         var strokeStyle: Pair<Int, Int>? = null
-        var focusListener: ViewTreeObserver.OnWindowFocusChangeListener? = null
     }
     private val states = WeakHashMap<ViewGroup, State>()
     private val resourceIds = WeakHashMap<android.content.res.Resources, MutableMap<Triple<String, String, String>, Int>>()
@@ -48,16 +31,6 @@ internal class FloatingChatHeaderCapsule {
         return resourceIds.getOrPut(view.resources) { HashMap() }.getOrPut(key) {
             view.resources.getIdentifier(name, type, key.first)
         }
-    }
-    private val main = Handler(Looper.getMainLooper())
-    private val worker by lazy {
-        ThreadPoolExecutor(1, 1, 15L, TimeUnit.SECONDS, ArrayBlockingQueue<Runnable>(16)).apply {
-            allowCoreThreadTimeOut(true)
-        }
-    }
-    private var workerStarted = false
-    private val cache = object : android.util.LruCache<String, Bitmap>(2 * 1024 * 1024) {
-        override fun sizeOf(key: String, value: Bitmap) = value.byteCount
     }
     // APK versionName is stable for this host process. Avoid rebuilding the full
     // runtime/patch fingerprint on every layout. Retry unavailable startup values.
@@ -118,18 +91,11 @@ internal class FloatingChatHeaderCapsule {
             if (state.strokeStyle != strokeStyle) bg.setStroke(strokeStyle.first, stroke)
         }
         state.strokeStyle = strokeStyle
-        val talker = WeChatApis.chatPage()?.currentTalker().orEmpty()
-        if (talker != state.talker) {
-            state.talker = talker; state.generation++; state.nextAttempt = 0L; state.loading = false; state.avatarAttempts = 0
-            state.avatar.setImageDrawable(null)
-        }
         val rawTitle = nativeTitle.text.toString()
         // ba.xml stores the trailing count/status text separately in obr.
         val suffix = (named("obr") as? TextView)?.takeIf { it.visibility == View.VISIBLE }?.text?.toString().orEmpty()
         val title = rawTitle + suffix
         if (state.title.text.toString() != title) state.title.text = title
-        if (state.avatar.contentDescription != title) state.avatar.contentDescription = title
-        if (talker.isNotBlank()) loadAvatar(header, state, talker)
         for (i in 0 until header.childCount) {
             val child = header.getChildAt(i)
             if (child === state.row) continue
@@ -189,131 +155,25 @@ internal class FloatingChatHeaderCapsule {
         }
         val back = Icon(ctx, false).apply { background = surface(); contentDescription = "返回" }
         val more = Icon(ctx, true).apply { background = surface(); contentDescription = "更多" }
-        val center = CenteredTitleContent(ctx).apply {
+        val center = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER
             background = surface(); setPadding(dp(header, 8), 0, dp(header, 8), 0)
-        }
-        val avatar = ImageView(ctx).apply {
-            scaleType = ImageView.ScaleType.CENTER_CROP
-            background = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(0x44808080) }
-            clipToOutline = true
         }
         val title = TextView(ctx).apply {
             setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 17f)
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            setSingleLine(true); ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER_VERTICAL
+            setSingleLine(true); ellipsize = TextUtils.TruncateAt.END; gravity = Gravity.CENTER
         }
-        center.addView(avatar, LinearLayout.LayoutParams(size - dp(header, 8), size - dp(header, 8)))
-        center.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, -1).apply { leftMargin = dp(header, 8) })
+        center.addView(title, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         row.addView(back, LinearLayout.LayoutParams(size, size))
         row.addView(center, LinearLayout.LayoutParams(0, size, 1f).apply { leftMargin = dp(header, 8); rightMargin = dp(header, 8) })
         row.addView(more, LinearLayout.LayoutParams(size, size))
         val original = header.background
         // Claim before any background setter can be intercepted by immersive mode.
         FloatingChatCardVisuals.ownPresentation(header)
-        listOf(row, back, more, center, avatar).forEach(FloatingChatCardVisuals::ownPresentation)
+        listOf(row, back, more, center).forEach(FloatingChatCardVisuals::ownPresentation)
         header.addView(row, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER_VERTICAL))
-        val state = State(row, avatar, title, back, more, center, original)
-        val weakHeader = WeakReference(header)
-        val weakState = WeakReference(state)
-        val focus = ViewTreeObserver.OnWindowFocusChangeListener { focused ->
-            val view = weakHeader.get(); val target = weakState.get()
-            if (focused && !closed && view != null && target != null && states[view] === target &&
-                !target.loading && target.avatar.drawable == null && target.talker.isNotBlank()) {
-                target.avatarAttempts = 0; target.nextAttempt = 0L
-                loadAvatar(view, target, target.talker)
-            }
-        }
-        state.focusListener = focus
-        header.viewTreeObserver.addOnWindowFocusChangeListener(focus)
-        return state
-    }
-    private fun loadAvatar(header: ViewGroup, state: State, talker: String) {
-        if (closed) return
-        cache.get(talker)?.let {
-            if (!it.isRecycled) {
-                if ((state.avatar.drawable as? BitmapDrawable)?.bitmap !== it) state.avatar.setImageBitmap(it)
-                return
-            }
-        }
-        val now = SystemClock.elapsedRealtime()
-        if (state.loading || now < state.nextAttempt) return
-        if (state.avatarAttempts >= 3) return
-        state.avatarAttempts++
-        state.loading = true; state.nextAttempt = now + 2_000
-        val token = state.generation
-        val weakHeader = WeakReference(header); val weakState = WeakReference(state)
-        workerStarted = true
-        try { worker.execute {
-            var bitmap: Bitmap? = null
-            try {
-                val contacts = WeChatApis.contact().contacts()
-                val urls = listOf(contacts?.getAvatarUrl(talker, false), contacts?.getAvatarUrl(talker, true))
-                    .filterNotNull().filter { it.isNotBlank() }.distinct()
-
-                for (url in urls) {
-                    if (closed || Thread.currentThread().isInterrupted) break
-                    try { bitmap = download(url) } catch (e: Exception) {
-                        if (!closed) HLog.e("[Hchat:悬浮标题栏] 头像源加载失败", e)
-                    }
-                    if (bitmap != null) break
-                }
-            } catch (e: Throwable) { if (!closed) HLog.e("[Hchat:悬浮标题栏] 头像加载失败", e) }
-            val result = bitmap
-            if (!closed) main.post {
-                val view = weakHeader.get(); val target = weakState.get()
-                if (closed || view == null || target == null || states[view] !== target ||
-                    target.generation != token || target.talker != talker) return@post
-                target.loading = false
-                if (result != null) {
-                    cache.put(talker, result); target.avatar.setImageBitmap(result)
-                } else {
-                    // Retry independently of layout events, with the same generation guard.
-
-                    main.postDelayed({
-                        val retryView = weakHeader.get(); val retryState = weakState.get()
-                        if (!closed && retryView != null && retryState != null &&
-                            retryView.isAttachedToWindow && states[retryView] === retryState &&
-                            retryState.generation == token && retryState.talker == talker) {
-                            loadAvatar(retryView, retryState, talker)
-                        }
-                    }, 2_000)
-                }
-            }
-        } } catch (_: RejectedExecutionException) {
-            state.loading = false
-        }
-    }
-    private fun download(address: String): Bitmap? {
-        if (closed || Thread.currentThread().isInterrupted) return null
-        val url = URL(address)
-        if (url.protocol !in listOf("http", "https")) return null
-        val conn = url.openConnection() as HttpURLConnection
-        val deadline = SystemClock.elapsedRealtime() + 8_000L
-        try {
-            conn.connectTimeout = 4000; conn.readTimeout = 4000
-            if (conn.responseCode !in 200..299) {
-
-                return null
-            }
-            val bytes = conn.inputStream.use { input ->
-                val out = java.io.ByteArrayOutputStream(); val buffer = ByteArray(8192)
-                while (true) {
-                    if (closed || Thread.currentThread().isInterrupted || SystemClock.elapsedRealtime() >= deadline) return null
-                    val count = input.read(buffer); if (count < 0) break
-                    if (out.size() + count > 2 * 1024 * 1024) return null
-                    out.write(buffer, 0, count)
-                }
-                out.toByteArray()
-            }
-            if (closed || Thread.currentThread().isInterrupted || SystemClock.elapsedRealtime() >= deadline) return null
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
-            var sample = 1
-            while (maxOf(bounds.outWidth, bounds.outHeight) / sample > 256) sample *= 2
-            return BitmapFactory.decodeByteArray(bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample })
-        } finally { conn.disconnect() }
+        return State(row, title, back, more, center, original)
     }
     private fun releaseSafely(action: () -> Unit) {
         try { action() } catch (error: Throwable) {
@@ -322,10 +182,7 @@ internal class FloatingChatHeaderCapsule {
     }
     fun restore(header: ViewGroup) {
         val state = states.remove(header) ?: return
-        state.generation++
-        releaseSafely { state.focusListener?.let { if (header.viewTreeObserver.isAlive) header.viewTreeObserver.removeOnWindowFocusChangeListener(it) } }
-        state.focusListener = null
-        listOf(header, state.row, state.back, state.more, state.center, state.avatar).forEach { view ->
+        listOf(header, state.row, state.back, state.more, state.center).forEach { view ->
             releaseSafely { FloatingChatCardVisuals.releasePresentation(view) }
         }
         releaseSafely { header.removeView(state.row) }
@@ -339,16 +196,12 @@ internal class FloatingChatHeaderCapsule {
         releaseSafely { state.back.setOnClickListener(null) }
         releaseSafely { state.more.setOnClickListener(null) }
         releaseSafely { state.center.setOnClickListener(null) }
-        releaseSafely { state.avatar.setImageDrawable(null) }
     }
     fun destroy() {
         if (closed) return
         closed = true
         states.keys.toList().forEach { header -> releaseSafely { restore(header) } }
         states.clear()
-        if (workerStarted) releaseSafely { worker.shutdownNow() }
-        releaseSafely { main.removeCallbacksAndMessages(null) }
-        releaseSafely { cache.evictAll() }
         hostVersionName = null
         resourceIds.clear()
     }
@@ -374,20 +227,6 @@ internal class FloatingChatHeaderCapsule {
         return null
     }
     private fun dp(view: View, value: Int) = (value * view.resources.displayMetrics.density + 0.5f).toInt()
-    /** Both children wrap their content; gravity centers the combined avatar/title block. */
-    private class CenteredTitleContent(ctx: Context) : LinearLayout(ctx) {
-        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            if (childCount == 2 && MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
-                val avatar = getChildAt(0)
-                val title = getChildAt(1) as TextView
-                val titleParams = title.layoutParams as MarginLayoutParams
-                val available = (MeasureSpec.getSize(widthMeasureSpec) - paddingLeft - paddingRight -
-                    avatar.layoutParams.width.coerceAtLeast(0) - titleParams.leftMargin - titleParams.rightMargin).coerceAtLeast(0)
-                if (title.maxWidth != available) title.maxWidth = available
-            }
-            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        }
-    }
     private class Icon(ctx: Context, private val more: Boolean) : View(ctx) {
         var ink = Color.BLACK
             set(value) { if (field != value) { field = value; invalidate() } }
