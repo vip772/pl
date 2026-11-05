@@ -6,6 +6,8 @@ import de.robv.android.xposed.XC_MethodHook
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
+import t.mma.hooks.items.mentionall.MentionAllCommand
+import t.mma.hooks.items.mentionall.MentionAllSettings
 import t.mma.preferences.HchatStorage
 import t.mma.utils.HLog
 import t.mma.utils.KavaReflector
@@ -36,11 +38,19 @@ class HiddenAtFeature : BaseFeature() {
 /** Type57 replacement using a verified synchronous AppMsg insertion path. */
 internal class HiddenAtRuntime(private val context: FeatureContext) {
     private val prefs = HiddenAtSettings.preferences(context.hostContext())
-    @Volatile private var enabled = prefs.getBoolean(HiddenAtSettings.ENABLE, false)
+    private val allPrefs = MentionAllSettings.preferences(context.hostContext())
+    @Volatile private var hiddenEnabled = prefs.getBoolean(HiddenAtSettings.ENABLE, false)
+    @Volatile private var allEnabled = allPrefs.getBoolean(MentionAllSettings.ENABLE, false)
+    @Volatile private var allCommand = MentionAllCommand.normalize(
+        allPrefs.getString(MentionAllSettings.COMMAND, MentionAllSettings.DEFAULT_COMMAND).orEmpty()
+    )
+    private val enabled: Boolean get() = hiddenEnabled || allEnabled
     @Volatile private var alive = true
     private var handle: java.io.Closeable? = null
     @Volatile private var generation = 0
     private var listening = false
+    private var hiddenListenerRegistered = false
+    private var allListenerRegistered = false
     private var installation: t.mma.hooks.core.DexInstallScheduler.Installation? = null
     private val replacing = ThreadLocal<Boolean>()
     private data class Replacement(val talker: String, val users: List<String>)
@@ -51,7 +61,18 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
     private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         synchronized(this) {
             if (alive && (key == null || key == HiddenAtSettings.ENABLE)) {
-                enabled = prefs.getBoolean(HiddenAtSettings.ENABLE, false)
+                hiddenEnabled = prefs.getBoolean(HiddenAtSettings.ENABLE, false)
+                if (enabled) schedule() else stop()
+            }
+        }
+    }
+    private val allListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        synchronized(this) {
+            if (alive && (key == null || key == MentionAllSettings.ENABLE || key == MentionAllSettings.COMMAND)) {
+                allEnabled = allPrefs.getBoolean(MentionAllSettings.ENABLE, false)
+                allCommand = MentionAllCommand.normalize(
+                    allPrefs.getString(MentionAllSettings.COMMAND, MentionAllSettings.DEFAULT_COMMAND).orEmpty()
+                )
                 if (enabled) schedule() else stop()
             }
         }
@@ -61,7 +82,11 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
         if (!alive || listening) return
         listening = true
         try {
+            // Mark before registering: a host may retain the listener and then throw.
+            hiddenListenerRegistered = true
             prefs.registerOnSharedPreferenceChangeListener(listener)
+            allListenerRegistered = true
+            allPrefs.registerOnSharedPreferenceChangeListener(allListener)
             if (enabled) schedule()
         } catch (error: Throwable) {
             destroy()
@@ -147,27 +172,39 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                                 val direction = (call(message, "z0") as? Number)?.toInt() ?: error("isSend非数字")
                                 if (!talker.endsWith("@chatroom") || type != 1 || direction != 1) return
                                 val content = call(message, "j") as? String ?: error("正文非字符串")
-                                if ('@' !in content) return
+                                val allBody = if (allEnabled) MentionAllCommand.body(content, allCommand) else null
+                                if (allBody == null && (!hiddenEnabled || '@' !in content)) return
                                 val sourceField = KavaReflector.findFieldRecursive(message.javaClass, "G") ?: error("MsgSource字段缺失")
-                                val source = KavaReflector.readField(sourceField, message) as? String
-                                if (source.isNullOrBlank()) return
+                                val originalSource = KavaReflector.readField(sourceField, message) as? String
                                 val self = WeChatApis.contact().account()?.selfWxId().orEmpty()
                                 if (self.isBlank()) return
-                                val users = HiddenAtText.users(source.toByteArray(Charsets.UTF_8), self)
-                                if (users.isEmpty()) return
-                                val names = linkedSetOf<String>()
-                                // Never enumerate all group members; look up only actual recipients, with a bounded synchronous budget.
-                                if (users.size <= 16) {
-                                    val contacts = WeChatApis.contact().contacts()
-                                    for (id in users) {
-                                        if (id == "notify@all") continue
-                                        contacts?.getGroupMemberDisplayName(talker, id)?.takeIf { it.isNotEmpty() && it != id }?.let { names += it }
-                                        contacts?.getDisplayName(id)?.takeIf { it.isNotEmpty() && it != id }?.let { names += it }
+                                val users: List<String>
+                                val source: String
+                                val cleaned: String
+                                if (allBody != null) {
+                                    // One member-ID query; no per-member profile or display-name lookup.
+                                    val contacts = WeChatApis.contact().contacts() ?: return
+                                    users = MentionAllCommand.recipients(contacts.getGroupMemberIds(talker), self)
+                                    if (users.isEmpty()) return
+                                    source = HiddenAtSource.merge(originalSource, users)
+                                    cleaned = allBody
+                                } else {
+                                    if (originalSource.isNullOrBlank()) return
+                                    source = originalSource
+                                    users = HiddenAtText.users(source.toByteArray(Charsets.UTF_8), self)
+                                    if (users.isEmpty()) return
+                                    val names = linkedSetOf<String>()
+                                    // Keep the original hidden-mention path's bounded lookup budget.
+                                    if (users.size <= 16) {
+                                        val contacts = WeChatApis.contact().contacts()
+                                        for (id in users) {
+                                            if (id == "notify@all") continue
+                                            contacts?.getGroupMemberDisplayName(talker, id)?.takeIf { it.isNotEmpty() && it != id }?.let { names += it }
+                                            contacts?.getDisplayName(id)?.takeIf { it.isNotEmpty() && it != id }?.let { names += it }
+                                        }
                                     }
+                                    cleaned = HiddenAtText.match(content, users.size, names)?.text ?: return
                                 }
-                                val result = HiddenAtText.match(content, users.size, names)
-                                if (result == null) return
-                                val cleaned = result.text
                                 val api = WeChatApis.messages() ?: return
                                 if (!api.canSendXml()) return
                                 replacement.set(Replacement(talker, users))
@@ -232,9 +269,17 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
     @Synchronized fun destroy() {
         if (!alive) return
         alive = false
-        enabled = false
+        hiddenEnabled = false
+        allEnabled = false
         val unregister = listening; listening = false
-        if (unregister) releaseSafely { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+        if (unregister || hiddenListenerRegistered || allListenerRegistered) {
+            val removeHidden = hiddenListenerRegistered
+            val removeAll = allListenerRegistered
+            hiddenListenerRegistered = false
+            allListenerRegistered = false
+            if (removeHidden) releaseSafely { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+            if (removeAll) releaseSafely { allPrefs.unregisterOnSharedPreferenceChangeListener(allListener) }
+        }
         stop()
     }
 }

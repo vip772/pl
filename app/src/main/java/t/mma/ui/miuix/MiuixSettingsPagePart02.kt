@@ -1979,6 +1979,7 @@ internal fun matchedFeatureSubTerms(query: String, provider: FeatureSettingsProv
 
 internal fun featureSubSearchTerms(featureId: String): List<String> {
     return when (featureId) {
+        "me_entry_visibility" -> listOf("主页电脑登录", "隐藏电脑登录状态", "输入框语音图标", "隐藏输入框语音图标", "Windows", "收藏", "朋友圈", "作品", "小店与卡包", "表情")
         "conversation_group_bar" -> listOf("分组横栏", "顶部聊天分组", "标准分组", "悬浮分组", "管理分组")
         "group_nickname_width" -> listOf("解除群成员昵称长度限制", "群昵称宽度", "长昵称", "昵称截断", "240dp")
         "step_multiplier" -> listOf("步数倍增", "微信运动", "运动步数", "倍率", "步数")
@@ -2102,7 +2103,7 @@ internal fun featureSubSearchTerms(featureId: String): List<String> {
         RemoveMomentsAdsFeature.ID -> listOf("去除朋友圈广告", "朋友圈广告", "广告屏蔽")
         MessageBubbleFeature.ID -> listOf("消息气泡", "聊天气泡", "自定义气泡", "左侧气泡", "右侧气泡", "红包气泡", "转账气泡", "系统消息气泡", "浅色模式", "深色模式", "NinePatch", "九宫格")
         MessageTextColorFeature.ID -> listOf("消息文本颜色", "文字颜色", "聊天气泡文字", "取色器", "浅色模式", "深色模式")
-        t.mma.hooks.items.mentionextension.MentionExtensionSettingsProvider.ID -> listOf("艾特扩展", "隐藏艾特", "表情艾特", "艾特高亮", "艾特提醒", "红色提醒", "艾特", "@我", "@所有人", "点击资料页", "群聊艾特", "高亮颜色")
+        t.mma.hooks.items.mentionextension.MentionExtensionSettingsProvider.ID -> listOf("艾特扩展", "艾特全体", "触发指令", "隐藏艾特", "表情艾特", "艾特高亮", "艾特提醒", "红色提醒", "艾特", "@我", "@所有人", "点击资料页", "群聊艾特", "高亮颜色")
         HomeTextColorFeature.ID -> listOf("首页文字颜色", "标题颜色", "副标题颜色", "渐变文字", "微信首页", "通讯录", "发现", "我")
         SpecialMessageFeature.ID -> listOf("特殊消息", "安全消息", "文本", "链接", "表情", "生效名单")
         ChatTimeStyleFeature.ID -> listOf("会话时间样式", "聊天时间", "微信时间", "自定义时间", "隐藏时间", "时间格式")

@@ -2257,6 +2257,12 @@ private fun MeEntryVisibilityControls(sp: SharedPreferences) {
 }
 
 @Composable
+private fun ExtraEntryVisibilityControl(sp: SharedPreferences, key: String, title: String, summary: String) {
+    var hidden by remember(key) { mutableStateOf(sp.getBoolean(key, false)) }
+    SwitchRow(title = title, summary = summary, checked = hidden,
+        onCheckedChange = { hidden = it; sp.edit().putBoolean(key, it).apply() })
+}
+@Composable
 internal fun MeEntryVisibilityMiuixPage(context: Context, provider: FeatureSettingsProvider, onBack: () -> Unit) {
     val sp = remember { HchatStorage.preferences(context, BackgroundBeautySettings.PREFS_NAME) }
     val listState = rememberLazyListState()
@@ -2273,6 +2279,14 @@ internal fun MeEntryVisibilityMiuixPage(context: Context, provider: FeatureSetti
         ) {
             item { SmallTitle(text = "我页面条目") }
             item { SettingsCard { MeEntryVisibilityControls(sp) } }
+            item { SmallTitle(text = "主页电脑登录") }
+            item { SettingsCard { ExtraEntryVisibilityControl(sp,
+                t.mma.hooks.items.backgroundbeauty.ExtraEntryVisibility.COMPUTER,
+                "隐藏电脑登录状态", "仅收起主页电脑登录状态，不退出电脑登录") } }
+            item { SmallTitle(text = "输入框语音图标") }
+            item { SettingsCard { ExtraEntryVisibilityControl(sp,
+                t.mma.hooks.items.backgroundbeauty.ExtraEntryVisibility.VOICE,
+                "隐藏输入框语音图标", "仅隐藏语音图标，语音模式的键盘返回键保持可用") } }
         }
     }
 }

@@ -1,6 +1,6 @@
 # 我页面条目隐藏（微信 8.0.78）
 
-入口：侧边栏 → 主题 → 我页面背景下方的五个独立开关。背景设置总开关打开后显示这些控制项；隐藏无需选择背景图片。隐藏开关本身独立保存，不随背景图片删除或背景总开关关闭而重置。默认全部关闭；目前运行路径只为 8.0.78 安装，其它版本保留配置但不执行过滤。
+当前入口：美化 → 隐藏条目，原五个我页开关不再依赖背景总开关或背景图片。隐藏开关本身独立保存，不随背景图片删除或背景总开关关闭而重置。默认全部关闭；目前运行路径只为 8.0.78 安装，其它版本保留配置但不执行过滤。
 
 |显示名称|原生 key|
 |---|---|
@@ -19,3 +19,12 @@
 五个布尔设置写入现有 `Hchat_background_beauty_config`，统一备份自动收录；无新增受管理资源或持久化运行缓存。既有 method cache 按备份规则排除。`scripts/tests/config_backup/archive.py` 补充五个 true/false 配置导出导入往返与运行缓存排除验证。
 
 `scripts/test_me_entry_visibility.py` 编译生产过滤器与抽取的真实 Hook 方法（平台类型以 JVM stub 提供），覆盖32种开关组合、两组灰度入口、原生隐藏状态保留和关闭恢复。它不等于 Android 全量编译或实机验收；安装新包后仍需验证五项单独开关/全部开关、空白分组、重新进入我页、原生刷新、账号切换及背景效果。尚未本地运行 Gradle、未构建 APK。仅有用户提供的8.0.78证据，未宣称其它默认版本集合通过兼容验证。
+
+
+## 新增两项静态依据（2026-11-05）
+
+材料：本机 `wechat8078_decoded`。输入框证据为 `smali_classes3/com/tencent/mm/pluginsdk/ui/chat/ChatFooter.smali`：`Z0(Context,AttributeSet)` 初始化布局 `0x7f0e0339`（t8），按钮 `0x7f0a1061`（bpe）绑定 `q:WeImageButton`，布局使用 `icons_outlined_voice`。`M2(int)` 切换图标，语音 selector `0x7f08052e`（o3）；`getMode` / `u0` 表明模式1为语音图标、模式2为键盘返回；`m0()` 可原生隐藏 q。ntc/kj7 是其他业务图标，不能用于本功能。
+
+电脑证据为 `smali_classes8/com/tencent/mm/ui/conversation/banner/l0.smali`（OtherOnlineBanner）及 `qb5/b.smali`：布局 `0x7f0e1774`（c8u），n 为状态行、p 为设备图标，父类 f/h 是专用容器。i() 返回原生可见性且内嵌 k(int)，后者更新 n；电脑 tag 为 `0x7f11028b`（display_regular）和 `0x7f110289`（display_lock_regular）。该 Banner 同时服务平板/手表/车机，因此未知或非电脑 tag 不过滤。
+
+`smali_classes11/com/tencent/mm/ui/conversation/MainUI.smali` 的 x 持有 BannerHelper（r），其 h() 调用各 Banner.i() 并整理首页共享容器与分组。因此关闭模块覆盖后还需通过已记录 helper.h() 重建，不只恢复单行可见性。嵌套 i/k 和关闭重建已有定向桩测试，但没有新 APK 实机结果。其他微信版本材料未完成横向验证，当前版本门控不放行非8.0.78。

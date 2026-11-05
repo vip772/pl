@@ -8,18 +8,21 @@ fixtures = {
 'Android.kt': '''package android.content
 open class Context
 interface SharedPreferences {
+ fun getString(k:String,d:String?):String?
  fun getBoolean(k:String,d:Boolean):Boolean
  fun registerOnSharedPreferenceChangeListener(l:OnSharedPreferenceChangeListener)
  fun unregisterOnSharedPreferenceChangeListener(l:OnSharedPreferenceChangeListener)
  fun interface OnSharedPreferenceChangeListener {fun onSharedPreferenceChanged(p:SharedPreferences,k:String?)}
 }
 class Prefs:SharedPreferences {
- var enabled=true;var failRegister=false;var failUnregister=false;var registrations=0;var removals=0
+ var enabled=true;var command="#aa";var failRegister=false;var failUnregister=false;var registrations=0;var removals=0
+ var changeKey:String?="enable"
  val listeners=mutableListOf<SharedPreferences.OnSharedPreferenceChangeListener>()
+ override fun getString(k:String,d:String?)=command
  override fun getBoolean(k:String,d:Boolean)=enabled
  override fun registerOnSharedPreferenceChangeListener(l:SharedPreferences.OnSharedPreferenceChangeListener){registrations++;listeners+=l;if(failRegister)error("register")}
  override fun unregisterOnSharedPreferenceChangeListener(l:SharedPreferences.OnSharedPreferenceChangeListener){removals++;listeners-=l;if(failUnregister)error("unregister")}
- fun toggle(v:Boolean){enabled=v;listeners.toList().forEach{it.onSharedPreferenceChanged(this,"enable")}}
+ fun toggle(v:Boolean,key:String?=changeKey){enabled=v;listeners.toList().forEach{it.onSharedPreferenceChanged(this,key)}}
 }
 ''',
 'Clock.kt': '''package android.os
@@ -57,7 +60,7 @@ object HookRegistry {
 }
 ''',
 'Storage.kt': '''package t.mma.preferences
-object HchatStorage {var prefs=android.content.Prefs();fun preferences(c:android.content.Context,n:String)=prefs}
+object HchatStorage {var prefs=android.content.Prefs();var allPrefs=android.content.Prefs().also{it.enabled=false};fun preferences(c:android.content.Context,n:String)=if(n=="Hchat_hidden_at_config") prefs else allPrefs}
 ''',
 'Utils.kt': '''package t.mma.utils
 object HLog {var fail=false;fun e(s:String,t:Throwable){if(fail)error("logger")}}
@@ -76,7 +79,7 @@ object KavaReflector {
 object WeChatApis {fun contact()=Contact();fun messages():Messages?=Messages()}
 class Contact {fun account():Account?=Account();fun contacts():Contacts?=Contacts()}
 class Account {fun selfWxId()="self"}
-class Contacts {fun getGroupMemberDisplayName(t:String,i:String)=i;fun getDisplayName(i:String)=i}
+class Contacts {fun getGroupMemberIds(t:String)=listOf("alice","self");fun getGroupMemberDisplayName(t:String,i:String)=i;fun getDisplayName(i:String)=i}
 class Messages {fun canSendXml()=true;fun sendAppMsgXmlWithLocalId(t:String,x:String)=1L}
 ''',
 'Outgoing.kt': '''package t.mma.hooks.api.message
@@ -94,18 +97,33 @@ import t.mma.preferences.HchatStorage
 import t.mma.hooks.api.message.OutgoingAtMessageHook as Out
 fun main(){
  val c=FeatureContext()
- HchatStorage.prefs=android.content.Prefs();val p=HchatStorage.prefs;val a=HiddenAtRuntime(c)
- a.install();a.install();check(p.registrations==1);val listener=p.listeners.single();val ticket=DexInstallScheduler.tickets.last();check(ticket.run()==true)
- val observer=Out.handles.last();val hooks=HookRegistry.handles.takeLast(2);observer.fail=true;hooks.forEach{it.fail=true};ticket.failClose=true;p.failUnregister=true;t.mma.utils.HLog.fail=true
- a.destroy();a.destroy();check(p.removals==1&&observer.closes==1&&ticket.closes==1&&hooks.all{it.releases==1});check(p.listeners.isEmpty())
- val count=DexInstallScheduler.tickets.size;p.enabled=true;listener.onSharedPreferenceChanged(p,"enable");a.install();check(DexInstallScheduler.tickets.size==count&&p.registrations==1)
+ HchatStorage.prefs=android.content.Prefs();HchatStorage.allPrefs=android.content.Prefs().also{it.enabled=false};val p=HchatStorage.prefs;val a=HiddenAtRuntime(c)
+ a.install();a.install();check(p.registrations==1&&HchatStorage.allPrefs.registrations==1);val listener=p.listeners.single();val ticket=DexInstallScheduler.tickets.last();check(ticket.run()==true)
+ val observer=Out.handles.last();val hooks=HookRegistry.handles.takeLast(2);observer.fail=true;hooks.forEach{it.fail=true};ticket.failClose=true;p.failUnregister=true;HchatStorage.allPrefs.failUnregister=true;t.mma.utils.HLog.fail=true
+ a.destroy();a.destroy();check(p.removals==1&&observer.closes==1&&ticket.closes==1&&hooks.all{it.releases==1});check(p.listeners.isEmpty()&&HchatStorage.allPrefs.listeners.isEmpty())
+ val count=DexInstallScheduler.tickets.size;p.enabled=true;listener.onSharedPreferenceChanged(p,"enable");a.install();check(DexInstallScheduler.tickets.size==count&&p.registrations==1&&HchatStorage.allPrefs.registrations==1)
  check(ticket.old!!.invoke());check(HookRegistry.handles.takeLast(2)==hooks)
  t.mma.utils.HLog.fail=false;HchatStorage.prefs=android.content.Prefs();val b=HiddenAtRuntime(c);b.install();val retry=DexInstallScheduler.tickets.last();HookRegistry.failAt=HookRegistry.calls+2
  check(retry.run()==false);check(HookRegistry.handles.last().releases==1);HookRegistry.failAt=0;check(retry.run()==true)
  val before=HookRegistry.handles.takeLast(2);HchatStorage.prefs.toggle(false);check(retry.closed&&before.all{it.releases==1});HchatStorage.prefs.toggle(true);val next=DexInstallScheduler.tickets.last();check(next!==retry&&next.run()==true);b.destroy()
- HchatStorage.prefs=android.content.Prefs().also{it.failRegister=true;it.failUnregister=true};val d=HiddenAtRuntime(c);var failed=false;try{d.install()}catch(_:IllegalStateException){failed=true};check(failed&&HchatStorage.prefs.removals==1&&HchatStorage.prefs.listeners.isEmpty());d.destroy()
- HchatStorage.prefs=android.content.Prefs();val reentrant=HiddenAtRuntime(c);reentrant.install();val reentrantTicket=DexInstallScheduler.tickets.last();val offset=HookRegistry.handles.size;HookRegistry.reenter={reentrant.destroy()};reentrantTicket.run();check(reentrantTicket.closed&&HookRegistry.handles.drop(offset).all{it.releases==1})
- println("PASS full production HiddenAt runtime: idempotent install/destroy, ticket ownership, disable/re-enable, partial hook rollback/retry, registration failure, multi-cleanup plus logger failure, stale listeners and stale installer")
+ HchatStorage.prefs=android.content.Prefs().also{it.failRegister=true;it.failUnregister=true};HchatStorage.allPrefs=android.content.Prefs().also{it.enabled=false};val d=HiddenAtRuntime(c);var failed=false;try{d.install()}catch(_:IllegalStateException){failed=true};check(failed&&HchatStorage.prefs.removals==1&&HchatStorage.prefs.listeners.isEmpty());d.destroy()
+ HchatStorage.prefs=android.content.Prefs().also{it.enabled=false}
+ HchatStorage.allPrefs=android.content.Prefs().also{it.enabled=true}
+ val allOnly=HiddenAtRuntime(c);allOnly.install();val allOnlyTicket=DexInstallScheduler.tickets.last()
+ check(allOnlyTicket.run()==true)
+ HchatStorage.prefs.toggle(true);check(!allOnlyTicket.closed)
+ HchatStorage.allPrefs.toggle(false);check(!allOnlyTicket.closed)
+ HchatStorage.prefs.toggle(false);check(allOnlyTicket.closed)
+HchatStorage.allPrefs.toggle(true);val allReenabled=DexInstallScheduler.tickets.last();check(allReenabled!==allOnlyTicket&&allReenabled.run()==true)
+ allOnly.destroy()
+ HchatStorage.prefs=android.content.Prefs();HchatStorage.allPrefs=android.content.Prefs().also{it.enabled=false};val reentrant=HiddenAtRuntime(c);reentrant.install();val reentrantTicket=DexInstallScheduler.tickets.last();val offset=HookRegistry.handles.size;HookRegistry.reenter={reentrant.destroy()};reentrantTicket.run();check(reentrantTicket.closed&&HookRegistry.handles.drop(offset).all{it.releases==1})
+ HchatStorage.prefs=android.content.Prefs();HchatStorage.allPrefs=android.content.Prefs().also{it.failRegister=true}
+ val secondFailure=HiddenAtRuntime(c)
+ check(runCatching{secondFailure.install()}.isFailure)
+ check(HchatStorage.prefs.removals==1&&HchatStorage.allPrefs.removals==1)
+ check(HchatStorage.prefs.listeners.isEmpty()&&HchatStorage.allPrefs.listeners.isEmpty())
+ secondFailure.destroy();check(HchatStorage.prefs.removals==1&&HchatStorage.allPrefs.removals==1)
+ println("PASS full production HiddenAt runtime: independent switches, idempotent install/destroy, ticket ownership, disable/re-enable, partial hook rollback/retry, both listener registration failures, multi-cleanup plus logger failure, stale listeners and stale installer")
 }
 '''
 }
@@ -114,5 +132,5 @@ with tempfile.TemporaryDirectory() as td:
  for name, text in fixtures.items(): (p/name).write_text(text)
  src=r/'app/src/main/java/t/mma/hooks/items/hiddenat/HiddenAtFeature.kt'
  jar=p/'test.jar'
- subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(jar),str(src),str(src.with_name('HiddenAtState.kt')),str(src.with_name('HiddenAtText.kt')),*map(str,p.glob('*.kt'))],check=True,timeout=60)
+ subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(jar),str(src),str(src.with_name('HiddenAtState.kt')),str(src.with_name('HiddenAtText.kt')),str(src.parents[1]/'mentionall'/'MentionAllSettings.kt'),str(src.parents[1]/'mentionall'/'MentionAllCommand.kt'),*map(str,p.glob('*.kt'))],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{jar}:{std}','t.mma.hooks.items.hiddenat.TestKt'],check=True,timeout=20)

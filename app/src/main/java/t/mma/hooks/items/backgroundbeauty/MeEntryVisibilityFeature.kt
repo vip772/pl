@@ -18,6 +18,7 @@ import java.util.WeakHashMap
 
 class MeEntryVisibilityFeature : BaseFeature() {
     private var runtime: MeEntryVisibilityRuntime? = null
+    private var extraRuntime: ExtraEntryVisibilityRuntime? = null
     override fun featureId() = ID
     override fun name() = "隐藏条目"
     override fun onFeatureInit(context: FeatureContext) {
@@ -27,8 +28,11 @@ class MeEntryVisibilityFeature : BaseFeature() {
         val installed = MeEntryVisibilityRuntime(context)
         runtime = installed
         installed.install()
+        extraRuntime = ExtraEntryVisibilityRuntime(context).also { it.install() }
     }
     override fun onFeatureDestroy(context: FeatureContext) {
+        extraRuntime?.destroy()
+        extraRuntime = null
         runtime?.destroy()
         runtime = null
     }

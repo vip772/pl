@@ -113,12 +113,14 @@ object FeatureToggleRegistry {
         return when (featureId) {
             "me_entry_visibility" -> {
                 val sp = HchatStorage.preferences(context, t.mma.hooks.items.backgroundbeauty.BackgroundBeautySettings.PREFS_NAME)
-                t.mma.hooks.items.backgroundbeauty.MeEntryVisibility.Entry.values().any { sp.getBoolean(it.key, false) }
+                t.mma.hooks.items.backgroundbeauty.MeEntryVisibility.Entry.values().any { sp.getBoolean(it.key, false) } ||
+                    t.mma.hooks.items.backgroundbeauty.ExtraEntryVisibility.keys.any { sp.getBoolean(it, false) }
             }
             "floating_chat_header" -> global(context, featureId)
             "floating_bottom_bar" -> boolean(context, "Hchat_custom_bottom_bar_config", "custom_bottom_bar_enable") &&
                 string(context, "Hchat_custom_bottom_bar_config", "custom_bottom_bar_style") == "floating"
-            "mention_extension" -> boolean(context, "Hchat_hidden_at_config", "enable") ||
+            "mention_extension" -> boolean(context, t.mma.hooks.items.mentionall.MentionAllSettings.PREFS, t.mma.hooks.items.mentionall.MentionAllSettings.ENABLE) ||
+                boolean(context, "Hchat_hidden_at_config", "enable") ||
                 boolean(context, "Hchat_emoji_at_config", "enable") ||
                 boolean(context, "Hchat_mention_highlight_config", "mention_highlight_enable") ||
                 t.mma.hooks.items.mentionextension.MentionNoticeSettings.enabled(context)

@@ -16,6 +16,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.unit.dp
 import t.mma.hooks.items.mentionhighlight.MentionHighlightSettings
+import t.mma.hooks.items.mentionall.MentionAllSettings
+import t.mma.hooks.items.mentionall.MentionAllCommand
 import t.mma.preferences.HchatStorage
 import t.mma.ui.FeatureSettingsProvider
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -33,6 +35,11 @@ internal fun MentionExtensionMiuixPage(
                 ?: MentionHighlightSettings.DEFAULT_COLOR
         )
     }
+    val allPrefs = remember { MentionAllSettings.preferences(context) }
+    var mentionAll by remember { mutableStateOf(allPrefs.getBoolean(MentionAllSettings.ENABLE, false)) }
+    var allCommand by remember { mutableStateOf(allPrefs.getString(
+        MentionAllSettings.COMMAND, MentionAllSettings.DEFAULT_COMMAND
+    ) ?: MentionAllSettings.DEFAULT_COMMAND) }
     val hiddenPrefs = remember { t.mma.hooks.items.hiddenat.HiddenAtSettings.preferences(context) }
     val emojiPrefs = remember { t.mma.hooks.items.emojiat.EmojiAtSettings.preferences(context) }
     var hidden by remember { mutableStateOf(hiddenPrefs.getBoolean(t.mma.hooks.items.hiddenat.HiddenAtSettings.ENABLE, false)) }
@@ -54,6 +61,8 @@ internal fun MentionExtensionMiuixPage(
             BottomActionBar(
                 primaryText = "保存设置",
                 onPrimaryClick = {
+                    allCommand = MentionAllCommand.normalize(allCommand)
+                    allPrefs.edit().putString(MentionAllSettings.COMMAND, allCommand).apply()
                     val normalized = MentionHighlightSettings.cleanColorSpec(colorSpec)
                         .ifEmpty { MentionHighlightSettings.DEFAULT_COLOR }
                     sp.edit().putString(MentionHighlightSettings.KEY_COLOR, normalized).apply()
@@ -76,6 +85,19 @@ internal fun MentionExtensionMiuixPage(
                 bottom = padding.calculateBottomPadding() + 12.dp
             )
         ) {
+            item { SettingsCard {
+                SwitchRow(mentionAll, "艾特全体", "无需开启“隐藏艾特”，最多艾特499人（不含自己）") {
+                    mentionAll = it
+                    allPrefs.edit().putBoolean(MentionAllSettings.ENABLE, it).apply()
+                }
+            } }
+            if (mentionAll) {
+                item { SettingsCard {
+                    InputRow("触发指令", "默认 #aa；可在指令后加空格和正文，修改后保存", allCommand) {
+                        allCommand = it.take(MentionAllCommand.MAX_COMMAND_LENGTH)
+                    }
+                } }
+            }
             item { SettingsCard {
                 SwitchRow(hidden, "隐藏艾特", "") {
                     hidden = it

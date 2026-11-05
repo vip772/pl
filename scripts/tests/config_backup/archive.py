@@ -86,6 +86,8 @@ import java.util.zip.*
 import org.json.*
 fun main(args:Array<String>){
  val base=File(args[0]);val a=Context(File(base,"a"));val b=Context(File(base,"b"),"com.test.b")
+ val mentionAll=Store.preferences(a,"Hchat_mention_all_config")
+ mentionAll.edit().putBoolean("enable",true).putString("command","#notify").commit()
  val p=Store.preferences(a,"Hchat_brand_new_feature")
  p.edit().putBoolean("enabled",true).putInt("i",42).putLong("l",1234567890123L).putFloat("f",1.25f).putStringSet("s",setOf("a","b")).commit()
  // Legacy AI values are exported without opening the AI settings page.
@@ -96,11 +98,13 @@ fun main(args:Array<String>){
  Store.preferences(a,"Hchat_weather_cache").edit().putString("data","runtime").commit()
  Store.runtimePreferences(a,"Hchat_custom_locator").edit().putInt("dex",5).commit()
  Store.preferences(a,"Hchat_mention_notice_config_seen").edit().putBoolean("id",true).commit()
- check(Store.backupPreferenceNames(a).containsAll(listOf("Hchat_brand_new_feature","Hchat_unopened")))
+ check(Store.backupPreferenceNames(a).containsAll(listOf("Hchat_brand_new_feature","Hchat_unopened","Hchat_mention_all_config")))
  check("Hchat_custom_locator" !in Store.backupPreferenceNames(a))
  val backup=File(base,"test.zip");val result=HchatConfigBackup.exportToUri(a,Uri(backup))
- check(result.stores==3 && result.resources==1)
- val restored=HchatConfigBackup.importFromUri(b,Uri(backup));check(restored.items==7)
+ check(result.stores==4 && result.resources==1)
+ val restored=HchatConfigBackup.importFromUri(b,Uri(backup));check(restored.items==9)
+ val restoredMentionAll=Store.preferences(b,"Hchat_mention_all_config")
+ check(restoredMentionAll.getBoolean("enable",false) && restoredMentionAll.getString("command","")=="#notify")
  val out=Store.preferences(b,"Hchat_brand_new_feature")
  check(out.getInt("i",0)==42 && out.getLong("l",0)==1234567890123L && out.getFloat("f",0f)==1.25f)
  check(File(out.getString("path","")!!).readText()=="image-data")
@@ -110,6 +114,25 @@ fun main(args:Array<String>){
  File(Store.resourceDirectory(only,"new"),"icon").writeText("icon")
  val onlyZip=File(base,"only.zip");check(HchatConfigBackup.exportToUri(only,Uri(onlyZip)).items==0)
  check(HchatConfigBackup.importFromUri(b,Uri(onlyZip)).resources==1)
+ // Mention-all settings remain independent of hidden-mention and survive enabled/disabled restore.
+ val allContext=Context(File(base,"mention-all"),"com.mention.all")
+ val allRestored=Context(File(base,"mention-all-restored"),"com.mention.all.restored")
+ val allConfig=Store.preferences(allContext,"Hchat_mention_all_config")
+ val hiddenConfig=Store.preferences(allContext,"Hchat_hidden_at_config")
+ Store.runtimePreferences(allContext,"Hchat_mention_all_runtime").edit().putString("members","not-user-config").commit()
+ for (allOn in listOf(false,true)) for (hiddenOn in listOf(false,true)) {
+  allConfig.edit().putBoolean("enable",allOn).putString("command",if(allOn) "#notify" else "#aa").commit()
+  hiddenConfig.edit().putBoolean("enable",hiddenOn).commit()
+  val allZip=File(base,"mention-all-$allOn-$hiddenOn.zip")
+  check(HchatConfigBackup.exportToUri(allContext,Uri(allZip)).items==3)
+  HchatConfigBackup.importFromUri(allRestored,Uri(allZip))
+  val allResult=Store.preferences(allRestored,"Hchat_mention_all_config")
+  check(allResult.getBoolean("enable",!allOn)==allOn)
+  check(allResult.getString("command","")==if(allOn) "#notify" else "#aa")
+  check(Store.preferences(allRestored,"Hchat_hidden_at_config").getBoolean("enable",!hiddenOn)==hiddenOn)
+  check("Hchat_mention_all_runtime" !in Store.backupPreferenceNames(allContext))
+ }
+ println("PASS mention-all: all four independent switch combinations and custom/default command archive round trip; runtime excluded")
  // Message menu layout values use the existing automatically discovered config store.
  val menu=Context(File(base,"menu"),"com.menu")
  val menuOut=Context(File(base,"menu-out"),"com.menu.out")
@@ -232,6 +255,23 @@ fun main(args:Array<String>){
  meKeys.forEachIndexed { i,k -> check(meRestored.contains(k) && meRestored.getBoolean(k,false)==(i%2==0)) }
  check("Hchat_background_beauty_method_cache" !in Store.backupPreferenceNames(meOut))
  println("PASS: five Me switches true/false round trip, runtime cache excluded")
+  // New switches are independent, default off, and share the existing user store.
+  for (mask in 0..3) {
+   val extra=Context(File(base,"extra-$mask"),"com.extra.$mask")
+   val extraOut=Context(File(base,"extra-restored-$mask"),"com.extra.restored.$mask")
+   val extraPrefs=Store.preferences(extra,"Hchat_background_beauty_config")
+   val extraKeys=listOf("hide_home_computer_login","hide_input_voice_icon")
+   extraKeys.forEach { check(!extraPrefs.getBoolean(it,false)) }
+   extraKeys.forEachIndexed { i,k -> extraPrefs.edit().putBoolean(k,(mask and (1 shl i))!=0).commit() }
+   Store.runtimePreferences(extra,"Hchat_background_beauty_method_cache").edit().putString("locator","not-user-config").commit()
+   val extraZip=File(base,"extra-$mask.zip")
+   check(HchatConfigBackup.exportToUri(extra,Uri(extraZip)).stores==1)
+   HchatConfigBackup.importFromUri(extraOut,Uri(extraZip))
+   val extraRestored=Store.preferences(extraOut,"Hchat_background_beauty_config")
+   extraKeys.forEachIndexed { i,k -> check(extraRestored.contains(k) && extraRestored.getBoolean(k,false)==((mask and (1 shl i))!=0)) }
+   check("Hchat_background_beauty_method_cache" !in Store.backupPreferenceNames(extraOut))
+  }
+  println("PASS extra visibility: default off, four independent combinations archive round trip; runtime excluded")
  val voice=Context(File(base,"voice-source"),"com.voice.source");val voicePrefs=Store.preferences(voice,"Hchat_voice_to_text_config")
  check(!voicePrefs.getBoolean("enable",false))
  voicePrefs.edit().putBoolean("enable",true).commit()
