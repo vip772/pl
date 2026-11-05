@@ -15,7 +15,7 @@ assert 'val topSampling = ConversationAnalysisIconView' in report
 assert 'contentDescription = "采样设置"' in report
 assert 'contentDescription = "模型容量与采样"' in report
 assert 'contentDescription = "AI接口设置"' in report
-assert 'store.setSampling(window, seek.progress); dialog.dismiss()' in report
+assert 'store.setSampling(window, seek.progress + 1); dialog.dismiss()' in report
 for start, end, width in [('showTopSamplingDialog', 'showSamplingDialog', '.90f'),
                           ('showSamplingDialog', 'showContentDialog', '.92f')]:
     body = report[report.index('    private fun ' + start + '('):report.index('    private fun ' + end + '(')]

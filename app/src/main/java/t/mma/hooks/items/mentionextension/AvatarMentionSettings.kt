@@ -11,7 +11,7 @@ internal object AvatarMentionSettings {
     const val COLOR = "color"
     const val ABOVE = "above"
     const val BELOW = "below"
-    const val DEFAULT_COLOR = "#FF4D67,#7C6BFF,#FFC857"
+    const val DEFAULT_COLOR = "#FF0000,#FF0000,#FF0000"
 
     fun preferences(context: Context) = HchatStorage.preferences(context, PREFS)
     fun enabled(context: Context) = preferences(context).getBoolean(ENABLE, false)

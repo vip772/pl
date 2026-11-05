@@ -6,7 +6,7 @@ ai=(b/'ConversationAnalysisAi.kt').read_text()
 assert '.put("stream", true)' in ai
 assert 'text/event-stream, application/json' in ai
 assert 'if (isJson)' in ai and 'json.optJSONArray("choices")' in ai
-assert 'postResult { if (token == requestToken.get()) onUpdate(ConversationAnalysisText.normalize(partial)) }' in ai
+assert 'postResult { if (token == requestToken.get()) onUpdate(partial) }' in ai
 assert 'val names = mutableMapOf<String, String>()' in ai
 normal=ai[ai.index('    private fun normalizeRecord('):ai.index('    private fun buildPrompt(')].replace('private fun normalizeRecord','fun normalizeRecord')
 api='''package t.mma.hooks.api.core
@@ -15,12 +15,23 @@ class Contacts { var calls=0;fun getGroupMemberDisplayName(t:String,id:String):S
 '''
 test=r'''package t.mma.hooks.items.conversationanalysis
 import java.io.*
+import org.json.JSONObject
 import java.util.concurrent.*
 import t.mma.hooks.api.core.WeChatApis
 class Normalizer {
 NORMALIZER
 }
 fun main() {
+ check(ConversationAnalysisStream.bodyText(null)=="")
+ check(ConversationAnalysisStream.bodyText(object {override fun toString()="null"})=="")
+ for(value in listOf(1,true,listOf("text"),mapOf("text" to "bad"))) check(ConversationAnalysisStream.bodyText(value)=="")
+ check(ConversationAnalysisStream.bodyText("null")=="null")
+ check(ConversationAnalysisStream.bodyText("正文")=="正文")
+ val absent=JSONObject("""{"content":null}""").opt("content")
+ check(ConversationAnalysisStream.bodyText(absent)=="")
+ check(ConversationAnalysisStream.bodyText(JSONObject("{}").opt("content"))=="")
+ check(ConversationAnalysisStream.bodyText(JSONObject("""{"content":42}""").opt("content"))=="")
+ check(ConversationAnalysisStream.bodyText(JSONObject("""{"content":"正文含null"}""").opt("content"))=="正文含null")
  fun decode(s:String)=ConversationAnalysisStream.Piece(if(s=="finish") "" else s,s=="finish")
  fun read(s:String):String=ConversationAnalysisStream.read(s.reader().buffered(), {}, ::decode) {}
  check(read(":heartbeat\r\ndata: 你好\r\n\r\ndata: 世界\r\n\r\ndata: [DONE]\r\n\r\n")=="你好世界")
@@ -63,5 +74,5 @@ fun main() {
 libs=Path('/tmp/pl-kotlin-libs');std=next(libs.glob('kotlin-stdlib-[0-9]*.jar'))
 with tempfile.TemporaryDirectory() as td:
  p=Path(td);(p/'Test.kt').write_text(test);(p/'Api.kt').write_text(api)
- subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(p/'test.jar'),str(b/'ConversationAnalysisStream.kt'),str(p/'Test.kt'),str(p/'Api.kt')],check=True,timeout=60)
- subprocess.run(['java','-cp',f'{p/"test.jar"}:{std}','t.mma.hooks.items.conversationanalysis.TestKt'],check=True,timeout=15)
+ subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',f'{std}:/tmp/backup-json.jar','-d',str(p/'test.jar'),str(b/'ConversationAnalysisStream.kt'),str(p/'Test.kt'),str(p/'Api.kt')],check=True,timeout=60)
+ subprocess.run(['java','-cp',f'{p/"test.jar"}:{std}:/tmp/backup-json.jar','t.mma.hooks.items.conversationanalysis.TestKt'],check=True,timeout=15)

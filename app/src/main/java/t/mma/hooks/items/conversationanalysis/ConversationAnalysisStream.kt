@@ -4,6 +4,9 @@ import java.io.BufferedReader
 
 /** SSE framing and throttled snapshots. No UI, connections or persistent cache owned here. */
 internal object ConversationAnalysisStream {
+    // JSONObject.NULL, missing fields and metadata are not report text.
+    fun bodyText(value: Any?): String = value as? String ?: ""
+
     data class Piece(val text: String, val finished: Boolean = false)
 
     fun read(

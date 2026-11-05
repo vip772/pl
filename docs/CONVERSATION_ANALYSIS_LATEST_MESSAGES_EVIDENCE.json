@@ -1,0 +1,55 @@
+{
+  "baseline": "22c385dc77c4a1d7ae319a45cf0ce391648fdbab",
+  "scope": "local source and targeted verification; no Gradle, R8, APK or device acceptance",
+  "results": {
+    "stream": {
+      "status": "passed",
+      "evidence": [
+        "PASS real SSE first partial before EOF; CRLF/multiline/heartbeat/DONE/finish/interrupt/cancel; 1000 chunks -> 4 snapshots; 3000 nickname lookups -> 1 per request"
+      ]
+    },
+    "generation": {
+      "status": "passed",
+      "evidence": [
+        "PASS real text: escaped/double escapes, CRLF, repeated /n, cross-chunk, URL/path protection, idempotence; bounded latest-message query; real renderer 1000 updates reuse one TextView and skip identical content"
+      ]
+    },
+    "period": {
+      "status": "passed",
+      "evidence": [
+        "PASS calendar day/week/month/all, year/leap/DST edges, 60-day slider; shared selection; real summary/five-chart queries and production AI read/sample/empty guard",
+        "PASS UI selection to generation and all deep-chart refresh routing; AI filters before sampling and refuses empty records before HTTP"
+      ]
+    },
+    "config": {
+      "status": "passed",
+      "evidence": [
+        "PASS production dialog/store: single dropdown and checked active slot, two independent drafts, cancel/reopen, atomic save+activation, immediate loading and duplicate blocking, error/empty recovery, selected model, test current profile, late callback and dismiss cleanup",
+        "PASS compact model/config helper contracts; Android sizing/rendering and live API excluded"
+      ]
+    },
+    "lifecycle": {
+      "status": "passed",
+      "evidence": [
+        "PASS production page close/queue removal/non-interruption/reopen; extracted AI replace/cancel/close; dialog isolation"
+      ]
+    },
+    "ui": {
+      "status": "passed",
+      "evidence": [
+        "PASS real icon View/painter and menu Drawable compile; all nine icon kinds draw; density, bounds, alpha/filter and canvas restoration",
+        "PASS extracted production dialog helper: short content wraps, overflow bounded, parent limits and unspecified measurement; 54 combinations",
+        "PASS icon routing, accessibility labels, unchanged sampling save and compact-dialog contracts"
+      ]
+    },
+    "sdk": {
+      "status": "passed",
+      "evidence": [
+        "PASS complete report UI, repositories, AI, renderer, period, page owner SDK + cached ABI compile; not Gradle/R8/device"
+      ]
+    }
+  },
+  "diff_check": "passed",
+  "device_latency_measurement": "pending",
+  "commit_push": "not performed"
+}

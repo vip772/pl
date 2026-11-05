@@ -182,16 +182,16 @@ internal object ConversationAnalysisReportDialog {
         root.addView(capacityBar, marginParams(activity, -1, 78, 0, 0, 0, 26))
         val limitTitle = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         limitTitle.addView(label(activity, "提取消息数量上限", 17f, textColor(activity), true), LinearLayout.LayoutParams(0, dp(activity, 34), 1f))
-        val limitValue = label(activity, if (store.sampleLimit() == 0) "自动" else store.sampleLimit().toString(), 17f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL }
+        val limitValue = label(activity, store.sampleLimit().toString(), 17f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.RIGHT or Gravity.CENTER_VERTICAL }
         limitTitle.addView(limitValue, LinearLayout.LayoutParams(dp(activity, 90), dp(activity, 34)))
         root.addView(limitTitle)
-        val seek = SeekBar(activity).apply { max = 50000; progress = store.sampleLimit(); progressTintList = android.content.res.ColorStateList.valueOf(0xffffa13a.toInt()); thumbTintList = android.content.res.ColorStateList.valueOf(0xffffa13a.toInt()); setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener { override fun onProgressChanged(b: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) limitValue.text = if (p == 0) "自动" else p.toString() }; override fun onStartTrackingTouch(b: SeekBar?) = Unit; override fun onStopTrackingTouch(b: SeekBar?) = Unit }) }
+        val seek = SeekBar(activity).apply { max = ConversationAnalysisInput.MAX_MESSAGES - 1; progress = store.sampleLimit() - 1; progressTintList = android.content.res.ColorStateList.valueOf(0xffffa13a.toInt()); thumbTintList = android.content.res.ColorStateList.valueOf(0xffffa13a.toInt()); setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener { override fun onProgressChanged(b: SeekBar?, p: Int, fromUser: Boolean) { if (fromUser) limitValue.text = (p + 1).toString() }; override fun onStartTrackingTouch(b: SeekBar?) = Unit; override fun onStopTrackingTouch(b: SeekBar?) = Unit }) }
         root.addView(seek, LinearLayout.LayoutParams(-1, dp(activity, 54)))
-        root.addView(label(activity, "注：设为 0 时优先快速生成，128K/256K/512K/1M/2M 分别均匀抽样最多 300/600/1200/2500/5000 条。抽样可能遗漏细节；需要更广覆盖可手动调高，上限越大等待越久。", 14f, if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff77716d.toInt(), false).apply { setLineSpacing(4f, 1f) }, marginParams(activity, -1, 0, 0, 12, 0, 18))
+        root.addView(label(activity, "默认读取所选时段内最新最多 1500 条文本消息，不足时使用实际数量，按时间顺序生成。可调低上限以减少等待；模型容量不改变消息上限，顶部统计仍覆盖完整时段。", 14f, if (isDark(activity)) 0xffaaa4ae.toInt() else 0xff77716d.toInt(), false).apply { setLineSpacing(4f, 1f) }, marginParams(activity, -1, 0, 0, 12, 0, 18))
         lateinit var dialog: Dialog
         val actions = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         actions.addView(label(activity, "取消", 16f, 0xffffa13a.toInt(), true).apply { gravity = Gravity.CENTER; setOnClickListener { dialog.dismiss() } }, LinearLayout.LayoutParams(0, dp(activity, 54), 1f))
-        val save = actionButton(activity, "保存", 0xffffa13a.toInt()) { store.setSampling(window, seek.progress); dialog.dismiss() }
+        val save = actionButton(activity, "保存", 0xffffa13a.toInt()) { store.setSampling(window, seek.progress + 1); dialog.dismiss() }
         actions.addView(save, LinearLayout.LayoutParams(0, dp(activity, 54), 1f))
         root.addView(actions)
         dialog = showContentDialog(activity, root, .92f)
@@ -352,8 +352,8 @@ internal object ConversationAnalysisReportDialog {
         fun reloadDeep(periodDays: Int) {
             val epoch = ++rankingEpoch
             range.text = rangeText(periodDays)
-            (metrics.getChildAt(0) as? LinearLayout)?.let { (it.getChildAt(2) as? TextView)?.text = "所选时段发言人数" }
-            (metrics.getChildAt(1) as? LinearLayout)?.let { (it.getChildAt(2) as? TextView)?.text = "所选时段消息数" }
+            (metrics.getChildAt(0) as? LinearLayout)?.let { (it.getChildAt(2) as? TextView)?.text = if (periodDays == 1) "今日发言人数" else "所选时段发言人数" }
+            (metrics.getChildAt(1) as? LinearLayout)?.let { (it.getChildAt(2) as? TextView)?.text = if (periodDays == 1) "今日消息数" else "所选时段消息数" }
             updateMetric(metrics, 0, "…")
             updateMetric(metrics, 1, "…")
             bodies.values.forEach { box ->
@@ -361,20 +361,23 @@ internal object ConversationAnalysisReportDialog {
                 box.addView(label(activity, "正在读取所选时段数据…", 14f, textColor(activity), false))
             }
             tasks.execute {
-                val details = runCatching { ConversationAnalysisDetailsRepository().load(talker, periodDays) }
-                    .onFailure { logger("群聊分析时段图表读取失败", it) }.getOrElse {
-                        ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), it.message ?: "读取失败")
-                    }
                 val summary = runCatching { ConversationAnalysisRepository().loadSummary(talker, periodDays) }
                     .onFailure { logger("群聊分析时段指标读取失败", it) }.getOrNull()
                 tasks.post {
                     if (!dialog.isShowing || activity.isFinishing || activity.isDestroyed || epoch != rankingEpoch) return@post
-                    renderDeepData(activity, bodies, details, reloadRanking, periodDays)
                     if (summary != null && summary.error == null) {
                         updateMetric(metrics, 0, summary.periodSpeakers.toString())
                         updateMetric(metrics, 1, summary.periodTotal.toString())
                         updateMetric(metrics, 2, summary.historyTotal.toString())
                     }
+                }
+                val details = runCatching { ConversationAnalysisDetailsRepository().load(talker, periodDays) }
+                    .onFailure { logger("群聊分析时段图表读取失败", it) }.getOrElse {
+                        ConversationAnalysisDetails(emptyList(), emptyList(), ConversationDeepStats(IntArray(24), emptyMap(), 0, 0, 0, 0), it.message ?: "读取失败")
+                    }
+                tasks.post {
+                    if (!dialog.isShowing || activity.isFinishing || activity.isDestroyed || epoch != rankingEpoch) return@post
+                    renderDeepData(activity, bodies, details, reloadRanking, periodDays)
                 }
             }
         }
@@ -786,7 +789,7 @@ internal object ConversationAnalysisReportDialog {
         generatedReportViews[reportDialog] = java.lang.ref.WeakReference(reportView)
         tasks.execute {
             val summary = runCatching { ConversationAnalysisRepository().loadSummary(talker, days) }.getOrNull()
-            val members = WeChatApis.contacts()?.getGroupMemberIds(talker).orEmpty().distinct().size
+            val members = summary?.groupMemberCount ?: 0
             tasks.post {
                 if (reportDialog.isShowing && reportRequests[reportDialog] === ai && summary != null) reportView.updateMeta(reportTitle, days, members, summary.periodSpeakers)
             }
@@ -795,11 +798,10 @@ internal object ConversationAnalysisReportDialog {
         reportHost.requestLayout()
         ai.generateStreaming(talker, days, partial@{ partial ->
             if (!reportDialog.isShowing || reportRequests[reportDialog] !== ai) return@partial
-            reportView.update(talker, days, partial)
-            reportHost.requestLayout()
+            reportView.update(reportTitle, days, partial)
         }, completed@{ final ->
             if (!reportDialog.isShowing || reportRequests[reportDialog] !== ai) return@completed
-            reportView.update(talker, days, final)
+            reportView.update(reportTitle, days, final)
             reportView.updateSampleCount(ai.lastSampleCount())
             val success = !final.startsWith("AI 总结失败：") && !final.startsWith("所选时段暂无") && !final.startsWith("请先配置")
             screenshot.isEnabled = success

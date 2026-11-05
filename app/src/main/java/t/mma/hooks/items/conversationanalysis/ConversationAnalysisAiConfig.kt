@@ -35,12 +35,12 @@ internal class ConversationAnalysisAiConfigStore(context: Context) {
 
     fun activeProfile(): ConversationAiProfile = profile(activeProfileId())
 
-    fun sampleLimit(): Int = prefs.getInt(KEY_SAMPLE_LIMIT, 0).coerceIn(0, 50_000)
+    fun sampleLimit(): Int = ConversationAnalysisInput.messageLimit(prefs.getInt(KEY_SAMPLE_LIMIT, 0))
     fun contextWindow(): String = prefs.getString(KEY_CONTEXT_WINDOW, "128k").orEmpty().let { value ->
         if (value in setOf("128k", "256k", "512k", "1m", "2m")) value else "128k"
     }
     fun setSampling(contextWindow: String, sampleLimit: Int) {
-        prefs.edit().putString(KEY_CONTEXT_WINDOW, contextWindow).putInt(KEY_SAMPLE_LIMIT, sampleLimit.coerceIn(0, 50_000)).apply()
+        prefs.edit().putString(KEY_CONTEXT_WINDOW, contextWindow).putInt(KEY_SAMPLE_LIMIT, ConversationAnalysisInput.messageLimit(sampleLimit)).apply()
     }
 
     fun save(profile: ConversationAiProfile) = saveProfile(profile, activate = false)

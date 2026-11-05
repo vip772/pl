@@ -174,6 +174,10 @@ fun fields(d:Dialog)=all(d.root).filterIsInstance<EditText>()
 fun dropdown(d:Dialog)=all(d.root).first{it.contentDescription.startsWith("选择API方案")}
 fun main() {
  val activity=Activity();val store=ConversationAnalysisAiConfigStore(activity)
+ check(store.sampleLimit()==1500)
+ store.setSampling("128k",0);check(store.sampleLimit()==1500)
+ store.setSampling("2m",50000);check(store.sampleLimit()==1500)
+ store.setSampling("128k",250);check(store.sampleLimit()==250)
  store.save(ConversationAiProfile(1,"first","address-one","/one","fake-one","model-one"))
  store.save(ConversationAiProfile(2,"second","address-two","/two","fake-two","model-two"))
  check(store.activeProfileId()==1)
@@ -220,6 +224,6 @@ with tempfile.TemporaryDirectory() as td:
  p=Path(td)
  for n,s in sources.items():(p/n).write_text(s)
  jar=p/'test.jar'
- subprocess.run(['java','-Xmx384m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(stdlib),'-d',str(jar),*map(str,p.glob('*.kt')),str(b/'ConversationAnalysisAiConfig.kt')],check=True,timeout=60)
+ subprocess.run(['java','-Xmx384m','-cp',':'.join(map(str,libs.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',str(stdlib),'-d',str(jar),*map(str,p.glob('*.kt')),str(b/'ConversationAnalysisAiConfig.kt'),str(b/'ConversationAnalysisInput.kt')],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{jar}:{stdlib}','t.mma.hooks.items.conversationanalysis.MainKt'],check=True,timeout=20)
 print('PASS compact model/config helper contracts; Android sizing/rendering and live API excluded')

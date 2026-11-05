@@ -11,18 +11,20 @@ assert 'val reloadRanking: (Int) -> Unit = { selection.select(it) }' in report
 assert 'selection.observe { reloadDeep(it) }' in report
 assert 'renderDeepData(activity, bodies, details, reloadRanking, periodDays)' in report
 assert 'epoch != rankingEpoch' in report
+assert 'if (periodDays == 1) "今日发言人数" else "所选时段发言人数"' in report
+assert 'if (periodDays == 1) "今日消息数" else "所选时段消息数"' in report
 assert 'reportRequests.remove(dialog)?.close()' in report
 assert 'generatedReportViews.remove(dialog)?.clear()' in report
 assert 'ConversationAnalysisPeriod.recentDays(nextDays)' in report
 for name in ['高频语义特征','情绪指纹探测','废话程度鉴定','多维属性探测','全天活跃频次']:
     assert f'bodies["{name}"]' in report
 assert 'private fun aiPeriodRange(days: Int): LongRange = ConversationAnalysisPeriod.range(days)' in ai
-assert ai.index('val period = aiPeriodRange(days)') < ai.index('val sampledRows =') < ai.index('buildPrompt(records))')
+assert ai.index('val period = aiPeriodRange(days)') < ai.index('val records = cursor.use') < ai.index('buildPrompt(records))')
 assert ai.index('require(records.isNotEmpty())') < ai.index('val conn = URL(join(cfg.address, cfg.path))',ai.index('private fun requestStreaming'))
 # Compile the real AI read/filter/sample prefix; stop before HTTP/JSON construction.
 prefix=ai[ai.index('        val db = WeChatApis.database()',ai.index('private fun requestStreaming')):ai.index('        val body = JSONObject()',ai.index('private fun requestStreaming'))]
 normalize=ai[ai.index('    private fun normalizeRecord('):ai.index('    private fun buildPrompt(')]
-ai_probe='package t.mma.hooks.items.conversationanalysis\nimport t.mma.hooks.api.core.WeChatApis\nclass Config { fun sampleLimit()=1;fun contextWindow()="128k" }\nclass AiReadProbe {\n var closed=false; val requestToken=java.util.concurrent.atomic.AtomicLong(1); val token=1L; fun postResult(f:()->Unit)=f();fun onUpdate(s:String)=Unit\n val configStore=Config(); var sampleCount=0\n fun autoMessageLimit(s:String)=3000\n fun aiPeriodRange(days:Int)=ConversationAnalysisPeriod.range(days)\n fun read(talker:String,days:Int):List<String> {\n' + prefix + "\nreturn records\n}\n" + normalize + "\n}"
+ai_probe='package t.mma.hooks.items.conversationanalysis\nimport t.mma.hooks.api.core.WeChatApis\nclass Config { fun sampleLimit()=1500;fun contextWindow()="128k" }\nclass AiReadProbe {\n var closed=false; val requestToken=java.util.concurrent.atomic.AtomicLong(1); val token=1L; fun postResult(f:()->Unit)=f();fun onUpdate(s:String)=Unit\n val configStore=Config(); var sampleCount=0\n fun autoMessageLimit(s:String)=3000\n fun aiPeriodRange(days:Int)=ConversationAnalysisPeriod.range(days)\n fun read(talker:String,days:Int):List<String> {\n' + prefix + "\nreturn records\n}\n" + normalize + "\n}"
 details=(b/'ConversationAnalysisDetails.kt').read_text()
 details='package t.mma.hooks.items.conversationanalysis\nimport t.mma.hooks.api.core.WeChatApis\nimport java.util.Calendar\nimport java.util.Locale\n'+details[details.index('internal data class ConversationRankingRow'):details.index('internal object ConversationAnalysisDetailsDialog')]
 api='''package t.mma.hooks.api.core
@@ -52,9 +54,10 @@ class WeChatDatabaseApi {
   return MessageCursor(query(sql,args)) { cancelOnRead?.invoke() }.also {lastCursor=it}
  }
  class MessageCursor(val data:List<Map<String,Any?>>,val onRead:()->Unit):java.io.Closeable {
-  var closed=false;var reads=0;var position=0
+  var closed=false;var reads=0;var position=-1
   val count get()=data.size
   fun getColumnIndexOrThrow(s:String)=if(s=="content") 0 else 1
+  fun moveToNext():Boolean {position++;return position in data.indices}
   fun moveToPosition(p:Int):Boolean {position=p;return p in data.indices}
   fun getString(c:Int):String {reads++;onRead();return data[position]["content"].toString()}
   fun getInt(c:Int)=0
@@ -68,7 +71,7 @@ class WeChatDatabaseApi {
   val rows=messages.filter { it.time in start..end }
   if (sql.contains("GROUP BY sender")) return rows.groupBy { it.sender }.map { mapOf("sender" to it.key,"cnt" to it.value.size) }
   if (sql.contains("SELECT DISTINCT")) return rows.map { mapOf("sender" to it.sender) }.distinct()
-  if (sql.contains("SELECT content,isSend,type")) return rows.sortedBy{it.time}.map { mapOf("content" to it.content,"isSend" to 0,"type" to 1) }
+  if (sql.contains("SELECT content,isSend,type")) return rows.sortedByDescending{it.time}.take(sql.substringAfter(" LIMIT ").toInt()).map { mapOf("content" to it.content,"isSend" to 0,"type" to 1) }
   if (sql.contains("SELECT content, type")) return rows.map { mapOf("content" to it.content,"type" to 1,"createTime" to it.time) }
   return listOf(mapOf("total" to rows.size,"speakers" to rows.map{it.sender}.distinct().size,"textCount" to rows.size,"questionCount" to rows.count{it.content.contains('?')},"laughCount" to rows.count{it.content.contains("哈哈")}))
  }
@@ -126,8 +129,8 @@ fun main() {
   })
   val probe=AiReadProbe()
   val records=probe.read("test@chatroom",code)
-  check(records.size==1&&!records.single().contains("OUTSIDE")&&probe.sampleCount==1)
-   check(db.lastCursor!!.closed && db.lastCursor!!.reads==1)
+  check(records.size==2&&records.none{it.contains("OUTSIDE")}&&probe.sampleCount==2)
+   check(db.lastCursor!!.closed && db.lastCursor!!.reads==2)
    db.failQuery=true
    check(runCatching {probe.read("g",code)}.exceptionOrNull()?.message=="消息查询失败，请检查数据库状态")
    db.failQuery=false
@@ -139,6 +142,13 @@ fun main() {
   check(runCatching { probe.read("test@chatroom",code) }.exceptionOrNull()?.message=="所选时段暂无文本消息")
   check(ConversationAnalysisDetailsRepository().load("test@chatroom",code).deep.hourly.sum()==0)
  }
+ // More than the cap: newest 1500 in chronological order, full summary stays complete.
+ val bounds=ConversationAnalysisPeriod.range(1)
+ db.messages=(0 until 2000).map {t.mma.hooks.api.runtime.WeChatDatabaseApi.Message(bounds.first+it,"message-$it")}
+ val records=AiReadProbe().read("g",1)
+ check(records.size==1500 && records.first().endsWith("message-500") && records.last().endsWith("message-1999"))
+ check(db.lastCursor!!.reads==1500 && db.lastCursor!!.closed)
+ check(ConversationAnalysisRepository().loadSummary("g@chatroom",1).periodTotal==2000)
  println("PASS calendar day/week/month/all, year/leap/DST edges, 60-day slider; shared selection; real summary/five-chart queries and production AI read/sample/empty guard")
 }
 '''

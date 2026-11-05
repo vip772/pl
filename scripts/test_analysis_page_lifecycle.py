@@ -38,6 +38,7 @@ import java.util.concurrent.atomic.*
 import java.net.HttpURLConnection
 class ConversationAnalysisAi {
  private val executor = t.mma.hooks.core.IdleSerialExecutor.create("fixture-ai")
+ private var sampleCount = 0
  @Volatile private var closed = false
  private val main = Handler(Looper.getMainLooper())
  private val requestToken = AtomicLong(0)
