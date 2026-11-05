@@ -160,19 +160,30 @@ private class SelectedMessagesHooker(
         val doneMethods = locateRetransmitDoneMethods()
         val doneHooked = doneMethods.isNotEmpty() && doneMethods.all { method ->
             hook(method, object : XC_MethodHook() {
-                override fun beforeHookedMethod(param: MethodHookParam) {
-                    if (closed) return
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    if (closed || param.hasThrowable()) return
                     val activity = param.thisObject as? Activity ?: return
-                    if (moduleSender.handleRetransmitDone(activity)) param.result = null
+                    moduleSender.handleRetransmitDone(activity)
                 }
             })
         }
+        val finishMethod = KavaReflector.loadClass(
+            SelectedMessageModuleSender.MSG_RETRANSMIT_UI, context.hostClassLoader()
+        )?.let { KavaReflector.findMethod(it, "finish") }
+        val finishHooked = finishMethod != null && hook(finishMethod, object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (closed || param.hasThrowable()) return
+                val activity = param.thisObject as? Activity ?: return
+                main.post { if (!closed) moduleSender.handleRetransmitFinished(activity) }
+            }
+        })
         val officialHooked = officialSender.install()
         if (!createHooked) logger("群发助手菜单创建Hook未安装", null)
         if (!clickHooked) logger("群发助手菜单点击Hook未安装", null)
+        if (!finishHooked) logger("群发助手重发页面结束Hook未安装", null)
         if (!doneHooked) logger("群发助手重发完成Hook未安装", null)
         if (!officialHooked) logger("微信原生群发助手通道未安装", null)
-        return createHooked && clickHooked && doneHooked && officialHooked
+        return createHooked && clickHooked && doneHooked && finishHooked && officialHooked
     }
 
     private fun addMenu(param: XC_MethodHook.MethodHookParam) {

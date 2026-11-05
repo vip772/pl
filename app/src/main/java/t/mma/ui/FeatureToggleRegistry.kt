@@ -124,7 +124,8 @@ object FeatureToggleRegistry {
                 boolean(context, "Hchat_hidden_at_config", "enable") ||
                 boolean(context, "Hchat_emoji_at_config", "enable") ||
                 boolean(context, "Hchat_mention_highlight_config", "mention_highlight_enable") ||
-                t.mma.hooks.items.mentionextension.MentionNoticeSettings.enabled(context)
+                t.mma.hooks.items.mentionextension.MentionNoticeSettings.enabled(context) ||
+                t.mma.hooks.items.mentionextension.AvatarMentionSettings.enabled(context)
             "special_message" -> {
                 val sp = HchatStorage.preferences(context, SpecialMessageFeature.PREFS)
                 sp.getBoolean("enabled", false) || sp.getBoolean("link", false)

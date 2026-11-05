@@ -129,7 +129,7 @@ public final class WeChatImageApi {
             return false;
         }
         File file = new File(imagePath);
-        if (!file.isFile()) {
+        if (!file.isFile() || !file.canRead() || file.length() == 0L) {
             log("发送图片失败: 文件不存在 " + imagePath);
             return false;
         }
@@ -154,7 +154,7 @@ public final class WeChatImageApi {
                 log("发送图片失败: 无法创建 " + method.getDeclaringClass().getName());
                 return false;
             }
-            KavaReflector.invoke(method, target,
+            KavaReflector.invokeOrThrow(method, target,
                     buildSendImageArgs(method, talker, imagePath, appId, original));
             return true;
         } catch (Throwable e) {
@@ -252,6 +252,8 @@ public final class WeChatImageApi {
         Method method = dexFinder != null ? dexFinder.imageTokenPathMethod : null;
         if (TextUtils.isEmpty(token) || method == null) return "";
         try {
+            String direct = materializeImagePath(token, method.getDeclaringClass().getClassLoader());
+            if (!direct.isEmpty()) return direct;
             Object target = imageStorage(method.getDeclaringClass());
             if (target == null) return "";
             String best = "";
@@ -301,11 +303,13 @@ public final class WeChatImageApi {
 
     private InputStream openVfsInputStream(ClassLoader classLoader, String path) {
         if (classLoader == null || TextUtils.isEmpty(path)) return null;
-        for (String className : new String[]{"com.tencent.mm.vfs.w6", "com.tencent.mm.vfs.p6"}) {
+        for (String className : new String[]{"com.tencent.mm.vfs.z6", "com.tencent.mm.vfs.w6", "com.tencent.mm.vfs.p6"}) {
             Class<?> clazz = KavaReflector.loadClass(className, classLoader);
             if (clazz == null) continue;
             for (String methodName : new String[]{"E", "F"}) {
                 Method method = KavaReflector.findMethod(clazz, methodName, String.class);
+                if (method == null || !KavaReflector.isStatic(method)
+                        || !InputStream.class.isAssignableFrom(method.getReturnType())) continue;
                 Object value = KavaReflector.invoke(method, null, path);
                 if (value instanceof InputStream) return (InputStream) value;
             }

@@ -141,6 +141,15 @@ class SelectedMessageModuleSender(
         return true
     }
 
+    // Media branches can finish without the generic done callback.
+    // Closing is not proof of success; release the wait without counting delivery.
+    fun handleRetransmitFinished(activity: Activity) {
+        val token = activity.intent?.getStringExtra(EXTRA_TOKEN).orEmpty()
+        if (closed || token.isBlank() || token != activeToken) return
+        val batch = activeBatch ?: return
+        try { logger("微信重发页面已结束但未返回发送结果", null) } catch (_: Throwable) { }
+        advanceTargets(batch, activeRetransmitTargets.size, ForwardSendPolicy.RETRANSMIT_BATCH_INTERVAL_MS)
+    }
     private fun startNextBatch() {
         val batch = synchronized(this) {
             if (closed || activeBatch != null) return
@@ -197,7 +206,9 @@ class SelectedMessageModuleSender(
             putExtra("Retr_Msg_Id", payload.msgId)
             putExtra("Retr_MsgTalker", payload.sourceTalker)
             putExtra("Retr_Msg_content", payload.content)
-            putExtra("Retr_File_Name", payload.fileName)
+            putExtra("Retr_File_Name", if ((snapshot.type and 0xffff) in setOf(43, 62)) {
+                snapshot.imagePath.ifBlank { payload.fileName }
+            } else payload.fileName)
             putExtra("Edit_Mode_Sigle_Msg", true)
             putExtra("Retr_MsgFromScene", payload.msgFromScene)
             putExtra("Retr_show_success_tips", false)
@@ -248,6 +259,7 @@ class SelectedMessageModuleSender(
         val mediaApi = WeChatApis.media()
         val videoPath = if (type == 43 || type == 62) resolveVideoPath(snapshot) else ""
         val source = when (type) {
+            3 -> if (snapshot.msgId <= 0L) resolveImagePath(snapshot) else ""
             34 -> snapshot.voicePath
             43, 62 -> videoPath
             47 -> emojiSource(snapshot)
@@ -256,6 +268,7 @@ class SelectedMessageModuleSender(
         val canHandle = when (type) {
             1, 42, 48 -> messageApi != null && !payload?.content.isNullOrBlank()
             49 -> !snapshot.isFile() && messageApi != null && !payload?.content.isNullOrBlank()
+            3 -> mediaApi?.images()?.canSendSilently() == true && source.isNotBlank() && File(source).isFile
             34, 43, 47, 62 -> mediaApi != null && source.isNotBlank() &&
                 (type == 47 || File(source).isFile)
             else -> false
@@ -281,6 +294,7 @@ class SelectedMessageModuleSender(
             val content = snapshot.retransmit?.content.orEmpty()
             when (plan.type) {
                 1 -> messageApi?.sendText(target, content) == true
+                3 -> mediaApi?.images()?.send(target, plan.source) == true
                 34 -> mediaApi?.voices()?.send(target, plan.source, snapshot.voiceDurationMillis) == true
                 42 -> messageApi?.sendRaw(target, content, 42) == true
                 43, 62 -> mediaApi?.videos()?.send(target, plan.source) == true
@@ -296,18 +310,10 @@ class SelectedMessageModuleSender(
         advanceTargets(batch, 1, ForwardSendPolicy.MIN_SEND_INTERVAL_MS)
     }
 
-    private fun resolveVideoPath(snapshot: SelectedMessageSnapshot): String {
-        val candidates = listOf(snapshot.retransmit?.fileName.orEmpty(), snapshot.imagePath)
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-        candidates.firstOrNull { File(it).isFile }?.let { return File(it).absolutePath }
-        val videos = WeChatApis.media()?.videos() ?: return ""
-        return candidates.firstNotNullOfOrNull { token ->
-            videos.resolvePathToken(token).takeIf { it.isNotBlank() }
-        }.orEmpty()
-    }
-
+    private fun resolveImagePath(snapshot: SelectedMessageSnapshot): String =
+        SelectedMessageMediaFiles.image(snapshot)
+    private fun resolveVideoPath(snapshot: SelectedMessageSnapshot): String =
+        SelectedMessageMediaFiles.video(snapshot)
     private fun emojiSource(snapshot: SelectedMessageSnapshot): String {
         val payload = snapshot.retransmit
         val fileName = payload?.fileName.orEmpty().trim()

@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import t.mma.hooks.items.mentionhighlight.MentionHighlightSettings
 import t.mma.hooks.items.mentionall.MentionAllSettings
 import t.mma.hooks.items.mentionall.MentionAllCommand
+import t.mma.hooks.items.mentionextension.AvatarMentionSettings
 import t.mma.preferences.HchatStorage
 import t.mma.ui.FeatureSettingsProvider
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
@@ -51,6 +52,12 @@ internal fun MentionExtensionMiuixPage(
         t.mma.hooks.items.mentionextension.MentionNoticeSettings.COLOR,
         t.mma.hooks.items.mentionextension.MentionNoticeSettings.DEFAULT_COLOR
     ).orEmpty()) }
+    val avatarPrefs = remember { AvatarMentionSettings.preferences(context) }
+    var avatarEnabled by remember { mutableStateOf(avatarPrefs.getBoolean(AvatarMentionSettings.ENABLE, false)) }
+    var avatarPosition by remember { mutableStateOf(AvatarMentionSettings.position(
+        avatarPrefs.getString(AvatarMentionSettings.POSITION, AvatarMentionSettings.ABOVE))) }
+    var avatarColor by remember { mutableStateOf(avatarPrefs.getString(
+        AvatarMentionSettings.COLOR, AvatarMentionSettings.DEFAULT_COLOR).orEmpty()) }
     val state = rememberLazyListState()
     val scrollBehavior = MiuixScrollBehavior()
     PageScaffold(
@@ -145,6 +152,31 @@ internal fun MentionExtensionMiuixPage(
                     ) {
                         noticeColor = it
                         noticePrefs.edit().putString(t.mma.hooks.items.mentionextension.MentionNoticeSettings.COLOR, it).apply()
+                    }
+                } }
+            }
+            item { SettingsCard {
+                SwitchRow(avatarEnabled, "头像提醒", "") {
+                    avatarEnabled = it
+                    avatarPrefs.edit().putBoolean(AvatarMentionSettings.ENABLE, it).apply()
+                }
+            } }
+            if (avatarEnabled) {
+                item { SettingsCard {
+                    PopupChoiceRow("头像位置", if (avatarPosition == AvatarMentionSettings.ABOVE) "上方" else "下方",
+                        listOf(PopupChoice("上方", AvatarMentionSettings.ABOVE), PopupChoice("下方", AvatarMentionSettings.BELOW)),
+                        avatarPosition, onValueChanged = {
+                            avatarPosition = AvatarMentionSettings.position(it)
+                            avatarPrefs.edit().putString(AvatarMentionSettings.POSITION, avatarPosition).apply()
+                        })
+                    InsetDivider()
+                    ColorPickerRow("提醒渐变颜色", "", avatarColor, threeColorGradient = true, showSummary = false,
+                        onReset = {
+                            avatarColor = AvatarMentionSettings.DEFAULT_COLOR
+                            avatarPrefs.edit().remove(AvatarMentionSettings.COLOR).apply()
+                        }) {
+                        avatarColor = it
+                        avatarPrefs.edit().putString(AvatarMentionSettings.COLOR, it).apply()
                     }
                 } }
             }

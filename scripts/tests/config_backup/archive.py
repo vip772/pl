@@ -317,6 +317,27 @@ fun main(args:Array<String>){
  }
  check(!Store.backupPreferenceNames(mergeOut).contains("Hchat_auto_merge_method_cache"))
  println("PASS auto merge actual settings: default-off, true/false export-import ZIP round trip and runtime cache exclusion")
+ // Avatar mention: actual constants, independent toggle/position/alpha gradient and runtime exclusion.
+ val avatar=Context(File(base,"avatar-mention"))
+ val avatarPrefs=t.mma.hooks.items.mentionextension.AvatarMentionSettings.preferences(avatar)
+ check(!t.mma.hooks.items.mentionextension.AvatarMentionSettings.enabled(avatar))
+ for (enabled in listOf(false,true)) for(position in listOf("above","below")) {
+  val color="#40FF0000,#8000FF00,#FF0000FF"
+  avatarPrefs.edit().putBoolean("enabled",enabled).putString("position",position).putString("color",color).commit()
+  Store.runtimePreferences(avatar,"Hchat_chat_avatar_method_cache").edit().putString("descriptor","runtime-only").commit()
+  val zip=File(base,"avatar-$enabled-$position.zip")
+  HchatConfigBackup.exportToUri(avatar,Uri(zip))
+  java.util.zip.ZipFile(zip).use { archive ->
+   val manifest=JSONObject(archive.getInputStream(archive.getEntry("config.json")).bufferedReader().readText())
+   check(!manifest.getJSONObject("prefs").has("Hchat_chat_avatar_method_cache"))
+  }
+  val restored=Context(File(base,"avatar-restored-$enabled-$position"))
+  HchatConfigBackup.importFromUri(restored,Uri(zip))
+  val result=t.mma.hooks.items.mentionextension.AvatarMentionSettings.preferences(restored)
+  check(t.mma.hooks.items.mentionextension.AvatarMentionSettings.enabled(restored)==enabled)
+  check(result.getString("position","")==position && result.getString("color","")==color)
+ }
+ println("PASS avatar mention: default off, independent on/off, above/below, alpha three-color ZIP round trip; method cache excluded")
  // Empty stores also round trip.
  val c=Context(File(base,"c"),"com.test.c");HchatConfigBackup.importFromUri(c,Uri(backup))
  fun legacy(value:JSONObject):File {
@@ -411,6 +432,6 @@ with tempfile.TemporaryDirectory() as td:
  p=Path(td)
  for n,s in sources.items():(p/n).write_text(s)
  jar=p/'test.jar'
- production=[repo/'app/src/main/java/t/mma/hooks/items/automerge/AutoMergeSettings.kt',repo/'app/src/main/java/t/mma/preferences/HchatStorage.kt',repo/'app/src/main/java/t/mma/preferences/ConversationGroupingExclusion.kt',repo/'app/src/main/java/t/mma/ui/miuix/HchatConfigBackup.kt']
+ production=[repo/'app/src/main/java/t/mma/hooks/items/mentionextension/AvatarMentionSettings.kt',repo/'app/src/main/java/t/mma/hooks/items/automerge/AutoMergeSettings.kt',repo/'app/src/main/java/t/mma/preferences/HchatStorage.kt',repo/'app/src/main/java/t/mma/preferences/ConversationGroupingExclusion.kt',repo/'app/src/main/java/t/mma/ui/miuix/HchatConfigBackup.kt']
  subprocess.run(['java','-Xmx384m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-no-stdlib','-no-reflect','-classpath',f'{stdlib}:{jsonjar}','-d',str(jar),*[str(p/n) for n in sources],*map(str,production)],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{jar}:{stdlib}:{jsonjar}','t.mma.ui.miuix.MainKt',str(p/'data')],check=True,timeout=30)

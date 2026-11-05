@@ -32,6 +32,7 @@ import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.items.grouplabel.GroupChatLabelStore
 import t.mma.hooks.items.selectedmessages.SelectedMessageContactRepository
 import t.mma.hooks.items.selectedmessages.SelectedMessageSendHandle
+import t.mma.hooks.items.selectedmessages.SelectedMessageMediaFiles
 import t.mma.hooks.items.selectedmessages.SelectedMessageSnapshot
 import t.mma.hooks.items.selectedmessages.SelectedMessagesRuntimeCoordinator
 import t.mma.hooks.items.selectedmessages.SelectedMessagesSettings
@@ -305,21 +306,17 @@ private class MessageForwardHooker(
             toast(activity, "部分选中消息无法读取")
             return
         }
-        val preparation = prepareMomentsIntent(activity, snapshots)
-        val intent = preparation.intent
-        if (intent == null) {
-            toast(activity, preparation.error)
-            return
-        }
         val exitTarget = MultiSelectMessageUi.resolveExitTarget(param.thisObject, exitMethod, logger)
         if (exitTarget == null) {
             toast(activity, "无法退出多选状态，请稍后重试")
             return
         }
-        exitTarget.exit(logger)
-        main.post {
-            if (!activity.isFinishing && !activity.isDestroyed) {
-                startMomentsEditor(activity, intent)
+        prepareChatMoments(activity, snapshots) { intent ->
+            exitTarget.exit(logger)
+            activity.window?.decorView?.postOnAnimation {
+                if (!closed && !activity.isFinishing && !activity.isDestroyed) {
+                    startMomentsEditor(activity, intent)
+                }
             }
         }
     }
@@ -884,13 +881,36 @@ private class MessageForwardHooker(
     }
 
     private fun forwardToMoments(activity: Activity, snapshot: SelectedMessageSnapshot) {
-        val preparation = prepareMomentsIntent(activity, listOf(snapshot))
-        val intent = preparation.intent
-        if (intent == null) {
-            toast(activity, preparation.error)
-            return
+        prepareChatMoments(activity, listOf(snapshot)) { startMomentsEditor(activity, it) }
+    }
+    private fun prepareChatMoments(
+        activity: Activity,
+        snapshots: List<SelectedMessageSnapshot>,
+        onPrepared: (Intent) -> Unit
+    ) {
+        if (closed) return
+        val canceled = AtomicBoolean(false)
+        pendingPreparations.add(canceled)
+        toast(activity, "正在准备朋友圈媒体...")
+        submitPreparation {
+            val result = runCatching {
+                if (closed || canceled.get()) throw InterruptedException()
+                prepareMomentsIntent(activity, snapshots)
+            }
+            pendingPreparations.remove(canceled)
+            main.post {
+                if (closed || canceled.get() || activity.isFinishing || activity.isDestroyed) return@post
+                activity.window?.decorView?.postOnAnimation {
+                    if (closed || canceled.get() || activity.isFinishing || activity.isDestroyed) return@postOnAnimation
+                    result.onSuccess { prepared ->
+                        prepared.intent?.let(onPrepared) ?: toast(activity, prepared.error)
+                    }.onFailure {
+                        logger("准备聊天媒体转朋友圈失败", it)
+                        toast(activity, "朋友圈媒体准备失败")
+                    }
+                }
+            }
         }
-        startMomentsEditor(activity, intent)
     }
 
     private fun prepareMomentsIntent(
@@ -908,8 +928,7 @@ private class MessageForwardHooker(
         val imageItems = snapshots.asSequence()
             .filter { WeChatMessageTypes.normalize(it.type) == WeChatMessageTypes.IMAGE }
             .map { snapshot ->
-                val imagePath = snapshot.retransmit?.fileName.orEmpty()
-                    .ifBlank { snapshot.imagePath }
+                val imagePath = SelectedMessageMediaFiles.image(snapshot)
                 val livePhoto = chatLivePhotoResolver.resolve(snapshot)
                 PreparedSnsImage(
                     imagePath = imagePath,
@@ -941,7 +960,9 @@ private class MessageForwardHooker(
             video.isNotBlank() -> {
                 intent.putExtra("Ksnsupload_type", 14)
                 intent.putExtra("KSightPath", video)
-                intent.putExtra("KSightThumbPath", video)
+                val thumb = WeChatApis.media()?.videos()?.ensureThumbPath(video, "").orEmpty()
+                if (thumb.isBlank()) return MomentsPreparation(error = "无法生成视频缩略图")
+                intent.putExtra("KSightThumbPath", thumb)
                 intent.putExtra("Kdescription", text)
             }
             images.isNotEmpty() -> {
@@ -976,20 +997,8 @@ private class MessageForwardHooker(
         )
     }
 
-    private fun resolveSelectedVideoPath(snapshot: SelectedMessageSnapshot): String {
-        val candidates = listOf(snapshot.retransmit?.fileName.orEmpty(), snapshot.imagePath)
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
-        candidates.firstOrNull { File(it).isFile }?.let {
-            return File(it).absolutePath
-        }
-        val videos = WeChatApis.media()?.videos() ?: return ""
-        return candidates.firstNotNullOfOrNull { token ->
-            videos.resolvePathToken(token).takeIf { it.isNotBlank() }
-        }.orEmpty()
-    }
-
+    private fun resolveSelectedVideoPath(snapshot: SelectedMessageSnapshot): String =
+        SelectedMessageMediaFiles.video(snapshot)
     private fun momentsCombinationError(types: List<Int>): String? {
         if (types.isEmpty()) return "未找到选中的消息"
         val imageCount = types.count { it == WeChatMessageTypes.IMAGE }

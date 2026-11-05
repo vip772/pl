@@ -186,6 +186,7 @@ object FeatureRegistry {
             .register(MessageTextColorFeature())
             .register(MentionHighlightFeature())
             .register(t.mma.hooks.items.mentionextension.MentionNoticeFeature())
+            .register(t.mma.hooks.items.mentionextension.AvatarMentionFeature())
             .register(HomeTextColorFeature())
             .register(HideChatAvatarFeature())
             .register(MessageBlockFeature())

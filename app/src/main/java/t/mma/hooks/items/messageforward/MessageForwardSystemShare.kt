@@ -8,6 +8,7 @@ import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
 import t.mma.hooks.core.FeatureContext
+import t.mma.hooks.items.selectedmessages.SelectedMessageMediaFiles
 import t.mma.hooks.items.selectedmessages.SelectedMessageSnapshot
 import t.mma.utils.KavaReflector
 import java.io.File
@@ -104,7 +105,8 @@ internal class MessageForwardSystemShare(
     private fun shareFile(snapshot: SelectedMessageSnapshot): File? {
         val type = snapshot.type and 0xffff
         val path = when (type) {
-            3, 43, 62 -> snapshot.retransmit?.fileName.orEmpty()
+            3 -> SelectedMessageMediaFiles.image(snapshot)
+            43, 62 -> SelectedMessageMediaFiles.video(snapshot)
             34 -> snapshot.voicePath
             47 -> snapshot.retransmit?.fileName.orEmpty()
             else -> ""

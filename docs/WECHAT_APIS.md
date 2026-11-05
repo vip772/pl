@@ -1037,3 +1037,8 @@ SingleMessageMenuLocator、MultiSelectMessageMenuLocator、FavoriteMenuLocator �
 
 ### 自动缓存运行时与共享消息观察者
 自动缓存主开关关闭时取消自身消息订阅、独占 Dex 安装凭证和延迟检查，重新开启创建新运行时；公共消息观察者保留给其它功能。关闭不保证撤销已交给微信的原生下载，也不补处理关闭期间的消息事件。
+
+
+### 媒体转发补充核查（8.0.78）
+
+图片/视频 VFS 读取增加经原生 Smali 确认的 `com.tencent.mm.vfs.z6.E(String): InputStream` 候选，并校验静态及返回类型。图片发送反射使用 `invokeOrThrow`，异常返回失败；返回 true 仅代表调用正常返回，不代表服务端投递。视频 `ensureThumbPath` 供转发编辑页复用真实 JPEG 缩略图。具体证据与未验收范围见 [MESSAGE_FORWARD_MEDIA_FIX.md](MESSAGE_FORWARD_MEDIA_FIX.md)。

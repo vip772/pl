@@ -73,3 +73,20 @@
 本地专项验证通过：`scripts/test_mention_all_command.py` 覆盖指令边界、无效配置、名单去重、自身排除及 499 上限；`scripts/test_mention_all_pipeline.py` 编译执行实际发送观察器，宿主接口使用桩，覆盖独立开关、自定义指令刷新、群聊/类型/方向过滤、本地名单与上行来源传播、无关消息隔离、失败保留原消息、原隐藏艾特分支；`scripts/test_hidden_at_owner.py` 覆盖两开关独立启停、销毁、两个监听注册失败、部分安装回滚和过期回调；`scripts/run_hidden_at_source_tests.cjs` 覆盖来源保留、原生参数及有界关联；`scripts/tests/config_backup/archive.py` 编译执行生产归档/存储，覆盖两开关四种组合、默认/自定义指令导出导入往返和运行库排除。
 
 兼容范围沿用发送公共入口当前明确校验的微信 8.0.78，未扩展其他版本。未运行 Gradle、未构建 APK，完整 Android/R8 构建及 Compose 页面尚未验收；未发送实机群消息，实际通知范围、499 人服务端接收、仅指令消息的隐藏呈现和长期性能仍待设备验收。本次变更只保留 dev 工作区，不提交、不推送。
+
+
+## 头像提醒
+
+艾特扩展新增独立的“头像提醒”，默认关闭。开启后显示“头像位置”（上方/下方）和“提醒渐变颜色”，分别复用 PopupChoiceRow 和 ColorPickerRow 的三色编辑；位置与颜色即时保存，支持恢复默认颜色。任一子功能开启即将艾特扩展纳入已开启聚合，搜索支持“头像提醒”“头像位置”。
+
+提醒属于当前聊天消息及其发送者头像，不累计到联系人：接收消息只艾特当前账号显示 `@我`，只艾特别人一人显示 `@1人`，多人按去重后的实际名单显示 `@N人`（包含自己）；发送消息一律按人数显示。普通 `notify@all` 显示 `@所有人`，收发方向一致；每条只按所选位置显示一处。群公告 `announcement@all`、私聊、无真实艾特元数据及仅引用内含艾特不显示。引用者当前消息自身的真实艾特保留。
+
+布局锚点取原生头像持有者的 convertView 消息行和 avatarIV；原 MaskLayout 的内部裁剪不承载提醒。消息行 overlay 绘制 10sp 三色文字，扣除头像自身 padding 后，文字水平中心对齐头像图像中心，以文字实际字形边界与图像边缘间隔 3dp；按所选方向增加行 padding 预留文字空间。行、头像及中间祖先布局变化时更新坐标，无预绘制/滚动轮询。复用到非艾特消息时删除旧装饰、恢复原 padding；关闭时取消共享订阅和安装任务，移除设置监听、主线程刷新、overlay 和布局/附着监听，释放 shader 与类读取缓存。
+
+隐藏头像与头像提醒共用 ChatAvatarBinding 的原生绑定 Hook、DexMethodCache 缓存与统一调度，仍保留隐藏头像原有方向判断及宽度处理。共享入口最后一个订阅退出时卸载 Hook 并清空字段缓存。不开新线程，不查数据库、不缓存消息内容、不扫描页面、不做动画；每次消息绑定复用当前原生消息，反射元数据按类缓存，颜色仅设置变化时解析，draw 只绘制文字。隐藏头像时不绘制提醒；这两项叠加和不同消息布局的实际间距仍待设备验收。
+
+配置库 `Hchat_avatar_mention_config` 的 enabled、position、color 由 HchatStorage 自动发现进入统一备份，默认 false / above / #FF4D67,#7C6BFF,#FFC857；无新增图片资源。`Hchat_chat_avatar_method_cache` 为定位缓存，排除备份。
+
+逆向依据：微信 8.0.78 原生统一头像入口为 b0.o(h0, gk5.d, String, e9)，持有者包含 avatarIV、avatarMask、convertView；当前消息父类 im.c8.G 被原生 atuserlist 解析读取，代码按递归字段读取并复用公共 WeChatMessage 的引用隔离与艾特语义。布局参考现有 8.0.77 解包收发资源及头像 6dp 内边距。混淆名不作为跨版本稳定接口。共享绑定锚点沿用现有隐藏头像证据，本轮没有重新完成技能默认八版本全面核验；尤其消息来源 G 字段仅有 8.0.78 的直接证据，不能宣称全版本兼容。
+
+验证脚本：scripts/test_avatar_mention_labels.py 执行真实模型和标签规则的 16 项用例；scripts/test_avatar_mention_sdk.py 定向编译新增运行时、共享入口及隐藏头像；scripts/tests/config_backup/archive.py 执行实际备份/存储的 ZIP 导出导入，覆盖默认关闭、开关、上下位置、带透明度三色及缓存排除。设置页另作 SDK/Compose 定向编译，既有控件使用合成边界。均不替代完整 Android/R8 构建、真实 View 布局和流畅度验收；未运行 Gradle、未构建 APK、未发送实机消息。本轮仅保留 dev 工作区，不提交、不推送。

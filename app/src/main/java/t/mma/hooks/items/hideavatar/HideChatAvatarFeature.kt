@@ -1,24 +1,15 @@
 package t.mma.hooks.items.hideavatar
-import t.mma.utils.HLog
 
 import android.view.View
-import de.robv.android.xposed.XC_MethodHook
-import t.mma.dexkit.DexMethodCache
 import t.mma.event.Events
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
-import t.mma.hooks.core.HookRegistry
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
-import org.luckypray.dexkit.query.FindMethod
-import org.luckypray.dexkit.query.matchers.MethodMatcher
-import java.lang.reflect.Field
-import java.lang.reflect.Method
 import java.util.Collections
 import java.util.WeakHashMap
-import java.util.concurrent.ConcurrentHashMap
 
 class HideChatAvatarFeature : BaseFeature() {
     private var runtime: HideChatAvatarRuntime? = null
@@ -38,6 +29,7 @@ class HideChatAvatarFeature : BaseFeature() {
     }
 
     override fun onFeatureDestroy(context: FeatureContext) {
+        runtime?.close()
         runtime = null
     }
 
@@ -56,50 +48,29 @@ private class HideChatAvatarRuntime(
     private val context: FeatureContext
 ) {
     private val prefs = HchatStorage.preferences(context.hostContext(), HideChatAvatarSettings.PREFS_NAME)
-    private val methodPrefs = DexMethodCache.prefs(context.hostContext(), "Hchat_hide_chat_avatar_method_cache")
-    private val holderFields = ConcurrentHashMap<Class<*>, AvatarFields>()
-    private val unsupportedHolderClasses = ConcurrentHashMap.newKeySet<Class<*>>()
     private val originalMaskWidths = Collections.synchronizedMap(WeakHashMap<View, Int>())
 
     @Volatile private var installed = false
+    private var closed = false
 
     @Synchronized
     fun install(): Boolean {
-        if (installed) return true
-        val method = locateAvatarBindMethod() ?: run {
-            HLog.e("$TAG 定位聊天头像绑定方法失败")
-            return false
+        if (closed || installed) return true
+        installed = ChatAvatarBinding.subscribe(context, this) { binding ->
+            val outgoing = resolveOutgoing(binding.username, binding.message) ?: return@subscribe
+            val hide = if (outgoing) prefs.getBoolean(HideChatAvatarSettings.KEY_HIDE_SELF, HideChatAvatarSettings.DEFAULT_HIDE_SELF)
+                else prefs.getBoolean(HideChatAvatarSettings.KEY_HIDE_OTHER, HideChatAvatarSettings.DEFAULT_HIDE_OTHER)
+            applyAvatarLayout(binding.avatar, binding.mask, hide)
         }
-        return runCatching {
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
-                override fun afterHookedMethod(param: MethodHookParam) {
-                    applyVisibility(param.args)
-                }
-            })
-            installed = true
-            true
-        }.getOrElse {
-            HLog.e("$TAG 安装聊天头像绑定 Hook 失败: ${it.message}", it)
-            false
-        }
+        return installed
     }
-
-    private fun applyVisibility(args: Array<Any?>?) {
-        if (args == null || args.size != 4) return
-        val message = args.firstOrNull { it != null && isMessageClass(it.javaClass) } ?: return
-        val outgoing = resolveOutgoing(args[2] as? String, message) ?: return
-        val hide = if (outgoing) {
-            prefs.getBoolean(HideChatAvatarSettings.KEY_HIDE_SELF, HideChatAvatarSettings.DEFAULT_HIDE_SELF)
-        } else {
-            prefs.getBoolean(HideChatAvatarSettings.KEY_HIDE_OTHER, HideChatAvatarSettings.DEFAULT_HIDE_OTHER)
-        }
-        val holder = args.firstOrNull { it != null && avatarFields(it.javaClass) != null } ?: return
-        val fields = avatarFields(holder.javaClass) ?: return
-        val avatar = KavaReflector.readField(fields.avatar, holder) as? View ?: return
-        val mask = KavaReflector.readField(fields.mask, holder) as? View
-        applyAvatarLayout(avatar, mask, hide)
+    @Synchronized
+    fun close() {
+        closed = true
+        ChatAvatarBinding.unsubscribe(this)
+        installed = false
+        originalMaskWidths.clear()
     }
-
     private fun applyAvatarLayout(avatar: View, mask: View?, hide: Boolean) {
         val wrapper = sequenceOf(mask, avatar.parent as? View)
             .filterNotNull()
@@ -155,94 +126,7 @@ private class HideChatAvatarRuntime(
         }
     }
 
-    private fun locateAvatarBindMethod(): Method? {
-        val cacheKey = methodCacheKey()
-        DexMethodCache.load(methodPrefs, cacheKey, context.hostClassLoader(), CACHE_AVATAR_BIND)
-            ?.takeIf { isAvatarBindCandidate(it) }
-            ?.let { return it }
-        val method = findMethodsByStrings(
-            "MicroMsg.ChattingItem",
-            "attachAvatarClickListener: getBizKfWorker:%s"
-        ).firstOrNull { isAvatarBindCandidate(it) }
-        if (method != null) {
-            DexMethodCache.save(methodPrefs, cacheKey, CACHE_AVATAR_BIND, method)
-        } else {
-            DexMethodCache.clear(methodPrefs, cacheKey, CACHE_AVATAR_BIND)
-        }
-        return method
-    }
-
-    private fun findMethodsByStrings(vararg strings: String): List<Method> {
-        return runCatching {
-            context.dexKitManager().withCurrentBridge { bridge ->
-                bridge.findMethod(
-                    FindMethod().apply {
-                        matcher(MethodMatcher().apply { usingStrings(strings.toList()) })
-                    }
-                ).mapNotNull { data ->
-                    runCatching { data.getMethodInstance(context.hostClassLoader()) }.getOrNull()
-                }
-            }
-        }.getOrElse {
-            HLog.e("$TAG 定位聊天头像绑定方法异常: ${it.message}", it)
-            emptyList()
-        }
-    }
-
-    private fun isAvatarBindCandidate(method: Method): Boolean {
-        val types = method.parameterTypes
-        return method.returnType == Void.TYPE &&
-            types.size == 4 &&
-            types[2] == String::class.java &&
-            avatarFields(types[0]) != null &&
-            types.any(::isMessageClass)
-    }
-
-    private fun isMessageClass(clazz: Class<*>): Boolean {
-        return clazz.name.startsWith("com.tencent.mm.storage.")
-    }
-
-    private fun avatarFields(clazz: Class<*>): AvatarFields? {
-        holderFields[clazz]?.let { return it }
-        if (unsupportedHolderClasses.contains(clazz)) return null
-        var current: Class<*>? = clazz
-        var avatar: Field? = null
-        var mask: Field? = null
-        while (current != null && current != Any::class.java) {
-            for (field in KavaReflector.declaredFields(current)) {
-                when {
-                    avatar == null && (field.name == "avatarIV" || field.type.name.endsWith(".ChattingAvatarImageView")) -> {
-                        avatar = field
-                    }
-                    mask == null && (field.name == "avatarMask" || field.type.name == "com.tencent.mm.ui.base.MaskLayout") -> {
-                        mask = field
-                    }
-                }
-            }
-            current = current.superclass
-        }
-        val result = avatar?.let { AvatarFields(it, mask) }
-        if (result == null) {
-            unsupportedHolderClasses += clazz
-        } else {
-            holderFields[clazz] = result
-        }
-        return result
-    }
-
-    private fun methodCacheKey(): String {
-        return DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
-            .takeIf { it.isNotBlank() }
-            ?.let { "$it|$CACHE_SCHEMA" }
-            .orEmpty()
-    }
-
-    private data class AvatarFields(val avatar: Field, val mask: Field?)
-
     private companion object {
-        const val TAG = "[Hchat:HideChatAvatar]"
-        const val CACHE_SCHEMA = "hide_chat_avatar_v1"
-        const val CACHE_AVATAR_BIND = "avatar_bind"
         const val MASK_LAYOUT_CLASS = "com.tencent.mm.ui.base.MaskLayout"
     }
 }

@@ -115,7 +115,7 @@ public final class WeChatVideoApi {
             return "";
         }
         File direct = new File(token);
-        if (direct.isFile()) {
+        if (direct.isFile() && direct.canRead() && direct.length() > 0L) {
             return direct.getAbsolutePath();
         }
         Method method = dexFinder != null ? dexFinder.videoPathMethod : null;
@@ -123,6 +123,8 @@ public final class WeChatVideoApi {
             return "";
         }
         try {
+            String readable = materializeVideoPath(token, method.getDeclaringClass().getClassLoader());
+            if (!readable.isEmpty()) return readable;
             boolean isStatic = KavaReflector.isStatic(method);
             Object receiver = isStatic ? null : videoPathReceiver(method.getDeclaringClass());
             if (!isStatic && receiver == null) return "";
@@ -340,11 +342,13 @@ public final class WeChatVideoApi {
 
     private InputStream openVfsInputStream(ClassLoader classLoader, String path) {
         if (classLoader == null || TextUtils.isEmpty(path)) return null;
-        for (String className : new String[]{"com.tencent.mm.vfs.w6", "com.tencent.mm.vfs.p6"}) {
+        for (String className : new String[]{"com.tencent.mm.vfs.z6", "com.tencent.mm.vfs.w6", "com.tencent.mm.vfs.p6"}) {
             Class<?> clazz = KavaReflector.loadClass(className, classLoader);
             if (clazz == null) continue;
             for (String methodName : new String[]{"E", "F"}) {
                 Method method = KavaReflector.findMethod(clazz, methodName, String.class);
+                if (method == null || !KavaReflector.isStatic(method)
+                        || !InputStream.class.isAssignableFrom(method.getReturnType())) continue;
                 Object value = KavaReflector.invoke(method, null, path);
                 if (value instanceof InputStream) return (InputStream) value;
             }
@@ -459,7 +463,7 @@ public final class WeChatVideoApi {
         return KavaReflector.findFieldRecursive(clazz, name);
     }
 
-    private String ensureThumbPath(String videoPath, String thumbPath) {
+    public String ensureThumbPath(String videoPath, String thumbPath) {
         if (!TextUtils.isEmpty(thumbPath) && new File(thumbPath).isFile()) {
             return thumbPath;
         }
