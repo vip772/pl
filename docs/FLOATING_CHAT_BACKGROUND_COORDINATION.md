@@ -13,3 +13,7 @@
 ## 2026-11-05 标题栏偶发灰底源码复核
 已复核沉浸式写背景Hook、透明表面处理、表面恢复及ActionBar三层背景恢复：现有代码对 `FloatingChatCardVisuals.contains` / `FloatingChatActionBarBackgrounds.contains` 做所有权避让；胶囊在挂载前声明所有权。没有本轮运行时证据证明这些路径造成截图灰色，不修改沉浸式实现。
 本次只移除8.0.78胶囊暂未就绪时的旧整栏回退，保留正常深色主题和其他卡片。此结论不意味着所有原生背景或主题变化已被实机排除；完整记录见 `FLOATING_HEADER_PRESENTATION_FIX_20261105.md`。
+
+## 2026-11-05 原生标签equals崩溃修正
+11.0.8（1188）的匹配R8映射将崩溃定位至 `isBottomBar` 的任意 `View.tag` 与模块字符串比较。微信8.0.78的 `xn.c.equals(Object)` 无类型保护直接强转，导致字符串参数触发ClassCastException。两处底栏标记判断统一调用 `isFloatingBottomBar`：读取标签一次，先确认String，再比较自定义底栏已有常量；不调用任意宿主对象equals、不改写原生标签。原生底栏类名判断和聊天/主页范围规则保持原样，无新增Hook、线程或遍历。
+定向静态检查及独立策略模型通过；未本地构建，未做R8产物或实机验收。映射与原生证据、验证边界见 `BACKGROUND_TAG_CRASH_FIX_20261105.md`。

@@ -2674,7 +2674,7 @@ private class BackgroundBeautyRuntime(
             if (slot != BackgroundBeautySettings.Slot.CHAT &&
                 (view === visibleChatHost || state.surfaces[view]?.slot == BackgroundBeautySettings.Slot.CHAT)) continue
             if (view !== decor && isBottomBar(view)) {
-                if (slot != BackgroundBeautySettings.Slot.CHAT && view.tag != "Hchat:FloatingBottomBar") {
+                if (slot != BackgroundBeautySettings.Slot.CHAT && !isFloatingBottomBar(view)) {
                     setTransparentSurface(state, view, slot)
                     // 微信 8.0.78 的底栏实色来自内部 LinearLayout，而非外层 RelativeLayout。
                     if (view.javaClass.name == "com.tencent.mm.ui.LauncherUIBottomTabView" && view is ViewGroup) {
@@ -3360,11 +3360,19 @@ private class BackgroundBeautyRuntime(
         return hasBackgroundImage(slot)
     }
 
+    // Host tags may implement equals with an unchecked cast. Never dispatch
+    // equality to an arbitrary WeChat object or replace its original tag.
+    private fun isFloatingBottomBar(view: View): Boolean {
+        val tag = view.tag
+        return tag is String &&
+            tag == t.mma.hooks.items.custombottombar.CustomBottomBarFeature.FLOATING_BOTTOM_BAR_TAG
+    }
+
     private fun isBottomBar(view: View): Boolean {
         val name = view.javaClass.name
         return name == BOTTOM_TAB_CLASS ||
             name == "com.tencent.mm.ui.LauncherUITabView" ||
-            view.tag == "Hchat:FloatingBottomBar"
+            isFloatingBottomBar(view)
     }
 
     private fun findDescendant(root: View?, className: String): View? {
