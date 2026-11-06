@@ -56,7 +56,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
                 resources.register { ProfileAddTimeFeature.removeProvider() }
                 ProfileAddTimeFeature.installProvider(host)
                 resources.register { ProfileGroupInfoFeature.removeProvider() }
-                ProfileGroupInfoFeature.installProvider()
+                ProfileGroupInfoFeature.installProvider(context.hostClassLoader())
                 val installation = DexInstallScheduler.installation("profile_display_header")
                 resources.register { installation.close() }
                 installation.schedule {

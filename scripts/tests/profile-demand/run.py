@@ -10,7 +10,7 @@ open class Activity {val intent=Intent()}
 class Intent {fun getStringExtra(k:String):String?= when(k){"Contact_ChatRoomId"->"group@chatroom";"Contact_User"->"member";else->null}}
 ''',
 'Log.kt':'''package t.mma.utils
-object HLog {fun e(s:String,t:Throwable){throw AssertionError(s,t)}}''',
+object HLog {fun d(s:String){};fun e(s:String,t:Throwable){throw AssertionError(s,t)}}''',
 'Prefs.kt':'''package t.mma.preferences
 object HchatStorage {fun preferences(a:android.app.Activity,n:String)=Prefs()}
 class Prefs {fun getBoolean(k:String,d:Boolean)=enabled;fun getString(k:String,d:String)=d;companion object {@Volatile var enabled=true}}
@@ -34,6 +34,7 @@ class Rooms {
  @Volatile var calls=0
  @Volatile var result:Map<String,Long> = emptyMap()
  val started=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
+ fun logNativeJoinGate(loader:ClassLoader?){}
  fun getMemberJoinTimes(g:String):Map<String,Long>{calls++;started.countDown();check(release.await(3,java.util.concurrent.TimeUnit.SECONDS));return result}
  fun getMemberInviter(g:String,m:String)=""
  fun getMemberDisplayName(g:String,m:String)=""

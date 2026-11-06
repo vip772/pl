@@ -21,6 +21,16 @@ public final class NativeJoinTimeTest {
         parse.setAccessible(true);
         Object sample = parse.invoke(api, (Object)member(1700000000L, 1700000123L, 1600000000L));
         Field time = sample.getClass().getDeclaredField("joinTimeMillis"); time.setAccessible(true);
+        Field present = sample.getClass().getDeclaredField("joinTimePresent"); present.setAccessible(true);
+        Field failed = sample.getClass().getDeclaredField("parseFailed"); failed.setAccessible(true);
+        Field raw = sample.getClass().getDeclaredField("rawJoinTime"); raw.setAccessible(true);
+        check(present.getBoolean(sample) && raw.getLong(sample) == 1700000123L && !failed.getBoolean(sample), "diagnostic valid timestamp classification");
+        Object absent = parse.invoke(api, (Object)member(0, null, null));
+        check(!present.getBoolean(absent) && !failed.getBoolean(absent), "absent is distinct from zero and parse error");
+        Object zero = parse.invoke(api, (Object)member(0, 0L, null));
+        check(present.getBoolean(zero) && raw.getLong(zero) == 0 && !failed.getBoolean(zero), "explicit zero classification");
+        Object truncated = parse.invoke(api, (Object)new byte[]{48, (byte)128});
+        check(failed.getBoolean(truncated), "truncated value is a parse failure, not absent metadata");
         check(time.getLong(sample) == 1700000123000L, "native field 6 must win over scene/unknown");
         check(time.getLong(parse.invoke(api, (Object)member(1700000000L, null, 1700000000L))) == 0, "other fields are not join times");
         for (long invalid : new long[]{0, 123, Long.MAX_VALUE, System.currentTimeMillis()/1000 + 172800}) {

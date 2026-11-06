@@ -2,6 +2,7 @@ package t.mma.hooks.items.profileid
 import t.mma.utils.HLog
 
 import android.app.Activity
+import java.lang.ref.WeakReference
 import t.mma.hooks.api.contact.WeContactHeaderApi
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.preferences.HchatStorage
@@ -32,6 +33,7 @@ class ProfileGroupInfoFeature {
             }
         }
         @Volatile private var active = false
+        @Volatile private var diagnosticLoader: ClassLoader? = null
         private val generation = AtomicInteger(0)
         private data class Snapshot(val times: Map<String, Long>, val loadedAt: Long)
         private val cache = object : LinkedHashMap<String, Snapshot>(16, 0.75f, true) {
@@ -39,10 +41,19 @@ class ProfileGroupInfoFeature {
         }
         private val loadingGroups = ConcurrentHashMap<String, Int>()
         private const val REFRESH_MS = 15_000L
+        private var diagnosticActivity = WeakReference<Activity>(null)
+        private var diagnosticState = ""
+        private fun logDisplay(activity: Activity, state: String) {
+            if (diagnosticActivity.get() === activity && diagnosticState == state) return
+            diagnosticActivity = WeakReference(activity)
+            diagnosticState = state
+            HLog.d("[Hchat:profile_group_info] JOIN_DIAG display $state")
+        }
 
-        @Synchronized fun installProvider() {
+        @Synchronized fun installProvider(loader: ClassLoader? = null) {
             if (active) return
             active = true
+            diagnosticLoader = loader
             generation.incrementAndGet()
             WeContactHeaderApi.addProvider(joinTimeProvider)
             WeContactHeaderApi.addProvider(inviterProvider)
@@ -50,6 +61,7 @@ class ProfileGroupInfoFeature {
 
         @Synchronized fun removeProvider() {
             active = false
+            diagnosticLoader = null
             generation.incrementAndGet()
             executor?.shutdownNow()
             executor = null
@@ -57,6 +69,8 @@ class ProfileGroupInfoFeature {
             WeContactHeaderApi.removeProvider(inviterProvider)
             synchronized(cache) { cache.clear() }
             loadingGroups.clear()
+            diagnosticActivity.clear()
+            diagnosticState = ""
         }
         // 仅在资料页请求进群时间时加载当前群，注册 Provider 不触发全群消息扫描。
         @Synchronized private fun scheduleGroup(groupId: String, run: Int = generation.get()) {
@@ -66,11 +80,13 @@ class ProfileGroupInfoFeature {
                 try {
                     if (generation.get() != run) return@Runnable
                     val api = WeChatApis.chatrooms() ?: return@Runnable
+                    api.logNativeJoinGate(diagnosticLoader)
                     val times = api.getMemberJoinTimes(groupId)
                     synchronized(cache) {
                         if (generation.get() != run) return@Runnable
                         cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime())
                     }
+                    HLog.d("[Hchat:profile_group_info] JOIN_DIAG cacheStored group=$groupId size=${times.size} generation=$run")
                     times.keys.forEach { memberId -> WeContactHeaderApi.refreshCurrentProfile(groupId, memberId) }
                 } catch (t: Throwable) {
                     HLog.e("[Hchat:profile_group_info] 群成员进群时间索引失败: $groupId", t)
@@ -109,11 +125,16 @@ class ProfileGroupInfoFeature {
 
         private class JoinTimeProvider : WeContactHeaderApi.Provider {
             override fun getHeaderText(activity: Activity): String? {
-                val (groupId, memberId) = profile(activity) ?: return null
+                val (groupId, memberId) = profile(activity) ?: run {
+                    logDisplay(activity, "state=profile-extras-unavailable")
+                    return null
+                }
                 val enabled = HchatStorage.preferences(activity, ProfileGroupJoinTimeSettings.PREFS_NAME)
                     .getBoolean(ProfileGroupJoinTimeSettings.KEY_ENABLE, ProfileGroupJoinTimeSettings.DEFAULT_ENABLE)
-                if (!enabled) return null
+                if (!enabled) { logDisplay(activity, "state=disabled"); return null }
                 val time = cachedJoinTime(groupId, memberId)
+                val snapshot = synchronized(cache) { cache[groupId] }
+                logDisplay(activity, "groupHash=${groupId.hashCode().toUInt().toString(16)} memberHash=${memberId.hashCode().toUInt().toString(16)} state=${if (time > 0L) "text-returned" else if (snapshot == null) "loading-or-not-ready" else "member-time-missing"} snapshotAt=${snapshot?.loadedAt ?: -1L}")
                 if (time <= 0L) return null
                 val formatted = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(Date(time))
                 return "进群时间：$formatted"
