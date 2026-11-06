@@ -110,6 +110,8 @@ object MentionNoticeSettings {
                 current = current.superclass
             }
         }
+        // Touch feedback is optional: an unsupported host must still generate reminders.
+        MentionNoticeTouchGuard.install(context, resources, renderMethods)
         return found
     }
     fun bind(root: android.view.View, content: String) {

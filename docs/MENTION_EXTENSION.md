@@ -94,3 +94,14 @@
 ## 头像艾特提醒验收与默认颜色
 用户已确认提交 22c385d 的头像艾特提醒实机验收成功。此前段落中的待验收描述保留为历史记录。
 本轮将头像提醒默认颜色改为纯红色 `#FF0000,#FF0000,#FF0000`，沿用三色配置格式；未保存颜色时及恢复默认使用红色，已有自定义颜色保留。新增默认颜色尚待新版实机验收。
+
+## 艾特提醒按压灰底处理
+用户确认提醒文字按下变灰，松手没有跳转。微信 8.0.78 APK 的系统消息布局 `res/layout/w6.xml` 使用 clickable 的 `MMNeat7extView`；系统消息条目 `com.tencent.mm.ui.chatting.viewitems.mn.H` 为内容安装 `com.tencent.mm.pluginsdk.ui.span.y` 与 `y0`。`y.onTouch(View, MotionEvent)` 在 wrapped 文字路径的 DOWN 主动调用内部 TextView.setPressed(true)，UP/CANCEL 恢复 false；Neat 路径还有 span 的 pressed 处理。这是已确认的原生按压入口，静态背景 mc 是透明 shape，不能把灰色归因于静态背景。灰色像素最终绘制位置尚无运行时定位证据。
+
+新增 `MentionNoticeTouchGuard` 在上述具体触摸方法执行前读取当前文字，仅匹配不可见模块标记 `\u2063\u2060\u2063` 或旧前缀 `[艾特提醒] `，清除当前外层控件及内部 TextView 的 pressed 并消费事件，阻止原生按压处理。不删除字符或宿主 Span，不修改监听、背景和父容器，不按“艾特了你”等普通文案模糊匹配。相同 View 复用为普通系统消息时直接透传；关闭开关后解除 Hook，重开独立安装。无行 View 缓存、线程、轮询或滚动监听。
+
+Hook 由现有 FeatureResourceScope 管理，与渲染方法共用安装去重集合。触摸入口定位或 Hook 失败记录阶段、目标描述符和微信版本，保留宿主触摸行为，且不阻止原有提醒生成；触摸处理异常每次安装只报告一次。此策略会同时抑制匹配提醒的原生触摸长按路径；父列表滚动及真实长按表现仍需实机确认。
+
+验证脚本 `scripts/test_mention_notice_touch.py` 编译执行实际生产 Guard，覆盖 DOWN/MOVE/UP/CANCEL、wrapped/直接 TextView、旧前缀、普通消息复用、关闭/销毁/重开、安装幂等、入口缺失、Hook 失败及反射异常限频；另以真实 Android SDK 36 定向编译 Guard，宿主和 Xposed 接口使用桩。回归运行 notice_span_bounds、notice_lifecycle、notice_order、stored_source、notice 与 source_pipeline 六组脚本。七组脚本均以退出码 0 通过，修正最终导入后触摸脚本重跑也通过；这些结果不能替代完整 Android/R8 构建或微信实机验收。
+
+版本证据仅覆盖 8.0.78；默认八版本的横向兼容尚未完成，本次不声明 8.0.49/58/66/68/72/74/76/77 支持。已知本地另有 8.0.76 APK 与 8.0.77 解包资源，但未核准其触摸入口。未运行 Gradle、未生成 APK；实际灰底消除、聊天滑动与长按待新版实机验收。
