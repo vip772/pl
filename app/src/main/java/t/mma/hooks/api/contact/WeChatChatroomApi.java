@@ -372,17 +372,15 @@ public final class WeChatChatroomApi {
     private boolean isMemberJoinSystemMessage(int type, String content, String memberWxId) {
         if (TextUtils.isEmpty(content) || TextUtils.isEmpty(memberWxId)
                 || !content.contains(memberWxId)) return false;
-        String lower = content.toLowerCase(java.util.Locale.ROOT);
-        boolean systemType = WeChatMessageTypes.INSTANCE.isSystem(type)
-                || type == 64 || type == 603979825 || type == 268445456
-                || type == 268445458 || type == 285222674
-                || type == 889192497 || type == 922746929;
-        if (!systemType) return false;
-        return lower.contains("加入") || lower.contains("邀请") || lower.contains("进群")
-                || lower.contains("加入了群聊") || lower.contains("邀请加入")
-                || lower.contains("addchatroommember") || lower.contains("invite")
-                || lower.contains("sysmsgtemplate") || lower.contains("chatroommember")
-                || lower.contains("linkname");
+        // Unknown message types must not supply a claimed join date.
+        // An invitation can mention the inviter, invitees and unrelated users.
+        // Until a structured role has been verified, only accept an explicit
+        // plain-text subject immediately followed by a completed join event.
+        if (type != 10000 && type != 10002) return false;
+        if (content.indexOf('<') >= 0 || content.length() > 16384) return false;
+        String id = java.util.regex.Pattern.quote(memberWxId);
+        return java.util.regex.Pattern.compile("^\\s*[\"'“”‘’]?" + id
+                + "[\"'“”‘’]?\\s*加入了群聊[。.!！]?\\s*$").matcher(content).matches();
     }
 
 

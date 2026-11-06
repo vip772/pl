@@ -37,6 +37,16 @@ public final class NativeJoinTimeTest {
             check(time.getLong(parse.invoke(api, (Object)member(0, invalid, null))) == 0, "invalid native timestamp");
         }
         check(time.getLong(parse.invoke(api, (Object)new byte[]{48, (byte)128})) == 0, "truncated protobuf must not fabricate time");
+        Method join = WeChatChatroomApi.class.getDeclaredMethod("isMemberJoinSystemMessage", int.class, String.class, String.class);
+        join.setAccessible(true);
+        check(!(Boolean)join.invoke(api, 10000, "wxid_inviter 邀请 wxid_joiner", "wxid_inviter"), "inviter action must not become inviter join date");
+        check(!(Boolean)join.invoke(api, 10000, "wxid_joiner 邀请你加入群聊", "wxid_joiner"), "invitation is not a completed join");
+        check(!(Boolean)join.invoke(api, 10002, "<sysmsgtemplate><username>wxid_joiner</username></sysmsgtemplate>", "wxid_joiner"), "template identity without a verified joiner role is insufficient");
+        check(!(Boolean)join.invoke(api, 922746929, "wxid_joiner 加入了群聊", "wxid_joiner"), "app message cannot assert a join event");
+        check(!(Boolean)join.invoke(api, 10000, "wxid_joiner_extra 加入了群聊", "wxid_joiner"), "member ID substring is not an exact identity");
+        check((Boolean)join.invoke(api, 10000, "“wxid_joiner”加入了群聊。", "wxid_joiner"), "explicit completed join subject is accepted");
+        check(!(Boolean)join.invoke(api, 10000, "wxid_joiner 加入了群聊 需要管理员批准", "wxid_joiner"), "trailing qualification cannot assert a completed join");
+        check(!(Boolean)join.invoke(api, 10000, "wxid_inviter 邀请 “wxid_joiner”加入了群聊。", "wxid_inviter"), "invitation actor is excluded from completed join subject");
         Method shape = WeChatChatroomApi.class.getDeclaredMethod("historyShape", String.class);
         shape.setAccessible(true);
         String structure = (String) shape.invoke(null, "<sysmsg><link name='inviter'><username><![CDATA[private_member_id]]></username><nickname>private_name</nickname></link></sysmsg>");

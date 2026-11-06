@@ -3,6 +3,8 @@ import subprocess,tempfile
 repo=Path(__file__).resolve().parents[3]
 lib=Path('/tmp/pl-kotlin-libs');jars=list(lib.glob('*.jar'));stdlib=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
 sources={
+'Recovery.kt':'''package t.mma.hooks.items.profileid
+object JoinTimeRecovery {fun accountKey(l:ClassLoader?)="fixture-account";fun read(l:ClassLoader?,g:String):Map<String,Long> = emptyMap()}''',
  'Clock.kt':'''package android.os
 object SystemClock { @Volatile var now=0L;fun elapsedRealtime()=now }''',
 'Activity.kt':'''package android.app

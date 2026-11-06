@@ -35,6 +35,7 @@ class ProfileGroupInfoFeature {
         @Volatile private var active = false
         @Volatile private var diagnosticLoader: ClassLoader? = null
         private val generation = AtomicInteger(0)
+        private var cacheAccount = ""
         private data class Snapshot(val times: Map<String, Long>, val loadedAt: Long, val complete: Boolean)
         private val cache = object : LinkedHashMap<String, Snapshot>(16, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Snapshot>?): Boolean = size > 32
@@ -74,6 +75,14 @@ class ProfileGroupInfoFeature {
             diagnosticActivity.clear()
             diagnosticState = ""
         }
+        @Synchronized fun stopJoinTime() {
+            generation.incrementAndGet()
+            executor?.shutdownNow()
+            executor = null
+            synchronized(cache) { cache.clear(); cacheAccount = "" }
+            loadingGroups.clear()
+            verifyingGroups.clear()
+        }
         // 仅在资料页请求进群时间时加载当前群，注册 Provider 不触发全群消息扫描。
         @Synchronized private fun scheduleGroup(groupId: String, run: Int = generation.get()) {
             if (!active || groupId.isBlank() || generation.get() != run) return
@@ -85,15 +94,26 @@ class ProfileGroupInfoFeature {
             HLog.d("[Hchat:profile_group_info] JOIN_DIAG schedule group=$groupId generation=$run state=queued")
             val work = Runnable {
                 try {
-                    if (generation.get() != run) return@Runnable
+                    if (generation.get() != run || !active) return@Runnable
+                    val accountAtStart = JoinTimeRecovery.accountKey(diagnosticLoader)
                     val api = WeChatApis.chatrooms() ?: run {
                         HLog.d("[Hchat:profile_group_info] JOIN_DIAG query group=$groupId state=api-unavailable")
                         return@Runnable
                     }
                     api.logNativeJoinGate(diagnosticLoader)
-                    val times = api.getMemberJoinTimes(groupId)
+                    val times = HashMap(api.getMemberJoinTimes(groupId))
                     synchronized(cache) {
-                        if (generation.get() != run) return@Runnable
+                        if (generation.get() != run || accountAtStart.isBlank() ||
+                            accountAtStart != JoinTimeRecovery.accountKey(diagnosticLoader)) return@Runnable
+                        cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), api.isJoinTimeResultComplete(times))
+                    }
+                    WeContactHeaderApi.refreshCurrentGroupProfile(groupId)
+                    val recovered = JoinTimeRecovery.read(diagnosticLoader, groupId)
+                    if (recovered.isEmpty()) return@Runnable
+                    times.putAll(recovered)
+                    synchronized(cache) {
+                        if (generation.get() != run || accountAtStart.isBlank() ||
+                            accountAtStart != JoinTimeRecovery.accountKey(diagnosticLoader)) return@Runnable
                         cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), api.isJoinTimeResultComplete(times))
                     }
                     HLog.d("[Hchat:profile_group_info] JOIN_DIAG cacheStored group=$groupId size=${times.size} generation=$run complete=${api.isJoinTimeResultComplete(times)}")
@@ -139,6 +159,16 @@ class ProfileGroupInfoFeature {
         }
 
         private fun cachedJoinTime(groupId: String, memberId: String): Long {
+            val self = JoinTimeRecovery.accountKey(diagnosticLoader)
+            synchronized(cache) {
+                if (self != cacheAccount) {
+                    generation.incrementAndGet()
+                    cache.clear()
+                    loadingGroups.clear()
+                    cacheAccount = self
+                }
+            }
+            if (self.isBlank()) return 0L
             val snapshot = synchronized(cache) { cache[groupId] }
             // Retry incomplete reads as well as missing members; successful native writes invalidate snapshots.
             if (snapshot == null || ((!snapshot.complete || snapshot.times[memberId] == null) &&

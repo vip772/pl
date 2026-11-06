@@ -81,6 +81,8 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
             joinPrefs, setOf(ProfileGroupJoinTimeSettings.KEY_ENABLE),
             enabled = { joinPrefs.getBoolean(ProfileGroupJoinTimeSettings.KEY_ENABLE, ProfileGroupJoinTimeSettings.DEFAULT_ENABLE) },
             create = { resources ->
+                resources.register { JoinTimeRecovery.close(); ProfileGroupInfoFeature.stopJoinTime() }
+                JoinTimeRecovery.open()
                 resources.register { JoinTimeNativeDiagnostics.close() }
                 JoinTimeNativeDiagnostics.install(context.hostClassLoader()) { groupId, eventId, expectedHash ->
                     ProfileGroupInfoFeature.nativeWriteCompleted(groupId, eventId, expectedHash)
