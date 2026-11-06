@@ -315,20 +315,28 @@ public final class WeChatDatabaseApi {
     }
 
     public List<String> messageTables() {
-        List<String> cached = messageTables;
+        return messageTables(false);
+    }
+
+    /** Refresh only for callers that need partitions created since the last lookup. */
+    public List<String> messageTables(boolean refresh) {
+        List<String> cached = refresh ? null : messageTables;
         if (cached != null) return cached;
         if (!ensureReady()) return new ArrayList<>();
         synchronized (this) {
-            if (messageTables != null) return messageTables;
+            if (!refresh && messageTables != null) return messageTables;
             List<String> result = new ArrayList<>();
-            for (Map<String, Object> row : query(
-                    "SELECT name FROM sqlite_master WHERE type='table' "
-                            + "AND name NOT LIKE 'sqlite_%'",
-                    null)) {
-                String table = stringValue(row, "name");
-                if (isLikelyMessageTable(table)) {
-                    result.add(table);
-                }
+            List<String> names = new ArrayList<>();
+            try (Cursor cursor = rawQuery("SELECT name FROM sqlite_master WHERE type='table' "
+                    + "AND name NOT LIKE 'sqlite_%'", null)) {
+                if (cursor == null) throw new IllegalStateException("message table discovery unavailable");
+                int column = cursor.getColumnIndexOrThrow("name");
+                while (cursor.moveToNext()) names.add(cursor.getString(column));
+            }
+            for (String table : names) {
+                if (Thread.currentThread().isInterrupted()) throw new IllegalStateException("message table discovery cancelled");
+                // Known tables were already checked; inspect only newly created tables.
+                if ((messageTables != null && messageTables.contains(table)) || isLikelyMessageTable(table)) result.add(table);
             }
             messageTables = result;
             return result;

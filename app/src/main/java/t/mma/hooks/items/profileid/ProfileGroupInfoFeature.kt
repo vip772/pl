@@ -8,18 +8,17 @@ import t.mma.preferences.HchatStorage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.Collections
-import java.util.HashMap
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.atomic.AtomicInteger
+import android.os.SystemClock
 
 class ProfileGroupInfoFeature {
     companion object {
         private val joinTimeProvider = JoinTimeProvider()
         private val inviterProvider = InviterProvider()
-@Volatile private var executor: ExecutorService? = null
+        @Volatile private var executor: ExecutorService? = null
 
         private fun executor(): ExecutorService {
             val current = executor
@@ -32,55 +31,65 @@ class ProfileGroupInfoFeature {
                     }.also { executor = it }
             }
         }
+        @Volatile private var active = false
         private val generation = AtomicInteger(0)
-        private val cache = ConcurrentHashMap<String, Map<String, Long>>()
-        private val loadedGroups = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
-        private val loadingGroups = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+        private data class Snapshot(val times: Map<String, Long>, val loadedAt: Long)
+        private val cache = object : LinkedHashMap<String, Snapshot>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Snapshot>?): Boolean = size > 32
+        }
+        private val loadingGroups = ConcurrentHashMap<String, Int>()
+        private const val REFRESH_MS = 15_000L
 
-        fun installProvider() {
+        @Synchronized fun installProvider() {
+            if (active) return
+            active = true
             generation.incrementAndGet()
             WeContactHeaderApi.addProvider(joinTimeProvider)
             WeContactHeaderApi.addProvider(inviterProvider)
         }
 
-        fun removeProvider() {
+        @Synchronized fun removeProvider() {
+            active = false
             generation.incrementAndGet()
             executor?.shutdownNow()
             executor = null
             WeContactHeaderApi.removeProvider(joinTimeProvider)
             WeContactHeaderApi.removeProvider(inviterProvider)
-            cache.clear()
-            loadedGroups.clear()
+            synchronized(cache) { cache.clear() }
             loadingGroups.clear()
         }
         // 仅在资料页请求进群时间时加载当前群，注册 Provider 不触发全群消息扫描。
-        private fun scheduleGroup(groupId: String, run: Int = generation.get()) {
-            if (groupId.isBlank() || generation.get() != run
-                || loadedGroups.contains(groupId) || !loadingGroups.add(groupId)) return
-            executor().execute {
+        @Synchronized private fun scheduleGroup(groupId: String, run: Int = generation.get()) {
+            if (!active || groupId.isBlank() || generation.get() != run || loadingGroups.size >= 32 ||
+                loadingGroups.putIfAbsent(groupId, run) != null) return
+            val work = Runnable {
                 try {
-                    val times = WeChatApis.chatrooms()?.getMemberJoinTimes(groupId).orEmpty()
-                    if (generation.get() != run) return@execute
-                    cache[groupId] = HashMap(times)
-                    loadedGroups.add(groupId)
-                    times.keys.forEach { memberId ->
-                        WeContactHeaderApi.refreshCurrentProfile(groupId, memberId)
+                    if (generation.get() != run) return@Runnable
+                    val api = WeChatApis.chatrooms() ?: return@Runnable
+                    val times = api.getMemberJoinTimes(groupId)
+                    synchronized(cache) {
+                        if (generation.get() != run) return@Runnable
+                        cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime())
                     }
+                    times.keys.forEach { memberId -> WeContactHeaderApi.refreshCurrentProfile(groupId, memberId) }
                 } catch (t: Throwable) {
                     HLog.e("[Hchat:profile_group_info] 群成员进群时间索引失败: $groupId", t)
                 } finally {
-                    loadingGroups.remove(groupId)
+                    loadingGroups.remove(groupId, run)
                 }
+            }
+            try { executor().execute(work) } catch (t: Throwable) {
+                loadingGroups.remove(groupId, run)
+                HLog.e("[Hchat:profile_group_info] 群成员进群时间任务未接收: $groupId", t)
             }
         }
 
         private fun cachedJoinTime(groupId: String, memberId: String): Long {
-            val groupCache = cache[groupId]
-            if (groupCache == null) {
-                scheduleGroup(groupId)
-                return 0L
-            }
-            return groupCache[memberId] ?: 0L
+            val snapshot = synchronized(cache) { cache[groupId] }
+            // Existing historical hits are stable; only missing members require a refreshed scan.
+            if (snapshot == null || (snapshot.times[memberId] == null &&
+                    SystemClock.elapsedRealtime() - snapshot.loadedAt >= REFRESH_MS)) scheduleGroup(groupId)
+            return snapshot?.times?.get(memberId) ?: 0L
         }
 
         private fun profile(activity: Activity): Pair<String, String>? {
@@ -91,6 +100,7 @@ class ProfileGroupInfoFeature {
             val memberId = intent.getStringExtra("room_member")
                 ?: intent.getStringExtra("Contact_User")
                 ?: intent.getStringExtra("Chat_User")
+                ?: intent.getStringExtra("Contact_Username")
                 ?: return null
             if ((!groupId.endsWith("@chatroom") && !groupId.endsWith("@im.chatroom")) ||
                 memberId.isBlank() || memberId == groupId) return null

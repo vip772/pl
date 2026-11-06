@@ -1,6 +1,7 @@
 package t.mma.hooks.api.contact;
 
 import android.text.TextUtils;
+import android.database.Cursor;
 
 import t.mma.dexkit.DexFinder;
 import t.mma.hooks.api.model.WeChatChatroom;
@@ -175,36 +176,49 @@ public final class WeChatChatroomApi {
     public Map<String, Long> getMemberJoinTimes(String chatroomId) {
         Map<String, Long> result = new LinkedHashMap<>();
         if (TextUtils.isEmpty(chatroomId) || databaseApi == null) return result;
-        Map<String, RoomDataMember> members = getRoomDataMembers(chatroomId);
-        if (members.isEmpty()) return result;
+        // roomdata is not a join-time source and may lag behind memberlist in new groups.
+        java.util.Set<String> members = new java.util.LinkedHashSet<>(getMemberIds(chatroomId));
+        WeChatChatroom room = getChatroom(chatroomId);
+        if (room != null) members.addAll(room.memberIds);
+        members.addAll(getRoomDataMembers(chatroomId).keySet());
+        if (members.isEmpty()) {
+            log("群成员进群时间暂不可查: group=" + chatroomId + " reason=member-list-empty");
+            return result;
+        }
         try {
             List<String> tables = new ArrayList<>();
             String mapped = databaseApi.messageTableForTalker(chatroomId);
             if (!TextUtils.isEmpty(mapped)) tables.add(mapped);
-            for (String table : databaseApi.messageTables()) {
+            for (String table : databaseApi.messageTables(true)) {
                 if (!tables.contains(table)) tables.add(table);
             }
             for (String table : tables) {
                 String quoted = databaseApi.quoteTable(table);
                 if (TextUtils.isEmpty(quoted)) continue;
-                List<Map<String, Object>> rows = databaseApi.query(
+                // Stream all matching records: a fixed oldest-20000 limit permanently
+                // loses recent joins in active groups, while materializing them wastes memory.
+                try (Cursor cursor = databaseApi.rawQuery(
                         "SELECT type, createTime, content FROM " + quoted
                                 + " WHERE talker=? AND (type=? OR type=? OR type=? OR type=?"
                                 + " OR type=? OR type=? OR type=? OR type=? OR type=?)"
-                                + " ORDER BY createTime ASC LIMIT 20000",
+                                + " ORDER BY createTime ASC",
                         new String[]{chatroomId, "10000", "10002", "64", "603979825",
-                                "268445456", "268445458", "285222674", "889192497", "922746929"});
-                for (Map<String, Object> row : rows) {
-                    String content = str(row, "content");
-                    int type = (int) number(row, "type");
-                    long time = number(row, "createTime");
-                    long millis = time < 100000000000L ? time * 1000L : time;
-                    if (millis <= 0L) continue;
-                    for (String memberWxId : members.keySet()) {
-                        if (!isMemberJoinSystemMessage(type, content, memberWxId)) continue;
-                        Long previous = result.get(memberWxId);
-                        if (previous == null || millis < previous) {
-                            result.put(memberWxId, millis);
+                                "268445456", "268445458", "285222674", "889192497", "922746929"})) {
+                    if (cursor == null) throw new IllegalStateException("join-time cursor unavailable: " + table);
+                    int contentColumn = cursor.getColumnIndexOrThrow("content");
+                    int typeColumn = cursor.getColumnIndexOrThrow("type");
+                    int timeColumn = cursor.getColumnIndexOrThrow("createTime");
+                    while (cursor.moveToNext()) {
+                        if (Thread.currentThread().isInterrupted()) throw new IllegalStateException("join-time query cancelled");
+                        String content = cursor.getString(contentColumn);
+                        int type = cursor.getInt(typeColumn);
+                        long time = cursor.getLong(timeColumn);
+                        long millis = time < 100000000000L ? time * 1000L : time;
+                        if (millis <= 0L) continue;
+                        for (String memberWxId : members) {
+                            if (!isMemberJoinSystemMessage(type, content, memberWxId)) continue;
+                            Long previous = result.get(memberWxId);
+                            if (previous == null || millis < previous) result.put(memberWxId, millis);
                         }
                     }
                 }
@@ -214,50 +228,17 @@ public final class WeChatChatroomApi {
                     + " hits=" + result.size());
         } catch (Throwable e) {
             log("建立群成员进群时间索引失败: group=" + chatroomId + " " + e.getMessage());
+            throw new IllegalStateException("群成员进群时间查询失败", e);
         }
         return result;
     }
 
     /** Returns the persisted join-event time from the group's system messages, or zero when unavailable. */
     public long getMemberJoinTime(String chatroomId, String memberWxId) {
-        if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId) || databaseApi == null) return 0L;
-        try {
-            List<String> tables = new ArrayList<>();
-            String mapped = databaseApi.messageTableForTalker(chatroomId);
-            if (!TextUtils.isEmpty(mapped)) tables.add(mapped);
-            for (String table : databaseApi.messageTables()) {
-                if (!tables.contains(table)) tables.add(table);
-            }
-            long best = 0L;
-            for (String table : tables) {
-                String quoted = databaseApi.quoteTable(table);
-                if (TextUtils.isEmpty(quoted)) continue;
-                // The join event is not a roomdata field. It is a system message,
-                // but WeChat has used several raw system-message type values and
-                // the XML may contain only username attributes rather than Chinese text.
-                List<Map<String, Object>> rows = databaseApi.query(
-                        "SELECT type, createTime, content FROM " + quoted
-                                + " WHERE content LIKE ? ORDER BY createTime ASC LIMIT 20000",
-                        new String[]{"%" + memberWxId + "%"});
-                for (Map<String, Object> row : rows) {
-                    String content = str(row, "content");
-                    int type = (int) number(row, "type");
-                    if (!isMemberJoinSystemMessage(type, content, memberWxId)) continue;
-                    long time = number(row, "createTime");
-                    long millis = time < 100000000000L ? time * 1000L : time;
-                    if (millis > 0L && (best == 0L || millis < best)) best = millis;
-                }
-            }
-            log("群成员进群时间查询: group=" + chatroomId + " member=" + memberWxId
-                    + " tables=" + tables.size() + " result=" + best);
-            return best;
-        } catch (Throwable e) {
-            log("查询群成员进群时间失败: group=" + chatroomId + " member=" + memberWxId
-                    + " " + e.getMessage());
-            return 0L;
-        }
+        if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId)) return 0L;
+        Long time = getMemberJoinTimes(chatroomId).get(memberWxId);
+        return time != null ? time : 0L;
     }
-
     private static long number(Map<String, Object> row, String key) {
         Object value = row != null ? row.get(key) : null;
         if (value instanceof Number) return ((Number) value).longValue();

@@ -7,6 +7,7 @@ assert all(p.exists() for p in cp),'Missing SDK/ABI; never run Gradle'
 cp+=list(Path('/root/.gradle/caches/modules-2/files-2.1').glob('*/*/*/*/*.jar'))+list(Path('/root/.gradle/caches').glob('*/transforms/*/transformed/*/jars/classes.jar'))+list(libs.glob('*.jar'))
 src=r/'app/src/main/java/t/mma'
 sources=list((src/'hooks/items/profileid').glob('*.kt'))
+sources += [src/'hooks/api/contact/WeChatChatroomApi.java', src/'hooks/api/runtime/WeChatDatabaseApi.java']
 sources += [src/'hooks/core'/n for n in ['BaseFeature.kt','Feature.kt','FeatureContext.kt','FeatureResourceScope.kt','PreferenceRuntimeOwner.kt','DexInstallScheduler.kt','HookRegistry.kt']]
 sources += [src/'hooks/api/contact/WeContactHeaderApi.kt', src/'dexkit/DexKitBridgeManager.java',src/'dexkit/DexMethodCache.kt']
 sources += [src/'hooks/items/realtail/BeforeTransferNameQuery.kt',src/'hooks/core/FeatureOwnership.kt',src/'hooks/api/runtime/WeChatTaskApi.kt',src/'hooks/api/net/WeChatNetworkApi.kt']
@@ -18,4 +19,9 @@ with tempfile.TemporaryDirectory(prefix='profile-runtime-sdk-') as td:
  result=subprocess.run(cmd,capture_output=True,text=True,timeout=55)
  print(result.stdout,end='');print(result.stderr,end='')
  if result.returncode:raise SystemExit(result.returncode)
-print('PASS profile package + current header API/core SDK compile; existing project ABI and UI registry fixture; no Gradle/APK/device')
+ # Compile modified Java against current Kotlin output without compiling unrelated sources.
+ java_cmd=['javac','-proc:none','--release','17','-sourcepath',str(p/'empty-source'),'-classpath',str(p/'out')+':'+':'.join(map(str,cp)),'-d',str(p/'java-out'),str(src/'hooks/api/contact/WeChatChatroomApi.java'),str(src/'hooks/api/runtime/WeChatDatabaseApi.java')]
+ result=subprocess.run(java_cmd,capture_output=True,text=True,timeout=55)
+ print(result.stdout,end='');print(result.stderr,end='')
+ if result.returncode:raise SystemExit(result.returncode)
+print('PASS profile Kotlin + chatroom Java SDK compile; existing ABI and UI registry fixture; no Gradle/APK/device')

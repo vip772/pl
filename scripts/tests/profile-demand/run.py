@@ -3,6 +3,8 @@ import subprocess,tempfile
 repo=Path(__file__).resolve().parents[3]
 lib=Path('/tmp/pl-kotlin-libs');jars=list(lib.glob('*.jar'));stdlib=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
 sources={
+ 'Clock.kt':'''package android.os
+object SystemClock { @Volatile var now=0L;fun elapsedRealtime()=now }''',
 'Activity.kt':'''package android.app
 open class Activity {val intent=Intent()}
 class Intent {fun getStringExtra(k:String):String?= when(k){"Contact_ChatRoomId"->"group@chatroom";"Contact_User"->"member";else->null}}
@@ -30,8 +32,9 @@ object WeContactHeaderApi {
 object WeChatApis {val api=Rooms();fun chatrooms()=api}
 class Rooms {
  @Volatile var calls=0
+ @Volatile var result:Map<String,Long> = emptyMap()
  val started=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
- fun getMemberJoinTimes(g:String):Map<String,Long>{calls++;started.countDown();check(release.await(3,java.util.concurrent.TimeUnit.SECONDS));return mapOf("member" to 1700000000000L)}
+ fun getMemberJoinTimes(g:String):Map<String,Long>{calls++;started.countDown();check(release.await(3,java.util.concurrent.TimeUnit.SECONDS));return result}
  fun getMemberInviter(g:String,m:String)=""
  fun getMemberDisplayName(g:String,m:String)=""
 }
@@ -49,11 +52,17 @@ fun main(){
  check(WeChatApis.api.started.await(3,java.util.concurrent.TimeUnit.SECONDS))
  repeat(20){check(p.getHeaderText(a)==null)};check(WeChatApis.api.calls==1)
  WeChatApis.api.release.countDown()
- val end=System.nanoTime()+3000000000L
- while(Header.refreshes==0 && System.nanoTime()<end) Thread.yield()
- check(Header.refreshes==1);check(p.getHeaderText(a)?.startsWith("进群时间：")==true);check(WeChatApis.api.calls==1)
+ Thread.sleep(100)
+ check(p.getHeaderText(a)==null);check(WeChatApis.api.calls==1)
+ WeChatApis.api.result=mapOf("member" to 1700000000000L)
+ android.os.SystemClock.now=15_001
+ p.getHeaderText(a)
+ val retryEnd=System.nanoTime()+3000000000L
+ while(Header.refreshes==0 && System.nanoTime()<retryEnd) Thread.yield()
+ check(Header.refreshes==1);check(p.getHeaderText(a)?.startsWith("进群时间：")==true);check(WeChatApis.api.calls==2)
+ repeat(20){p.getHeaderText(a)};check(WeChatApis.api.calls==2)
  ProfileGroupInfoFeature.removeProvider();check(Header.providers.isEmpty())
- println("PASS: 注册不查群、关闭不加载、当前群后台加载、并发去重、完成刷新与缓存命中、销毁清理")
+ println("PASS: no startup scan, disabled no load, background dedup, empty snapshot expiry and new-member refresh, cooldown, teardown")
 }
 '''}
 with tempfile.TemporaryDirectory() as d:
