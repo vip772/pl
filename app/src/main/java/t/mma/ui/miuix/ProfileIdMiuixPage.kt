@@ -143,7 +143,7 @@ private fun ProfileGradientSetting(
         if (enabled) {
             if (prefixKey != null) {
                 InsetDivider()
-                InputRow("自定义前缀文本", "留空使用默认：＊＊", prefix) { value ->
+                InputRow("自定义前缀文本", "留空使用默认：${ProfileRealNameTailSettings.DEFAULT_PREFIX}", prefix) { value ->
                     prefix = value
                     prefs.edit().putString(prefixKey, value).apply()
                 }

@@ -61,12 +61,13 @@ with tempfile.TemporaryDirectory(prefix='profile-display-') as directory:
     print('PASS: exact production three-stop shader method compiled against Android SDK')
     (temp / 'Check.kt').write_text('''import t.mma.hooks.items.profileid.*
 fun main() {
+ check(ProfileRealNameTailSettings.headerText("**东", "＊＊") == "实名尾字：＊＊东")
  check(!ProfileRealNameTailSettings.DEFAULT_ENABLE)
- check(ProfileRealNameTailSettings.headerText("**东", "") == "实名尾字：＊＊东")
+ check(ProfileRealNameTailSettings.headerText("**东", "") == "实名尾字：可能是个东")
  check(ProfileRealNameTailSettings.headerText("**东", "小") == "实名尾字：小东")
  check(ProfileRealNameTailSettings.headerText("", "小") == "实名尾字：未知")
  check(ProfileRealNameTailSettings.headerText("＊＊", null) == "实名尾字：未知")
- check(ProfileRealNameTailSettings.headerText("**𠮷", null) == "实名尾字：＊＊𠮷")
+ check(ProfileRealNameTailSettings.headerText("**𠮷", null) == "实名尾字：可能是个𠮷")
  val values = listOf("#112233", "#112233,#445566", "#112233,#445566,#778899")
  for (value in values) {
   check(ProfileGroupJoinTimeSettings.cleanColorSpec(value) == value)

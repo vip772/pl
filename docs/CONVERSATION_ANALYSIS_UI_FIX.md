@@ -31,6 +31,6 @@
 
 AI 接口设置图标改为八齿连续齿轮轮廓，中心保留圆孔，点击入口与设置弹窗保持原样。图标继续使用 Canvas 绘制，不依赖字体或 emoji。
 
-关注内容区域独立为 ConversationAnalysisFocusInput：原提示从输入框 hint 分离成 12sp 单行提示，窄屏可在 8–12sp 范围内适配。输入文字保持 15sp，输入框至少一行、最小 48dp，启用多行换行并使用 WRAP_CONTENT 随内容增高。圆角描边使用红、粉、紫三色水平渐变，深色主题使用较亮描边与深色底色，浅色主题使用浅底与深色文字。渐变 Shader 仅在边界变化时重建，不在每帧创建位图或绘制对象。
+关注内容区域独立为 ConversationAnalysisFocusInput：提示使用框内 Android 原生 hint，空内容时显示、输入后隐藏、清空后恢复。提示独立使用 12sp，按实际可用宽度单行显示，超出时尾部省略；输入文字保持 15sp。输入框最小 48dp，多行换行并使用 WRAP_CONTENT 随内容增高。内部不绘制填充，保持透明；保留红粉紫渐变圆角描边，文字、提示和描边颜色跟随深浅主题。Shader 仅在边界变化时重建。
 
 检查：`python scripts/check_analysis_focus_sdk.py` 已通过真实 Android SDK 定向编译及布局接线静态检查；`test_analysis_ui_icons_layout.py`、`test_analysis_api_config.py`、`test_analysis_generation.py` 回归通过。没有运行 Gradle、生成 APK 或进行实机界面验收。关注内容仍沿用既有输入行为，本次不修改模型请求或生成链路。

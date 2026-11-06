@@ -419,7 +419,7 @@ fun main(args:Array<String>){
  check(!tailPrefs.getBoolean("enabled",false))
  Store.runtimePreferences(tail,"Hchat_feature_real_name_tail_runtime").edit().putString("pending","wxid_test").commit()
  val tailZip=File(base,"profile-tail.zip")
- for (prefix in listOf("", "小", "＊＊")) {
+ for (prefix in listOf("", "小", "可能是个", "＊＊")) {
   for (enabled in listOf(false,true)) {
    tailPrefs.edit().putBoolean("enabled",enabled).putString("prefix",prefix).putString("color","#112233,#445566,#778899").commit()
    HchatConfigBackup.exportToUri(tail,Uri(tailZip))

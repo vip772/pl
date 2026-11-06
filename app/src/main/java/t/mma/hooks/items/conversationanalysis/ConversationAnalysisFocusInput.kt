@@ -12,14 +12,17 @@ import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.drawable.Drawable
 import android.text.InputType
-import android.util.TypedValue
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.TextPaint
+import android.text.TextUtils
+import android.text.style.AbsoluteSizeSpan
 import android.view.Gravity
 import android.view.ViewGroup
 import android.widget.EditText
 import android.widget.LinearLayout
-import android.widget.TextView
 
-/** A compact single-line prompt above a content-sized editor. Uses the host night theme. */
+/** Native hint visibility with a transparent, content-sized editor and themed border. */
 internal object ConversationAnalysisFocusInput {
     fun create(context: Context): LinearLayout {
         val dark = context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
@@ -27,19 +30,10 @@ internal object ConversationAnalysisFocusInput {
         fun dp(value: Float): Int = (value * context.resources.displayMetrics.density + .5f).toInt()
         return LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
-            val prompt = TextView(context).apply {
-                text = "（可选）让 AI 重点关注什么？例如：大家聊了吃的吗"
-                textSize = 12f
-                setTextColor(if (dark) 0xffbdb4c5.toInt() else 0xff746a79.toInt())
-                setSingleLine(true)
-                // Keep the complete prompt on narrow screens and with larger system fonts.
-                setAutoSizeTextTypeUniformWithConfiguration(8, 12, 1, TypedValue.COMPLEX_UNIT_SP)
-                gravity = Gravity.START or Gravity.CENTER_VERTICAL
-            }
-            addView(prompt, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(30f)))
-            val editor = EditText(context).apply {
+            val editor = FocusEditor(context).apply {
                 contentDescription = "AI总结关注内容（可选）"
                 textSize = 15f
+                setHintTextColor(if (dark) 0xffbdb4c5.toInt() else 0xff746a79.toInt())
                 setTextColor(if (dark) 0xfff4edf7.toInt() else 0xff302737.toInt())
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or
                     InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
@@ -54,14 +48,29 @@ internal object ConversationAnalysisFocusInput {
         }
     }
 
+    /** Android hides the hint on input; size it separately without shrinking entered text. */
+    private class FocusEditor(context: Context) : EditText(context) {
+        private val prompt = "（可选）让 AI 重点关注什么？例如：大家聊了吃的吗"
+        private val hintPaint = TextPaint(paint).apply {
+            textSize = 12f * resources.displayMetrics.scaledDensity
+        }
+
+        override fun onSizeChanged(width: Int, height: Int, oldWidth: Int, oldHeight: Int) {
+            super.onSizeChanged(width, height, oldWidth, oldHeight)
+            if (width == oldWidth && hint != null) return
+            val available = (width - compoundPaddingLeft - compoundPaddingRight).coerceAtLeast(0)
+            val display = TextUtils.ellipsize(prompt, hintPaint, available.toFloat(), TextUtils.TruncateAt.END)
+            hint = SpannableString(display).apply {
+                setSpan(AbsoluteSizeSpan(hintPaint.textSize.toInt()), 0, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+        }
+    }
+
     /** Rebuild the shader only when bounds change; no bitmaps, layers, or draw-time allocation. */
     private class FocusBorder(density: Float, dark: Boolean) : Drawable() {
         private val radius = 14f * density
         private val strokeWidth = 1.5f * density
         private val shape = RectF()
-        private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = if (dark) 0xff29232e.toInt() else 0xfffffbff.toInt()
-        }
         private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
             this.strokeWidth = this@FocusBorder.strokeWidth
@@ -79,18 +88,15 @@ internal object ConversationAnalysisFocusInput {
         }
 
         override fun draw(canvas: Canvas) {
-            canvas.drawRoundRect(shape, radius, radius, fill)
             canvas.drawRoundRect(shape, radius, radius, stroke)
         }
 
         override fun setAlpha(alpha: Int) {
-            fill.alpha = alpha
             stroke.alpha = alpha
             invalidateSelf()
         }
 
         override fun setColorFilter(colorFilter: ColorFilter?) {
-            fill.colorFilter = colorFilter
             stroke.colorFilter = colorFilter
             invalidateSelf()
         }

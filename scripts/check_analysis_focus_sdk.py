@@ -25,10 +25,12 @@ report = (BASE / 'ConversationAnalysisReportDialog.kt').read_text()
 focus = (BASE / 'ConversationAnalysisFocusInput.kt').read_text()
 assert 'ConversationAnalysisFocusInput.create(activity)' in report
 assert 'content.addView(focusInput, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))' in report
-assert 'setSingleLine(true)' in focus and 'setAutoSizeTextTypeUniformWithConfiguration(8, 12, 1' in focus
+assert 'hint = SpannableString(display)' in focus and 'TextUtils.ellipsize(prompt' in focus
+assert 'private val fill' not in focus and 'drawRoundRect(shape, radius, radius, fill)' not in focus
+assert 'setHintTextColor' in focus and 'AbsoluteSizeSpan' in focus
 assert 'InputType.TYPE_TEXT_FLAG_MULTI_LINE' in focus
 assert 'setHorizontallyScrolling(false)' in focus
 assert 'addView(editor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))' in focus
 assert 'Configuration.UI_MODE_NIGHT_YES' in focus
 assert 'override fun onBoundsChange' in focus and 'LinearGradient(' in focus
-print('PASS static contracts: single-line compact prompt, content-sized multiline editor, theme colors, bounds-based gradient')
+print('PASS static contracts: native single-line hint, transparent fill, content-sized multiline editor, theme colors, bounds-based gradient')

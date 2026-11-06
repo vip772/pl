@@ -6,7 +6,7 @@ object ProfileRealNameTailSettings {
     const val KEY_PREFIX = "prefix"
     const val KEY_COLOR = "color"
     const val DEFAULT_ENABLE = false
-    const val DEFAULT_PREFIX = "＊＊"
+    const val DEFAULT_PREFIX = "可能是个"
     const val DEFAULT_COLOR = "#FF000000,#FF000000,#FF000000"
 
     fun prefix(value: String?): String = value.orEmpty().trim().ifEmpty { DEFAULT_PREFIX }
