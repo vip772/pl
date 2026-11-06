@@ -82,7 +82,9 @@ class HchatExtraFeature : BaseFeature() {
     @Throws(Throwable::class)
     override fun onFeatureInstall(context: FeatureContext) {
         val prefs = HchatStorage.preferences(context.hostContext(), HchatExtraSettings.PREFS_NAME)
-        // 只把四个启用开关当作重启边界：改颜色/格式/间距走 hooker 内部偏好监听，不做整代重装。
+        val recallPrefs = HchatStorage.preferences(context.hostContext(),
+            t.mma.hooks.items.antirecall.AntiRecallSettings.PREFS_NAME)
+        // Recall visuals share the chat binder but have their own enable dependency.
         val enableKeys = setOf(
             HchatExtraSettings.KEY_MESSAGE_DETAILS,
             HchatExtraSettings.KEY_RED_PACKET_DETAILS,
@@ -92,7 +94,8 @@ class HchatExtraFeature : BaseFeature() {
         val owner = PreferenceRuntimeOwner(
             prefs,
             enableKeys,
-            enabled = { enableKeys.any { prefs.getBoolean(it, false) } },
+            enabled = { enableKeys.any { prefs.getBoolean(it, false) } ||
+                recallPrefs.getBoolean(t.mma.hooks.items.antirecall.AntiRecallSettings.KEY_ENABLE, false) },
             create = { resources ->
                 val created = HchatExtraRuntime(context) { message, error -> logError(message, error) }
                 runtime = created
@@ -110,6 +113,13 @@ class HchatExtraFeature : BaseFeature() {
             restartOnChange = true
         )
         trackResource { owner.close() }
+        val recallListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == null || key == t.mma.hooks.items.antirecall.AntiRecallSettings.KEY_ENABLE) {
+                owner.refresh()
+            }
+        }
+        recallPrefs.registerOnSharedPreferenceChangeListener(recallListener)
+        trackResource { recallPrefs.unregisterOnSharedPreferenceChangeListener(recallListener) }
         owner.start()
         subscribe(Events.DexReady::class.java) {
             owner.refresh()
@@ -832,12 +842,15 @@ private class HchatExtraHooker(
         dynamicRecall.bind(root, talker, id, serverId, isSelf) {
             val parent = root as? ViewGroup
             if (parent == null) null else {
-                holderCardContainer(holder, parent)
-                    ?.takeIf { it.visibility == View.VISIBLE && it.width > 0 && it.height > 0 }
-                    ?: holderMainContentView(holder, parent)
-                        ?.takeIf { hasMessageSizedBounds(it, parent) }
+                val clickArea = findHolderView(holder, "clickArea", holderClickAreaFieldCache)
+                clickArea?.takeIf {
+                    it.visibility == View.VISIBLE && it.height > 0 && hasMessageSizedBounds(it, parent)
+                } ?: holderMainContentView(holder, parent)
+                    ?.takeIf { it.visibility == View.VISIBLE && it.height > 0 && hasMessageSizedBounds(it, parent) }
+                    ?: holderCardContainer(holder, parent)
+                        ?.takeIf { it.visibility == View.VISIBLE && it.height > 0 && hasMessageSizedBounds(it, parent) }
                     ?: messageContentView(holder, parent)
-                        ?.takeIf { hasMessageSizedBounds(it, parent) }
+                        ?.takeIf { it.visibility == View.VISIBLE && it.height > 0 && hasMessageSizedBounds(it, parent) }
             }
         }
     }

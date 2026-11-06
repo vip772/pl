@@ -146,11 +146,22 @@ internal class DynamicRecallRuntime(private val context: Context) {
         private val rootLocation = IntArray(2)
         private val contentLocation = IntArray(2)
         private val body = RectF()
-        private val path = Path()
+        private val path = Path().apply {
+            moveTo(.37f, .22f); lineTo(.37f, .12f)
+            lineTo(.63f, .12f); lineTo(.63f, .22f)
+        }
         private var iconLeft = 0f
         private var iconTop = 0f
         private var iconSize = 0f
+        private var content: View? = null
+        private var outgoing = false
         fun update(content: View, isSelf: Boolean) {
+            this.content = content
+            outgoing = isSelf
+            updatePosition(content, isSelf)
+            invalidateSelf()
+        }
+        private fun updatePosition(content: View, isSelf: Boolean) {
             setBounds(0, 0, root.width, root.height)
             val density = root.resources.displayMetrics.density
             iconSize = minOf(18f * density, root.width.toFloat(), content.height.toFloat())
@@ -167,13 +178,12 @@ internal class DynamicRecallRuntime(private val context: Context) {
                 .coerceIn(0f, maxOf(0f, root.height - iconSize))
             paint.strokeWidth = 1.6f * density
             body.set(.25f, .31f, .75f, .88f)
-            path.reset()
-            path.moveTo(.37f, .22f); path.lineTo(.37f, .12f)
-            path.lineTo(.63f, .12f); path.lineTo(.63f, .22f)
-            invalidateSelf()
         }
         override fun draw(canvas: Canvas) {
-            if (!enabled() || !markerEnabled() || !root.isShown || iconSize <= 0f) return
+            val current = content ?: return
+            if (!enabled() || !markerEnabled() || !root.isShown || !current.isShown) return
+            updatePosition(current, outgoing)
+            if (iconSize <= 0f) return
             val saved = canvas.save()
             canvas.translate(iconLeft, iconTop)
             canvas.scale(iconSize, iconSize)

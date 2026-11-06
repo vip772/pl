@@ -5,6 +5,7 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.res.Configuration
 import android.graphics.Color
 import android.view.Gravity
@@ -38,6 +39,43 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
     override fun isEnabled(context: FeatureContext): Boolean = isEnabled(context.hostContext())
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(ProfileIdSettingsProvider())
+        // Start before FeatureManager's enable gate; these rows must not depend on real-name tail.
+        val host = context.hostContext()
+        val idPrefs = HchatStorage.preferences(host, ProfileIdSettings.PREFS_NAME)
+        val relatedPrefs = listOf(
+            HchatStorage.preferences(host, ProfileAddTimeSettings.PREFS_NAME),
+            HchatStorage.preferences(host, ProfileGroupJoinTimeSettings.PREFS_NAME),
+            HchatStorage.preferences(host, ProfileGroupInviterSettings.PREFS_NAME)
+        )
+        val headerOwner = PreferenceRuntimeOwner(
+            idPrefs, setOf(ProfileIdSettings.KEY_ENABLE),
+            enabled = { isLegacyEnabled(host) },
+            create = { resources ->
+                resources.register { WeContactHeaderApi.removeProvider(this) }
+                WeContactHeaderApi.addProvider(this)
+                resources.register { ProfileAddTimeFeature.removeProvider() }
+                ProfileAddTimeFeature.installProvider(host)
+                resources.register { ProfileGroupInfoFeature.removeProvider() }
+                ProfileGroupInfoFeature.installProvider()
+                val installation = DexInstallScheduler.installation("profile_display_header")
+                resources.register { installation.close() }
+                installation.schedule {
+                    if (resources.isClosed()) true else {
+                        val ready = WeContactHeaderApi.install(context)
+                        if (!resources.isClosed()) install(host, context.hostClassLoader())
+                        ready
+                    }
+                }
+            },
+            onError = { logError("资料页显示启停失败", it) }
+        )
+        trackResource { headerOwner.close() }
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> headerOwner.refresh() }
+        relatedPrefs.forEach { prefs ->
+            prefs.registerOnSharedPreferenceChangeListener(listener)
+            trackResource { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+        }
+        headerOwner.start()
         val tailPrefs = HchatStorage.preferences(context.hostContext(), ProfileRealNameTailSettings.PREFS_NAME)
         val tailOwner = PreferenceRuntimeOwner(
             tailPrefs, setOf(ProfileRealNameTailSettings.KEY_ENABLE),
@@ -56,25 +94,13 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
         tailOwner.start()
     }
     override fun onFeatureInstall(context: FeatureContext) {
-        HLog.initialize(context.hostContext())
-        WeContactHeaderApi.install(context)
-        WeContactHeaderApi.addProvider(this)
-        ProfileAddTimeFeature.installProvider(context.hostContext())
-        ProfileGroupInfoFeature.installProvider()
-        install(context.hostContext(), context.hostClassLoader())
+        // Preference owners initialize providers and own retry tickets above.
     }
-
     override fun getHeaderText(activity: Activity): String? {
         val idPrefs = HchatStorage.preferences(activity, ProfileIdSettings.PREFS_NAME)
         if (!idPrefs.getBoolean(ProfileIdSettings.KEY_ENABLE, ProfileIdSettings.DEFAULT_ENABLE)) return null
         val profileId = resolveProfileId(activity, ProfileKind.CONTACT) ?: return null
         return "$LABEL：$profileId"
-    }
-
-    override fun onFeatureDestroy(context: FeatureContext) {
-        WeContactHeaderApi.removeProvider(this)
-        ProfileAddTimeFeature.removeProvider()
-        ProfileGroupInfoFeature.removeProvider()
     }
 
     companion object {
@@ -110,16 +136,19 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
         @JvmStatic
         fun isEnabled(context: Context?): Boolean {
             if (context == null) return false
+            return isLegacyEnabled(context) || HchatStorage.preferences(context, ProfileRealNameTailSettings.PREFS_NAME)
+                .getBoolean(ProfileRealNameTailSettings.KEY_ENABLE, ProfileRealNameTailSettings.DEFAULT_ENABLE)
+        }
+        private fun isLegacyEnabled(context: Context?): Boolean {
+            if (context == null) return false
             val idPrefs = HchatStorage.preferences(context, ProfileIdSettings.PREFS_NAME)
             val addTimePrefs = HchatStorage.preferences(context, ProfileAddTimeSettings.PREFS_NAME)
             val joinTimePrefs = HchatStorage.preferences(context, ProfileGroupJoinTimeSettings.PREFS_NAME)
-            val tailPrefs = HchatStorage.preferences(context, ProfileRealNameTailSettings.PREFS_NAME)
             val inviterPrefs = HchatStorage.preferences(context, ProfileGroupInviterSettings.PREFS_NAME)
             return idPrefs.getBoolean(ProfileIdSettings.KEY_ENABLE, ProfileIdSettings.DEFAULT_ENABLE) ||
                 addTimePrefs.getBoolean(ProfileAddTimeSettings.KEY_ENABLE, ProfileAddTimeSettings.DEFAULT_ENABLE) ||
                 joinTimePrefs.getBoolean(ProfileGroupJoinTimeSettings.KEY_ENABLE, ProfileGroupJoinTimeSettings.DEFAULT_ENABLE) ||
-                inviterPrefs.getBoolean(ProfileGroupInviterSettings.KEY_ENABLE, ProfileGroupInviterSettings.DEFAULT_ENABLE) ||
-                tailPrefs.getBoolean(ProfileRealNameTailSettings.KEY_ENABLE, ProfileRealNameTailSettings.DEFAULT_ENABLE)
+                inviterPrefs.getBoolean(ProfileGroupInviterSettings.KEY_ENABLE, ProfileGroupInviterSettings.DEFAULT_ENABLE)
         }
 
         @JvmStatic

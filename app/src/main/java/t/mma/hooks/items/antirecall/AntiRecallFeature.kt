@@ -14,7 +14,7 @@ import t.mma.hooks.api.model.WeChatRecalledMessage
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
-import t.mma.hooks.core.HookRegistry
+import t.mma.hooks.core.OwnedHooks
 import t.mma.preferences.HchatStorage
 import t.mma.utils.KavaReflector
 import java.lang.reflect.Method
@@ -32,6 +32,10 @@ class AntiRecallFeature : BaseFeature() {
     private val rawMessageRows = ConcurrentHashMap<Long, Map<String, Any>>()
     private val noticeHandler = Handler(Looper.getMainLooper())
     private val pendingNoticeKeys = Collections.newSetFromMap(ConcurrentHashMap<String, Boolean>())
+    private var ownedHooks = OwnedHooks { logError("防撤回Hook安装或清理失败", it) }
+    private val installedMethods = HashSet<Method>()
+    private var installation: DexInstallScheduler.Installation? = null
+    @Volatile private var active = false
     private var methodCachePrefs: android.content.SharedPreferences? = null
     @Volatile private var revokeEntryInstalled = false
     @Volatile private var messageStorageHookInstalled = false
@@ -47,53 +51,81 @@ class AntiRecallFeature : BaseFeature() {
     }
 
     override fun onFeatureInstall(context: FeatureContext) {
+        active = true
+        ownedHooks = OwnedHooks { logError("防撤回Hook安装或清理失败", it) }
+        installation = DexInstallScheduler.installation(ID, name())
         methodCachePrefs = DexMethodCache.prefs(context.hostContext(), "Hchat_anti_recall_method_cache")
         installMessageCache()
-        installSelfRecallUpdateHook(context)
+        runCatching { installSelfRecallUpdateHook(context) }
+            .onFailure { logError("自己撤回数据库保护安装失败", it) }
         scheduleDexHooks(context)
-        subscribe(Events.DexReady::class.java) {
-            scheduleDexHooks(context)
+        val prefs = HchatStorage.preferences(context.hostContext(), AntiRecallSettings.PREFS_NAME)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if ((key == null || key == AntiRecallSettings.KEY_ENABLE) && isAntiRecallEnabled(context)) {
+                scheduleDexHooks(context)
+            }
         }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        trackResource { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+        subscribe(Events.DexReady::class.java) { scheduleDexHooks(context) }
     }
 
     private fun scheduleDexHooks(context: FeatureContext) {
-        DexInstallScheduler.schedule(ID, name()) {
+        installation?.schedule {
             installDexHooks(context)
         }
     }
 
     @Synchronized
     private fun installDexHooks(context: FeatureContext): Boolean {
+        if (!active) return false
         val revokeEntries = locateRevokeEntries(context)
-        installMsgProcessingClearHook(context)
-        installLegacySelfRecallMediaCleanupHook(context)
-        installMessageStorageRevokeHook(context, revokeEntries)
+        runCatching { installSelfRecallUpdateHook(context) }
+            .onFailure { logError("数据库保护补装失败", it) }
+        runCatching { installMsgProcessingClearHook(context) }
+            .onFailure { logError("媒体处理保护定位失败", it) }
+        runCatching { installLegacySelfRecallMediaCleanupHook(context) }
+            .onFailure { logError("旧媒体保护定位失败", it) }
+        runCatching { installMessageStorageRevokeHook(context, revokeEntries) }
+            .onFailure { logError("消息存储保护定位失败", it) }
         if (!revokeEntryInstalled) {
-            var installed = false
+            var installed = revokeEntries.isNotEmpty()
             revokeEntries.map { it.method }.forEach { method ->
                 try {
-                    HookRegistry.get().hook(method, object : XC_MethodHook() {
+                    hookOnce(method, object : RecallHook() {
                         override fun beforeHookedMethod(param: MethodHookParam) {
                             val args = param.args ?: return
                             val talker = args.getOrNull(0) as? String ?: ""
                             val svrId = (args.getOrNull(1) as? Number)?.toLong() ?: 0L
                             val replaceMsg = args.getOrNull(3) as? String ?: ""
                             val payload = args.getOrNull(2)
-                            val recallTime = resolveRecallEventTime(payload)
-                            val payloadInfo = parseRevokePayload(talker, svrId, payload, replaceMsg)
-                            val recalledInfo = resolveRecalledInfo(talker, svrId, payloadInfo)
-                            publishRecallEvent(context, talker, svrId, recalledInfo)
-                            if (!isAntiRecallEnabled(context)) return
-                            val handledKey = recallHandledKey(talker, svrId, recalledInfo)
-                            if (!isHandled(handledKey)) {
-                                if (!handleRecall(context, talker, svrId, recalledInfo, recallTime)) return
-                                markHandled(handledKey)
-                            }
-                            param.setResult(null)
+                            val payloadInfo = runCatching {
+                                parseRevokePayload(talker, svrId, payload, replaceMsg)
+                            }.onFailure { logError("撤回参数解析失败", it) }.getOrNull()
+                            val recalledInfo = runCatching {
+                                resolveRecalledInfo(talker, svrId, payloadInfo)
+                            }.onFailure { logError("撤回原消息查询失败", it) }.getOrNull() ?: payloadInfo
+                            val enabled = isAntiRecallEnabled(context)
+                            val selfRecall = isSelfRevokeText(replaceMsg) ||
+                                runCatching { isSelfRecall(recalledInfo) }.getOrDefault(false)
+                            val block = enabled && (!selfRecall || keepSelfRecallEnabled(context))
+                            // Commit interception before optional publication, persistence or notice work.
+                            if (block) param.setResult(null)
+                            runCatching { publishRecallEvent(context, talker, svrId, recalledInfo) }
+                                .onFailure { logError("撤回事件发布失败", it) }
+                            if (!block) return
+                            runCatching {
+                                val handledKey = recallHandledKey(talker, svrId, recalledInfo)
+                                if (!isHandled(handledKey)) {
+                                    handleRecall(context, talker, svrId, recalledInfo,
+                                        resolveRecallEventTime(payload), selfRecall)
+                                    markHandled(handledKey)
+                                }
+                            }.onFailure { logError("撤回已拦截，附属处理失败", it) }
                         }
                     })
-                    installed = true
                 } catch (e: Throwable) {
+                    installed = false
                     logError("防撤回入口Hook安装失败", e)
                 }
             }
@@ -105,6 +137,46 @@ class AntiRecallFeature : BaseFeature() {
         return revokeEntryInstalled &&
             messageStorageHookInstalled &&
             (msgProcessingHookInstalled || legacyCleanupHookInstalled)
+    }
+
+    private abstract class RecallHook : XC_MethodHook() {
+        public abstract override fun beforeHookedMethod(param: MethodHookParam)
+    }
+    @Synchronized
+    private fun hookOnce(method: Method, callback: RecallHook) {
+        check(active) { "AntiRecall generation closed" }
+        if (method in installedMethods) return
+        val owner = ownedHooks
+        check(owner.hook(method, object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                if (owner.isClosed()) return
+                // Keep Xposed from resetting an already committed interception on exceptions.
+                try { callback.beforeHookedMethod(param) } catch (error: Throwable) {
+                    try { logError("防撤回回调异常", error) } catch (_: Throwable) { }
+                }
+            }
+        }) != null) { "AntiRecall hook rejected: $method" }
+        installedMethods.add(method)
+    }
+    @Synchronized
+    override fun onFeatureDestroy(context: FeatureContext) {
+        active = false
+        installation?.close()
+        installation = null
+        ownedHooks.close()
+        installedMethods.clear()
+        noticeHandler.removeCallbacksAndMessages(null)
+        pendingNoticeKeys.clear()
+        handledRecalls.clear()
+        publishedRecallEvents.clear()
+        messageCache.clear()
+        selfRecallMsgIds.clear()
+        rawMessageRows.clear()
+        methodCachePrefs = null
+        revokeEntryInstalled = false
+        messageStorageHookInstalled = false
+        msgProcessingHookInstalled = false
+        legacyCleanupHookInstalled = false
     }
 
     private fun publishRecallEvent(
@@ -156,15 +228,10 @@ class AntiRecallFeature : BaseFeature() {
         talker: String,
         svrId: Long,
         payloadInfo: WeChatRecalledMessage?,
-        recallTime: Long
+        recallTime: Long,
+        selfRecall: Boolean
     ): Boolean {
-        val recalledInfo = resolveRecalledInfo(talker, svrId, payloadInfo)
-        val payloadSelfRecall = isSelfRecall(payloadInfo)
-        val resolvedSelfRecall = isSelfRecall(recalledInfo)
-        val selfRecall = payloadSelfRecall || resolvedSelfRecall
-        if (selfRecall && !keepSelfRecallEnabled(context)) {
-            return false
-        }
+        val recalledInfo = payloadInfo
         runCatching { DynamicRecallStore.mark(context.hostContext(), recalledInfo?.message) }
             .onFailure { logError("动态撤回标记保存失败", it) }
         if (selfRecall) markSelfRecallMessage(recalledInfo)
@@ -216,10 +283,10 @@ class AntiRecallFeature : BaseFeature() {
     private fun installMessageStorageRevokeHook(context: FeatureContext, revokeEntries: List<RevokeEntry>) {
         if (messageStorageHookInstalled) return
         val methods = locateMessageStorageUpdateMethods(context, revokeEntries)
-        var installed = false
+        var installed = methods.isNotEmpty()
         methods.forEach { method ->
             try {
-                HookRegistry.get().hook(method, object : XC_MethodHook() {
+                hookOnce(method, object : RecallHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
                         if (!isAntiRecallEnabled(context) || !keepSelfRecallEnabled(context)) return
                         val msgId = (param.args?.getOrNull(0) as? Number)?.toLong() ?: return
@@ -235,8 +302,8 @@ class AntiRecallFeature : BaseFeature() {
                         param.setResult(blockedReturnValue(method))
                     }
                 })
-                installed = true
             } catch (e: Throwable) {
+                installed = false
                 logError("自己撤回消息存储Hook安装失败", e)
             }
         }
@@ -249,18 +316,18 @@ class AntiRecallFeature : BaseFeature() {
     private fun installMsgProcessingClearHook(context: FeatureContext) {
         if (msgProcessingHookInstalled) return
         val methods = locateMsgProcessingClearMethods(context)
-        var installed = false
+        var installed = methods.isNotEmpty()
         methods.forEach { method ->
             try {
-                HookRegistry.get().hook(method, object : XC_MethodHook() {
+                hookOnce(method, object : RecallHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
                         if (!isAntiRecallEnabled(context) || !keepSelfRecallEnabled(context)) return
                         if (!shouldBlockMsgProcessingClear(param.args)) return
                         param.setResult(null)
                     }
                 })
-                installed = true
             } catch (e: Throwable) {
+                installed = false
                 logError("媒体处理信息清理Hook安装失败", e)
             }
         }
@@ -270,18 +337,18 @@ class AntiRecallFeature : BaseFeature() {
     private fun installLegacySelfRecallMediaCleanupHook(context: FeatureContext) {
         if (legacyCleanupHookInstalled) return
         val methods = locateLegacySelfRecallMediaCleanupMethods(context)
-        var installed = false
+        var installed = methods.isNotEmpty()
         methods.forEach { method ->
             try {
-                HookRegistry.get().hook(method, object : XC_MethodHook() {
+                hookOnce(method, object : RecallHook() {
                     override fun beforeHookedMethod(param: MethodHookParam) {
                         if (!isAntiRecallEnabled(context) || !keepSelfRecallEnabled(context)) return
                         if (!shouldBlockLegacySelfRecallMediaCleanup(param.args)) return
                         param.setResult(null)
                     }
                 })
-                installed = true
             } catch (e: Throwable) {
+                installed = false
                 logError("旧版自己撤回媒体清理Hook安装失败", e)
             }
         }
@@ -427,7 +494,7 @@ class AntiRecallFeature : BaseFeature() {
         var count = 0
         for (method in KavaReflector.declaredMethods(dbClass)) {
             if (!isUpdateMethod(method)) continue
-            HookRegistry.get().hook(method, object : XC_MethodHook() {
+            hookOnce(method, object : RecallHook() {
                 override fun beforeHookedMethod(param: MethodHookParam) {
                     if (!isAntiRecallEnabled(context) || !keepSelfRecallEnabled(context)) return
                     if (!fixSelfRecallUpdateValues(context, param.args)) return
@@ -548,6 +615,7 @@ class AntiRecallFeature : BaseFeature() {
         selfRecall: Boolean,
         attempt: Int = 0
     ) {
+        if (!active || !isAntiRecallEnabled(context)) return
         if (talker.isBlank() || svrId <= 0L) {
             HLog.e("$TAG 插入提示失败: talker/newmsgid为空 talker=$talker newmsgid=$svrId")
             return
@@ -573,8 +641,9 @@ class AntiRecallFeature : BaseFeature() {
             return
         }
         if (attempt < NOTICE_RETRY_COUNT) {
+            val owner = ownedHooks
             noticeHandler.postDelayed(
-                { insertLocalNotice(context, talker, svrId, recalledInfo, recallTime, selfRecall, attempt + 1) },
+                { if (!owner.isClosed()) insertLocalNotice(context, talker, svrId, recalledInfo, recallTime, selfRecall, attempt + 1) },
                 NOTICE_RETRY_DELAYS_MS[attempt]
             )
         } else {
@@ -606,10 +675,11 @@ class AntiRecallFeature : BaseFeature() {
         payloadInfo: WeChatRecalledMessage?
     ): WeChatMessage? {
         for (id in recallLookupIds(svrId, payloadInfo)) {
-            messageCache[cacheKey(talker, id)]?.let { return it }
-            val message = WeChatApis.messageStore()?.getMessageById(id)
-                ?: WeChatApis.messageStore()?.getMessageBySvrId(talker, id)
-                ?: WeChatApis.messageStore()?.getMessageBySvrId(id)
+            messageCache[cacheKey(talker, id)]?.takeIf {
+                it.talker == talker && it.msgSvrId == id && !it.isRecalled()
+            }?.let { return it }
+            val message = WeChatApis.messageStore()?.getMessageBySvrId(talker, id)
+                ?.takeIf { it.talker == talker && it.msgSvrId == id && !it.isRecalled() }
             if (message != null) {
                 rememberMessage(message)
                 return message
@@ -617,17 +687,12 @@ class AntiRecallFeature : BaseFeature() {
         }
         return null
     }
-
     private fun resolveRecalledCreateTime(svrId: Long, info: WeChatRecalledMessage?): Long {
-        for (id in recallLookupIds(svrId, info)) {
-            val byLocalId = normalizeMillis(WeChatApis.messageStore()?.getMessageById(id)?.createTime ?: 0L)
-            if (byLocalId > 0L) return byLocalId
-        }
-        val newMsgCreateTime = normalizeMillis(WeChatApis.messageStore()?.getCreateTimeBySvrId(info?.newMsgId ?: 0L) ?: 0L)
-        if (newMsgCreateTime > 0L) return newMsgCreateTime
         val createTime = normalizeMillis(info?.bestCreateTime() ?: 0L)
         if (createTime > 0L) return createTime
-        return normalizeMillis(WeChatApis.messageStore()?.getCreateTimeBySvrId(svrId) ?: 0L)
+        val talker = info?.talker.orEmpty()
+        if (talker.isBlank()) return 0L
+        return normalizeMillis(resolveRecalledMessage(talker, svrId, info)?.createTime ?: 0L)
     }
 
     private fun normalizeMillis(createTime: Long): Long {
@@ -636,9 +701,9 @@ class AntiRecallFeature : BaseFeature() {
 
     private fun recallLookupIds(svrId: Long, payloadInfo: WeChatRecalledMessage?): List<Long> {
         return linkedSetOf(
-            payloadInfo?.originSvrId ?: 0L,
             svrId,
-            payloadInfo?.newMsgId ?: 0L
+            payloadInfo?.newMsgId ?: 0L,
+            payloadInfo?.originSvrId ?: 0L
         ).filter { it > 0L }
     }
 
@@ -800,13 +865,9 @@ class AntiRecallFeature : BaseFeature() {
     }
 
     private fun recallHandledKey(talker: String, svrId: Long, payloadInfo: WeChatRecalledMessage?): String {
-        val id = if (isSelfRecall(payloadInfo)) {
-            svrId
-        } else {
-            payloadInfo?.originSvrId?.takeIf { it > 0L }
-                ?: payloadInfo?.newMsgId?.takeIf { it > 0L }
-                ?: svrId
-        }
+        val id = svrId.takeIf { it > 0L }
+            ?: payloadInfo?.newMsgId?.takeIf { it > 0L }
+            ?: payloadInfo?.originSvrId ?: 0L
         return "$talker:$id"
     }
 
@@ -840,12 +901,12 @@ class AntiRecallFeature : BaseFeature() {
             else -> revokeNameFromText(replaceMsg)
         }
         val to = decodeStringField(addMsg, "f")
-        val originFromXml = xmlLong(commandContent, "msgid")
-        val newMsgId = (KavaReflector.readField(addMsg, "r") as? Number)?.toLong()
-            ?: xmlLong(commandContent, "newmsgid")
-            ?: 0L
+        // XML msgid is a legacy identifier, not a server-id lookup fallback.
+        // The envelope's addMsg.r identifies the revoke notification, not its target.
+        val newMsgId = xmlLong(commandContent, "newmsgid")?.takeIf { it > 0L }
+            ?: originSvrId
         val flag = payloadFlag(payload)
-        val resolvedOrigin = originFromXml ?: originSvrId
+        val resolvedOrigin = originSvrId.takeIf { it > 0L } ?: newMsgId
         if (from.isBlank() && to.isBlank() && resolvedOrigin <= 0L && newMsgId <= 0L) {
             return null
         }
@@ -1142,7 +1203,7 @@ class AntiRecallFeature : BaseFeature() {
     }
 
     private fun isAntiRecallEnabled(context: FeatureContext): Boolean {
-        return HchatStorage.preferences(context.hostContext(), AntiRecallSettings.PREFS_NAME)
+        return active && HchatStorage.preferences(context.hostContext(), AntiRecallSettings.PREFS_NAME)
             .getBoolean(AntiRecallSettings.KEY_ENABLE, AntiRecallSettings.DEFAULT_ENABLE)
     }
 
