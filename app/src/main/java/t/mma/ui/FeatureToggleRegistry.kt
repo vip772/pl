@@ -10,6 +10,7 @@ import t.mma.hooks.items.momentsfake.MomentsFakeInteractionSettings
 import t.mma.hooks.items.specialmessage.SpecialMessageFeature
 import t.mma.hooks.items.profileid.ProfileGroupJoinTimeSettings
 import t.mma.hooks.items.profileid.ProfileGroupInviterSettings
+import t.mma.hooks.items.profileid.ProfileRealNameTailSettings
 import t.mma.hooks.items.profileid.ProfileIdSettings
 import t.mma.hooks.items.profileid.ProfileAddTimeSettings
 import t.mma.preferences.HchatStorage
@@ -148,9 +149,10 @@ object FeatureToggleRegistry {
                 boolean(context, MomentsFakeInteractionSettings.PREFS_NAME, key)
             }
             "profile_id" -> boolean(context, ProfileIdSettings.PREFS_NAME, ProfileIdSettings.KEY_ENABLE) ||
-                boolean(context, ProfileAddTimeSettings.PREFS_NAME, ProfileAddTimeSettings.KEY_ENABLE)
-            "profile_group_info" -> boolean(context, ProfileGroupJoinTimeSettings.PREFS_NAME, ProfileGroupJoinTimeSettings.KEY_ENABLE) ||
-                boolean(context, ProfileGroupInviterSettings.PREFS_NAME, ProfileGroupInviterSettings.KEY_ENABLE)
+                boolean(context, ProfileAddTimeSettings.PREFS_NAME, ProfileAddTimeSettings.KEY_ENABLE) ||
+                boolean(context, ProfileGroupJoinTimeSettings.PREFS_NAME, ProfileGroupJoinTimeSettings.KEY_ENABLE) ||
+                boolean(context, ProfileGroupInviterSettings.PREFS_NAME, ProfileGroupInviterSettings.KEY_ENABLE) ||
+                boolean(context, ProfileRealNameTailSettings.PREFS_NAME, ProfileRealNameTailSettings.KEY_ENABLE)
             "moments_fake_interaction" -> {
                 val sp = HchatStorage.preferences(context, MomentsFakeInteractionSettings.PREFS_NAME)
                 sp.getBoolean(MomentsFakeInteractionSettings.KEY_FAKE_LIKE_ENABLE, false) ||

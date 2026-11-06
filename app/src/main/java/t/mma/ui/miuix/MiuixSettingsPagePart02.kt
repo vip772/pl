@@ -385,7 +385,6 @@ import t.mma.hooks.items.patblock.PatBlockSettings
 import t.mma.hooks.items.profileid.ProfileIdFeature
 import t.mma.hooks.items.profileid.ProfileIdSettings
 import t.mma.hooks.items.profileid.ProfileAddTimeSettings
-import t.mma.hooks.items.profileid.ProfileGroupInfoSettingsProvider
 import t.mma.hooks.items.profileid.ProfileGroupJoinTimeSettings
 import t.mma.hooks.items.profileid.ProfileGroupInviterSettings
 
@@ -1240,8 +1239,7 @@ internal fun practicalFeatureGroups(
                 ConversationAnalysisFeature.ID,
                 AtAllNotificationBlockFeature.ID,
                 GroupLeaveMonitorFeature.ID,
-                GroupRenameMonitorFeature.ID,
-                ProfileGroupInfoSettingsProvider.ID
+                GroupRenameMonitorFeature.ID
             )
         ),
         FeatureGroupEntry(
@@ -2133,7 +2131,7 @@ internal fun featureSubSearchTerms(featureId: String): List<String> {
             "菜单名称颜色", "菜单名称大小", "菜单文字",
             "微信页面", "扫一扫", "朋友圈", "视频号", "收藏", "钱包"
         )
-        ProfileIdFeature.ID -> listOf("资料页显示", "显示微信 ID", "显示ID", "好友ID", "群聊ID", "wxid", "复制ID", "添加时间", "好友添加时间", "yyyy-MM-dd HH:mm:ss", "渐变颜色")
+        ProfileIdFeature.ID -> listOf("资料页显示", "显示微信 ID", "显示ID", "好友ID", "群聊ID", "wxid", "复制ID", "添加时间", "好友添加时间", "显示进群时间", "进群时间", "显示邀请人", "邀请人", "自然进群", "实名尾字", "自定义前缀", "未知", "yyyy-MM-dd HH:mm:ss", "渐变颜色", "三色渐变颜色")
         QuickContactEditFeature.ID -> listOf("快捷设置备注和标签", "好友备注", "好友标签", "新建标签", "会话长按菜单", "朋友圈头像")
         QuickMomentsFeature.ID -> listOf("快捷查看朋友圈", "朋友圈", "会话长按菜单", "个人朋友圈", "聊天分组", "自己", "企业微信联系人")
         QuickTerminateFeature.ID -> listOf("快捷终止", "结束微信", "终止微信", "加号菜单", "关闭微信")

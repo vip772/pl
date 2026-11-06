@@ -391,7 +391,6 @@ import t.mma.hooks.items.patblock.PatBlockSettings
 import t.mma.hooks.items.profileid.ProfileIdFeature
 import t.mma.hooks.items.profileid.ProfileIdSettings
 import t.mma.hooks.items.profileid.ProfileAddTimeSettings
-import t.mma.hooks.items.profileid.ProfileGroupInfoSettingsProvider
 import t.mma.hooks.items.protobuf.ProtobufPacketFeature
 import t.mma.hooks.items.protobuf.ProtobufPacketRuntime
 import t.mma.hooks.items.protobuf.ProtobufPacketSettings
@@ -1102,7 +1101,6 @@ internal fun FeatureSettingsPage(
         CallRingtoneBlockFeature.ID -> CallRingtoneBlockMiuixPage(context, provider, onBack)
         DisableHotUpdateFeature.ID -> DisableHotUpdateMiuixPage(context, provider, onBack)
         ProfileIdFeature.ID -> ProfileIdMiuixPage(context, provider, onBack)
-        ProfileGroupInfoSettingsProvider.ID -> ProfileGroupInfoMiuixPage(context, provider, onBack)
         QuickContactEditFeature.ID -> QuickContactEditMiuixPage(context, provider, onBack)
         QuickGroupChatLabelFeature.ID -> QuickGroupChatLabelMiuixPage(context, provider, onBack)
         QuickMomentsFeature.ID -> QuickMomentsMiuixPage(context, provider, onBack)

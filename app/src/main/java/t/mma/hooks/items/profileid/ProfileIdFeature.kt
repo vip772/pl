@@ -20,6 +20,8 @@ import de.robv.android.xposed.XC_MethodHook
 import de.robv.android.xposed.XposedBridge
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.FeatureContext
+import t.mma.hooks.core.PreferenceRuntimeOwner
+import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.HookRegistry
 import t.mma.hooks.api.core.WeChatApis
 import java.text.SimpleDateFormat
@@ -36,13 +38,22 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
     override fun isEnabled(context: FeatureContext): Boolean = isEnabled(context.hostContext())
     override fun onFeatureInit(context: FeatureContext) {
         registerSettingsProvider(ProfileIdSettingsProvider())
-        registerSettingsProvider(ProfileGroupInfoSettingsProvider()) {
-            val joinTime = HchatStorage.preferences(context.hostContext(), ProfileGroupJoinTimeSettings.PREFS_NAME)
-                .getBoolean(ProfileGroupJoinTimeSettings.KEY_ENABLE, ProfileGroupJoinTimeSettings.DEFAULT_ENABLE)
-            val inviter = HchatStorage.preferences(context.hostContext(), ProfileGroupInviterSettings.PREFS_NAME)
-                .getBoolean(ProfileGroupInviterSettings.KEY_ENABLE, ProfileGroupInviterSettings.DEFAULT_ENABLE)
-            joinTime || inviter
-        }
+        val tailPrefs = HchatStorage.preferences(context.hostContext(), ProfileRealNameTailSettings.PREFS_NAME)
+        val tailOwner = PreferenceRuntimeOwner(
+            tailPrefs, setOf(ProfileRealNameTailSettings.KEY_ENABLE),
+            enabled = { tailPrefs.getBoolean(ProfileRealNameTailSettings.KEY_ENABLE, false) },
+            create = { resources ->
+                val provider = ProfileRealNameTailProvider(context) { message, error -> logError(message, error) }
+                resources.register { provider.close() }
+                WeContactHeaderApi.addProvider(provider)
+                val installation = DexInstallScheduler.installation("profile_real_name_tail_header")
+                resources.register { installation.close() }
+                installation.schedule { resources.isClosed() || WeContactHeaderApi.install(context) }
+            },
+            onError = { logError("资料页实名尾字启停失败", it) }
+        )
+        trackResource { tailOwner.close() }
+        tailOwner.start()
     }
     override fun onFeatureInstall(context: FeatureContext) {
         HLog.initialize(context.hostContext())
@@ -102,11 +113,13 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
             val idPrefs = HchatStorage.preferences(context, ProfileIdSettings.PREFS_NAME)
             val addTimePrefs = HchatStorage.preferences(context, ProfileAddTimeSettings.PREFS_NAME)
             val joinTimePrefs = HchatStorage.preferences(context, ProfileGroupJoinTimeSettings.PREFS_NAME)
+            val tailPrefs = HchatStorage.preferences(context, ProfileRealNameTailSettings.PREFS_NAME)
             val inviterPrefs = HchatStorage.preferences(context, ProfileGroupInviterSettings.PREFS_NAME)
             return idPrefs.getBoolean(ProfileIdSettings.KEY_ENABLE, ProfileIdSettings.DEFAULT_ENABLE) ||
                 addTimePrefs.getBoolean(ProfileAddTimeSettings.KEY_ENABLE, ProfileAddTimeSettings.DEFAULT_ENABLE) ||
                 joinTimePrefs.getBoolean(ProfileGroupJoinTimeSettings.KEY_ENABLE, ProfileGroupJoinTimeSettings.DEFAULT_ENABLE) ||
-                inviterPrefs.getBoolean(ProfileGroupInviterSettings.KEY_ENABLE, ProfileGroupInviterSettings.DEFAULT_ENABLE)
+                inviterPrefs.getBoolean(ProfileGroupInviterSettings.KEY_ENABLE, ProfileGroupInviterSettings.DEFAULT_ENABLE) ||
+                tailPrefs.getBoolean(ProfileRealNameTailSettings.KEY_ENABLE, ProfileRealNameTailSettings.DEFAULT_ENABLE)
         }
 
         @JvmStatic

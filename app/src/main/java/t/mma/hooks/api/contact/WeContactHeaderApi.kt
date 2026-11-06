@@ -100,13 +100,17 @@ object WeContactHeaderApi {
             method.parameterTypes.size == 1 &&
             View::class.java.isAssignableFrom(method.parameterTypes[0])
 
-    fun refreshCurrentProfile(groupId: String, memberId: String) {
+    fun refreshCurrentProfile(groupId: String?, memberId: String) {
         val activity = currentActivity?.get() ?: return
         if (activity.isFinishing || activity.isDestroyed) return
         if (currentGroupId != groupId || currentMemberId != memberId) return
         val header = currentHeader?.get() ?: return
         val root = currentRoot?.get() ?: return
-        root.post { bind(header, root) }
+        root.post {
+            if (currentActivity?.get() === activity && currentRoot?.get() === root &&
+                currentGroupId == groupId && currentMemberId == memberId &&
+                !activity.isFinishing && !activity.isDestroyed) bind(header, root)
+        }
     }
 
     private fun bind(header: View.OnLongClickListener?, root: View?) {
@@ -125,6 +129,7 @@ object WeContactHeaderApi {
         currentMemberId = activity.intent?.getStringExtra("room_member")
             ?: activity.intent?.getStringExtra("Contact_User")
             ?: activity.intent?.getStringExtra("Chat_User")
+            ?: activity.intent?.getStringExtra("Contact_Username")
         val templates = findViews(viewRoot) {
             it is TextView && listenerInfoLongClick(it) === header
         }.filterIsInstance<TextView>()
@@ -166,12 +171,12 @@ object WeContactHeaderApi {
     private fun applyColorSpec(view: TextView, raw: String?) {
         val parts = raw.orEmpty().split(',')
             .mapNotNull { runCatching { Color.parseColor(it.trim()) }.getOrNull() }
-            .take(2)
+            .take(3)
         if (parts.isEmpty()) return
-        val end = parts.getOrElse(1) { parts[0] }
-        view.paint.shader = if (parts[0] == end) null else
-            LinearGradient(0f, 0f, 1000f, 0f, parts[0], end, Shader.TileMode.CLAMP)
-        if (parts[0] == end) view.setTextColor(parts[0])
+        val singleColor = parts.all { it == parts[0] }
+        view.paint.shader = if (singleColor) null else
+            LinearGradient(0f, 0f, 1000f, 0f, parts.toIntArray(), null, Shader.TileMode.CLAMP)
+        if (singleColor) view.setTextColor(parts[0])
     }
 
     private fun listenerInfo(view: View): Any? = KavaReflector.readField(view, "mListenerInfo")

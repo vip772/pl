@@ -411,6 +411,31 @@ fun main(args:Array<String>){
  check(!importedGlobal.contains("floating_chat_footer_enabled")&&!importedGlobal.contains("floating_chat_footer_transparency"))
  check(Store.preferences(retiredOut,"Hchat_feature_floating_chat_footer").all.isEmpty())
  println("PASS removed input settings excluded from export/legacy import; header settings preserved")
+ // Profile real-name settings use the production archive.
+ val tail=Context(File(base,"profile-tail"),"com.tail")
+ val tailOut=Context(File(base,"profile-tail-out"),"com.tail.out")
+ val tailName="Hchat_profile_real_name_tail_config"
+ val tailPrefs=Store.preferences(tail,tailName)
+ check(!tailPrefs.getBoolean("enabled",false))
+ Store.runtimePreferences(tail,"Hchat_feature_real_name_tail_runtime").edit().putString("pending","wxid_test").commit()
+ val tailZip=File(base,"profile-tail.zip")
+ for (prefix in listOf("", "小", "＊＊")) {
+  for (enabled in listOf(false,true)) {
+   tailPrefs.edit().putBoolean("enabled",enabled).putString("prefix",prefix).putString("color","#112233,#445566,#778899").commit()
+   HchatConfigBackup.exportToUri(tail,Uri(tailZip))
+   java.util.zip.ZipFile(tailZip).use { archive ->
+    val manifest=JSONObject(archive.getInputStream(archive.getEntry("config.json")).bufferedReader().readText())
+    check(manifest.getJSONObject("prefs").has(tailName))
+    check(!manifest.getJSONObject("prefs").has("Hchat_feature_real_name_tail_runtime"))
+   }
+   HchatConfigBackup.importFromUri(tailOut,Uri(tailZip))
+   val restored=Store.preferences(tailOut,tailName)
+   check(restored.getBoolean("enabled",!enabled)==enabled)
+   check(restored.getString("prefix",null)==prefix)
+   check(restored.getString("color",null)=="#112233,#445566,#778899")
+  }
+ }
+ println("PASS profile real-name enabled/off, empty/custom/default prefix, three colors archive round trip; runtime excluded")
  // Commit failure after resource replacement must restore both preferences and resource.
  val target=File(Store.resourceDirectory(b,"future"),"image.png");target.writeText("before")
  out.edit().putInt("i",99).commit();FastKV.failName="Hchat_brand_new_feature";FastKV.failOnce=true

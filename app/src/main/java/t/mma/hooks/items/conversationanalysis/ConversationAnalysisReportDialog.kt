@@ -264,8 +264,8 @@ internal object ConversationAnalysisReportDialog {
             if (index < 6) tabs.addView(Space(activity), LinearLayout.LayoutParams(dp(activity, 4), 1))
         }
         content.addView(tabScroll, marginParams(activity, -1, 42, 0, 10, 0, 10))
-        val focus = EditText(activity).apply { hint = "（可选）让 AI 重点关注什么？例如：大家聊了吃的吗"; gravity = Gravity.CENTER; setPadding(dp(activity, 14), dp(activity, 8), dp(activity, 14), dp(activity, 8)); background = rounded(0x00ffffff, dp(activity, 14)) }
-        content.addView(focus, LinearLayout.LayoutParams(-1, dp(activity, 58)))
+        val focusInput = ConversationAnalysisFocusInput.create(activity)
+        content.addView(focusInput, LinearLayout.LayoutParams(-1, ViewGroup.LayoutParams.WRAP_CONTENT))
         val buttons = LinearLayout(activity).apply { gravity = Gravity.CENTER_VERTICAL }
         val reportHost = LinearLayout(activity).apply { orientation = LinearLayout.VERTICAL }
         val screenshot = actionButton(activity, "生成截图", 0xffd8d8d8.toInt()) { showGeneratedReportPicker(activity, dialog, talker) }.apply {

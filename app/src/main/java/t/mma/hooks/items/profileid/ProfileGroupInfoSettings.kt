@@ -5,8 +5,10 @@ object ProfileGroupJoinTimeSettings {
     const val KEY_ENABLE = "profile_group_join_time_enable"
     const val KEY_COLOR = "profile_group_join_time_color"
     const val DEFAULT_ENABLE = false
-    const val DEFAULT_COLOR = "#FF000000,#FF000000"
-    fun cleanColorSpec(value: String?): String = ProfileAddTimeSettings.cleanColorSpec(value)
+    const val DEFAULT_COLOR = "#FF000000,#FF000000,#FF000000"
+    fun cleanColorSpec(value: String?): String = value.orEmpty().split(',').mapNotNull {
+        ProfileAddTimeSettings.cleanColor(it).takeIf(String::isNotEmpty)
+    }.take(3).joinToString(",")
 }
 
 object ProfileGroupInviterSettings {
@@ -14,6 +16,8 @@ object ProfileGroupInviterSettings {
     const val KEY_ENABLE = "profile_group_inviter_enable"
     const val KEY_COLOR = "profile_group_inviter_color"
     const val DEFAULT_ENABLE = false
-    const val DEFAULT_COLOR = "#FF000000,#FF000000"
-    fun cleanColorSpec(value: String?): String = ProfileAddTimeSettings.cleanColorSpec(value)
+    const val DEFAULT_COLOR = "#FF000000,#FF000000,#FF000000"
+    fun cleanColorSpec(value: String?): String = value.orEmpty().split(',').mapNotNull {
+        ProfileAddTimeSettings.cleanColor(it).takeIf(String::isNotEmpty)
+    }.take(3).joinToString(",")
 }

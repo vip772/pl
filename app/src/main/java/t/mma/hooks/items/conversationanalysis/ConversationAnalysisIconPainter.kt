@@ -58,14 +58,16 @@ internal class ConversationAnalysisIconPainter(private val kind: ConversationAna
                     for (y in floatArrayOf(8f, 12f, 16f)) canvas.drawLine(7f, y, 17f, y, paint)
                 }
                 ConversationAnalysisIconView.Kind.SETTINGS -> {
-                    canvas.drawCircle(12f, 12f, 6.5f, paint)
-                    canvas.drawCircle(12f, 12f, 2.5f, paint)
-                    for (i in 0 until 8) {
-                        val tooth = canvas.save()
-                        canvas.rotate(i * 45f, 12f, 12f)
-                        canvas.drawLine(12f, 3f, 12f, 5.5f, paint)
-                        canvas.restoreToCount(tooth)
+                    // Eight flat teeth connected by an inset rim, rather than radial spokes.
+                    for (step in 0 until 32) {
+                        val angle = Math.toRadians((step * 11.25 - 95.625))
+                        val radius = if (step % 4 == 1 || step % 4 == 2) 10f else 7.5f
+                        val x = 12f + (kotlin.math.cos(angle) * radius).toFloat()
+                        val y = 12f + (kotlin.math.sin(angle) * radius).toFloat()
+                        if (step == 0) path.moveTo(x, y) else path.lineTo(x, y)
                     }
+                    path.close()
+                    canvas.drawCircle(12f, 12f, 3f, paint)
                 }
                 ConversationAnalysisIconView.Kind.SPARKLE -> {
                     path.moveTo(12f, 3f); path.lineTo(15f, 9f); path.lineTo(21f, 12f)

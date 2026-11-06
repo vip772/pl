@@ -7,6 +7,9 @@
 
 搜索面板首位新增默认选中的“聚合音乐”，交替合并 QQ 分页搜索与网易云聚合搜索，去重后总数最多 80 首。QQ 按 songmid 校验关键词取流返回身份，网易云按 ID 取流；保留收藏、队列及原有独立音源入口。请求、解析、Android 回调与短播验证、接口限制见 [首页聚合音乐](HOME_MUSIC_AGGREGATE.md)。
 
+## 资料页显示设置
+群成员进群时间与邀请人设置统一位于“界面 → 资料页显示”，独立开关下方按需显示三色渐变编辑；旧群组入口及专用页面已删除。配置兼容、实现及验证边界见 [迁移记录](PROFILE_DISPLAY_SETTINGS_MIGRATION.md)。
+
 ## 协作与发布规则
 
 - 提交信息、推送说明、Release notes 和工作流说明统一使用中文。
@@ -2194,3 +2197,5 @@ BaseFeature 事件订阅包装现绑定订阅时的资源作用域，作用域�
 ## BeanShell 数字转换异常隔离修复
 
 将非法字符串数字转换从 `InterpreterError` 改为保留原始原因的 `UtilTargetError`，并贯通变量、参数、数组和表达式的节点错误转换，复用脚本 try/catch 与接口代理的既有 TargetError 处理。无全局吞异常、无默认填 0、无新增线程/缓存/配置。证据、146个源文件 SDK 定向编译、97项合成 JVM 断言与未完成的实机验收边界见 `docs/BEANSHELL_NUMERIC_ERROR_FIX_20261103.md`；回归命令为 `python3 scripts/test_beanshell_numeric_error.py`。
+
+资料页实名尾字的设置、运行时和备份验证见 [资料页实名尾字](PROFILE_REAL_NAME_TAIL.md)。

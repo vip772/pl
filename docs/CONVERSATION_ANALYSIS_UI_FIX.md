@@ -25,3 +25,12 @@
 ## 尚未验证
 
 未运行Gradle、未构建APK、未执行完整Android/Compose/R8构建，未安装新包或进行设备截图验收。需在新版统一确认浅色/深色图标可读性、原点击功能、横竖屏与大字体、小屏滚动、按钮可达和底部间距。不能将桩测试通过表述为实机验收完成。
+
+
+## 智能总结设置图标与关注内容输入
+
+AI 接口设置图标改为八齿连续齿轮轮廓，中心保留圆孔，点击入口与设置弹窗保持原样。图标继续使用 Canvas 绘制，不依赖字体或 emoji。
+
+关注内容区域独立为 ConversationAnalysisFocusInput：原提示从输入框 hint 分离成 12sp 单行提示，窄屏可在 8–12sp 范围内适配。输入文字保持 15sp，输入框至少一行、最小 48dp，启用多行换行并使用 WRAP_CONTENT 随内容增高。圆角描边使用红、粉、紫三色水平渐变，深色主题使用较亮描边与深色底色，浅色主题使用浅底与深色文字。渐变 Shader 仅在边界变化时重建，不在每帧创建位图或绘制对象。
+
+检查：`python scripts/check_analysis_focus_sdk.py` 已通过真实 Android SDK 定向编译及布局接线静态检查；`test_analysis_ui_icons_layout.py`、`test_analysis_api_config.py`、`test_analysis_generation.py` 回归通过。没有运行 Gradle、生成 APK 或进行实机界面验收。关注内容仍沿用既有输入行为，本次不修改模型请求或生成链路。
