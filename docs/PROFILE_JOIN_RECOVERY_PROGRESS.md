@@ -30,3 +30,7 @@
 此前测试替身使用普通Array参数，偏离生产vararg签名，使错误调用在测试中成功；这是上一轮测试通过但实机失败的已确认验证缺口。先只修测试签名，旧生产代码已复现Missing b41.y1.u并退出1；随后修正两处为*args。新增原始账号读取断言、参数类型匹配及--production-reflector模式，直接编译运行生产KavaReflector和恢复对象，微信scene/队列仍为模拟，不冒充设备验证。
 本次三个成员哈希b723d329/46016787/308da4e0，均不同于旧完整回包唯一正时间成员哈希50fbeb61；不得承诺修正加载后这三位就有日期。
 本轮已通过：真实vararg签名替身回归（退出0）、生产KavaReflector及全部项目compat依赖运行恢复对象回归（退出0）、资料页回归（退出0）、SDK定向编译及解析回归（退出0）、git diff --check。真实组件测试初次缺少DefaultLogger的失败已由补齐项目compat源文件解决，没有改动全局反射工具。证据目录 /sdcard/Download/Operit/join-vararg-evidence/ 保存旧码失败red.log、修正后green.log、真实组件production-reflector.log、SDK及资料页输出；新日志SHA256 aa73748c4cf3f592cad0c17aaaafc40dd9fb2104663701f6993d464f43a45481。未运行Gradle、未构建APK；实机修复验收仍为0。
+
+## 2026-11-07 最新实机反馈（00:41:19）
+60ef388后日志确认两个目标群完整查询成功：26人群00:40:51.944请求、00:40:52.399响应、00:40:52.402缓存1项；208人群00:41:01.369请求、00:41:01.839响应、00:41:01.846缓存1项。26人群26项中25项0、1项有效；当前查看成员哈希b723d329，以及208人群bf715f4/7bda8fc5均未命中有效条目，显示返回member-time-missing。208人群历史83行、含身份29行、接受0行。请求未启动的旧阻断不符合本次现场；现有数据不足以恢复这些成员真实日期，不能承诺全员显示。
+原始日志SHA256 fd1f4c39bda2f1644a80b13fc25a4318b7121f0c5c364acb2b211d409f9b9eb7，归档 /sdcard/Download/Operit/home-text-late-evidence/runtime-004119.log。本轮没有改进群时间生产代码；生产反射恢复回归与资料页回归退出码均0。本人有效条目实际UI显示、真实历史角色覆盖、Android/R8构建与新版实机验收仍未闭环。首页暗黑文字不全另见 HOME_TEXT_COLOR_LATE_INSTALL.md。两个用户目标实机验收通过数保持0/2。

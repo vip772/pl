@@ -25,6 +25,7 @@ import de.robv.android.xposed.callbacks.XCallback
 import t.mma.R
 import t.mma.dexkit.DexMethodCache
 import t.mma.event.Events
+import t.mma.hooks.api.core.WeChatApis
 import t.mma.hooks.core.BaseFeature
 import t.mma.hooks.core.DexInstallScheduler
 import t.mma.hooks.core.FeatureContext
@@ -91,6 +92,8 @@ private class HomeTextColorRuntime(
     private val modernConversationRows = Collections.synchronizedMap(
         WeakHashMap<Any, WeakReference<View>>()
     )
+    private val modernHolderViewFields = ConcurrentHashMap<Class<*>, List<Field>>()
+    private var installedRowHookCount = 0
     private val installedConversationMethods = ConcurrentHashMap.newKeySet<Method>()
     private val trackedFixedViews = Collections.synchronizedMap(WeakHashMap<View, Boolean>())
     private val neatClassCache = ConcurrentHashMap<Class<*>, Boolean>()
@@ -149,6 +152,7 @@ private class HomeTextColorRuntime(
     @Synchronized
     fun install(allowDexSearch: Boolean): Boolean {
         if (destroyed) return false
+        val previousRowHookCount = installedRowHookCount
         val runtimeKey = DexMethodCache.runtimeKey(context.hostContext(), context.hostClassLoader())
         conversationInstalled = installConversationAdapterHooks(
             locateConversationGetViews(runtimeKey, allowDexSearch)
@@ -206,6 +210,10 @@ private class HomeTextColorRuntime(
                 ),
                 "局部"
             )
+        }
+        if (installedRowHookCount != previousRowHookCount) {
+            mainHandler.removeCallbacks(refreshVisibleConversations)
+            mainHandler.post(refreshVisibleConversations)
         }
         return conversationInstalled && contactsInstalled && preferenceInstalled &&
             (layoutInflaterInstalled || layoutInflaterUnavailable) &&
@@ -280,6 +288,8 @@ private class HomeTextColorRuntime(
         destroyed = true
         prefs.unregisterOnSharedPreferenceChangeListener(preferenceListener)
         mainHandler.removeCallbacks(settingsRefresh)
+        mainHandler.removeCallbacks(refreshVisibleConversations)
+        modernHolderViewFields.clear()
         runOnMain {
             val rows = synchronized(trackedRows) {
                 trackedRows.keys.toList().also { trackedRows.clear() }
@@ -383,6 +393,7 @@ private class HomeTextColorRuntime(
             if (method in installedConversationMethods) return@forEach
             if (installAdapterHook(method, RowKind.CONVERSATION)) {
                 installedConversationMethods += method
+                installedRowHookCount++
             }
         }
         return installedConversationMethods.isNotEmpty()
@@ -423,7 +434,7 @@ private class HomeTextColorRuntime(
                     object : XC_MethodHook(XCallback.PRIORITY_HIGHEST) {
                         override fun beforeHookedMethod(param: MethodHookParam) {
                             val holder = param.args?.getOrNull(1) ?: return
-                            val row = modernConversationRows[holder]?.get() ?: return
+                            val row = modernConversationRow(holder) ?: return
                             deferredConversationRows.remove(row)
                             restoreRow(row)
                         }
@@ -431,11 +442,12 @@ private class HomeTextColorRuntime(
                         override fun afterHookedMethod(param: MethodHookParam) {
                             if (destroyed || param.hasThrowable()) return
                             val holder = param.args?.getOrNull(1) ?: return
-                            val row = modernConversationRows[holder]?.get() ?: return
+                            val row = modernConversationRow(holder) ?: return
                             applyBoundRow(row, RowKind.CONVERSATION)
                         }
                     }
                 )
+                installedRowHookCount++
                 true
             }.getOrElse {
                 HLog.e(
@@ -448,6 +460,64 @@ private class HomeTextColorRuntime(
         }
     }
 
+    // Native 8.0.78 jo5.i0.b stores the holder in row.tag. Require that exact
+    // identity instead of treating an arbitrary holder View field as a row.
+    private fun modernConversationRow(holder: Any): View? {
+        modernConversationRows[holder]?.get()?.takeIf { it.tag === holder }?.let { return it }
+        val fields = modernHolderViewFields.getOrPut(holder.javaClass) {
+            val result = ArrayList<Field>()
+            var type: Class<*>? = holder.javaClass
+            while (type != null && type != Any::class.java) {
+                result += KavaReflector.declaredFields(type).filter {
+                    !Modifier.isStatic(it.modifiers) && View::class.java.isAssignableFrom(it.type)
+                }
+                type = type.superclass
+            }
+            result
+        }
+        for (field in fields) {
+            var view = KavaReflector.readField(field, holder) as? View ?: continue
+            var depth = 0
+            while (depth++ < 12) {
+                if (view.tag === holder) {
+                    modernConversationRows[holder] = WeakReference(view)
+                    return view
+                }
+                view = view.parent as? View ?: break
+            }
+        }
+        return null
+    }
+    // Bounded catch-up after installing a conversation hook, without polling.
+    private val refreshVisibleConversations = Runnable {
+        if (!destroyed && config.enabled) {
+            val activity = WeChatApis.currentActivity()?.currentActivity()
+            if (activity != null && isLauncherPage(activity)) {
+                val root = activity.window?.decorView
+                if (root != null) refreshVisibleConversationTree(root, 2048)
+            }
+        }
+    }
+    private fun refreshVisibleConversationTree(view: View, remaining: Int): Int {
+        if (remaining <= 0) return 0
+        var budget = remaining - 1
+        if (view.visibility != View.VISIBLE) return budget
+        if (view is ViewGroup) {
+            if ((view.parent is android.widget.AdapterView<*> ||
+                    view.parent?.javaClass?.name?.startsWith("androidx.recyclerview.widget.") == true) &&
+                recyclerAnchorMask(view) and ANCHOR_MASK_CONVERSATION == ANCHOR_MASK_CONVERSATION
+            ) {
+                restoreRow(view)
+                applyBoundRow(view, RowKind.CONVERSATION)
+                return budget
+            }
+            for (index in 0 until view.childCount) {
+                budget = refreshVisibleConversationTree(view.getChildAt(index), budget)
+                if (budget <= 0) break
+            }
+        }
+        return budget
+    }
     private fun locateModernConversationMethods(
         runtimeKey: String,
         allowDexSearch: Boolean
