@@ -24,4 +24,13 @@ with tempfile.TemporaryDirectory(prefix='profile-runtime-sdk-') as td:
  result=subprocess.run(java_cmd,capture_output=True,text=True,timeout=55)
  print(result.stdout,end='');print(result.stderr,end='')
  if result.returncode:raise SystemExit(result.returncode)
+ # Run native protobuf parser on JVM, replacing only Android TextUtils.
+ textutils=p/'TextUtils.java'
+ textutils.write_text('package android.text; public class TextUtils { public static boolean isEmpty(CharSequence s) {return s==null || s.length()==0;} }')
+ test=r/'scripts/tests/profile-demand/NativeJoinTimeTest.java'
+ testcp=str(p/'java-out')+':'+str(p/'out')+':'+':'.join(map(str,cp))
+ result=subprocess.run(['javac','-proc:none','--release','17','-classpath',testcp,'-d',str(p/'test-out'),str(textutils),str(test)],capture_output=True,text=True,timeout=55)
+ print(result.stdout,end='');print(result.stderr,end='')
+ if result.returncode:raise SystemExit(result.returncode)
+ subprocess.run(['java','-cp',str(p/'test-out')+':'+testcp,'NativeJoinTimeTest'],check=True,timeout=15)
 print('PASS profile Kotlin + chatroom Java SDK compile; existing ABI and UI registry fixture; no Gradle/APK/device')

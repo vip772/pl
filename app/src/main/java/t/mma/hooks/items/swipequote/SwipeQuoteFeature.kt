@@ -1,5 +1,8 @@
 package t.mma.hooks.items.swipequote
 
+import android.app.Activity
+import android.app.AlertDialog
+import android.content.ContextWrapper
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Canvas
@@ -96,6 +99,7 @@ private class SwipeQuoteAdapter(
         resources.close()
         mainHandler.removeCallbacksAndMessages(null)
         repeatVoiceExecutor.shutdownNow()
+        mainHandler.post { repeatConfirmation?.dismiss() }
         synchronized(recyclerStates) {
             val rows = recyclerStates.values.mapNotNull { it.visualRow }
             mainHandler.post { rows.forEach { clearSwipeVisual(it) } }
@@ -115,6 +119,7 @@ private class SwipeQuoteAdapter(
     private val footerRefreshMethodCache = ConcurrentHashMap<Class<*>, List<Method>>()
     private val voiceContentGetterCache = ConcurrentHashMap<Class<*>, Method?>()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var repeatConfirmation: AlertDialog? = null
     private val repeatVoiceExecutor = Executors.newSingleThreadExecutor { runnable ->
         Thread(runnable, "Hchat-SwipeRepeatVoice").apply { isDaemon = true }
     }
@@ -635,7 +640,7 @@ private class SwipeQuoteAdapter(
                 val triggered = if (event.actionMasked == MotionEvent.ACTION_UP && state.armed && activeHit != null) {
                     when (state.direction) {
                         SwipeDirection.LEFT_QUOTE -> showNativeQuote(activeHit.row, activeHit.target)
-                        SwipeDirection.RIGHT_REPEAT -> repeatNativeMessage(activeHit.target)
+                        SwipeDirection.RIGHT_REPEAT -> confirmSwipeRepeat(activeHit.row, activeHit.target)
                         SwipeDirection.NONE -> false
                     }
                 } else {
@@ -725,6 +730,60 @@ private class SwipeQuoteAdapter(
             return true
         }
         return false
+    }
+
+    /** Only right-swipe repeats require confirmation; menu repeats keep their existing behavior. */
+    private fun confirmSwipeRepeat(row: View, target: QuoteTarget): Boolean {
+        if (resources.isClosed() || !isRepeatEnabled()) return false
+        if (repeatConfirmation != null) return true
+        var host = row.context
+        while (host is ContextWrapper && host !is Activity) {
+            val base = host.baseContext
+            if (base === host) return false
+            host = base
+        }
+        val activity = host as? Activity ?: return false
+        if (activity.isFinishing || activity.isDestroyed || !row.isAttachedToWindow) return false
+        val talker = WeChatApis.chatPage()?.currentTalker().orEmpty()
+        if (talker.isEmpty() || (target.talker.isNotEmpty() && target.talker != talker)) return false
+        // Freeze the conversation now, so a delayed confirmation cannot send into another chat.
+        val pendingTarget = target.copy(talker = talker)
+        var confirmed = false
+        val dialog = AlertDialog.Builder(activity)
+            .setTitle("复读消息")
+            .setMessage("确定复读这条消息吗？")
+            .setNegativeButton("取消", null)
+            .setPositiveButton("确定") { _, _ ->
+                if (confirmed) return@setPositiveButton
+                confirmed = true
+                if (!resources.isClosed() && isRepeatEnabled() &&
+                    !activity.isFinishing && !activity.isDestroyed && row.isAttachedToWindow &&
+                    WeChatApis.chatPage()?.currentTalker() == pendingTarget.talker
+                ) {
+                    if (!repeatNativeMessage(pendingTarget)) showToast("该消息暂不支持复读")
+                }
+            }
+            .create()
+        val detachListener = object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(view: View) = Unit
+            override fun onViewDetachedFromWindow(view: View) { dialog.dismiss() }
+        }
+        dialog.setOnDismissListener {
+            row.removeOnAttachStateChangeListener(detachListener)
+            if (repeatConfirmation === dialog) repeatConfirmation = null
+        }
+        return runCatching {
+            repeatConfirmation = dialog
+            row.addOnAttachStateChangeListener(detachListener)
+            dialog.show()
+            true
+        }.getOrElse {
+            row.removeOnAttachStateChangeListener(detachListener)
+            if (repeatConfirmation === dialog) repeatConfirmation = null
+            runCatching { dialog.dismiss() }
+            logger("显示右划复读确认框失败", it)
+            false
+        }
     }
 
     private fun repeatNativeMessage(target: QuoteTarget): Boolean {

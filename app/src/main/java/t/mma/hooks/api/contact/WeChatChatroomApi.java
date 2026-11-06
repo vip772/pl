@@ -171,18 +171,31 @@ public final class WeChatChatroomApi {
 
     /**
      * Reads all known member join times for a group in one background-friendly pass.
-     * The result is keyed by member wxid and contains the earliest matching event time.
+     * The result prefers native roomdata.joinTime; history fills only members missing native time.
      */
     public Map<String, Long> getMemberJoinTimes(String chatroomId) {
         Map<String, Long> result = new LinkedHashMap<>();
         if (TextUtils.isEmpty(chatroomId) || databaseApi == null) return result;
-        // roomdata is not a join-time source and may lag behind memberlist in new groups.
+        // WeChat 8.0.78 so.b: field 5 = addChatRoomScene, field 6 = joinTime (seconds).
+        // Prefer persisted member metadata; local system-message history may be incomplete.
+        Map<String, RoomDataMember> roomMembers = getRoomDataMembers(chatroomId);
+        for (Map.Entry<String, RoomDataMember> entry : roomMembers.entrySet()) {
+            if (entry.getValue().joinTimeMillis > 0L) result.put(entry.getKey(), entry.getValue().joinTimeMillis);
+        }
+        int nativeHits = result.size();
         java.util.Set<String> members = new java.util.LinkedHashSet<>(getMemberIds(chatroomId));
         WeChatChatroom room = getChatroom(chatroomId);
         if (room != null) members.addAll(room.memberIds);
-        members.addAll(getRoomDataMembers(chatroomId).keySet());
+        members.addAll(roomMembers.keySet());
         if (members.isEmpty()) {
             log("群成员进群时间暂不可查: group=" + chatroomId + " reason=member-list-empty");
+            return result;
+        }
+        java.util.Set<String> missingMembers = new java.util.LinkedHashSet<>(members);
+        missingMembers.removeAll(result.keySet());
+        if (missingMembers.isEmpty()) {
+            log("群成员进群时间索引完成: group=" + chatroomId + " tables=0 members=" + members.size()
+                    + " hits=" + result.size() + " roomdataHits=" + nativeHits + " messageHits=0");
             return result;
         }
         try {
@@ -215,7 +228,7 @@ public final class WeChatChatroomApi {
                         long time = cursor.getLong(timeColumn);
                         long millis = time < 100000000000L ? time * 1000L : time;
                         if (millis <= 0L) continue;
-                        for (String memberWxId : members) {
+                        for (String memberWxId : missingMembers) {
                             if (!isMemberJoinSystemMessage(type, content, memberWxId)) continue;
                             Long previous = result.get(memberWxId);
                             if (previous == null || millis < previous) result.put(memberWxId, millis);
@@ -225,10 +238,12 @@ public final class WeChatChatroomApi {
             }
             log("群成员进群时间索引完成: group=" + chatroomId
                     + " tables=" + tables.size() + " members=" + members.size()
-                    + " hits=" + result.size());
+                    + " hits=" + result.size() + " roomdataHits=" + nativeHits
+                    + " messageHits=" + (result.size() - nativeHits));
         } catch (Throwable e) {
             log("建立群成员进群时间索引失败: group=" + chatroomId + " " + e.getMessage());
-            throw new IllegalStateException("群成员进群时间查询失败", e);
+            // Do not discard verified native timestamps because a history fallback failed.
+            if (result.isEmpty()) throw new IllegalStateException("群成员进群时间查询失败", e);
         }
         return result;
     }
@@ -451,6 +466,8 @@ public final class WeChatChatroomApi {
                     member.roomFlag = reader.readVarint32();
                 } else if (wireType == 2 && fieldNumber == 4) {
                     member.inviterWxId = reader.readString().trim();
+                } else if (wireType == 0 && fieldNumber == 6) {
+                    member.joinTimeMillis = normalizeNativeJoinTime(reader.readVarint64());
                 } else {
                     reader.skip(wireType);
                 }
@@ -459,6 +476,13 @@ public final class WeChatChatroomApi {
             return new RoomDataMember();
         }
         return member;
+    }
+
+    private static long normalizeNativeJoinTime(long seconds) {
+        // Native protocol is int32 seconds. Reject missing, corrupt and future timestamps.
+        if (seconds < 946684800L || seconds > Integer.MAX_VALUE
+                || seconds > System.currentTimeMillis() / 1000L + 86400L) return 0L;
+        return seconds * 1000L;
     }
 
     private boolean hasColumn(String table, String column) {
@@ -538,6 +562,7 @@ public final class WeChatChatroomApi {
         String username = "";
         String displayName = "";
         String inviterWxId = "";
+        long joinTimeMillis;
         int roomFlag;
     }
 
