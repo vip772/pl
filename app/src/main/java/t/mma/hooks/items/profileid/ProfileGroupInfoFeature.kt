@@ -35,10 +35,11 @@ class ProfileGroupInfoFeature {
         @Volatile private var active = false
         @Volatile private var diagnosticLoader: ClassLoader? = null
         private val generation = AtomicInteger(0)
-        private data class Snapshot(val times: Map<String, Long>, val loadedAt: Long)
+        private data class Snapshot(val times: Map<String, Long>, val loadedAt: Long, val complete: Boolean)
         private val cache = object : LinkedHashMap<String, Snapshot>(16, 0.75f, true) {
             override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Snapshot>?): Boolean = size > 32
         }
+        private val verifyingGroups = ConcurrentHashMap<String, Int>()
         private val loadingGroups = ConcurrentHashMap<String, Int>()
         private const val REFRESH_MS = 15_000L
         private var diagnosticActivity = WeakReference<Activity>(null)
@@ -69,25 +70,34 @@ class ProfileGroupInfoFeature {
             WeContactHeaderApi.removeProvider(inviterProvider)
             synchronized(cache) { cache.clear() }
             loadingGroups.clear()
+            verifyingGroups.clear()
             diagnosticActivity.clear()
             diagnosticState = ""
         }
         // 仅在资料页请求进群时间时加载当前群，注册 Provider 不触发全群消息扫描。
         @Synchronized private fun scheduleGroup(groupId: String, run: Int = generation.get()) {
-            if (!active || groupId.isBlank() || generation.get() != run || loadingGroups.size >= 32 ||
-                loadingGroups.putIfAbsent(groupId, run) != null) return
+            if (!active || groupId.isBlank() || generation.get() != run) return
+            if (loadingGroups.size >= 32) {
+                HLog.d("[Hchat:profile_group_info] JOIN_DIAG schedule group=$groupId state=capacity")
+                return
+            }
+            if (loadingGroups.putIfAbsent(groupId, run) != null) return
+            HLog.d("[Hchat:profile_group_info] JOIN_DIAG schedule group=$groupId generation=$run state=queued")
             val work = Runnable {
                 try {
                     if (generation.get() != run) return@Runnable
-                    val api = WeChatApis.chatrooms() ?: return@Runnable
+                    val api = WeChatApis.chatrooms() ?: run {
+                        HLog.d("[Hchat:profile_group_info] JOIN_DIAG query group=$groupId state=api-unavailable")
+                        return@Runnable
+                    }
                     api.logNativeJoinGate(diagnosticLoader)
                     val times = api.getMemberJoinTimes(groupId)
                     synchronized(cache) {
                         if (generation.get() != run) return@Runnable
-                        cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime())
+                        cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), api.isJoinTimeResultComplete(times))
                     }
-                    HLog.d("[Hchat:profile_group_info] JOIN_DIAG cacheStored group=$groupId size=${times.size} generation=$run")
-                    times.keys.forEach { memberId -> WeContactHeaderApi.refreshCurrentProfile(groupId, memberId) }
+                    HLog.d("[Hchat:profile_group_info] JOIN_DIAG cacheStored group=$groupId size=${times.size} generation=$run complete=${api.isJoinTimeResultComplete(times)}")
+                    WeContactHeaderApi.refreshCurrentGroupProfile(groupId)
                 } catch (t: Throwable) {
                     HLog.e("[Hchat:profile_group_info] 群成员进群时间索引失败: $groupId", t)
                 } finally {
@@ -100,10 +110,38 @@ class ProfileGroupInfoFeature {
             }
         }
 
+        // Runs only after an observed native write, with bounded/coalesced verification work.
+        @Synchronized fun nativeWriteCompleted(groupId: String, eventId: Long, expectedHash: String) {
+            val run = generation.get()
+            if (!active) return
+            synchronized(cache) { cache.remove(groupId) }
+            if (verifyingGroups.size >= 32 || verifyingGroups.putIfAbsent(groupId, run) != null) {
+                HLog.d("[Hchat:profile_group_info] JOIN_DIAG persistedRead event=$eventId group=$groupId state=coalesced-or-capacity")
+                return
+            }
+            try {
+                executor().execute {
+                    try {
+                        if (!active || generation.get() != run) return@execute
+                        val api = WeChatApis.chatrooms()
+                        if (api == null) HLog.d("[Hchat:profile_group_info] JOIN_DIAG persistedRead event=$eventId group=$groupId state=api-unavailable")
+                        else api.logPersistedJoinTimes(groupId, eventId, expectedHash)
+                        synchronized(cache) { if (generation.get() == run) cache.remove(groupId) }
+                        WeContactHeaderApi.refreshCurrentGroupProfile(groupId)
+                    } catch (error: Throwable) {
+                        HLog.e("[Hchat:profile_group_info] JOIN_DIAG persistedRead event=$eventId group=$groupId failed", error)
+                    } finally { verifyingGroups.remove(groupId, run) }
+                }
+            } catch (error: Throwable) {
+                verifyingGroups.remove(groupId, run)
+                HLog.e("[Hchat:profile_group_info] JOIN_DIAG persistedRead rejected", error)
+            }
+        }
+
         private fun cachedJoinTime(groupId: String, memberId: String): Long {
             val snapshot = synchronized(cache) { cache[groupId] }
-            // Existing historical hits are stable; only missing members require a refreshed scan.
-            if (snapshot == null || (snapshot.times[memberId] == null &&
+            // Retry incomplete reads as well as missing members; successful native writes invalidate snapshots.
+            if (snapshot == null || ((!snapshot.complete || snapshot.times[memberId] == null) &&
                     SystemClock.elapsedRealtime() - snapshot.loadedAt >= REFRESH_MS)) scheduleGroup(groupId)
             return snapshot?.times?.get(memberId) ?: 0L
         }
@@ -134,7 +172,7 @@ class ProfileGroupInfoFeature {
                 if (!enabled) { logDisplay(activity, "state=disabled"); return null }
                 val time = cachedJoinTime(groupId, memberId)
                 val snapshot = synchronized(cache) { cache[groupId] }
-                logDisplay(activity, "groupHash=${groupId.hashCode().toUInt().toString(16)} memberHash=${memberId.hashCode().toUInt().toString(16)} state=${if (time > 0L) "text-returned" else if (snapshot == null) "loading-or-not-ready" else "member-time-missing"} snapshotAt=${snapshot?.loadedAt ?: -1L}")
+                logDisplay(activity, "groupHash=${groupId.hashCode().toUInt().toString(16)} memberHash=${memberId.hashCode().toUInt().toString(16)} complete=${snapshot?.complete} pending=${loadingGroups.containsKey(groupId)} state=${if (time > 0L) "text-returned" else if (snapshot == null) "loading-or-not-ready" else "member-time-missing"} snapshotAt=${snapshot?.loadedAt ?: -1L}")
                 if (time <= 0L) return null
                 val formatted = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.ROOT).format(Date(time))
                 return "进群时间：$formatted"

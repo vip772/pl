@@ -1,0 +1,15 @@
+Base HEAD: 4bf1d3d25352de0b6f3824f60d04e88a196ed0e3
+Checks recorded before commit/push; user subsequently authorized publishing all pending changes. No Gradle/APK/device validation.
+/tmp/join-root-signatures-final.log
+PASS: 13 native probe signatures and protocol fields match supplied 8.0.78 smali; observers do not override results
+
+/tmp/join-root-demand-verified.log
+PASS: no startup scan, disabled no load, background dedup, empty snapshot expiry and new-member refresh, cooldown, incomplete-hit retry, native-write invalidation/readback, teardown
+Kotlin JVM compile PASS
+
+/tmp/join-root-sdk-verified.log
+PASS production diagnostic structure/privacy, incomplete query status and per-member native transitions
+PASS native roomdata production parser: field 6, seconds conversion, scene/unknown exclusion, invalid/future/truncated data
+PASS profile Kotlin + chatroom Java SDK compile; existing ABI and UI registry fixture; no Gradle/APK/device
+
+git diff --check: PASS

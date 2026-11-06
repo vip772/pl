@@ -28,3 +28,5 @@
 未运行 Gradle、未构建 APK，所有定向编译和 JVM 夹具结果都不能替代新版实机数据。最终根因和修复仍待日志取证。
 
 验证记录：scripts/check_profile_runtime_sdk.py PASS（/tmp/join-diag-sdk-final.log）；生产解析器有效/缺失/零值/截断分类断言通过；scripts/tests/profile-demand/run.py PASS（/tmp/join-diag-demand.log），覆盖无启动扫描、禁用不加载、去重、空快照刷新、冷却、销毁。定向 SDK 编译依赖已有 ABI 与夹具。
+
+后续原生写入完整链路诊断与缓存修复见 [PROFILE_JOIN_ROOT_DIAGNOSTICS.md](PROFILE_JOIN_ROOT_DIAGNOSTICS.md)。此前“无新增Hook”仅适用于4bf1d3d定位版，后续本地修改新增由进群时间开关控制的13个只读原生探针。

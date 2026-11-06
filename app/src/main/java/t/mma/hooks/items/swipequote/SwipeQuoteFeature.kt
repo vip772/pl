@@ -751,9 +751,9 @@ private class SwipeQuoteAdapter(
         var confirmed = false
         val dialog = AlertDialog.Builder(activity)
             .setTitle("复读消息")
-            .setMessage("确定复读这条消息吗？")
-            .setNegativeButton("取消", null)
-            .setPositiveButton("确定") { _, _ ->
+            .setMessage("你最好是真的在复读，而不是误碰，艹！")
+            .setNegativeButton("假的", null)
+            .setPositiveButton("真的") { _, _ ->
                 if (confirmed) return@setPositiveButton
                 confirmed = true
                 if (!resources.isClosed() && isRepeatEnabled() &&

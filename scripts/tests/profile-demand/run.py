@@ -26,6 +26,7 @@ object WeContactHeaderApi {
  fun addProvider(p:Provider){providers.add(p)}
  fun removeProvider(p:Provider){providers.remove(p)}
  fun refreshCurrentProfile(g:String,m:String){refreshes++}
+ fun refreshCurrentGroupProfile(g:String){refreshes++}
 }
 ''',
 'Apis.kt':'''package t.mma.hooks.api.core
@@ -34,7 +35,11 @@ class Rooms {
  @Volatile var calls=0
  @Volatile var result:Map<String,Long> = emptyMap()
  val started=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
+ @Volatile var complete=true
+ @Volatile var verified=0
  fun logNativeJoinGate(loader:ClassLoader?){}
+ fun isJoinTimeResultComplete(times:Map<String,Long>)=complete
+ fun logPersistedJoinTimes(g:String,id:Long,hash:String){verified++}
  fun getMemberJoinTimes(g:String):Map<String,Long>{calls++;started.countDown();check(release.await(3,java.util.concurrent.TimeUnit.SECONDS));return result}
  fun getMemberInviter(g:String,m:String)=""
  fun getMemberDisplayName(g:String,m:String)=""
@@ -59,11 +64,24 @@ fun main(){
  android.os.SystemClock.now=15_001
  p.getHeaderText(a)
  val retryEnd=System.nanoTime()+3000000000L
- while(Header.refreshes==0 && System.nanoTime()<retryEnd) Thread.yield()
- check(Header.refreshes==1);check(p.getHeaderText(a)?.startsWith("进群时间：")==true);check(WeChatApis.api.calls==2)
+ while(Header.refreshes<2 && System.nanoTime()<retryEnd) Thread.yield()
+ check(Header.refreshes==2);check(p.getHeaderText(a)?.startsWith("进群时间：")==true);check(WeChatApis.api.calls==2)
  repeat(20){p.getHeaderText(a)};check(WeChatApis.api.calls==2)
+ // A partial snapshot must retry even when this member already has a historical hit.
+ WeChatApis.api.complete=false
+ ProfileGroupInfoFeature.nativeWriteCompleted("group@chatroom", 1L, "fixture")
+ val verifiedEnd=System.nanoTime()+3000000000L
+ while(WeChatApis.api.verified==0 && System.nanoTime()<verifiedEnd) Thread.yield()
+ Thread.sleep(30)
+ p.getHeaderText(a);Thread.sleep(60)
+ check(WeChatApis.api.calls==3)
+ android.os.SystemClock.now=30_002
+ p.getHeaderText(a);Thread.sleep(60)
+ check(WeChatApis.api.calls==4)
  ProfileGroupInfoFeature.removeProvider();check(Header.providers.isEmpty())
- println("PASS: no startup scan, disabled no load, background dedup, empty snapshot expiry and new-member refresh, cooldown, teardown")
+ ProfileGroupInfoFeature.nativeWriteCompleted("group@chatroom", 2L, "fixture")
+ check(WeChatApis.api.verified==1)
+ println("PASS: no startup scan, disabled no load, background dedup, empty snapshot expiry and new-member refresh, cooldown, incomplete-hit retry, native-write invalidation/readback, teardown")
 }
 '''}
 with tempfile.TemporaryDirectory() as d:

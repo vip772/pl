@@ -37,6 +37,22 @@ public final class NativeJoinTimeTest {
             check(time.getLong(parse.invoke(api, (Object)member(0, invalid, null))) == 0, "invalid native timestamp");
         }
         check(time.getLong(parse.invoke(api, (Object)new byte[]{48, (byte)128})) == 0, "truncated protobuf must not fabricate time");
+        Method shape = WeChatChatroomApi.class.getDeclaredMethod("historyShape", String.class);
+        shape.setAccessible(true);
+        String structure = (String) shape.invoke(null, "<sysmsg><link name='inviter'><username><![CDATA[private_member_id]]></username><nickname>private_name</nickname></link></sysmsg>");
+        check(structure.contains("roleCount=1") && structure.contains("userCount=1"), "history diagnostic retains structural roles and identities");
+        check(!structure.contains("private_member_id") && !structure.contains("private_name") && !structure.contains("inviter"), "history diagnostic excludes raw names, IDs and role attribute values");
+        check(!api.isJoinTimeResultComplete(api.getMemberJoinTimes("group@chatroom")), "database unavailable is incomplete, not confirmed empty");
+        Class<?> probes = Class.forName("t.mma.hooks.items.profileid.JoinTimeNativeDiagnostics");
+        Object instance = probes.getField("INSTANCE").get(null);
+        Method transitions = probes.getDeclaredMethod("transitions", java.util.Map.class, java.util.Map.class, java.util.Map.class);
+        transitions.setAccessible(true);
+        String changes = (String) transitions.invoke(instance,
+                java.util.Map.of("cleared", 1700000000L, "removed", 1700000000L),
+                java.util.Map.of("cleared", 0L, "copied", 1700000100L),
+                java.util.Map.of("cleared", 1700000000L, "copied", 1700000100L));
+        check(changes.contains("cleared=1") && changes.contains("removed=1") && changes.contains("incomingPositiveCopied=1") && changes.contains("incomingPositiveNotCopied=1"), "production native transition classifier distinguishes clearing, omission and copying");
+        System.out.println("PASS production diagnostic structure/privacy, incomplete query status and per-member native transitions");
         System.out.println("PASS native roomdata production parser: field 6, seconds conversion, scene/unknown exclusion, invalid/future/truncated data");
     }
     static void check(boolean ok, String message) { if (!ok) throw new AssertionError(message); }

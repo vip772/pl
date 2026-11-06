@@ -100,6 +100,10 @@ object WeContactHeaderApi {
             method.parameterTypes.size == 1 &&
             View::class.java.isAssignableFrom(method.parameterTypes[0])
 
+    fun refreshCurrentGroupProfile(groupId: String) {
+        if (currentGroupId != groupId) return
+        currentMemberId?.let { refreshCurrentProfile(groupId, it) }
+    }
     fun refreshCurrentProfile(groupId: String?, memberId: String) {
         val activity = currentActivity?.get() ?: return
         if (activity.isFinishing || activity.isDestroyed) return
@@ -133,8 +137,14 @@ object WeContactHeaderApi {
         val templates = findViews(viewRoot) {
             it is TextView && listenerInfoLongClick(it) === header
         }.filterIsInstance<TextView>()
-        val parent = templates.map { it.parent }.distinct().singleOrNull() as? LinearLayout ?: return
-        if (parent.orientation != LinearLayout.VERTICAL) return
+        val parent = templates.map { it.parent }.distinct().singleOrNull() as? LinearLayout ?: run {
+            if (currentGroupId != null) HLog.d("[$TAG] JOIN_DIAG render state=template-parent-unavailable templates=${templates.size}")
+            return
+        }
+        if (parent.orientation != LinearLayout.VERTICAL) {
+            if (currentGroupId != null) HLog.d("[$TAG] JOIN_DIAG render state=parent-not-vertical")
+            return
+        }
         val template = templates.firstOrNull() ?: return
         val touch = listenerInfoTouch(template)
         providers.forEach { provider ->
@@ -165,6 +175,9 @@ object WeContactHeaderApi {
                 }
             }
             parent.addView(row)
+            if (text.startsWith("进群时间：")) {
+                HLog.d("[$TAG] JOIN_DIAG render state=row-added groupHash=${currentGroupId?.hashCode()?.toUInt()?.toString(16)} memberHash=${currentMemberId?.hashCode()?.toUInt()?.toString(16)} attached=${row.isAttachedToWindow} shown=${row.isShown}")
+            }
         }
     }
 
