@@ -23,3 +23,10 @@
 - 两群其他成员接口返回0；没有可信原文支持的日期保持不显示，不能承诺恢复全员。原文结构覆盖属于后续有证据再扩展，不用猜测放宽规则。
 - 未确认原生历史清零成因，不能把本次恢复称为历史清零根因修复。
 - 本次专项独立于资源生命周期七阶段，七阶段进度保持0/7。
+
+## 2026-11-07 新日志失败复盘（00:19:35）
+附件 Hchat-runtime-20261107-001935.log 中00:19:09.751、00:19:13.053、00:19:20.533三次资料页回调均 complete=null / pending=false / snapshotAt=-1，没有后台schedule/query/request记录。
+代码确认：JoinTimeRecovery.call/static将args数组作为一个参数传给生产KavaReflector.findCompatibleMethod(vararg args)，缺少展开符；因此无参数的b41.y1.u()被按一个数组参数匹配，抛Missing b41.y1.u。accountKey捕获后返回空串，cachedJoinTime直接返回0，后台索引也被阻止。此错误同时影响gp0.j1.q、队列g/d和onSceneEnd的匹配，修正两处统一封装以覆盖全部调用点。
+此前测试替身使用普通Array参数，偏离生产vararg签名，使错误调用在测试中成功；这是上一轮测试通过但实机失败的已确认验证缺口。先只修测试签名，旧生产代码已复现Missing b41.y1.u并退出1；随后修正两处为*args。新增原始账号读取断言、参数类型匹配及--production-reflector模式，直接编译运行生产KavaReflector和恢复对象，微信scene/队列仍为模拟，不冒充设备验证。
+本次三个成员哈希b723d329/46016787/308da4e0，均不同于旧完整回包唯一正时间成员哈希50fbeb61；不得承诺修正加载后这三位就有日期。
+本轮已通过：真实vararg签名替身回归（退出0）、生产KavaReflector及全部项目compat依赖运行恢复对象回归（退出0）、资料页回归（退出0）、SDK定向编译及解析回归（退出0）、git diff --check。真实组件测试初次缺少DefaultLogger的失败已由补齐项目compat源文件解决，没有改动全局反射工具。证据目录 /sdcard/Download/Operit/join-vararg-evidence/ 保存旧码失败red.log、修正后green.log、真实组件production-reflector.log、SDK及资料页输出；新日志SHA256 aa73748c4cf3f592cad0c17aaaafc40dd9fb2104663701f6993d464f43a45481。未运行Gradle、未构建APK；实机修复验收仍为0。

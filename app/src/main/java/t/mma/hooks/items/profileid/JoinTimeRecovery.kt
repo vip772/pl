@@ -45,12 +45,12 @@ internal object JoinTimeRecovery {
     private fun field(value: Any, name: String): Any =
         KavaReflector.readField(value, name) ?: error("Missing ${value.javaClass.name}.$name")
     private fun call(value: Any, name: String, vararg args: Any?): Any? {
-        val m = KavaReflector.findCompatibleMethod(value.javaClass, name, args) ?: error("Missing method $name")
+        val m = KavaReflector.findCompatibleMethod(value.javaClass, name, *args) ?: error("Missing method $name")
         return KavaReflector.invokeOrThrow(m, value, *args)
     }
     private fun static(loader: ClassLoader, type: String, name: String, vararg args: Any?): Any? {
         val c = loader.loadClass(type)
-        val m = KavaReflector.findCompatibleMethod(c, name, args) ?: error("Missing $type.$name")
+        val m = KavaReflector.findCompatibleMethod(c, name, *args) ?: error("Missing $type.$name")
         return KavaReflector.invokeOrThrow(m, null, *args)
     }
     /** Called only by the existing background group worker, never a view callback. */

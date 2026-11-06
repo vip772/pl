@@ -28,7 +28,12 @@ object HLog {fun e(s:String,t:Throwable){throw AssertionError(s,t)}}
 object KavaReflector {
  fun readField(o:Any,n:String):Any?=o.javaClass.getField(n).get(o)
  fun writeField(o:Any,n:String,v:Any?):Boolean {o.javaClass.getField(n).set(o,v);return true}
- fun findCompatibleMethod(c:Class<*>,n:String,a:Array<out Any?>)=c.methods.firstOrNull{it.name==n && it.parameterCount==a.size}
+ fun findCompatibleMethod(c:Class<*>,n:String,vararg a:Any?)=c.methods.firstOrNull { m ->
+  m.name==n && m.parameterCount==a.size && m.parameterTypes.indices.all { i ->
+   a[i]==null || m.parameterTypes[i].isInstance(a[i]) ||
+   (m.parameterTypes[i]==Int::class.javaPrimitiveType && a[i] is Int)
+  }
+ }
  fun invokeOrThrow(m:java.lang.reflect.Method,o:Any?,vararg a:Any?)=m.invoke(o,*a)
  fun findDeclaredMethod(c:Class<*>,n:String,vararg a:Class<*>)=c.getDeclaredMethod(n,*a)
  fun findConstructor(c:Class<*>,vararg a:Class<*>)=c.getConstructor(*a)
@@ -77,6 +82,7 @@ class Queue {
 'Test.kt':'''package t.mma.hooks.items.profileid
 fun main(){
  val loader=JoinTimeRecovery.javaClass.classLoader;val q=gp0.j1.b
+ check(JoinTimeRecovery.accountKey(loader)=="account-A")
  check(JoinTimeRecovery.read(loader,"g@chatroom").isEmpty());check(q.calls==0)
  JoinTimeRecovery.open()
  t.mma.hooks.api.core.WeChatApis.supported=false
@@ -109,10 +115,22 @@ fun main(){
 }
 '''
 }
+# Also execute against the actual production reflection wrapper; a fixture with
+# a different vararg ABI previously concealed the failed account lookup.
+import sys
+actual_reflector = '--production-reflector' in sys.argv
+if actual_reflector:
+ sources['Reflect.kt']='''package t.mma.utils
+object HLog {fun e(s:String,t:Throwable){throw AssertionError(s,t)}}
+'''
+ libs += list(Path('/root/.gradle/caches/modules-2/files-2.1/com.highcapable.kavaref').glob('*/*/*/*.jar'))
 with tempfile.TemporaryDirectory() as td:
  p=Path(td);files=[]
  for name,text in sources.items():
   f=p/name;f.write_text(text);files.append(str(f))
- cmd=['java','-Xmx256m','-cp',':'.join(map(str,libs)),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(stdlib),'-d',str(p/'test.jar'),*files,str(r/'app/src/main/java/t/mma/hooks/items/profileid/JoinTimeRecovery.kt')]
+ if actual_reflector:
+  files.append(str(r/'app/src/main/java/t/mma/utils/KavaReflector.kt'))
+  files += list(map(str,(r/'app/src/main/java/t/mma/compat/kavaref').rglob('*.kt')))
+ cmd=['java','-Xmx256m','-cp',':'.join(map(str,libs)),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-jvm-target','17','-nowarn','-no-stdlib','-no-reflect','-classpath',':'.join(map(str,libs)),'-d',str(p/'test.jar'),*files,str(r/'app/src/main/java/t/mma/hooks/items/profileid/JoinTimeRecovery.kt')]
  subprocess.run(cmd,check=True,timeout=55)
- subprocess.run(['java','-cp',str(p/'test.jar')+':'+str(stdlib),'t.mma.hooks.items.profileid.TestKt'],check=True,timeout=20)
+ subprocess.run(['java','-Dactual.reflector='+str(actual_reflector).lower(),'-cp',str(p/'test.jar')+':'+':'.join(map(str,libs)),'t.mma.hooks.items.profileid.TestKt'],check=True,timeout=20)
