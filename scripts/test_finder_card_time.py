@@ -12,7 +12,7 @@ start = source.index('    private fun finderFeedBottomAnchor(')
 end = source.index('    private fun cardBottomAnchor(', start)
 resolver = source[start:end]
 assert source.index('return finderFeedBottomAnchor(root, holder)', end) < source.index('val row = root as? ViewGroup', end)
-assert 'parent.timeLayoutParams(label, details.isSelf, params.topMargin)' in source
+assert 'parent.timeLayoutParams(label, details.isSelf, params.topMargin,' in source
 assert source.count('avatarHidden && parent !is MessageDetailsFinderColumn') == 2
 assert 'MessageDetailsFinderColumn.restore(parent)' in source
 assert 'MessageDetailsFinderColumn.restore(previousParent)' in source
@@ -20,7 +20,13 @@ assert 'releaseSafely("视频号时间布局")' in source
 
 files = {
     'Gravity.kt': 'package android.view\nobject Gravity {const val END=8388613;const val START=8388611}',
-    'Text.kt': 'package android.widget\nclass TextView:android.view.View()',
+    'TextUtils.kt': 'package android.text\nobject TextUtils {enum class TruncateAt { END }}',
+    'Text.kt': '''package android.widget
+class TextView:android.view.View() {
+ var maxLines=99;var ellipsize:android.text.TextUtils.TruncateAt?=null
+ fun setSingleLine(single:Boolean){maxLines=if(single) 1 else 99}
+ override fun onMeasure(w:Int,h:Int){measuredWidth=if(MeasureSpec.getMode(w)==MeasureSpec.EXACTLY) MeasureSpec.getSize(w) else minOf(desiredWidth,MeasureSpec.getSize(w));measuredHeight=desiredHeight}
+}''',
     'Context.kt': 'package android.content\nclass Context',
     'View.kt': '''package android.view
 open class View(val context:android.content.Context=android.content.Context()) {
@@ -30,7 +36,7 @@ open class View(val context:android.content.Context=android.content.Context()) {
  var layoutParams:ViewGroup.LayoutParams=ViewGroup.LayoutParams(-2,-2)
  var measuredWidth=200;var measuredHeight=300
  var desiredWidth=200;var desiredHeight=300
- open fun onMeasure(w:Int,h:Int){measuredWidth=if(MeasureSpec.getMode(w)==MeasureSpec.EXACTLY) MeasureSpec.getSize(w) else desiredWidth;measuredHeight=desiredHeight}
+ open fun onMeasure(w:Int,h:Int){measuredWidth=if(MeasureSpec.getMode(w)==MeasureSpec.EXACTLY) MeasureSpec.getSize(w) else minOf(desiredWidth,MeasureSpec.getSize(w));measuredHeight=desiredHeight}
  fun measure(w:Int,h:Int)=onMeasure(w,h)
  fun setMeasuredDimension(w:Int,h:Int){measuredWidth=w;measuredHeight=h}
  object MeasureSpec {
@@ -63,7 +69,7 @@ open class LinearLayout(c:android.content.Context=android.content.Context()):Vie
    val childWidth=fixed ?: if(v.layoutParams.width==ViewGroup.LayoutParams.MATCH_PARENT) limit else minOf(v.desiredWidth,limit)
    v.measure(View.MeasureSpec.makeMeasureSpec(childWidth,View.MeasureSpec.EXACTLY),h)
    widest=maxOf(widest,v.measuredWidth)
-   totalHeight+=if(fixed==null) ((v.desiredWidth+childWidth-1)/childWidth)*v.desiredHeight else v.measuredHeight
+   totalHeight+=if(fixed==null && v !is TextView) ((v.desiredWidth+childWidth-1)/childWidth)*v.desiredHeight else v.measuredHeight
   }
   setMeasuredDimension(if(exact) limit else minOf(widest,limit),totalHeight)
  }
@@ -113,22 +119,24 @@ fun main(){
   check(a.parent is MessageDetailsFinderColumn)
   check(a.parent.layoutParams.width==240)
   val label=android.widget.TextView()
-  val timeParams=a.parent.timeLayoutParams(label,self,2)
+  val timeParams=a.parent.timeLayoutParams(label,self,2,1000)
   check(timeParams.width==ViewGroup.LayoutParams.MATCH_PARENT && timeParams.topMargin==2)
   check(timeParams.leftMargin==0 && timeParams.rightMargin==0)
   check(label.paddingLeft==0 && label.paddingRight==0 && label.paddingTop==2 && label.paddingBottom==2)
   check(label.gravity==if(self) Gravity.END else Gravity.START)
   check(label.textAlignment==if(self) View.TEXT_ALIGNMENT_TEXT_END else View.TEXT_ALIGNMENT_TEXT_START)
   a.parent.addView(label,timeParams);check(a.parent.indexOfChild(label)>a.parent.indexOfChild(card))
-  // Long text at larger font/display scales wraps below the card; it cannot enlarge the slot.
+  // Time may expand the column, but never changes native card size or line count.
   for(nativeWidth in listOf(180,240,360,540,720)){
    card.layoutParams.width=nativeWidth
    for(textWidth in listOf(100,400,1200,2400)){
     label.desiredWidth=textWidth;label.desiredHeight=24
     a.parent.measure(View.MeasureSpec.makeMeasureSpec(1600,View.MeasureSpec.AT_MOST),0)
-    check(a.parent.measuredWidth==nativeWidth){"time enlarged native card slot"}
-    check(card.measuredWidth==nativeWidth && label.measuredWidth<=nativeWidth)
-    if(textWidth>nativeWidth) check(a.parent.measuredHeight>card.measuredHeight+24){"long time must wrap"}
+    check(a.parent.measuredWidth==maxOf(nativeWidth,minOf(textWidth,1000))){"single-line time width"}
+    check(card.measuredWidth==nativeWidth && label.measuredWidth==a.parent.measuredWidth)
+    check(label.maxLines==1 && label.ellipsize==android.text.TextUtils.TruncateAt.END)
+    check((card.layoutParams as LinearLayout.LayoutParams).gravity==if(self) Gravity.END else Gravity.START)
+    check(a.parent.measuredHeight==card.measuredHeight+24){"time must remain one line"}
    }
   }
   card.layoutParams.width=240
@@ -146,7 +154,7 @@ fun main(){
   val replacement=View();host.addView(replacement,LinearLayout.LayoutParams(240,-2));holder.r=replacement
   val next=r.anchor(row,holder)!!;check(next.layoutView===replacement);MessageDetailsFinderColumn.restore(next.parent)
   holder.r=null;check(r.anchor(row,holder)==null)
-  println("PASS Finder self=$self: edge alignment with zero duplicate margins/padding, native slot width across five display widths and four text widths, below-card anchor, zero/hidden/foreign/detached/null checks, 5000 warm binds, 50 cleanup cycles, original slot/margins and recycled holder")
+  println("PASS Finder self=$self: single-line row width with native card size, edge alignment and zero duplicate margins/padding across five display widths and four text widths, below-card anchor, zero/hidden/foreign/detached/null checks, 5000 warm binds, 50 cleanup cycles, original slot/margins and recycled holder")
  }
 }
 ''',

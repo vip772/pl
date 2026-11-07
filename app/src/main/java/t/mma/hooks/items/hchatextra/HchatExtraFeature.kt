@@ -2358,7 +2358,8 @@ private class HchatExtraHooker(
             }
             is LinearLayout -> {
                 val linearParams = if (parent is MessageDetailsFinderColumn) {
-                    parent.timeLayoutParams(label, details.isSelf, params.topMargin)
+                    parent.timeLayoutParams(label, details.isSelf, params.topMargin,
+                        (root.width - root.paddingLeft - root.paddingRight - edge - right).coerceAtLeast(content.width))
                 } else LinearLayout.LayoutParams(params)
                 linearParams.gravity = if (details.isSelf) Gravity.END else Gravity.START
                 if (avatarHidden && parent !is MessageDetailsFinderColumn) {
