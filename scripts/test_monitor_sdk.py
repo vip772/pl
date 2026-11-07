@@ -17,7 +17,7 @@ sources += [r/'app/src/main/java/t/mma/hooks/core/FeatureOwnership.kt']
 sources += list((r/'app/src/main/java/t/mma/hooks/items/roundavatar').glob('*.kt'))
 java_sources=[r/'app/src/main/java/t/mma/hooks/items/protobuf'/n for n in ['ProtobufPacketHook.java','ProtobufPacketRuntime.java']]
 sources += [r/'app/src/main/java/t/mma/hooks/items/antirecall/DynamicRecallGradient.kt']
-sources += [r/'app/src/main/java/t/mma/hooks/items/conversationanalysis'/n for n in ['ConversationAnalysisFeature.kt','ConversationAnalysisRuntime.kt','ConversationAnalysisMessageMenuRuntime.kt']]
+sources += [r/'app/src/main/java/t/mma/hooks/items/conversationanalysis'/n for n in ['ConversationAnalysisFeature.kt','ConversationAnalysisMessageMenuRuntime.kt']]
 sources += list((r/'app/src/main/java/t/mma/hooks/items/realtail').glob('*.kt'))
 sources += [r/'app/src/main/java/t/mma/hooks/items/chatname/NativeGroupNicknameGate.kt']
 sources += [r/'app/src/main/java/t/mma/hooks/items/chatname/ChatNameDecorationLayout.kt']
@@ -51,6 +51,7 @@ java_sources += [r/'app/src/main/java/t/mma/event/EventBus.java']
 sources += [r/'app/src/main/java/t/mma/hooks/core/ResourceMemoryCallbacks.kt']
 java_sources += [r/'app/src/main/java/t/mma/ModuleEntry.java']
 java_sources += [r/'app/src/main/java/t/mma/utils/StartupSyncRetryGuard.java',r/'app/src/main/java/t/mma/dexkit/DexFinder.java',r/'app/src/main/java/t/mma/dexkit/DexBridgeHolder.java']
+java_sources += [r/"app/src/main/java/t/mma/hooks/api/contact/WeChatContactApi.java"]
 sources+=java_sources
 with tempfile.TemporaryDirectory() as td:
  # Generate compile-only ids from current declarations; cached R.jar may predate source.

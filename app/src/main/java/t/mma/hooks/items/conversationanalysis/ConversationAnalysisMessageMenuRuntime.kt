@@ -1,5 +1,9 @@
 package t.mma.hooks.items.conversationanalysis
 
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import java.lang.ref.WeakReference
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.Drawable
@@ -22,7 +26,7 @@ internal class ConversationAnalysisMessageMenuRuntime(
     private val logger: (String, Throwable?) -> Unit
 ) {
     private val resources = t.mma.hooks.core.FeatureResourceScope { logger("群聊分析菜单资源释放失败", it) }
-    private data class Binding(val nativeMessage: Any, val talker: String)
+    private data class Binding(val talker: String, val activity: WeakReference<Activity>)
 
     private val hookedMethods = Collections.newSetFromMap(ConcurrentHashMap<Method, Boolean>())
     private val byItem = Collections.synchronizedMap(WeakHashMap<MenuItem, Binding>())
@@ -80,7 +84,7 @@ internal class ConversationAnalysisMessageMenuRuntime(
         if (!isGroup(talker)) return
         val menu = param.args?.getOrNull(0) ?: return
         val item = addMenuItem(menu, view) ?: return
-        val binding = Binding(native, talker)
+        val binding = Binding(talker, WeakReference(findActivity(view.context)))
         byItem[item] = binding
         byGroup[item.groupId] = binding
     }
@@ -93,7 +97,9 @@ internal class ConversationAnalysisMessageMenuRuntime(
         clearBindings()
         if (binding == null || !isGroup(binding.talker)) return
         param.result = null
-        val activity = WeChatApis.currentActivity()?.currentActivity() ?: return
+        val activity = binding.activity.get()?.takeIf { !it.isFinishing && !it.isDestroyed }
+            ?: WeChatApis.currentActivity()?.currentActivity()?.takeIf { !it.isFinishing && !it.isDestroyed }
+            ?: return
         if (activity.isFinishing || activity.isDestroyed) return
         activity.runOnUiThread {
             if (resources.isClosed()) return@runOnUiThread
@@ -101,6 +107,17 @@ internal class ConversationAnalysisMessageMenuRuntime(
                 ConversationAnalysisReportDialog.show(activity, binding.talker, logger)
             }
         }
+    }
+
+    /** Resolve the owner while the message View is available; never retain its Context. */
+    private fun findActivity(source: Context): Activity? {
+        var current = source
+        val visited = Collections.newSetFromMap(java.util.IdentityHashMap<Context, Boolean>())
+        while (visited.add(current)) {
+            if (current is Activity) return current.takeIf { !it.isFinishing && !it.isDestroyed }
+            current = (current as? ContextWrapper)?.baseContext ?: return null
+        }
+        return null
     }
 
     private fun addMenuItem(menu: Any, view: View): MenuItem? {

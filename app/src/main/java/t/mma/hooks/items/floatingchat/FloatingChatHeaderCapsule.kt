@@ -5,11 +5,15 @@ import android.content.res.Configuration
 import android.graphics.*
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.text.SpannableString
+import android.text.Spanned
+import android.text.style.ImageSpan
 import android.text.TextUtils
 import android.view.*
 import android.widget.*
 import t.mma.hooks.api.core.WeChatApis
 import t.mma.utils.HLog
+import t.mma.utils.KavaReflector
 import java.util.WeakHashMap
 
 /** Presentation only: native children keep parents, IDs and click listeners. */
@@ -17,12 +21,17 @@ internal class FloatingChatHeaderCapsule {
     private data class ChildState(val alpha: Float, val accessibility: Int)
     private class State(val row: LinearLayout, val title: TextView,
                         val back: Icon, val more: Icon, val center: LinearLayout,
-                        val background: Drawable?) {
+                        val background: Drawable?, val baseHeight: Int, val originalHeight: Int, val statistics: TextView) {
         val hidden = WeakHashMap<View, ChildState>()
         var backTarget: View? = null
         var moreTarget: View? = null
         var titleTarget: View? = null
         var strokeStyle: Pair<Int, Int>? = null
+        var iconsLoaded = false
+        var maleIcon: Drawable? = null
+        var femaleIcon: Drawable? = null
+        var statisticsWidth = -1
+        var statisticsHeight = 0
     }
     private val states = WeakHashMap<ViewGroup, State>()
     private val resourceIds = WeakHashMap<android.content.res.Resources, MutableMap<Triple<String, String, String>, Int>>()
@@ -49,7 +58,7 @@ internal class FloatingChatHeaderCapsule {
     // An unresolved version must wait, never install a legacy surface first.
     fun usesLegacyPresentation(): Boolean = hostVersionName()?.let { it != "8.0.78" } == true
 
-    fun apply(header: ViewGroup, transparency: Int = -1): Boolean {
+    fun apply(header: ViewGroup, transparency: Int = -1, statistics: String? = null): Boolean {
         if (closed) return false
         if (header.width <= 0 || header.height <= 0) return fail(header)
         if (!supportsHost()) return fail(header)
@@ -98,15 +107,85 @@ internal class FloatingChatHeaderCapsule {
         if (state.title.text.toString() != title) state.title.text = title
         for (i in 0 until header.childCount) {
             val child = header.getChildAt(i)
-            if (child === state.row) continue
+            if (child === state.row || child === state.statistics) continue
             state.hidden.getOrPut(child) { ChildState(child.alpha, child.importantForAccessibility) }
             if (child.alpha != 0f) child.alpha = 0f
             if (child.importantForAccessibility != View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS) child.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
         if (header.background != null) header.background = null
-        if (header.getChildAt(header.childCount - 1) !== state.row) state.row.bringToFront()
+        if (header.getChildAt(header.childCount - 1) !== state.row && header.getChildAt(header.childCount - 1) !== state.statistics) state.row.bringToFront()
 
+        applyStatistics(header, state, statistics, ink)
         return true
+    }
+    private fun applyStatistics(header: ViewGroup, state: State, text: String?, ink: Int) {
+        val label = state.statistics
+        val visible = text != null
+        if (visible && state.title.height <= 0) {
+            if (label.visibility != View.INVISIBLE) label.visibility = View.INVISIBLE
+            return
+        }
+        if (label.visibility != if (visible) View.VISIBLE else View.GONE) label.visibility = if (visible) View.VISIBLE else View.GONE
+        var height = state.baseHeight
+        if (visible) {
+            val textChanged = label.text.toString() != text
+            if (textChanged) label.text = statisticsText(header, state, text!!)
+            if (label.currentTextColor != ink) label.setTextColor(ink)
+            val color = if (ink == Color.WHITE) 0xB3242424.toInt() else 0xB3F7F7F7.toInt()
+            val background = label.background as GradientDrawable
+            if (background.color?.defaultColor != color) background.setColor(color)
+            // The title occupies the whole middle capsule. Use its real measured bottom.
+            val titleBottom = state.row.top + state.center.top + state.title.bottom
+            val top = titleBottom + dp(header, 3)
+            val availableWidth = (header.width - dp(header, 8)).coerceAtLeast(1)
+            if (textChanged || state.statisticsWidth != availableWidth || label.isLayoutRequested) {
+                label.measure(View.MeasureSpec.makeMeasureSpec(availableWidth, View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED))
+                state.statisticsWidth = availableWidth
+                state.statisticsHeight = label.measuredHeight
+            }
+            val lp = label.layoutParams as FrameLayout.LayoutParams
+            if (lp.topMargin != top) { lp.topMargin = top; label.layoutParams = lp }
+            height = maxOf(height, top + state.statisticsHeight)
+        }
+        val lp = header.layoutParams
+        val desired = if (visible) height else state.originalHeight
+        if (lp.height != desired) { lp.height = desired; header.layoutParams = lp }
+    }
+    private fun statisticsText(header: ViewGroup, state: State, text: String): CharSequence {
+        if (!text.startsWith("男 ")) return text
+        if (!state.iconsLoaded) {
+            state.iconsLoaded = true
+            // 8.0.78 profile UI uses ke5.a.i(Context, rawId), without a color filter.
+            try {
+                val loader = KavaReflector.loadClass("ke5.a", header.context.classLoader)
+                val method = KavaReflector.findDeclaredMethod(loader, "i", Context::class.java, Int::class.javaPrimitiveType!!)
+                    ?: throw NoSuchMethodException("ke5.a.i(Context,int):Drawable")
+                fun load(name: String): Drawable {
+                    val id = resourceId(header, name, "raw")
+                    check(id != 0) { "Missing native resource $name" }
+                    return (KavaReflector.invokeOrThrow(method, null, header.context, id) as? Drawable)
+                        ?.mutate() ?: error("Native icon $name unavailable")
+                }
+                state.maleIcon = load("ic_sex_male")
+                state.femaleIcon = load("ic_sex_female")
+            } catch (error: Throwable) {
+                HLog.e("[Hchat:群员性别好友统计] 微信8.0.78 ke5.a.i 原生性别图标加载失败", error)
+            }
+        }
+        val result = SpannableString(text)
+        val size = dp(header, 14)
+        fun insert(label: String, drawable: Drawable?) {
+            val index = text.indexOf(label)
+            if (index < 0 || drawable == null) return
+            drawable.setBounds(0, 0, size, size)
+            // Replace the existing separator space, retaining readable plain text.
+            result.setSpan(ImageSpan(drawable, ImageSpan.ALIGN_CENTER), index + 1, index + 2,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+        insert("男 ", state.maleIcon)
+        insert("女 ", state.femaleIcon)
+        return result
     }
     private fun fail(header: ViewGroup): Boolean {
         // Native menu/title rebuilding is transient. Keep an installed capsule instead
@@ -172,8 +251,21 @@ internal class FloatingChatHeaderCapsule {
         // Claim before any background setter can be intercepted by immersive mode.
         FloatingChatCardVisuals.ownPresentation(header)
         listOf(row, back, more, center).forEach(FloatingChatCardVisuals::ownPresentation)
-        header.addView(row, FrameLayout.LayoutParams(-1, -1, Gravity.CENTER_VERTICAL))
-        return State(row, title, back, more, center, original)
+        val baseHeight = header.height
+        val originalHeight = header.layoutParams.height
+        header.addView(row, FrameLayout.LayoutParams(-1, baseHeight, Gravity.TOP))
+        val statistics = TextView(ctx).apply {
+            setTextSize(android.util.TypedValue.COMPLEX_UNIT_SP, 12f)
+            setSingleLine(true)
+            ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER
+            setPadding(dp(header, 10), dp(header, 4), dp(header, 10), dp(header, 4))
+            background = GradientDrawable().apply { cornerRadius = dp(header, 24).toFloat() }
+            visibility = View.GONE
+        }
+        FloatingChatCardVisuals.ownPresentation(statistics)
+        header.addView(statistics, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+        return State(row, title, back, more, center, original, baseHeight, originalHeight, statistics)
     }
     private fun releaseSafely(action: () -> Unit) {
         try { action() } catch (error: Throwable) {
@@ -182,10 +274,15 @@ internal class FloatingChatHeaderCapsule {
     }
     fun restore(header: ViewGroup) {
         val state = states.remove(header) ?: return
-        listOf(header, state.row, state.back, state.more, state.center).forEach { view ->
+        listOf(header, state.row, state.back, state.more, state.center, state.statistics).forEach { view ->
             releaseSafely { FloatingChatCardVisuals.releasePresentation(view) }
         }
         releaseSafely { header.removeView(state.row) }
+        releaseSafely { header.removeView(state.statistics) }
+        releaseSafely {
+            val lp = header.layoutParams
+            if (lp.height != state.originalHeight) { lp.height = state.originalHeight; header.layoutParams = lp }
+        }
         releaseSafely { header.background = state.background }
         state.hidden.toMap().forEach { (view, old) ->
             releaseSafely { view.alpha = old.alpha }

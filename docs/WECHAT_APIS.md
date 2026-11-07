@@ -1047,3 +1047,7 @@ SingleMessageMenuLocator、MultiSelectMessageMenuLocator、FavoriteMenuLocator �
 ### 媒体转发补充核查（8.0.78）
 
 图片/视频 VFS 读取增加经原生 Smali 确认的 `com.tencent.mm.vfs.z6.E(String): InputStream` 候选，并校验静态及返回类型。图片发送反射使用 `invokeOrThrow`，异常返回失败；返回 true 仅代表调用正常返回，不代表服务端投递。视频 `ensureThumbPath` 供转发编辑页复用真实 JPEG 缩略图。具体证据与未验收范围见 [MESSAGE_FORWARD_MEDIA_FIX.md](MESSAGE_FORWARD_MEDIA_FIX.md)。
+
+## 群员性别好友统计快照
+
+`WeChatApis.contacts().getGroupMemberStatistics(groupId)` 必须在后台调用，返回 `GroupMemberStatistics`（`male`、`female`、`unknown`、`friends`）；不可用返回 `null`。成员来自本地 `chatroom.memberlist`，去重、每批最多 200 人，性别沿用联系人 `lvbuff` 解析；好友复用严格好友条件并排除自己。空名单或 cursor 失败不返回伪造零值。说明及验证边界见 [悬浮标题栏群员统计](FLOATING_CHAT_MEMBER_STATISTICS.md)。

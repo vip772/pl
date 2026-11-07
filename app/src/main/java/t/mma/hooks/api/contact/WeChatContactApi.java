@@ -550,6 +550,61 @@ public final class WeChatContactApi {
         return result;
     }
 
+    /** Local snapshot; null means unavailable. Call only from a worker thread. */
+    public static final class GroupMemberStatistics {
+        public final int male, female, unknown, friends;
+        private GroupMemberStatistics(int male, int female, int unknown, int friends) {
+            this.male = male; this.female = female; this.unknown = unknown; this.friends = friends;
+        }
+    }
+    public GroupMemberStatistics getGroupMemberStatistics(String groupId) {
+        if (!isGroup(groupId) || databaseApi == null) return null;
+        try {
+            LinkedHashSet<String> members = new LinkedHashSet<>();
+            try (android.database.Cursor cursor = databaseApi.rawQuery(
+                    "SELECT memberlist FROM chatroom WHERE chatroomname=? LIMIT 1", new String[]{groupId})) {
+                if (cursor == null || !cursor.moveToFirst() || cursor.isNull(0)) return null;
+                for (String member : cursor.getString(0).split(";")) {
+                    if (!TextUtils.isEmpty(member)) members.add(member);
+                }
+            }
+            if (members.isEmpty()) return null;
+            String self;
+            try (android.database.Cursor cursor = databaseApi.rawQuery(
+                    "SELECT value FROM userinfo WHERE id=2 LIMIT 1", null)) {
+                if (cursor == null || !cursor.moveToFirst()) return null;
+                self = cursor.getString(0);
+            }
+            if (TextUtils.isEmpty(self)) return null;
+            List<String> ids = new ArrayList<>(members);
+            int male = 0, female = 0, friends = 0;
+            for (int start = 0; start < ids.size(); start += 200) {
+                if (Thread.currentThread().isInterrupted()) return null;
+                List<String> batch = ids.subList(start, Math.min(start + 200, ids.size()));
+                String placeholders = String.join(",", Collections.nCopies(batch.size(), "?"));
+                String sql = "SELECT r.username,r.lvbuff,CASE WHEN r.verifyFlag=0 "
+                        + "AND (r.type & 1)!=0 AND (r.type & 8)=0 AND (r.type & 32)=0 "
+                        + "AND r.username NOT LIKE '%chatroom' "
+                        + "AND (r.encryptUsername!='' OR r.username=(SELECT value FROM userinfo WHERE id=2)) "
+                        + "THEN 1 ELSE 0 END FROM rcontact r WHERE r.username IN (" + placeholders + ")";
+                try (android.database.Cursor cursor = databaseApi.rawQuery(sql, batch.toArray(new String[0]))) {
+                    if (cursor == null) return null;
+                    while (cursor.moveToNext()) {
+                        if (Thread.currentThread().isInterrupted()) return null;
+                        int gender = parseLvContactProfile(cursor.isNull(1) ? null : cursor.getBlob(1)).gender;
+                        if (gender == 1) male++;
+                        else if (gender == 2) female++;
+                        if (!self.equals(cursor.getString(0)) && cursor.getInt(2) == 1) friends++;
+                    }
+                }
+            }
+            return new GroupMemberStatistics(male, female, members.size() - male - female, friends);
+        } catch (Throwable error) {
+            log("读取群员统计失败: " + error.getMessage());
+            return null;
+        }
+    }
+
     public List<String> getGroupMemberIds(String groupId) {
         List<String> result = new ArrayList<>();
         if (!isGroup(groupId)) return result;

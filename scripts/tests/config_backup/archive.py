@@ -209,6 +209,25 @@ fun main(args:Array<String>){
   check("Hchat_shortcut_label_test_runtime" !in Store.backupPreferenceNames(labelOut))
  }
  println("PASS: shortcut label background blank/single/three/alpha colors round trip; text/icon unchanged; runtime excluded")
+ // Floating header member statistics is user configuration; snapshots stay out of archives.
+ val memberContext=Context(File(base,"member-statistics"),"com.member.statistics")
+ val memberOut=Context(File(base,"member-statistics-out"),"com.member.statistics.out")
+ val memberPrefs=Store.preferences(memberContext,"Hchat_global_config")
+ val memberKey="floating_chat_header_member_statistics_enabled"
+ check(!memberPrefs.getBoolean(memberKey,false))
+ for (enabled in listOf(false,true,false)) {
+  memberPrefs.edit().putBoolean(memberKey,enabled).putBoolean("floating_chat_header_enabled",true).commit()
+  val memberZip=File(base,"member-statistics.zip")
+  check(HchatConfigBackup.exportToUri(memberContext,Uri(memberZip)).items==2)
+  HchatConfigBackup.importFromUri(memberOut,Uri(memberZip))
+  val memberRestored=Store.preferences(memberOut,"Hchat_global_config")
+  check(memberRestored.getBoolean(memberKey,!enabled)==enabled)
+  check(memberRestored.getBoolean("floating_chat_header_enabled",false))
+  java.util.zip.ZipFile(memberZip).use { zip ->
+   check(zip.entries().asSequence().none { it.name.contains("member_statistics_runtime") })
+  }
+ }
+ println("PASS: member statistics default-off and false/true/false production archive round trip; memory-only snapshots")
  // Calendar uses a fixed resource path, so restore never needs the source URI.
  val cal=Context(File(base,"calendar"),"com.calendar")
  val calOut=Context(File(base,"calendar-restored"),"com.calendar.restored")

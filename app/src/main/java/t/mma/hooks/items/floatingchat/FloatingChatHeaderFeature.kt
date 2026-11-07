@@ -60,15 +60,17 @@ private class HeaderRuntime(private val context: FeatureContext) {
     private var backgroundTransparency = livePrefs.getInt("floating_chat_header_transparency", -1)
     private val configHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val liveListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
-        if (key == "floating_chat_header_enabled" || key == "floating_chat_header_transparency") configHandler.post {
+        if (key == "floating_chat_header_enabled" || key == "floating_chat_header_transparency" || key == FloatingChatMemberStatistics.KEY) configHandler.post {
             if (closed) return@post
             backgroundTransparency = livePrefs.getInt("floating_chat_header_transparency", -1)
+            if (!isEnabled() || !livePrefs.getBoolean(FloatingChatMemberStatistics.KEY, false)) memberStatistics.stop()
             refreshVisible()
         }
     }
     init { livePrefs.registerOnSharedPreferenceChangeListener(liveListener) }
     private val hooked = HashSet<Member>()
     private val capsule = FloatingChatHeaderCapsule()
+    private val memberStatistics = FloatingChatMemberStatistics { if (!closed) refreshVisible() }
     private val resourceIds = java.util.WeakHashMap<android.content.res.Resources, MutableMap<Pair<String, String>, Int>>()
     private fun resourceId(view: View, name: String): Int {
         val key = view.context.packageName to name
@@ -325,6 +327,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (closed) return
         drainPendingRestores()
         if (!isEnabled()) {
+            memberStatistics.stop()
             restore(sourceLayout)
             visibleChatLayout(sourceLayout)?.takeIf { it !== sourceLayout }?.let(::restore)
             return
@@ -373,11 +376,14 @@ private class HeaderRuntime(private val context: FeatureContext) {
         }
 
         FloatingChatActionBarBackgrounds.claim(header)
+        val statistics = (header as? ViewGroup)?.let {
+            memberStatistics.bind(it, capsule.supportsHost() && livePrefs.getBoolean(FloatingChatMemberStatistics.KEY, false))
+        }
+        val split = (header as? ViewGroup)?.let { capsule.apply(it, backgroundTransparency, statistics) } == true
         applyHeaderZoneCards(layout, header)
         tipsCardBottoms.remove(layout)
         applyTrackedTipsGroup(layout, header)
         applyContentZoneCards(layout, header)
-        val split = (header as? ViewGroup)?.let { capsule.apply(it, backgroundTransparency) } == true
         // Native menu/title readiness must not select a full-width grey fallback
         // on a verified capsule host. Keep native children until the capsule is ready.
         val legacyCard = capsule.usesLegacyPresentation() && !split
@@ -915,6 +921,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         if (closed) return
         closed = true
         resources.close()
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) memberStatistics.close()
         hooked.clear()
         installed = false
         releaseSafely { livePrefs.unregisterOnSharedPreferenceChangeListener(liveListener) }
@@ -924,6 +931,7 @@ private class HeaderRuntime(private val context: FeatureContext) {
         else configHandler.post { drainPendingRestores() }
     }
     private fun restoreOwnedViews() {
+        releaseSafely { memberStatistics.close() }
         releaseSafely { capsule.destroy() }
         chatTopPaddings.keys.toList().forEach { view -> releaseSafely { restoreChatTopInset(view) } }
         chatTopPaddings.clear()

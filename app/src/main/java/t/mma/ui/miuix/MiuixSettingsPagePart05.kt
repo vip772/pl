@@ -2237,6 +2237,8 @@ internal fun FloatingChatToggleMiuixPage(
     var transparency by remember(transparencyKey) {
         mutableStateOf(store.getInt(transparencyKey, 10).coerceIn(0, 100))
     }
+    val statisticsKey = "floating_chat_header_member_statistics_enabled"
+    var statisticsEnabled by remember { mutableStateOf(store.getBoolean(statisticsKey, false)) }
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -2259,6 +2261,11 @@ internal fun FloatingChatToggleMiuixPage(
                         store.edit().putBoolean(key, it).apply()
                     })
                     if (enabled) {
+                        InsetDivider()
+                        SwitchRow(statisticsEnabled, "群员性别好友统计", "群名称下方显示本群性别人数与好友人数", onCheckedChange = {
+                            statisticsEnabled = it
+                            store.edit().putBoolean(statisticsKey, it).apply()
+                        })
                         InsetDivider()
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
                             Text(text = "背景透明度 ${transparency}%", color = MiuixTheme.colorScheme.onSurface)

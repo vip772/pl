@@ -21,14 +21,10 @@ class ConversationAnalysisFeature : BaseFeature() {
         registerSettingsProvider(ConversationAnalysisSettingsProvider())
     }
 
-    private var runtime: ConversationAnalysisRuntime? = null
     private var messageMenuRuntime: ConversationAnalysisMessageMenuRuntime? = null
 
     override fun onFeatureInstall(context: FeatureContext) {
         // Hook 需要在关闭状态下先安装；具体是否展示菜单由运行时实时检查开关。
-        val installed = ConversationAnalysisRuntime(context, ::logRuntimeError)
-        runtime = installed
-        installed.install()
         val menu = ConversationAnalysisMessageMenuRuntime(context, ::logRuntimeError)
         messageMenuRuntime = menu
         val ticket = DexInstallScheduler.installation(ID, "群聊分析消息菜单")
@@ -48,8 +44,6 @@ class ConversationAnalysisFeature : BaseFeature() {
     override fun onFeatureDestroy(context: FeatureContext) {
         messageMenuRuntime?.destroy()
         messageMenuRuntime = null
-        runtime?.destroy()
-        runtime = null
     }
 
     private fun logRuntimeError(message: String, throwable: Throwable?) {
