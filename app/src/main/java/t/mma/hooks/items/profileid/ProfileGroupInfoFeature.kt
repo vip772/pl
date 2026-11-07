@@ -100,26 +100,33 @@ class ProfileGroupInfoFeature {
                         HLog.d("[Hchat:profile_group_info] JOIN_DIAG query group=$groupId state=api-unavailable")
                         return@Runnable
                     }
-                    api.logNativeJoinGate(diagnosticLoader)
-                    val result = api.getMemberJoinTimes(groupId)
-                    val complete = api.isJoinTimeResultComplete(result)
-                    val times = HashMap(result)
-                    synchronized(cache) {
-                        if (generation.get() != run || accountAtStart.isBlank() ||
-                            accountAtStart != JoinTimeRecovery.accountKey(diagnosticLoader)) return@Runnable
-                        cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), complete)
+                    // Database/history failure must not prevent the independent native request.
+                    val times = HashMap<String, Long>()
+                    var complete = false
+                    try {
+                        val result = api.getMemberJoinTimes(groupId)
+                        complete = api.isJoinTimeResultComplete(result)
+                        times.putAll(result)
+                    } catch (error: Throwable) {
+                        HLog.e("[Hchat:profile_group_info] 本地进群时间读取失败，继续原生补查", error)
                     }
-                    WeContactHeaderApi.refreshCurrentGroupProfile(groupId)
+                    fun publish(): Boolean {
+                        synchronized(cache) {
+                            if (!active || generation.get() != run || accountAtStart.isBlank() ||
+                                accountAtStart != JoinTimeRecovery.accountKey(diagnosticLoader)) return false
+                            cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), complete)
+                        }
+                        WeContactHeaderApi.refreshCurrentGroupProfile(groupId)
+                        return true
+                    }
+                    if (!publish()) return@Runnable
+                    // Local query success does not imply every member has a timestamp.
+                    // Recovery is independent of local history/database availability.
                     val recovered = JoinTimeRecovery.read(diagnosticLoader, groupId)
-                    if (recovered.isEmpty()) return@Runnable
-                    times.putAll(recovered)
-                    synchronized(cache) {
-                        if (generation.get() != run || accountAtStart.isBlank() ||
-                            accountAtStart != JoinTimeRecovery.accountKey(diagnosticLoader)) return@Runnable
-                        cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), complete)
+                    if (recovered.isNotEmpty()) {
+                        times.putAll(recovered)
+                        publish()
                     }
-                    HLog.d("[Hchat:profile_group_info] JOIN_DIAG cacheStored group=$groupId size=${times.size} generation=$run complete=${complete}")
-                    WeContactHeaderApi.refreshCurrentGroupProfile(groupId)
                 } catch (t: Throwable) {
                     HLog.e("[Hchat:profile_group_info] 群成员进群时间索引失败: $groupId", t)
                 } finally {

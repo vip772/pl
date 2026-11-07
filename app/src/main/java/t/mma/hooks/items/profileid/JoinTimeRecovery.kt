@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 
 /** Read-only, bounded full-detail recovery for the verified 8.0.78 protocol. */
 internal object JoinTimeRecovery {
-    private data class Result(val times: Map<String, Long>, val at: Long)
+    private data class Result(val times: Map<String, Long>, val at: Long, val succeeded: Boolean = false)
     private class Request(val account: String, val group: String, val epoch: Long, val queue: Any) {
         val done = CountDownLatch(1)
     }
@@ -71,7 +71,9 @@ internal object JoinTimeRecovery {
                     account = self
                 }
                 val previous = cache[group]
-                if (previous != null && SystemClock.elapsedRealtime() - previous.at < 300_000L) return previous.times
+                // A transport failure must not suppress recovery for five minutes.
+                val retryAfter = if (previous?.succeeded == true) 300_000L else 15_000L
+                if (previous != null && SystemClock.elapsedRealtime() - previous.at < retryAfter) return previous.times
                 // Background-only requests with a hard bound.
                 if (pending.size >= 2 || pending.values.any { it.group == group }) return previous?.times ?: emptyMap()
                 val c = loader.loadClass("qn.w")
@@ -141,7 +143,7 @@ internal object JoinTimeRecovery {
                     if (enabled && request.epoch == epoch && account == request.account) {
                         val merged = HashMap(cache[request.group]?.times ?: emptyMap())
                         merged.putAll(times) // Zero or omitted fields never erase a known time.
-                        cache[request.group] = Result(merged, SystemClock.elapsedRealtime())
+                        cache[request.group] = Result(merged, SystemClock.elapsedRealtime(), succeeded = true)
                     }
                 }
             }
@@ -158,7 +160,7 @@ internal object JoinTimeRecovery {
         }
     }
     fun close() = synchronized(lock) {
-        enabled = false
+                enabled = false
         epoch++
         cache.clear()
         account = ""
