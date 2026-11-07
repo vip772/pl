@@ -216,6 +216,12 @@ internal class DynamicRecallRuntime(private val context: Context) {
         private val selectableEffect = t.mma.hooks.items.dynamicbadge.SelectableBorderEffect()
         private var motionStyle = 0
         private var gradient: SweepGradient? = null
+        private var geometryWidth = -1
+        private var geometryHeight = -1
+        private var geometryStroke = -1f
+        private var geometryDensity = -1f
+        private var geometryColors: String? = null
+        private var colorSpec = DynamicRecallGradient.DEFAULT
         private var perimeter = 0f
         private var dashCount = 1
         private var period = DynamicBadgeSettings.DEFAULT_NUMBER_SPEED
@@ -236,19 +242,9 @@ internal class DynamicRecallRuntime(private val context: Context) {
             paint.strokeWidth = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_STROKE,
                 DynamicBadgeSettings.DEFAULT_NUMBER_STROKE_WIDTH)
                 .coerceIn(DynamicBadgeSettings.MIN_STROKE_WIDTH, DynamicBadgeSettings.MAX_STROKE_WIDTH) * density
-            val inset = paint.strokeWidth / 2f
-            rect.set(inset, inset, view.width - inset, view.height - inset)
-            val colors = DynamicRecallGradient.parts(prefs.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
-                DynamicRecallGradient.DEFAULT).orEmpty()).map { Color.parseColor(it) }
-            gradient = SweepGradient(rect.centerX(), rect.centerY(),
-                intArrayOf(colors[0], colors[1], colors[2], colors[0]), floatArrayOf(0f, 1f / 3f, 2f / 3f, 1f))
-            outline.reset()
-            val radius = minOf(12f * density, rect.height() / 2f)
-            if (rect.width() > 0 && rect.height() > 0) outline.addRoundRect(rect, radius, radius, Path.Direction.CW)
-            measure.setPath(outline, true)
-            perimeter = measure.length
-            dashCount = (perimeter / maxOf(24f * density, paint.strokeWidth * 5f)).toInt().coerceAtLeast(1)
-            paint.strokeCap = Paint.Cap.ROUND
+            colorSpec = prefs.getString(AntiRecallSettings.KEY_DYNAMIC_COLOR,
+                DynamicRecallGradient.DEFAULT).orEmpty()
+            updateGeometry()
             period = prefs.getInt(AntiRecallSettings.KEY_DYNAMIC_SPEED, DynamicBadgeSettings.DEFAULT_NUMBER_SPEED)
                 .coerceIn(DynamicBadgeSettings.MIN_SPEED, DynamicBadgeSettings.MAX_SPEED)
             if (borderEnabled()) {
@@ -256,10 +252,48 @@ internal class DynamicRecallRuntime(private val context: Context) {
             } else stop()
             invalidateSelf()
         }
+        /** Layout callbacks may precede the final content size. Check again before drawing;
+         * unchanged frames do not allocate paths, shaders or color collections. */
+        private fun updateGeometry() {
+            setBounds(0, 0, host.width, host.height)
+            val width = view.width
+            val height = view.height
+            val density = view.resources.displayMetrics.density
+            val sizeChanged = width != geometryWidth || height != geometryHeight ||
+                paint.strokeWidth != geometryStroke || density != geometryDensity
+            val colorsChanged = colorSpec != geometryColors
+            if (!sizeChanged && !colorsChanged) return
+            if (sizeChanged) {
+                geometryWidth = width
+                geometryHeight = height
+                geometryStroke = paint.strokeWidth
+                geometryDensity = density
+                val inset = paint.strokeWidth / 2f
+                rect.set(inset, inset, width - inset, height - inset)
+                outline.reset()
+                val radius = minOf(12f * density, rect.width() / 2f, rect.height() / 2f)
+                if (rect.width() > 0f && rect.height() > 0f) {
+                    outline.addRoundRect(rect, radius, radius, Path.Direction.CW)
+                }
+                measure.setPath(outline, true)
+                perimeter = measure.length
+                dashCount = (perimeter / maxOf(24f * density, paint.strokeWidth * 5f)).toInt().coerceAtLeast(1)
+                paint.strokeCap = Paint.Cap.ROUND
+            }
+            if (width > 0 && height > 0) {
+                val colors = DynamicRecallGradient.parts(colorSpec).map { Color.parseColor(it) }
+                gradient = SweepGradient(rect.centerX(), rect.centerY(),
+                    intArrayOf(colors[0], colors[1], colors[2], colors[0]),
+                    floatArrayOf(0f, 1f / 3f, 2f / 3f, 1f))
+            } else gradient = null
+            geometryColors = colorSpec
+        }
+
         fun stop() { running = false; view.removeCallbacks(frame) }
         override fun draw(canvas: Canvas) {
-            if (!enabled() || !view.isShown || rect.width() <= 0 || rect.height() <= 0) return
-            if (!borderEnabled() || perimeter <= 0f) return
+            if (!enabled() || !view.isShown || !borderEnabled()) return
+            updateGeometry()
+            if (rect.width() <= 0 || rect.height() <= 0 || perimeter <= 0f) return
             val progress = (SystemClock.uptimeMillis() % period).toFloat() / period
             gradientMatrix.setRotate(progress * 360f, rect.centerX(), rect.centerY())
             gradient?.setLocalMatrix(gradientMatrix)

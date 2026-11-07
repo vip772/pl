@@ -2357,9 +2357,11 @@ private class HchatExtraHooker(
                 refreshMessageDetailsColorsAfterAttach(label, newlyAttached = !alreadyAttached)
             }
             is LinearLayout -> {
-                val linearParams = LinearLayout.LayoutParams(params)
+                val linearParams = if (parent is MessageDetailsFinderColumn) {
+                    parent.timeLayoutParams(label, details.isSelf, params.topMargin)
+                } else LinearLayout.LayoutParams(params)
                 linearParams.gravity = if (details.isSelf) Gravity.END else Gravity.START
-                if (avatarHidden) {
+                if (avatarHidden && parent !is MessageDetailsFinderColumn) {
                     (label.layoutParams as? ViewGroup.MarginLayoutParams)?.let { current ->
                         if (details.isSelf) {
                             linearParams.marginEnd = current.marginEnd
@@ -2388,7 +2390,7 @@ private class HchatExtraHooker(
                         label.layoutParams = linearParams
                     }
                 }
-                if (avatarHidden) {
+                if (avatarHidden && parent !is MessageDetailsFinderColumn) {
                     scheduleBottomDetailsAlignment(label, root, parent, alignmentView, details.isSelf, 0)
                 } else {
                     messageDetailsPositionListeners.cancel(label)

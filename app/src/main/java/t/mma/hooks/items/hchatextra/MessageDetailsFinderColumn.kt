@@ -1,8 +1,10 @@
 package t.mma.hooks.items.hchatextra
 
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import android.widget.TextView
 
 /** Keeps time text within the native card width without changing its horizontal slot. */
 internal class MessageDetailsFinderColumn private constructor(
@@ -22,6 +24,18 @@ internal class MessageDetailsFinderColumn private constructor(
             MeasureSpec.makeMeasureSpec(it, MeasureSpec.EXACTLY)
         } ?: widthMeasureSpec
         super.onMeasure(columnSpec, heightMeasureSpec)
+    }
+
+    /** This column already excludes the avatar and owns exactly the card width. */
+    fun timeLayoutParams(label: TextView, isSelf: Boolean, topMargin: Int): LayoutParams {
+        val edge = if (isSelf) Gravity.END else Gravity.START
+        label.gravity = edge
+        label.textAlignment = if (isSelf) View.TEXT_ALIGNMENT_TEXT_END else View.TEXT_ALIGNMENT_TEXT_START
+        label.setPadding(0, label.paddingTop, 0, label.paddingBottom)
+        return LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            gravity = edge
+            this.topMargin = topMargin
+        }
     }
 
     companion object {

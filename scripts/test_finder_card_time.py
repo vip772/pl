@@ -12,15 +12,21 @@ start = source.index('    private fun finderFeedBottomAnchor(')
 end = source.index('    private fun cardBottomAnchor(', start)
 resolver = source[start:end]
 assert source.index('return finderFeedBottomAnchor(root, holder)', end) < source.index('val row = root as? ViewGroup', end)
+assert 'parent.timeLayoutParams(label, details.isSelf, params.topMargin)' in source
+assert source.count('avatarHidden && parent !is MessageDetailsFinderColumn') == 2
 assert 'MessageDetailsFinderColumn.restore(parent)' in source
 assert 'MessageDetailsFinderColumn.restore(previousParent)' in source
 assert 'releaseSafely("视频号时间布局")' in source
 
 files = {
+    'Gravity.kt': 'package android.view\nobject Gravity {const val END=8388613;const val START=8388611}',
+    'Text.kt': 'package android.widget\nclass TextView:android.view.View()',
     'Context.kt': 'package android.content\nclass Context',
     'View.kt': '''package android.view
 open class View(val context:android.content.Context=android.content.Context()) {
  var parent:ViewGroup?=null;var visibility=0;var width=200;var height=300
+ var gravity=0;var textAlignment=0;var paddingTop=2;var paddingBottom=2;var paddingLeft=4;var paddingRight=4
+ fun setPadding(l:Int,t:Int,r:Int,b:Int){paddingLeft=l;paddingTop=t;paddingRight=r;paddingBottom=b}
  var layoutParams:ViewGroup.LayoutParams=ViewGroup.LayoutParams(-2,-2)
  var measuredWidth=200;var measuredHeight=300
  var desiredWidth=200;var desiredHeight=300
@@ -33,10 +39,10 @@ open class View(val context:android.content.Context=android.content.Context()) {
   fun getSize(s:Int)=s and 0x3fffffff
   fun getMode(s:Int)=s and -1073741824
  }
- companion object {const val VISIBLE=0;const val GONE=8}
+ companion object {const val VISIBLE=0;const val GONE=8;const val TEXT_ALIGNMENT_TEXT_END=3;const val TEXT_ALIGNMENT_TEXT_START=2}
 }
 open class ViewGroup(c:android.content.Context=android.content.Context()):View(c) {
- open class LayoutParams(var width:Int,var height:Int){companion object {const val WRAP_CONTENT=-2}}
+ open class LayoutParams(var width:Int,var height:Int){companion object {const val WRAP_CONTENT=-2;const val MATCH_PARENT=-1}}
  val children=mutableListOf<View>();val childCount get()=children.size
  fun indexOfChild(v:View)=children.indexOf(v)
  fun getChildAt(i:Int)=children[i]
@@ -54,7 +60,7 @@ open class LinearLayout(c:android.content.Context=android.content.Context()):Vie
   var widest=0;var totalHeight=0
   for(v in children){
    val fixed=v.layoutParams.width.takeIf{it>0}
-   val childWidth=fixed ?: minOf(v.desiredWidth,limit)
+   val childWidth=fixed ?: if(v.layoutParams.width==ViewGroup.LayoutParams.MATCH_PARENT) limit else minOf(v.desiredWidth,limit)
    v.measure(View.MeasureSpec.makeMeasureSpec(childWidth,View.MeasureSpec.EXACTLY),h)
    widest=maxOf(widest,v.measuredWidth)
    totalHeight+=if(fixed==null) ((v.desiredWidth+childWidth-1)/childWidth)*v.desiredHeight else v.measuredHeight
@@ -63,7 +69,7 @@ open class LinearLayout(c:android.content.Context=android.content.Context()):Vie
  }
  var orientation=HORIZONTAL
  class LayoutParams(w:Int,h:Int):ViewGroup.LayoutParams(w,h) {
-  var leftMargin=0;var rightMargin=0;var gravity=0;var weight=0f
+  var leftMargin=0;var rightMargin=0;var topMargin=0;var gravity=0;var weight=0f
   constructor(p:LayoutParams):this(p.width,p.height){leftMargin=p.leftMargin;rightMargin=p.rightMargin;gravity=p.gravity;weight=p.weight}
  }
  companion object {const val HORIZONTAL=0;const val VERTICAL=1}
@@ -106,7 +112,14 @@ fun main(){
   check(a.layoutView===card && a.alignmentView===card)
   check(a.parent is MessageDetailsFinderColumn)
   check(a.parent.layoutParams.width==240)
-  val label=View();a.parent.addView(label,LinearLayout.LayoutParams(-2,-2));check(a.parent.indexOfChild(label)>a.parent.indexOfChild(card))
+  val label=android.widget.TextView()
+  val timeParams=a.parent.timeLayoutParams(label,self,2)
+  check(timeParams.width==ViewGroup.LayoutParams.MATCH_PARENT && timeParams.topMargin==2)
+  check(timeParams.leftMargin==0 && timeParams.rightMargin==0)
+  check(label.paddingLeft==0 && label.paddingRight==0 && label.paddingTop==2 && label.paddingBottom==2)
+  check(label.gravity==if(self) Gravity.END else Gravity.START)
+  check(label.textAlignment==if(self) View.TEXT_ALIGNMENT_TEXT_END else View.TEXT_ALIGNMENT_TEXT_START)
+  a.parent.addView(label,timeParams);check(a.parent.indexOfChild(label)>a.parent.indexOfChild(card))
   // Long text at larger font/display scales wraps below the card; it cannot enlarge the slot.
   for(nativeWidth in listOf(180,240,360,540,720)){
    card.layoutParams.width=nativeWidth
@@ -133,7 +146,7 @@ fun main(){
   val replacement=View();host.addView(replacement,LinearLayout.LayoutParams(240,-2));holder.r=replacement
   val next=r.anchor(row,holder)!!;check(next.layoutView===replacement);MessageDetailsFinderColumn.restore(next.parent)
   holder.r=null;check(r.anchor(row,holder)==null)
-  println("PASS Finder self=$self: native slot width across five display widths and four text widths, below-card anchor, zero/hidden/foreign/detached/null checks, 5000 warm binds, 50 cleanup cycles, original slot/margins and recycled holder")
+  println("PASS Finder self=$self: edge alignment with zero duplicate margins/padding, native slot width across five display widths and four text widths, below-card anchor, zero/hidden/foreign/detached/null checks, 5000 warm binds, 50 cleanup cycles, original slot/margins and recycled holder")
  }
 }
 ''',
