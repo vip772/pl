@@ -14,6 +14,7 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -23,27 +24,32 @@ import android.widget.TextView
 /** Owns measurement of the text body and the lower-right action extension. */
 internal object SwipeRepeatDialogStyle {
     fun confirmation(context: Context, text: CharSequence, confirm: () -> Unit): AlertDialog {
-        val dialog = AlertDialog.Builder(context).create()
-        val card = ConfirmationCard(context, text,
-            cancel = { dialog.cancel() },
-            confirm = {
-                if (dialog.isShowing) {
-                    dialog.dismiss()
-                    confirm()
+        return object : AlertDialog(context) {
+            override fun onCreate(savedInstanceState: Bundle?) {
+                super.onCreate(savedInstanceState)
+                val card = ConfirmationCard(context, text,
+                    cancel = { cancel() },
+                    confirm = {
+                        if (isShowing) {
+                            dismiss()
+                            confirm()
+                        }
+                    })
+                // Dialog.show() calls onCreate before attaching the decor to WindowManager.
+                // Set final content and width now to center the first frame with its
+                // measured height, without a second visible resize.
+                setContentView(card)
+                window?.apply {
+                    setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                    decorView.setPadding(0, 0, 0, 0)
+                    val available = context.resources.displayMetrics.widthPixels
+                    setLayout(minOf(available - card.dp(48), card.dp(360)), ViewGroup.LayoutParams.WRAP_CONTENT)
                 }
-            })
-        dialog.setOnShowListener {
-            dialog.setContentView(card)
-            dialog.window?.apply {
-                setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-                decorView.setPadding(0, 0, 0, 0)
-                val available = context.resources.displayMetrics.widthPixels
-                setLayout(minOf(available - card.dp(48), card.dp(360)), ViewGroup.LayoutParams.WRAP_CONTENT)
             }
+        }.apply {
+            setCancelable(true)
+            setCanceledOnTouchOutside(true)
         }
-        dialog.setCancelable(true)
-        dialog.setCanceledOnTouchOutside(true)
-        return dialog
     }
 
     private class ConfirmationCard(

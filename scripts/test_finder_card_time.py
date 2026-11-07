@@ -22,6 +22,17 @@ files = {
 open class View(val context:android.content.Context=android.content.Context()) {
  var parent:ViewGroup?=null;var visibility=0;var width=200;var height=300
  var layoutParams:ViewGroup.LayoutParams=ViewGroup.LayoutParams(-2,-2)
+ var measuredWidth=200;var measuredHeight=300
+ var desiredWidth=200;var desiredHeight=300
+ open fun onMeasure(w:Int,h:Int){measuredWidth=if(MeasureSpec.getMode(w)==MeasureSpec.EXACTLY) MeasureSpec.getSize(w) else desiredWidth;measuredHeight=desiredHeight}
+ fun measure(w:Int,h:Int)=onMeasure(w,h)
+ fun setMeasuredDimension(w:Int,h:Int){measuredWidth=w;measuredHeight=h}
+ object MeasureSpec {
+  const val EXACTLY=1073741824;const val AT_MOST=-2147483648;const val UNSPECIFIED=0
+  fun makeMeasureSpec(s:Int,m:Int)=(s and 0x3fffffff) or m
+  fun getSize(s:Int)=s and 0x3fffffff
+  fun getMode(s:Int)=s and -1073741824
+ }
  companion object {const val VISIBLE=0;const val GONE=8}
 }
 open class ViewGroup(c:android.content.Context=android.content.Context()):View(c) {
@@ -38,6 +49,18 @@ open class ViewGroup(c:android.content.Context=android.content.Context()):View(c
     'Linear.kt': '''package android.widget
 import android.view.*
 open class LinearLayout(c:android.content.Context=android.content.Context()):ViewGroup(c) {
+ override fun onMeasure(w:Int,h:Int){
+  val limit=View.MeasureSpec.getSize(w);val exact=View.MeasureSpec.getMode(w)==View.MeasureSpec.EXACTLY
+  var widest=0;var totalHeight=0
+  for(v in children){
+   val fixed=v.layoutParams.width.takeIf{it>0}
+   val childWidth=fixed ?: minOf(v.desiredWidth,limit)
+   v.measure(View.MeasureSpec.makeMeasureSpec(childWidth,View.MeasureSpec.EXACTLY),h)
+   widest=maxOf(widest,v.measuredWidth)
+   totalHeight+=if(fixed==null) ((v.desiredWidth+childWidth-1)/childWidth)*v.desiredHeight else v.measuredHeight
+  }
+  setMeasuredDimension(if(exact) limit else minOf(widest,limit),totalHeight)
+ }
  var orientation=HORIZONTAL
  class LayoutParams(w:Int,h:Int):ViewGroup.LayoutParams(w,h) {
   var leftMargin=0;var rightMargin=0;var gravity=0;var weight=0f
@@ -61,7 +84,7 @@ class Resolver {
  var lookups=0
  private val fields=mutableMapOf<Class<*>,List<java.lang.reflect.Field>>()
  fun messageContentFields(h:Any)=fields.getOrPut(h.javaClass){lookups++;h.javaClass.declaredFields.toList()}
- fun isViewWithinRoot(v:View,r:View):Boolean {var x:View?=v;repeat(32){if(x===r)return true;x=x?.parent};return false}
+ fun isViewWithinRoot(v:View,r:View):Boolean {var x:View?=v;repeat(32){if(x===r)return true;x=x?.parent as? View};return false}
 ''' + resolver + '''
  fun anchor(r:View,h:Any)=finderFeedBottomAnchor(r,h)
 }
@@ -81,8 +104,21 @@ fun main(){
   check(r.anchor(LinearLayout(),holder)==null)
   val a=r.anchor(row,holder)!!;check(a.parent is LinearLayout && a.parent.orientation==LinearLayout.VERTICAL)
   check(a.layoutView===card && a.alignmentView===card)
-  check((a.parent is MessageDetailsFinderColumn)==self)
+  check(a.parent is MessageDetailsFinderColumn)
+  check(a.parent.layoutParams.width==240)
   val label=View();a.parent.addView(label,LinearLayout.LayoutParams(-2,-2));check(a.parent.indexOfChild(label)>a.parent.indexOfChild(card))
+  // Long text at larger font/display scales wraps below the card; it cannot enlarge the slot.
+  for(nativeWidth in listOf(180,240,360,540,720)){
+   card.layoutParams.width=nativeWidth
+   for(textWidth in listOf(100,400,1200,2400)){
+    label.desiredWidth=textWidth;label.desiredHeight=24
+    a.parent.measure(View.MeasureSpec.makeMeasureSpec(1600,View.MeasureSpec.AT_MOST),0)
+    check(a.parent.measuredWidth==nativeWidth){"time enlarged native card slot"}
+    check(card.measuredWidth==nativeWidth && label.measuredWidth<=nativeWidth)
+    if(textWidth>nativeWidth) check(a.parent.measuredHeight>card.measuredHeight+24){"long time must wrap"}
+   }
+  }
+  card.layoutParams.width=240
   repeat(5000){check(r.anchor(row,holder)?.parent===a.parent)};check(r.lookups==1)
   MessageDetailsFinderColumn.restore(a.parent);check(card.parent===a.parent)
   a.parent.removeView(label)
@@ -90,14 +126,14 @@ fun main(){
   MessageDetailsFinderColumn.restore(a.parent)
   check(card.parent===host && host.indexOfChild(card)==if(self) 1 else 0)
   check(row.getChildAt(0)===neighbor)
-  if(self){check(card.layoutParams===params && params.width==260 && params.leftMargin==9 && params.rightMargin==7 && params.gravity==5)}
+  check(card.layoutParams===params && params.width==260 && params.leftMargin==9 && params.rightMargin==7 && params.gravity==5)
   // Repeated enable/recycle cycles preserve the native slot and never nest columns.
   repeat(50){val next=r.anchor(row,holder)!!;MessageDetailsFinderColumn.restore(next.parent);check(card.parent===host)}
   host.removeView(card);check(r.anchor(row,holder)==null)
   val replacement=View();host.addView(replacement,LinearLayout.LayoutParams(240,-2));holder.r=replacement
   val next=r.anchor(row,holder)!!;check(next.layoutView===replacement);MessageDetailsFinderColumn.restore(next.parent)
   holder.r=null;check(r.anchor(row,holder)==null)
-  println("PASS Finder self=$self: horizontal native row, below-card anchor, zero/hidden/foreign/detached/null checks, 5000 warm binds, 50 cleanup cycles, original slot/margins and recycled holder")
+  println("PASS Finder self=$self: native slot width across five display widths and four text widths, below-card anchor, zero/hidden/foreign/detached/null checks, 5000 warm binds, 50 cleanup cycles, original slot/margins and recycled holder")
  }
 }
 ''',
@@ -114,3 +150,7 @@ with tempfile.TemporaryDirectory(prefix='finder-time-regression-') as directory:
                    check=True, timeout=60)
     subprocess.run(['java', '-ea', '-cp', str(jar) + ':' + str(STD),
                     't.mma.hooks.items.hchatextra.MainKt'], check=True, timeout=20)
+
+    sdk = Path('/usr/lib/android-sdk/platforms/android-36/android.jar')
+    subprocess.run(['java', '-Xmx256m', '-cp', str(LIB / '*'), 'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler', '-nowarn', '-no-stdlib', '-no-reflect', '-classpath', str(STD)+':'+str(sdk), '-d', str(out/'sdk.jar'), str(out/'Resolver.kt'), str(out/'Reflect.kt'), str(BASE / 'MessageDetailsFinderColumn.kt')], check=True, timeout=60)
+    print('PASS exact Finder resolver and full container SDK compile')

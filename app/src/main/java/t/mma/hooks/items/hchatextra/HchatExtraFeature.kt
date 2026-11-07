@@ -3732,17 +3732,14 @@ private class HchatExtraHooker(
         return holderMainContentView(holder, row)
     }
     private fun finderFeedBottomAnchor(root: View, holder: Any): BottomDetailsAnchor? {
-        // 8.0.78 r7/t7 both bind p7.r to bkg. Their row is horizontal;
-        // the receive content column is vertical, while send bkg is horizontal's child.
+        // 8.0.78 r7/t7 bind p7.r to id/bkg. Both directions need a card-width
+        // column: receive's native column also contains the wider nickname header.
         if (holder.javaClass.name != "com.tencent.mm.ui.chatting.viewitems.p7") return null
         val card = messageContentFields(holder).firstOrNull { it.name == "r" }
             ?.let { KavaReflector.readField(it, holder) as? View } ?: return null
         if (card.visibility != View.VISIBLE || !isViewWithinRoot(card, root) ||
             card.width <= 0 || card.height <= 0) return null
-        val parent = card.parent as? LinearLayout ?: return null
-        val column = if (parent.orientation == LinearLayout.VERTICAL) parent else {
-            MessageDetailsFinderColumn.wrap(card) ?: return null
-        }
+        val column = MessageDetailsFinderColumn.wrap(card) ?: return null
         return BottomDetailsAnchor(column, card, card)
     }
     private fun cardBottomAnchor(root: View, holder: Any, type: Int, appSubtype: Int?): BottomDetailsAnchor? {

@@ -4,7 +4,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 
-/** Temporary send-side column; only owns the verified Finder card and injected time label. */
+/** Keeps time text within the native card width without changing its horizontal slot. */
 internal class MessageDetailsFinderColumn private constructor(
     private val card: View,
     private val originalParams: LinearLayout.LayoutParams
@@ -13,20 +13,29 @@ internal class MessageDetailsFinderColumn private constructor(
         orientation = VERTICAL
     }
 
+    override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        // p7 owns the pixel width, including WeChat display configuration. The time
+        // label must not enlarge this slot and displace the status area or avatar.
+        val nativeWidth = card.layoutParams.width.takeIf { it > 0 }
+            ?: card.measuredWidth.takeIf { it > 0 }
+        val columnSpec = nativeWidth?.let {
+            MeasureSpec.makeMeasureSpec(it, MeasureSpec.EXACTLY)
+        } ?: widthMeasureSpec
+        super.onMeasure(columnSpec, heightMeasureSpec)
+    }
+
     companion object {
         fun wrap(card: View): MessageDetailsFinderColumn? {
+            (card.parent as? MessageDetailsFinderColumn)?.let { return it }
             val parent = card.parent as? LinearLayout ?: return null
-            if (parent.orientation != HORIZONTAL) return null
             val params = card.layoutParams as? LinearLayout.LayoutParams ?: return null
-            // Native p7 updates the card width itself. Keep those dimensions on the card;
-            // outer margins/gravity/weight belong to its original horizontal slot.
+            // Keep native margins/gravity/weight on the original card slot.
             val index = parent.indexOfChild(card)
             if (index < 0) return null
             val column = MessageDetailsFinderColumn(card, params)
             parent.removeViewAt(index)
             column.addView(card, LinearLayout.LayoutParams(params.width, params.height))
             parent.addView(column, index, LinearLayout.LayoutParams(params).apply {
-                width = ViewGroup.LayoutParams.WRAP_CONTENT
                 height = ViewGroup.LayoutParams.WRAP_CONTENT
             })
             return column
