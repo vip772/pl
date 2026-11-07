@@ -101,11 +101,13 @@ class ProfileGroupInfoFeature {
                         return@Runnable
                     }
                     api.logNativeJoinGate(diagnosticLoader)
-                    val times = HashMap(api.getMemberJoinTimes(groupId))
+                    val result = api.getMemberJoinTimes(groupId)
+                    val complete = api.isJoinTimeResultComplete(result)
+                    val times = HashMap(result)
                     synchronized(cache) {
                         if (generation.get() != run || accountAtStart.isBlank() ||
                             accountAtStart != JoinTimeRecovery.accountKey(diagnosticLoader)) return@Runnable
-                        cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), api.isJoinTimeResultComplete(times))
+                        cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), complete)
                     }
                     WeContactHeaderApi.refreshCurrentGroupProfile(groupId)
                     val recovered = JoinTimeRecovery.read(diagnosticLoader, groupId)
@@ -114,9 +116,9 @@ class ProfileGroupInfoFeature {
                     synchronized(cache) {
                         if (generation.get() != run || accountAtStart.isBlank() ||
                             accountAtStart != JoinTimeRecovery.accountKey(diagnosticLoader)) return@Runnable
-                        cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), api.isJoinTimeResultComplete(times))
+                        cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), complete)
                     }
-                    HLog.d("[Hchat:profile_group_info] JOIN_DIAG cacheStored group=$groupId size=${times.size} generation=$run complete=${api.isJoinTimeResultComplete(times)}")
+                    HLog.d("[Hchat:profile_group_info] JOIN_DIAG cacheStored group=$groupId size=${times.size} generation=$run complete=${complete}")
                     WeContactHeaderApi.refreshCurrentGroupProfile(groupId)
                 } catch (t: Throwable) {
                     HLog.e("[Hchat:profile_group_info] 群成员进群时间索引失败: $groupId", t)

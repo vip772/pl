@@ -4,7 +4,7 @@ repo=Path(__file__).resolve().parents[3]
 lib=Path('/tmp/pl-kotlin-libs');jars=list(lib.glob('*.jar'));stdlib=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
 sources={
 'Recovery.kt':'''package t.mma.hooks.items.profileid
-object JoinTimeRecovery {fun accountKey(l:ClassLoader?)="fixture-account";fun read(l:ClassLoader?,g:String):Map<String,Long> = emptyMap()}''',
+object JoinTimeRecovery {@Volatile var account="fixture-account";fun accountKey(l:ClassLoader?)=account;fun read(l:ClassLoader?,g:String):Map<String,Long> = emptyMap()}''',
  'Clock.kt':'''package android.os
 object SystemClock { @Volatile var now=0L;fun elapsedRealtime()=now }''',
 'Activity.kt':'''package android.app
@@ -40,9 +40,11 @@ class Rooms {
  @Volatile var complete=true
  @Volatile var verified=0
  fun logNativeJoinGate(loader:ClassLoader?){}
- fun isJoinTimeResultComplete(times:Map<String,Long>)=complete
+ class Result(val complete:Boolean, data:Map<String,Long>):HashMap<String,Long>(data)
+ fun isJoinTimeResultComplete(times:Map<String,Long>)=times is Result && times.complete
  fun logPersistedJoinTimes(g:String,id:Long,hash:String){verified++}
- fun getMemberJoinTimes(g:String):Map<String,Long>{calls++;started.countDown();check(release.await(3,java.util.concurrent.TimeUnit.SECONDS));return result}
+ @Volatile var queryOverride: (() -> Map<String,Long>)? = null
+ fun getMemberJoinTimes(g:String):Map<String,Long>{queryOverride?.let { return Result(complete,it()) };calls++;started.countDown();check(release.await(3,java.util.concurrent.TimeUnit.SECONDS));return Result(complete,result)}
  fun getMemberInviter(g:String,m:String)=""
  fun getMemberDisplayName(g:String,m:String)=""
 }
@@ -69,6 +71,9 @@ fun main(){
  while(Header.refreshes<2 && System.nanoTime()<retryEnd) Thread.yield()
  check(Header.refreshes==2);check(p.getHeaderText(a)?.startsWith("进群时间：")==true);check(WeChatApis.api.calls==2)
  repeat(20){p.getHeaderText(a)};check(WeChatApis.api.calls==2)
+ android.os.SystemClock.now=30_002
+ repeat(20){check(p.getHeaderText(a)!=null)}
+ Thread.sleep(60);check(WeChatApis.api.calls==2) {"complete hit was scanned again"}
  // A partial snapshot must retry even when this member already has a historical hit.
  WeChatApis.api.complete=false
  ProfileGroupInfoFeature.nativeWriteCompleted("group@chatroom", 1L, "fixture")
@@ -77,13 +82,52 @@ fun main(){
  Thread.sleep(30)
  p.getHeaderText(a);Thread.sleep(60)
  check(WeChatApis.api.calls==3)
- android.os.SystemClock.now=30_002
+ android.os.SystemClock.now=45_003
  p.getHeaderText(a);Thread.sleep(60)
  check(WeChatApis.api.calls==4)
+ ProfileGroupInfoFeature.stopJoinTime();check(Header.providers.size==2)
+ p.getHeaderText(a);Thread.sleep(100);check(WeChatApis.api.calls==5)
+ ProfileGroupInfoFeature.removeProvider();check(Header.providers.isEmpty())
+ ProfileGroupInfoFeature.installProvider();check(Header.providers.size==2)
+ Header.providers[0].getHeaderText(a);Thread.sleep(100);check(WeChatApis.api.calls==6)
  ProfileGroupInfoFeature.removeProvider();check(Header.providers.isEmpty())
  ProfileGroupInfoFeature.nativeWriteCompleted("group@chatroom", 2L, "fixture")
  check(WeChatApis.api.verified==1)
- println("PASS: no startup scan, disabled no load, background dedup, empty snapshot expiry and new-member refresh, cooldown, incomplete-hit retry, native-write invalidation/readback, teardown")
+ // A host query may ignore interruption: its old result must never replace the new generation.
+ val oldStarted=java.util.concurrent.CountDownLatch(1)
+ val oldRelease=java.util.concurrent.CountDownLatch(1)
+ val oldFinished=java.util.concurrent.CountDownLatch(1)
+ val currentLoaded=java.util.concurrent.CountDownLatch(1)
+ WeChatApis.api.complete=true
+ WeChatApis.api.queryOverride={
+   oldStarted.countDown()
+   while(true) { try { oldRelease.await();break } catch(_:InterruptedException) {} }
+   oldFinished.countDown()
+   mapOf("member" to 1600000000000L)
+ }
+ ProfileGroupInfoFeature.installProvider()
+ val oldProvider=Header.providers[0];oldProvider.getHeaderText(a)
+ check(oldStarted.await(2,java.util.concurrent.TimeUnit.SECONDS))
+ ProfileGroupInfoFeature.stopJoinTime()
+ WeChatApis.api.queryOverride={currentLoaded.countDown();mapOf("member" to 1800000000000L)}
+ oldProvider.getHeaderText(a)
+ check(currentLoaded.await(2,java.util.concurrent.TimeUnit.SECONDS))
+ Thread.sleep(50)
+ val currentText=oldProvider.getHeaderText(a)
+ check(currentText!=null)
+ oldRelease.countDown();check(oldFinished.await(2,java.util.concurrent.TimeUnit.SECONDS))
+ Thread.sleep(50)
+ check(oldProvider.getHeaderText(a)==currentText) {"stale generation overwrote current snapshot"}
+ t.mma.hooks.items.profileid.JoinTimeRecovery.account="account-B"
+ val accountStarted=java.util.concurrent.CountDownLatch(1)
+ val accountRelease=java.util.concurrent.CountDownLatch(1)
+ WeChatApis.api.queryOverride={accountStarted.countDown();check(accountRelease.await(2,java.util.concurrent.TimeUnit.SECONDS));emptyMap()}
+ check(oldProvider.getHeaderText(a)==null) {"previous account cache leaked"}
+ check(accountStarted.await(2,java.util.concurrent.TimeUnit.SECONDS))
+ accountRelease.countDown();Thread.sleep(60)
+ check(oldProvider.getHeaderText(a)==null)
+ ProfileGroupInfoFeature.removeProvider()
+ println("PASS: no startup scan, disabled no load, background dedup, empty snapshot expiry and new-member refresh, cooldown, incomplete-hit retry, native-write invalidation/readback, complete-result metadata, stop/reopen, noninterruptible stale worker rejection, teardown")
 }
 '''}
 with tempfile.TemporaryDirectory() as d:
