@@ -77,22 +77,18 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
         }
         headerOwner.start()
         val joinPrefs = HchatStorage.preferences(host, ProfileGroupJoinTimeSettings.PREFS_NAME)
-        val joinDiagnosticsOwner = PreferenceRuntimeOwner(
+        val joinTimeOwner = PreferenceRuntimeOwner(
             joinPrefs, setOf(ProfileGroupJoinTimeSettings.KEY_ENABLE),
             enabled = { joinPrefs.getBoolean(ProfileGroupJoinTimeSettings.KEY_ENABLE, ProfileGroupJoinTimeSettings.DEFAULT_ENABLE) },
             create = { resources ->
                 resources.register { JoinTimeRecovery.close(); ProfileGroupInfoFeature.stopJoinTime() }
                 JoinTimeRecovery.open()
                 ProfileGroupInfoFeature.startBindings(host)
-                resources.register { JoinTimeNativeDiagnostics.close() }
-                JoinTimeNativeDiagnostics.install(context.hostClassLoader()) { groupId, eventId, expectedHash ->
-                    ProfileGroupInfoFeature.nativeWriteCompleted(groupId, eventId, expectedHash)
-                }
             },
-            onError = { logError("进群时间原生诊断启停失败", it) }
+            onError = { logError("进群时间启停失败", it) }
         )
-        trackResource { joinDiagnosticsOwner.close() }
-        joinDiagnosticsOwner.start()
+        trackResource { joinTimeOwner.close() }
+        joinTimeOwner.start()
         val tailPrefs = HchatStorage.preferences(context.hostContext(), ProfileRealNameTailSettings.PREFS_NAME)
         val tailOwner = PreferenceRuntimeOwner(
             tailPrefs, setOf(ProfileRealNameTailSettings.KEY_ENABLE),

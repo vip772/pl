@@ -768,12 +768,7 @@ private class SwipeQuoteAdapter(
         } else SwipeRepeatPresentation.ORIGINAL
         val dialog = if (mode == SwipeRepeatPresentation.Mode.FINGERPRINT) {
             SwipeRepeatPresentation.fingerprint(activity, confirm)
-        } else AlertDialog.Builder(activity)
-            .setTitle(" ")
-            .setMessage(message)
-            .setNegativeButton("假的", null)
-            .setPositiveButton("真的") { _, _ -> confirm() }
-            .create()
+        } else SwipeRepeatDialogStyle.confirmation(activity, message, confirm)
         val detachListener = object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(view: View) = Unit
             override fun onViewDetachedFromWindow(view: View) { dialog.dismiss() }
@@ -786,9 +781,6 @@ private class SwipeQuoteAdapter(
             repeatConfirmation = dialog
             row.addOnAttachStateChangeListener(detachListener)
             dialog.show()
-            if (mode == SwipeRepeatPresentation.Mode.FINGERPRINT) {
-                SwipeRepeatPresentation.styleFingerprint(dialog)
-            } else SwipeRepeatDialogStyle.apply(dialog, mode == SwipeRepeatPresentation.Mode.ORIGINAL)
             true
         }.getOrElse {
             row.removeOnAttachStateChangeListener(detachListener)

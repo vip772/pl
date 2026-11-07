@@ -13,6 +13,7 @@ classpath += list(Path('/root/.gradle/caches').glob('*/transforms/*/transformed/
 classpath += list(libs.glob('*.jar'))
 source = root / 'app/src/main/java/t/mma'
 sources = list((source / 'hooks/items/swipequote').glob('*.kt'))
+sources += [source / 'hooks/items/chattoolbar/ChatToolbarSettings.kt']
 sources += [source / 'hooks/core' / name for name in ['BaseFeature.kt', 'Feature.kt', 'FeatureContext.kt', 'FeatureResourceScope.kt', 'DexInstallScheduler.kt', 'HookRegistry.kt', 'FeatureOwnership.kt']]
 sources += [source / 'dexkit/DexKitBridgeManager.java', source / 'dexkit/DexMethodCache.kt']
 sources += [source / name for name in ['hooks/api/media/VoiceMessageDurationResolver.kt', 'hooks/api/message/SingleMessageMenuLocator.kt', 'hooks/api/message/WeChatRetransmitPayload.kt']]

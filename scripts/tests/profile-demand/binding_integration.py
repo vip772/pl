@@ -62,7 +62,6 @@ class Rooms {
  fun getMemberJoinTimes(g:String,b:Map<String,Long>,f:Map<String,Long>):Map<String,Long>{calls++;return result.filter{it.value>(f[it.key]?:0)}}
  fun memberJoinTimeSource(m:Map<String,Long>,i:String)="history"
  fun isJoinTimeResultComplete(m:Map<String,Long>)=true
- fun logPersistedJoinTimes(g:String,e:Long,h:String){}
  fun getMemberInviter(g:String,m:String)=""
  fun getMemberDisplayName(g:String,m:String)=""
 }

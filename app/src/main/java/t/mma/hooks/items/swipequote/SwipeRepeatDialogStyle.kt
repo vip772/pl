@@ -1,10 +1,8 @@
 package t.mma.hooks.items.swipequote
 
 import android.app.AlertDialog
-import android.graphics.drawable.InsetDrawable
-import android.util.TypedValue
-import android.view.Gravity
-import android.widget.TextView
+import android.content.Context
+import android.content.res.ColorStateList
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -16,95 +14,108 @@ import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
+import android.widget.TextView
 
-/** Styling for the swipe confirmation only; native measurement and click handlers stay intact. */
+/** Owns measurement of the text body and the lower-right action extension. */
 internal object SwipeRepeatDialogStyle {
-    fun apply(dialog: AlertDialog, centerInTitleSpace: Boolean = true) {
-        val window = dialog.window ?: return
-        val decor = window.decorView
-        // Keep the original title's measured space so the dialog does not change size.
-        val titleId = decor.resources.getIdentifier("alertTitle", "id", "android")
-        decor.findViewById<View>(titleId)?.visibility = View.INVISIBLE
-        val panelId = decor.resources.getIdentifier("parentPanel", "id", "android")
-        val panel = decor.findViewById<ViewGroup>(panelId) ?: return
-        val density = decor.resources.displayMetrics.density
-        fun dp(value: Float) = value * density
-        val negative = dialog.getButton(AlertDialog.BUTTON_NEGATIVE)
-        val positive = dialog.getButton(AlertDialog.BUTTON_POSITIVE)
-        fun capsule(button: android.widget.Button, color: Int) {
-            val fill = GradientDrawable().apply {
-                setColor(color)
-                cornerRadius = dp(100f)
-            }
-            val mask = GradientDrawable().apply {
-                setColor(Color.WHITE)
-                cornerRadius = dp(100f)
-            }
-            button.backgroundTintList = null
-            button.background = RippleDrawable(
-                android.content.res.ColorStateList.valueOf(0x33FFFFFF),
-                InsetDrawable(fill, dp(5f).toInt(), 0, dp(5f).toInt(), 0),
-                InsetDrawable(mask, dp(5f).toInt(), 0, dp(5f).toInt(), 0)
-            )
-            button.setTextColor(Color.WHITE)
-            button.stateListAnimator = null
-        }
-        capsule(negative, Color.rgb(241, 147, 52))
-        capsule(positive, Color.rgb(66, 170, 105))
-        // Strip native rectangular surfaces, including theme-specific panel backgrounds.
-        fun clearSurfaces(view: View) {
-            if (view === negative || view === positive) return
-            val padding = intArrayOf(view.paddingLeft, view.paddingTop, view.paddingRight, view.paddingBottom)
-            view.background = null
-            view.setPadding(padding[0], padding[1], padding[2], padding[3])
-            if (view is ViewGroup) for (index in 0 until view.childCount) {
-                clearSurfaces(view.getChildAt(index))
+    fun confirmation(context: Context, text: CharSequence, confirm: () -> Unit): AlertDialog {
+        val dialog = AlertDialog.Builder(context).create()
+        val card = ConfirmationCard(context, text,
+            cancel = { dialog.cancel() },
+            confirm = {
+                if (dialog.isShowing) {
+                    dialog.dismiss()
+                    confirm()
+                }
+            })
+        dialog.setOnShowListener {
+            dialog.setContentView(card)
+            dialog.window?.apply {
+                setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+                decorView.setPadding(0, 0, 0, 0)
+                val available = context.resources.displayMetrics.widthPixels
+                setLayout(minOf(available - card.dp(48), card.dp(360)), ViewGroup.LayoutParams.WRAP_CONTENT)
             }
         }
-        clearSurfaces(panel)
-        val decorPadding = intArrayOf(decor.paddingLeft, decor.paddingTop, decor.paddingRight, decor.paddingBottom)
-        window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-        decor.setPadding(decorPadding[0], decorPadding[1], decorPadding[2], decorPadding[3])
-        panel.post {
-            if (!dialog.isShowing) return@post
-            val panelPosition = IntArray(2)
-            val buttonPosition = IntArray(2)
-            panel.getLocationInWindow(panelPosition)
-            negative.getLocationInWindow(buttonPosition)
-            val shoulder = (buttonPosition[1] - panelPosition[1] - dp(8f))
-                .coerceIn(dp(24f), panel.height.toFloat())
-            val inset = (buttonPosition[0] - panelPosition[0] - dp(12f))
-                .coerceIn(0f, panel.width * 0.6f)
-            panel.background = CardBackground(inset, shoulder, dp(20f))
-            val message = panel.findViewById<TextView>(android.R.id.message)
-            if (message != null) {
-                if (!centerInTitleSpace) return@post
-                // Preserve the original mode's outer size while changing its text metrics.
-                panel.layoutParams = panel.layoutParams.apply { width = panel.width; height = panel.height }
-                message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
-                message.gravity = Gravity.CENTER
-                message.textAlignment = View.TEXT_ALIGNMENT_CENTER
-                // Reuse the hidden title space without changing the card outline.
-                var ancestor = message.parent
-                while (ancestor is ViewGroup && ancestor !== panel) {
-                    ancestor.clipChildren = false
-                    ancestor.clipToPadding = false
-                    ancestor = ancestor.parent
-                }
-                message.post positionMessage@{
-                    if (!dialog.isShowing) return@positionMessage
-                    val position = IntArray(2)
-                    message.getLocationInWindow(position)
-                    val targetCenter = panelPosition[1] + shoulder / 2f
-                    val currentCenter = position[1] + message.height / 2f
-                    message.translationY += targetCenter - currentCenter
-                }
+        dialog.setCancelable(true)
+        dialog.setCanceledOnTouchOutside(true)
+        return dialog
+    }
+
+    private class ConfirmationCard(
+        context: Context,
+        text: CharSequence,
+        cancel: () -> Unit,
+        confirm: () -> Unit
+    ) : ViewGroup(context) {
+        private val message = TextView(context).apply {
+            this.text = text
+            textSize = 18f
+            setTextColor(Color.BLACK)
+            gravity = Gravity.CENTER
+            textAlignment = View.TEXT_ALIGNMENT_CENTER
+            setPadding(dp(24), dp(24), dp(24), dp(24))
+        }
+        private val negative = action("假的", Color.rgb(241, 147, 52), cancel)
+        private val positive = action("真的", Color.rgb(66, 170, 105), confirm)
+        private var bodyHeight = 0
+        fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
+
+        init {
+            addView(message)
+            addView(negative)
+            addView(positive)
+        }
+
+        private fun action(label: String, color: Int, click: () -> Unit) = Button(context).apply {
+            text = label
+            textSize = 16f
+            isAllCaps = false
+            setTextColor(Color.WHITE)
+            setPadding(0, 0, 0, 0)
+            minimumWidth = 0
+            minimumHeight = 0
+            stateListAnimator = null
+            val fill = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color) }
+            val mask = GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(Color.WHITE) }
+            background = RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), fill, mask)
+            setOnClickListener { click() }
+        }
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            val width = MeasureSpec.getSize(widthMeasureSpec)
+            val actionsHeight = dp(72)
+            val availableBody = if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.UNSPECIFIED)
+                MeasureSpec.getSize(0x3fffffff) else (MeasureSpec.getSize(heightMeasureSpec) - actionsHeight).coerceAtLeast(0)
+            message.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(availableBody, MeasureSpec.AT_MOST))
+            bodyHeight = maxOf(dp(104), message.measuredHeight).coerceAtMost(availableBody)
+            message.measure(MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(bodyHeight, MeasureSpec.EXACTLY))
+            val size = MeasureSpec.makeMeasureSpec(dp(56), MeasureSpec.EXACTLY)
+            negative.measure(size, size)
+            positive.measure(size, size)
+            setMeasuredDimension(width, bodyHeight + actionsHeight)
+        }
+
+        override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
+            message.layout(0, 0, width, bodyHeight)
+            val size = dp(56)
+            val edge = dp(16)
+            val gap = dp(10)
+            val x = width - edge - size
+            val y = bodyHeight + dp(8)
+            positive.layout(x, y, x + size, y + size)
+            negative.layout(x - gap - size, y, x - gap, y + size)
+            if (changed || background == null) {
+                background = CardBackground((negative.left - dp(16)).toFloat(), bodyHeight.toFloat(), dp(20).toFloat())
             }
         }
     }
-
     /** Full-width text area with a lower-right extension around the two actions. */
     private class CardBackground(
         private val inset: Float,

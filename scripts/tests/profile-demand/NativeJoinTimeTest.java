@@ -21,14 +21,12 @@ public final class NativeJoinTimeTest {
         parse.setAccessible(true);
         Object sample = parse.invoke(api, (Object)member(1700000000L, 1700000123L, 1600000000L));
         Field time = sample.getClass().getDeclaredField("joinTimeMillis"); time.setAccessible(true);
-        Field present = sample.getClass().getDeclaredField("joinTimePresent"); present.setAccessible(true);
         Field failed = sample.getClass().getDeclaredField("parseFailed"); failed.setAccessible(true);
-        Field raw = sample.getClass().getDeclaredField("rawJoinTime"); raw.setAccessible(true);
-        check(present.getBoolean(sample) && raw.getLong(sample) == 1700000123L && !failed.getBoolean(sample), "diagnostic valid timestamp classification");
+        check(!failed.getBoolean(sample), "valid timestamp parses successfully");
         Object absent = parse.invoke(api, (Object)member(0, null, null));
-        check(!present.getBoolean(absent) && !failed.getBoolean(absent), "absent is distinct from zero and parse error");
+        check(time.getLong(absent) == 0 && !failed.getBoolean(absent), "absent metadata is not a parse error");
         Object zero = parse.invoke(api, (Object)member(0, 0L, null));
-        check(present.getBoolean(zero) && raw.getLong(zero) == 0 && !failed.getBoolean(zero), "explicit zero classification");
+        check(time.getLong(zero) == 0 && !failed.getBoolean(zero), "zero timestamp remains unavailable");
         Object truncated = parse.invoke(api, (Object)new byte[]{48, (byte)128});
         check(failed.getBoolean(truncated), "truncated value is a parse failure, not absent metadata");
         check(time.getLong(sample) == 1700000123000L, "native field 6 must win over scene/unknown");
@@ -47,22 +45,7 @@ public final class NativeJoinTimeTest {
         check(!(Boolean)join.invoke(api, 1, "wxid_joiner 加入了群聊", "wxid_joiner"), "ordinary text excluded");
         check(!(Boolean)join.invoke(api, 10000, "wxid_other 加入了群聊", "wxid_joiner"), "missing identity excluded");
         check(!(Boolean)join.invoke(api, 10000, "wxid_joiner 修改了群名", "wxid_joiner"), "unrelated event excluded");
-        Method shape = WeChatChatroomApi.class.getDeclaredMethod("historyShape", String.class);
-        shape.setAccessible(true);
-        String structure = (String) shape.invoke(null, "<sysmsg><link name='inviter'><username><![CDATA[private_member_id]]></username><nickname>private_name</nickname></link></sysmsg>");
-        check(structure.contains("roleCount=1") && structure.contains("userCount=1"), "history diagnostic retains structural roles and identities");
-        check(!structure.contains("private_member_id") && !structure.contains("private_name") && !structure.contains("inviter"), "history diagnostic excludes raw names, IDs and role attribute values");
         check(!api.isJoinTimeResultComplete(api.getMemberJoinTimes("group@chatroom")), "database unavailable is incomplete, not confirmed empty");
-        Class<?> probes = Class.forName("t.mma.hooks.items.profileid.JoinTimeNativeDiagnostics");
-        Object instance = probes.getField("INSTANCE").get(null);
-        Method transitions = probes.getDeclaredMethod("transitions", java.util.Map.class, java.util.Map.class, java.util.Map.class);
-        transitions.setAccessible(true);
-        String changes = (String) transitions.invoke(instance,
-                java.util.Map.of("cleared", 1700000000L, "removed", 1700000000L),
-                java.util.Map.of("cleared", 0L, "copied", 1700000100L),
-                java.util.Map.of("cleared", 1700000000L, "copied", 1700000100L));
-        check(changes.contains("cleared=1") && changes.contains("removed=1") && changes.contains("incomingPositiveCopied=1") && changes.contains("incomingPositiveNotCopied=1"), "production native transition classifier distinguishes clearing, omission and copying");
-        System.out.println("PASS production diagnostic structure/privacy, incomplete query status and per-member native transitions");
         System.out.println("PASS native roomdata production parser: field 6, seconds conversion, scene/unknown exclusion, invalid/future/truncated data");
     }
     static void check(boolean ok, String message) { if (!ok) throw new AssertionError(message); }

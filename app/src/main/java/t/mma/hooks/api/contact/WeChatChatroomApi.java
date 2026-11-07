@@ -1,5 +1,7 @@
 package t.mma.hooks.api.contact;
 
+import t.mma.utils.HLog;
+
 import android.text.TextUtils;
 import android.database.Cursor;
 
@@ -183,12 +185,6 @@ public final class WeChatChatroomApi {
     public String memberJoinTimeSource(Map<String, Long> result, String memberId) {
         return result instanceof JoinTimeResult ? ((JoinTimeResult) result).sources.getOrDefault(memberId, "history") : "history";
     }
-    public void logPersistedJoinTimes(String groupId, long eventId, String expectedHash) {
-        NativeJoinDiagnostics diagnostic = new NativeJoinDiagnostics();
-        getRoomDataMembers(groupId, diagnostic);
-        log("JOIN_DIAG persistedRead event=" + eventId + " group=" + groupId + " expectedHash=" + expectedHash
-                + " hashMatches=" + expectedHash.equals(diagnostic.blobHash) + " " + diagnostic);
-    }
     /** Lightweight metadata read: never scans message history. */
     public Map<String, Long> getNativeMemberJoinTimes(String chatroomId) {
         JoinTimeResult result = new JoinTimeResult();
@@ -208,30 +204,25 @@ public final class WeChatChatroomApi {
         JoinTimeResult result = new JoinTimeResult();
         if (TextUtils.isEmpty(chatroomId) || databaseApi == null) {
             result.complete = false;
-            log("JOIN_DIAG query state=input-unavailable");
             return result;
         }
         // WeChat 8.0.78 so.b: field 5 = addChatRoomScene, field 6 = joinTime (seconds).
         // Prefer persisted member metadata; local system-message history may be incomplete.
-        NativeJoinDiagnostics nativeDiagnostics = new NativeJoinDiagnostics();
-        Map<String, RoomDataMember> roomMembers = getRoomDataMembers(chatroomId, nativeDiagnostics);
-        log("JOIN_DIAG native group=" + chatroomId + " " + nativeDiagnostics);
-        if (!"complete".equals(nativeDiagnostics.state) || nativeDiagnostics.parseErrors > 0) result.complete = false;
+        RoomDataReadStatus status = new RoomDataReadStatus();
+        Map<String, RoomDataMember> roomMembers = getRoomDataMembers(chatroomId, status);
+        if (!status.complete) result.complete = false;
         for (Map.Entry<String, RoomDataMember> entry : roomMembers.entrySet()) {
             if (entry.getValue().joinTimeMillis > floors.getOrDefault(entry.getKey(), 0L)) {
                 result.put(entry.getKey(), entry.getValue().joinTimeMillis);
                 result.sources.put(entry.getKey(), "native");
             }
         }
-        int nativeHits = result.size();
-        long queryStarted = android.os.SystemClock.elapsedRealtime();
         java.util.Set<String> members = new java.util.LinkedHashSet<>(getMemberIds(chatroomId));
         WeChatChatroom room = getChatroom(chatroomId);
         if (room != null) members.addAll(room.memberIds);
         members.addAll(roomMembers.keySet());
         if (members.isEmpty()) {
             result.complete = false;
-            log("群成员进群时间暂不可查: group=" + chatroomId + " reason=member-list-empty");
             return result;
         }
         for (Map.Entry<String, Long> entry : bound.entrySet()) {
@@ -241,8 +232,6 @@ public final class WeChatChatroomApi {
         java.util.Set<String> missingMembers = new java.util.LinkedHashSet<>(members);
         missingMembers.removeAll(result.keySet());
         if (missingMembers.isEmpty()) {
-            log("群成员进群时间索引完成: group=" + chatroomId + " tables=0 members=" + members.size()
-                    + " hits=" + result.size() + " roomdataHits=" + nativeHits + " messageHits=0");
             return result;
         }
         try {
@@ -252,20 +241,13 @@ public final class WeChatChatroomApi {
             for (String table : databaseApi.messageTables(true)) {
                 if (!tables.contains(table)) tables.add(table);
             }
-            log("JOIN_DIAG discovery group=" + chatroomId + " mapped=" + mapped + " tables=" + tables.size());
             if (tables.isEmpty()) result.complete = false;
-            long totalRows = 0L, totalIdentityRows = 0L, totalAcceptedRows = 0L;
             for (String table : tables) {
-                long rowsRead = 0L, identityRows = 0L, acceptedRows = 0L, invalidTimeRows = 0L;
                 String quoted = databaseApi.quoteTable(table);
                 if (TextUtils.isEmpty(quoted)) {
                     result.complete = false;
-                    log("JOIN_DIAG historyTable group=" + chatroomId + " table=" + table + " state=invalid-table");
                     continue;
                 }
-                java.util.Set<String> structuralShapes = new java.util.HashSet<>();
-                int shapeOmittedRows = 0;
-                logHistoryTypeInventory(chatroomId, table, quoted);
                 // Stream all matching records: a fixed oldest-20000 limit permanently
                 // loses recent joins in active groups, while materializing them wastes memory.
                 try (Cursor cursor = databaseApi.rawQuery(
@@ -281,53 +263,25 @@ public final class WeChatChatroomApi {
                     int timeColumn = cursor.getColumnIndexOrThrow("createTime");
                     while (cursor.moveToNext()) {
                         if (Thread.currentThread().isInterrupted()) throw new IllegalStateException("join-time query cancelled");
-                        rowsRead++;
                         String content = cursor.getString(contentColumn);
                         int type = cursor.getInt(typeColumn);
                         long time = cursor.getLong(timeColumn);
                         long millis = time < 100000000000L ? time * 1000L : time;
-                        if (millis <= 0L) { invalidTimeRows++; continue; }
-                        boolean identityMatch = false, accepted = false;
+                        if (millis <= 0L) continue;
                         for (String memberWxId : missingMembers) {
                             if (TextUtils.isEmpty(content) || !content.contains(memberWxId)) continue;
-                            identityMatch = true;
                             if (millis <= floors.getOrDefault(memberWxId, 0L)) continue;
                             if (!isMemberJoinSystemMessage(type, content, memberWxId)) continue;
-                            accepted = true;
                             Long previous = result.get(memberWxId);
                             if (previous == null || millis < previous) result.put(memberWxId, millis);
-                        }
-                        if (identityMatch) identityRows++;
-                        if (accepted) acceptedRows++;
-                        if (!TextUtils.isEmpty(content)) {
-                            String shape = "type=" + type + " identity=" + identityMatch + " accepted=" + accepted + " " + historyShape(content);
-                            if (!structuralShapes.contains(shape)) {
-                                if (structuralShapes.size() < 32) {
-                                    structuralShapes.add(shape);
-                                    log("JOIN_DIAG historyShape group=" + chatroomId + " table=" + table + " " + shape);
-                                } else shapeOmittedRows++;
-                            }
                         }
                     }
                 } catch (Throwable error) {
                     result.complete = false;
-                    log("JOIN_DIAG historyFailure group=" + chatroomId + " table=" + table
-                            + " error=" + error.getClass().getName());
+                    HLog.e("[Hchat:WeChatChatroomApi] 群成员进群时间历史读取失败: " + table, error);
                     if (Thread.currentThread().isInterrupted()) throw new IllegalStateException("join-time cancelled", error);
-                } finally {
-                    totalRows += rowsRead; totalIdentityRows += identityRows; totalAcceptedRows += acceptedRows;
-                    log("JOIN_DIAG historyTable group=" + chatroomId + " table=" + table + " rows=" + rowsRead
-                            + " shapeOmittedRows=" + shapeOmittedRows + " invalidTimeRows=" + invalidTimeRows + " identityRows=" + identityRows + " acceptedRows=" + acceptedRows);
                 }
             }
-            log("JOIN_DIAG historySummary group=" + chatroomId + " rows=" + totalRows + " identityRows=" + totalIdentityRows
-                    + " acceptedRows=" + totalAcceptedRows + " missingBefore=" + missingMembers.size()
-                    + " missingAfter=" + (members.size() - result.size())
-                    + " complete=" + result.complete + " elapsedMs=" + (android.os.SystemClock.elapsedRealtime() - queryStarted));
-            log("群成员进群时间索引完成: group=" + chatroomId
-                    + " tables=" + tables.size() + " members=" + members.size()
-                    + " hits=" + result.size() + " roomdataHits=" + nativeHits
-                    + " messageHits=" + (result.size() - nativeHits));
         } catch (Throwable e) {
             result.complete = false;
             log("建立群成员进群时间索引失败: group=" + chatroomId + " " + e.getMessage());
@@ -337,49 +291,6 @@ public final class WeChatChatroomApi {
         return result;
     }
 
-    /** Bounded structural evidence: no message text, names, or raw member IDs. */
-    private static final java.util.regex.Pattern HISTORY_TAG = java.util.regex.Pattern.compile("<(/?)([A-Za-z][A-Za-z0-9_:-]*)");
-    private static final java.util.regex.Pattern HISTORY_ROLE = java.util.regex.Pattern.compile("<link\\b[^>]*\\bname=[\"']([^\"']+)[\"']");
-    private static final java.util.regex.Pattern HISTORY_USER = java.util.regex.Pattern.compile("<username>(?:<!\\[CDATA\\[)?([^<\\]]+)");
-    private static String historyShape(String content) {
-        int originalLength = content.length();
-        boolean truncated = originalLength > 16384;
-        if (truncated) content = content.substring(0, 16384);
-        java.util.regex.Matcher tags = HISTORY_TAG.matcher(content);
-        java.util.Set<String> names = new java.util.LinkedHashSet<>();
-        while (tags.find() && names.size() < 16) names.add(tags.group(2));
-        java.util.Set<String> roles = new java.util.LinkedHashSet<>();
-        java.util.regex.Matcher links = HISTORY_ROLE.matcher(content);
-        int roleCount = 0;
-        while (links.find()) {
-            roleCount++;
-            if (roles.size() < 16) roles.add(Integer.toHexString(links.group(1).hashCode()));
-        }
-        java.util.List<String> users = new java.util.ArrayList<>();
-        java.util.regex.Matcher ids = HISTORY_USER.matcher(content);
-        int userCount = 0;
-        while (ids.find()) {
-            userCount++;
-            if (users.size() < 16) users.add(Integer.toHexString(ids.group(1).hashCode()));
-        }
-        return "length=" + originalLength + " truncated=" + truncated + " tags=" + names + " roleCount=" + roleCount + " roleHashes=" + roles
-                + " userCount=" + userCount + " userHashes=" + users
-                + " joinWord=" + (content.contains("加入") || content.contains("进群"))
-                + " inviteWord=" + (content.contains("邀请") || content.toLowerCase(java.util.Locale.ROOT).contains("invite"));
-    }
-    private void logHistoryTypeInventory(String groupId, String table, String quoted) {
-        try (Cursor cursor = databaseApi.rawQuery("SELECT type, COUNT(*) AS n FROM " + quoted
-                + " WHERE talker=? GROUP BY type", new String[]{groupId})) {
-            if (cursor == null) throw new IllegalStateException("type inventory cursor unavailable");
-            int types = 0;
-            while (cursor.moveToNext()) {
-                if (++types > 64) { log("JOIN_DIAG typeInventory group=" + groupId + " table=" + table + " state=truncated"); break; }
-                log("JOIN_DIAG typeInventory group=" + groupId + " table=" + table + " type=" + cursor.getInt(0) + " rows=" + cursor.getLong(1));
-            }
-        } catch (Throwable error) {
-            log("JOIN_DIAG typeInventory group=" + groupId + " table=" + table + " state=unavailable error=" + error.getClass().getName());
-        }
-    }
     /** Returns the persisted join-event time from the group's system messages, or zero when unavailable. */
     public long getMemberJoinTime(String chatroomId, String memberWxId) {
         if (TextUtils.isEmpty(chatroomId) || TextUtils.isEmpty(memberWxId)) return 0L;
@@ -551,67 +462,35 @@ public final class WeChatChatroomApi {
         return result;
     }
 
-    /** Read-only probe for the verified 8.0.78 gate; never overrides configuration. */
-    public void logNativeJoinGate(ClassLoader loader) {
-        if (loader == null) { log("JOIN_DIAG gate state=loader-unavailable"); return; }
-        try {
-            Class<?> config = Class.forName("com.tencent.mm.repairer.config.profile.RepairerConfigChatroomJoinInfo", false, loader);
-            Class<?> service = Class.forName("lb2.e", false, loader);
-            Class<?> key = Class.forName("od5.e", false, loader);
-            Object instance = service.getDeclaredMethod("g").invoke(null);
-            Object value = service.getDeclaredMethod("c", key).invoke(instance, config.getDeclaredConstructor().newInstance());
-            log("JOIN_DIAG gate state=read value=" + value);
-        } catch (Throwable error) {
-            log("JOIN_DIAG gate state=unavailable error=" + error.getClass().getSimpleName());
-        }
-    }
-
-    private static final class NativeJoinDiagnostics {
-        String blobHash = "unavailable";
-        String state = "not-started";
-        int bytes, entries, named, duplicates, parseErrors, absent, zero, early, overflow, future, valid;
-        @Override public String toString() {
-            return "state=" + state + " blobHash=" + blobHash + " bytes=" + bytes + " entries=" + entries + " named=" + named
-                    + " duplicates=" + duplicates + " parseErrors=" + parseErrors + " absent=" + absent
-                    + " zero=" + zero + " early=" + early + " overflow=" + overflow
-                    + " future=" + future + " valid=" + valid;
-        }
+    /** Carries completeness used by retry policy, without diagnostic statistics or hashing. */
+    private static final class RoomDataReadStatus {
+        boolean complete;
     }
 
     private Map<String, RoomDataMember> getRoomDataMembers(String chatroomId) {
         return getRoomDataMembers(chatroomId, null);
     }
 
-    private Map<String, RoomDataMember> getRoomDataMembers(String chatroomId, NativeJoinDiagnostics d) {
+    private Map<String, RoomDataMember> getRoomDataMembers(String chatroomId, RoomDataReadStatus status) {
         Map<String, RoomDataMember> result = new LinkedHashMap<>();
         if (TextUtils.isEmpty(chatroomId) || databaseApi == null) {
-            if (d != null) d.state = "input-unavailable";
             return result;
         }
         if (!hasColumn("chatroom", "roomdata")) {
-            if (d != null) d.state = "column-unavailable";
             return result;
         }
         try (Cursor cursor = databaseApi.rawQuery(
                 "SELECT roomdata FROM chatroom WHERE chatroomname=? LIMIT 1", new String[]{chatroomId})) {
-            if (cursor == null) { if (d != null) d.state = "cursor-unavailable"; return result; }
-            if (!cursor.moveToFirst()) { if (d != null) d.state = "row-absent"; return result; }
+            if (cursor == null) return result;
+            if (!cursor.moveToFirst()) return result;
             int column = cursor.getColumnIndexOrThrow("roomdata");
             byte[] roomData;
             if (cursor.getType(column) == Cursor.FIELD_TYPE_STRING) roomData = hexStringToBytes(cursor.getString(column));
             else roomData = cursor.getBlob(column);
             if (roomData == null || roomData.length == 0) {
-                if (d != null) d.state = "blob-empty";
                 return result;
             }
-            if (d != null) {
-                d.bytes = roomData.length;
-                d.state = "parsing";
-                byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(roomData);
-                StringBuilder hex = new StringBuilder(64);
-                for (byte value : digest) hex.append(String.format(java.util.Locale.ROOT, "%02x", value & 255));
-                d.blobHash = hex.toString();
-            }
+            boolean parseFailed = false;
             ProtoReader reader = new ProtoReader(roomData);
             while (!reader.isAtEnd()) {
                 int tag = reader.readVarint32();
@@ -619,25 +498,14 @@ public final class WeChatChatroomApi {
                 int wireType = tag & 7;
                 if (fieldNumber == 1 && wireType == 2) {
                     RoomDataMember member = parseRoomDataMember(reader.readBytes());
-                    if (d != null) {
-                        d.entries++;
-                        if (member.parseFailed) d.parseErrors++;
-                        else if (!member.joinTimePresent) d.absent++;
-                        else if (member.rawJoinTime == 0L) d.zero++;
-                        else if (member.rawJoinTime < 946684800L) d.early++;
-                        else if (member.rawJoinTime > Integer.MAX_VALUE) d.overflow++;
-                        else if (member.joinTimeMillis == 0L) d.future++;
-                        else d.valid++;
-                    }
+                    if (member.parseFailed) parseFailed = true;
                     if (!TextUtils.isEmpty(member.username)) {
-                        if (d != null) { d.named++; if (result.containsKey(member.username)) d.duplicates++; }
                         result.put(member.username, member);
                     }
                 } else reader.skip(wireType);
             }
-            if (d != null) d.state = "complete";
+            if (status != null) status.complete = !parseFailed;
         } catch (Throwable e) {
-            if (d != null) d.state = "read-or-envelope-error:" + e.getClass().getSimpleName();
             log("解析群成员身份失败: " + e.getMessage());
         }
         return result;
@@ -660,9 +528,7 @@ public final class WeChatChatroomApi {
                 } else if (wireType == 2 && fieldNumber == 4) {
                     member.inviterWxId = reader.readString().trim();
                 } else if (wireType == 0 && fieldNumber == 6) {
-                    member.joinTimePresent = true;
-                    member.rawJoinTime = reader.readVarint64();
-                    member.joinTimeMillis = normalizeNativeJoinTime(member.rawJoinTime);
+                    member.joinTimeMillis = normalizeNativeJoinTime(reader.readVarint64());
                 } else {
                     reader.skip(wireType);
                 }
@@ -760,8 +626,7 @@ public final class WeChatChatroomApi {
         String displayName = "";
         String inviterWxId = "";
         long joinTimeMillis;
-        long rawJoinTime;
-        boolean joinTimePresent, parseFailed;
+        boolean parseFailed;
         int roomFlag;
     }
 

@@ -53,11 +53,8 @@ class Rooms {
  @Volatile var result:Map<String,Long> = emptyMap()
  val started=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
  @Volatile var complete=true
- @Volatile var verified=0
- fun logNativeJoinGate(loader:ClassLoader?){}
  class Result(val complete:Boolean, data:Map<String,Long>):HashMap<String,Long>(data)
  fun isJoinTimeResultComplete(times:Map<String,Long>)=times is Result && times.complete
- fun logPersistedJoinTimes(g:String,id:Long,hash:String){verified++}
  @Volatile var queryOverride: (() -> Map<String,Long>)? = null
  fun getMemberJoinTimes(g:String):Map<String,Long>{queryOverride?.let { return Result(complete,it()) };calls++;started.countDown();check(release.await(3,java.util.concurrent.TimeUnit.SECONDS));return Result(complete,result)}
  fun getMemberInviter(g:String,m:String)=""
@@ -91,10 +88,7 @@ fun main(){
  Thread.sleep(60);check(WeChatApis.api.calls==2) {"complete hit was scanned again"}
  // A partial snapshot must retry even when this member already has a historical hit.
  WeChatApis.api.complete=false
- ProfileGroupInfoFeature.nativeWriteCompleted("group@chatroom", 1L, "fixture")
- val verifiedEnd=System.nanoTime()+3000000000L
- while(WeChatApis.api.verified==0 && System.nanoTime()<verifiedEnd) Thread.yield()
- Thread.sleep(30)
+ ProfileGroupInfoFeature.stopJoinTime()
  p.getHeaderText(a);Thread.sleep(60)
  check(WeChatApis.api.calls==3)
  android.os.SystemClock.now=45_003
@@ -106,8 +100,6 @@ fun main(){
  ProfileGroupInfoFeature.installProvider();check(Header.providers.size==2)
  Header.providers[0].getHeaderText(a);Thread.sleep(100);check(WeChatApis.api.calls==6)
  ProfileGroupInfoFeature.removeProvider();check(Header.providers.isEmpty())
- ProfileGroupInfoFeature.nativeWriteCompleted("group@chatroom", 2L, "fixture")
- check(WeChatApis.api.verified==1)
  // A host query may ignore interruption: its old result must never replace the new generation.
  val oldStarted=java.util.concurrent.CountDownLatch(1)
  val oldRelease=java.util.concurrent.CountDownLatch(1)
@@ -142,7 +134,7 @@ fun main(){
  accountRelease.countDown();Thread.sleep(60)
  check(oldProvider.getHeaderText(a)==null)
  ProfileGroupInfoFeature.removeProvider()
- println("PASS: no startup scan, disabled no load, background dedup, empty snapshot expiry and new-member refresh, cooldown, incomplete-hit retry, native-write invalidation/readback, complete-result metadata, stop/reopen, noninterruptible stale worker rejection, teardown")
+ println("PASS: no startup scan, disabled no load, background dedup, empty snapshot expiry and new-member refresh, cooldown, incomplete-hit retry, complete-result metadata, stop/reopen, noninterruptible stale worker rejection, teardown")
 }
 '''}
 with tempfile.TemporaryDirectory() as d:
