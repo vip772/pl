@@ -46,12 +46,12 @@ class Contact {fun account():Account?=Account();fun contacts():Contacts?=Contact
 class Account {fun selfWxId()=State.self}
 object State {
  var self="self";var members=listOf("self","alice","bob","bob");var queries=0;var nameQueries=0
- var canSend=true;var result=42L;var sends=0;var xml="";var replacement:Message?=null
+ var failNames=false;var canSend=true;var result=42L;var sends=0;var xml="";var replacement:Message?=null
 }
 class Contacts {
  fun getGroupMemberIds(t:String):List<String>{State.queries++;return State.members}
- fun getGroupMemberDisplayName(t:String,i:String):String{State.nameQueries++;return i}
- fun getDisplayName(i:String):String{State.nameQueries++;return i}
+ fun getGroupMemberDisplayName(t:String,i:String):String{State.nameQueries++;if(State.failNames)error("name lookup");return i}
+ fun getDisplayName(i:String):String{State.nameQueries++;if(State.failNames)error("name lookup");return i}
 }
 class Messages {
  fun canSendXml()=State.canSend

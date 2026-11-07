@@ -2,6 +2,8 @@ package t.mma.hooks.items.profileid
 import t.mma.utils.HLog
 
 import android.app.Activity
+import android.content.Context
+import t.mma.hooks.api.contact.WeChatChatroomChangeApi
 import java.lang.ref.WeakReference
 import t.mma.hooks.api.contact.WeContactHeaderApi
 import t.mma.hooks.api.core.WeChatApis
@@ -10,7 +12,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.Executors
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.atomic.AtomicInteger
 import android.os.SystemClock
@@ -27,11 +28,98 @@ class ProfileGroupInfoFeature {
             return synchronized(this) {
                 val existing = executor
                 if (existing != null && !existing.isShutdown) existing else
-                    Executors.newSingleThreadExecutor { runnable ->
-                        Thread(runnable, "Hchat-GroupJoinTime").apply { isDaemon = true }
-                    }.also { executor = it }
+                    java.util.concurrent.ThreadPoolExecutor(1, 1, 0L, java.util.concurrent.TimeUnit.MILLISECONDS,
+                        java.util.concurrent.ArrayBlockingQueue<Runnable>(128),
+                        java.util.concurrent.ThreadFactory { runnable ->
+                            Thread(runnable, "Hchat-GroupJoinTime").apply { isDaemon = true }
+                        }).also { executor = it }
             }
         }
+        @Volatile private var bindingStore: JoinTimeBindingStore? = null
+        private val creationObserver = InitialGroupJoinObserver()
+        private var changeSubscription: WeChatChatroomChangeApi.Subscription? = null
+        private val membershipVersions = ConcurrentHashMap<String, Int>()
+
+        @Synchronized fun startBindings(context: Context) {
+            bindingStore = JoinTimeBindingStore(context)
+            ensureChangeSubscription()
+            creationObserver.start(diagnosticLoader) { account, group, selected ->
+                val store = bindingStore ?: return@start
+                val run = generation.get()
+                try { executor().execute {
+                    if (!active || generation.get() != run || bindingStore !== store ||
+                        account != JoinTimeRecovery.accountKey(diagnosticLoader)) return@execute
+                    try {
+                        // Existing persisted groups are never retrospectively treated as new groups.
+                        if (store.contains(account, group)) return@execute
+                        val state = JoinTimeBindingStore.Group()
+                        state.recordCreation(account, selected)
+                        val current = runCatching { WeChatApis.chatrooms()?.getChatroom(group)?.memberIds?.toSet().orEmpty() }
+                            .getOrDefault(emptySet())
+                        state.reconcile(current, System.currentTimeMillis())
+                        val native = runCatching { WeChatApis.chatrooms()?.getNativeMemberJoinTimes(group).orEmpty() }
+                            .getOrDefault(emptyMap())
+                        state.merge(native) { "native" }
+                        state.bindInitialMembers(native[account] ?: 0L)
+                        if (generation.get() != run || bindingStore !== store ||
+                            account != JoinTimeRecovery.accountKey(diagnosticLoader)) return@execute
+                        store.write(account, group, state)
+                        synchronized(cache) { cache.remove(group) }
+                        WeContactHeaderApi.refreshCurrentGroupProfile(group)
+                    } catch (error: Throwable) {
+                        HLog.e("[Hchat:profile_group_info] 初始成员绑定保存失败", error)
+                    }
+                } } catch (error: java.util.concurrent.RejectedExecutionException) {
+                    HLog.e("[Hchat:profile_group_info] 初始成员绑定任务未接收", error)
+                }
+            }
+        }
+
+        @Synchronized private fun ensureChangeSubscription() {
+            if (bindingStore == null || changeSubscription?.isActive == true) return
+            val changes = WeChatApis.chatroomChanges() ?: return
+            changes.install()
+            changeSubscription = changes.subscribe { change ->
+                if (!change.mayMemberListChanged()) return@subscribe
+                val group = change.chatroomId()
+                val room = change.chatroom ?: return@subscribe
+                val members = room.memberIds.filter { it.isNotBlank() }.toSet()
+                if (group.isBlank() || members.isEmpty()) return@subscribe
+                val store = bindingStore ?: return@subscribe
+                val account = JoinTimeRecovery.accountKey(diagnosticLoader)
+                if (account.isBlank()) return@subscribe
+                if (!store.contains(account, group)) return@subscribe
+                val run = generation.get()
+                val observedAt = System.currentTimeMillis()
+                // Invalidate immediately, before queued queries can publish an older membership.
+                membershipVersions.merge(group, 1, Int::plus)
+                synchronized(cache) { cache.remove(group) }
+                try { executor().execute {
+                    if (!active || generation.get() != run || bindingStore !== store ||
+                        account != JoinTimeRecovery.accountKey(diagnosticLoader)) return@execute
+                    try {
+                        val state = store.read(account, group)
+                        state.reconcile(members, observedAt)
+                        store.write(account, group, state)
+                        synchronized(cache) { cache.remove(group) }
+                        WeContactHeaderApi.refreshCurrentGroupProfile(group)
+                    } catch (error: Throwable) {
+                        HLog.e("[Hchat:profile_group_info] 成员时间绑定更新失败", error)
+                    }
+                } } catch (error: java.util.concurrent.RejectedExecutionException) {
+                    HLog.e("[Hchat:profile_group_info] 成员时间绑定任务未接收", error)
+                }
+            }
+        }
+
+        private fun closeBindings() {
+            creationObserver.close()
+            changeSubscription?.unsubscribe()
+            changeSubscription = null
+            bindingStore = null
+            membershipVersions.clear()
+        }
+
         @Volatile private var active = false
         @Volatile private var diagnosticLoader: ClassLoader? = null
         private val generation = AtomicInteger(0)
@@ -63,6 +151,7 @@ class ProfileGroupInfoFeature {
 
         @Synchronized fun removeProvider() {
             active = false
+            closeBindings()
             diagnosticLoader = null
             generation.incrementAndGet()
             executor?.shutdownNow()
@@ -76,6 +165,7 @@ class ProfileGroupInfoFeature {
             diagnosticState = ""
         }
         @Synchronized fun stopJoinTime() {
+            closeBindings()
             generation.incrementAndGet()
             executor?.shutdownNow()
             executor = null
@@ -84,7 +174,7 @@ class ProfileGroupInfoFeature {
             verifyingGroups.clear()
         }
         // 仅在资料页请求进群时间时加载当前群，注册 Provider 不触发全群消息扫描。
-        @Synchronized private fun scheduleGroup(groupId: String, run: Int = generation.get()) {
+        @Synchronized private fun scheduleGroup(groupId: String, requestedMember: String, run: Int = generation.get()) {
             if (!active || groupId.isBlank() || generation.get() != run) return
             if (loadingGroups.size >= 32) {
                 HLog.d("[Hchat:profile_group_info] JOIN_DIAG schedule group=$groupId state=capacity")
@@ -92,6 +182,7 @@ class ProfileGroupInfoFeature {
             }
             if (loadingGroups.putIfAbsent(groupId, run) != null) return
             HLog.d("[Hchat:profile_group_info] JOIN_DIAG schedule group=$groupId generation=$run state=queued")
+            val membershipVersion = membershipVersions[groupId] ?: 0
             val work = Runnable {
                 try {
                     if (generation.get() != run || !active) return@Runnable
@@ -100,31 +191,62 @@ class ProfileGroupInfoFeature {
                         HLog.d("[Hchat:profile_group_info] JOIN_DIAG query group=$groupId state=api-unavailable")
                         return@Runnable
                     }
+                    val store = bindingStore
+                    val state = store?.read(accountAtStart, groupId)
+                    val currentMembers = runCatching { api.getChatroom(groupId)?.memberIds?.filter { it.isNotBlank() }?.toSet().orEmpty() }.getOrDefault(emptySet())
+                    if (state != null && currentMembers.isNotEmpty()) {
+                        state.reconcile(currentMembers, System.currentTimeMillis())
+                    }
                     // Database/history failure must not prevent the independent native request.
                     val times = HashMap<String, Long>()
                     var complete = false
+                    if (state != null) times.putAll(state.bindings.mapValues { it.value.time })
+                    // An already-bound profile needs only membership reconciliation, never history.
+                    val boundRequestedMember = state?.bindings?.containsKey(requestedMember) == true &&
+                        !(requestedMember in state.initialMembers && state.bindings[requestedMember]?.source == "history")
                     try {
-                        val result = api.getMemberJoinTimes(groupId)
-                        complete = api.isJoinTimeResultComplete(result)
-                        times.putAll(result)
+                        val result = if (boundRequestedMember) api.getNativeMemberJoinTimes(groupId) else if (state == null) api.getMemberJoinTimes(groupId) else
+                            api.getMemberJoinTimes(groupId, state.bindings.mapValues { it.value.time }, state.floors)
+                        complete = boundRequestedMember || api.isJoinTimeResultComplete(result)
+                        if (state == null) times.putAll(result) else {
+                            val eligible = result.filter { (id, _) ->
+                                id !in state.initialMembers || api.memberJoinTimeSource(result, id) != "history"
+                            }
+                            state.merge(eligible) { api.memberJoinTimeSource(result, it) }
+                            val creatorBinding = state.bindings[state.creator]
+                            if (creatorBinding?.source == "native" || creatorBinding?.source == "server")
+                                state.bindInitialMembers(creatorBinding.time)
+                            times.putAll(state.bindings.mapValues { it.value.time })
+                        }
                     } catch (error: Throwable) {
                         HLog.e("[Hchat:profile_group_info] 本地进群时间读取失败，继续原生补查", error)
                     }
                     fun publish(): Boolean {
+                        fun valid() = active && generation.get() == run && accountAtStart.isNotBlank() &&
+                            accountAtStart == JoinTimeRecovery.accountKey(diagnosticLoader) &&
+                            (membershipVersions[groupId] ?: 0) == membershipVersion && bindingStore === store
+                        if (!valid()) return false
+                        if (state != null && store != null) store.write(accountAtStart, groupId, state)
                         synchronized(cache) {
                             if (!active || generation.get() != run || accountAtStart.isBlank() ||
-                                accountAtStart != JoinTimeRecovery.accountKey(diagnosticLoader)) return false
+                                accountAtStart != JoinTimeRecovery.accountKey(diagnosticLoader) ||
+                                (membershipVersions[groupId] ?: 0) != membershipVersion || bindingStore !== store) return false
                             cache[groupId] = Snapshot(HashMap(times), SystemClock.elapsedRealtime(), complete)
                         }
                         WeContactHeaderApi.refreshCurrentGroupProfile(groupId)
                         return true
                     }
-                    if (!publish()) return@Runnable
+                    if (!publish() || boundRequestedMember) return@Runnable
                     // Local query success does not imply every member has a timestamp.
                     // Recovery is independent of local history/database availability.
                     val recovered = JoinTimeRecovery.read(diagnosticLoader, groupId)
                     if (recovered.isNotEmpty()) {
-                        times.putAll(recovered)
+                        if (state == null) times.putAll(recovered) else {
+                            state.merge(recovered) { "server" }
+                            state.bindInitialMembers(recovered[state.creator] ?: 0L)
+                            times.clear()
+                            times.putAll(state.bindings.mapValues { it.value.time })
+                        }
                         publish()
                     }
                 } catch (t: Throwable) {
@@ -168,11 +290,13 @@ class ProfileGroupInfoFeature {
         }
 
         private fun cachedJoinTime(groupId: String, memberId: String): Long {
+            ensureChangeSubscription()
             val self = JoinTimeRecovery.accountKey(diagnosticLoader)
             synchronized(cache) {
                 if (self != cacheAccount) {
                     generation.incrementAndGet()
                     cache.clear()
+                    membershipVersions.clear()
                     loadingGroups.clear()
                     cacheAccount = self
                 }
@@ -181,7 +305,7 @@ class ProfileGroupInfoFeature {
             val snapshot = synchronized(cache) { cache[groupId] }
             // Retry incomplete reads as well as missing members; successful native writes invalidate snapshots.
             if (snapshot == null || ((!snapshot.complete || snapshot.times[memberId] == null) &&
-                    SystemClock.elapsedRealtime() - snapshot.loadedAt >= REFRESH_MS)) scheduleGroup(groupId)
+                    SystemClock.elapsedRealtime() - snapshot.loadedAt >= REFRESH_MS)) scheduleGroup(groupId, memberId)
             return snapshot?.times?.get(memberId) ?: 0L
         }
 

@@ -582,6 +582,12 @@ private class HchatExtraHooker(
                 }
             }
         }
+        releaseSafely("视频号时间布局") {
+            val labels = synchronized(messageDetailsLabels) { messageDetailsLabels.toList() }
+            labels.filter { it.parent is MessageDetailsFinderColumn }.forEach { label ->
+                releaseSafely("视频号时间标签") { removeMessageDetailsLabel(label) }
+            }
+        }
         releaseSafely("消息详情登记") {
             synchronized(messageDetailsLabels) { messageDetailsLabels.clear() }
             synchronized(messageDetailsBindings) { messageDetailsBindings.clear() }
@@ -1545,7 +1551,9 @@ private class HchatExtraHooker(
             }
         if (label.parent !== parent) {
             removeTaggedMessageDetailsViews(root, keep = label)
-            (label.parent as? ViewGroup)?.removeView(label)
+            val previousParent = label.parent as? ViewGroup
+            previousParent?.removeView(label)
+            MessageDetailsFinderColumn.restore(previousParent)
         }
         rememberMessageDetailsLabel(label)
         applyMessageDetailsLabel(label, details)
@@ -2692,7 +2700,9 @@ private class HchatExtraHooker(
         messageDetailsColorListeners.cancel(label)
         synchronized(messageDetailsBindings) { messageDetailsBindings.remove(label) }
         synchronized(messageDetailsLabels) { messageDetailsLabels.remove(label) }
-        (label.parent as? ViewGroup)?.removeView(label)
+        val parent = label.parent as? ViewGroup
+        parent?.removeView(label)
+        MessageDetailsFinderColumn.restore(parent)
     }
 
     private fun removeTaggedMessageDetailsViews(root: View, keep: View? = null) {
@@ -3721,7 +3731,24 @@ private class HchatExtraHooker(
         }
         return holderMainContentView(holder, row)
     }
+    private fun finderFeedBottomAnchor(root: View, holder: Any): BottomDetailsAnchor? {
+        // 8.0.78 r7/t7 both bind p7.r to bkg. Their row is horizontal;
+        // the receive content column is vertical, while send bkg is horizontal's child.
+        if (holder.javaClass.name != "com.tencent.mm.ui.chatting.viewitems.p7") return null
+        val card = messageContentFields(holder).firstOrNull { it.name == "r" }
+            ?.let { KavaReflector.readField(it, holder) as? View } ?: return null
+        if (card.visibility != View.VISIBLE || !isViewWithinRoot(card, root) ||
+            card.width <= 0 || card.height <= 0) return null
+        val parent = card.parent as? LinearLayout ?: return null
+        val column = if (parent.orientation == LinearLayout.VERTICAL) parent else {
+            MessageDetailsFinderColumn.wrap(card) ?: return null
+        }
+        return BottomDetailsAnchor(column, card, card)
+    }
     private fun cardBottomAnchor(root: View, holder: Any, type: Int, appSubtype: Int?): BottomDetailsAnchor? {
+        if (holder.javaClass.name == "com.tencent.mm.ui.chatting.viewitems.p7") {
+            return finderFeedBottomAnchor(root, holder)
+        }
         val row = root as? ViewGroup ?: return null
         if (row !is RelativeLayout && row !is android.widget.FrameLayout &&
             !(row is LinearLayout && row.orientation == LinearLayout.VERTICAL)

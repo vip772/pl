@@ -39,6 +39,24 @@ fun main() {
     check(pending.get("g", 1) == null && pending.get("g", 129) == users)
     pending.clear(); check(pending.get("g", 129) == null)
     check(runCatching { pending.put("g", 0, users) }.isFailure)
+    fun cleaned(input: String, expected: String, count: Int = 1, names: List<String> = emptyList()) {
+        check(HiddenAtText.match(input, count, names)?.text == expected) { "mention cleanup mismatch: $input" }
+    }
+    cleaned("前文@未知昵称\u2005后文", "前文后文")
+    cleaned("hello123@未知昵称\u2005tail", "hello123tail")
+    cleaned("前文@A@B\u2005后文", "前文后文")
+    cleaned("前文@a.b+[x](y)✨\u2005后文", "前文后文")
+    cleaned("前文@长 名\u2005后文", "前文后文", names=listOf("长"))
+    cleaned("前文@👨‍👩‍👧‍👦\u2005后文", "前文后文")
+    cleaned("前文@A\u2005中间@B\u2005后文", "前文中间后文", 2)
+    cleaned("前文@A 后文", "前文后文", names=listOf("A"))
+    check(HiddenAtText.match("@A 后文", 2, listOf("A")) == null)
+    check(HiddenAtText.match("@unknown ordinary space", 1) == null)
+    check(HiddenAtText.match("user@example.com\u2005", 1) == null)
+    cleaned("user@example.com @A\u2005tail", "user@example.com tail")
+    cleaned("@A\u2005@A\u2005", "\u200B")
+    cleaned("@A\u2005", "\u200B")
+    println("PASS: text-before-mention, unknown names, internal @, regex symbols, emoji, name prefixes, multiple mentions, partial cleanup rejection and email guard")
     println("PASS: source preservation, replacement, retry idempotence, group/ID isolation, TTL, capacity, clear")
 }`);
 const jar = path.join(out, 'source.jar');

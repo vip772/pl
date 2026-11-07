@@ -749,20 +749,30 @@ private class SwipeQuoteAdapter(
         // Freeze the conversation now, so a delayed confirmation cannot send into another chat.
         val pendingTarget = target.copy(talker = talker)
         var confirmed = false
-        val dialog = AlertDialog.Builder(activity)
-            .setTitle(" ")
-            .setMessage("你最好是真的在复读，而不是误碰，艹！")
-            .setNegativeButton("假的", null)
-            .setPositiveButton("真的") { _, _ ->
-                if (confirmed) return@setPositiveButton
-                confirmed = true
-                if (!resources.isClosed() && isRepeatEnabled() &&
-                    !activity.isFinishing && !activity.isDestroyed && row.isAttachedToWindow &&
-                    WeChatApis.chatPage()?.currentTalker() == pendingTarget.talker
-                ) {
-                    if (!repeatNativeMessage(pendingTarget)) showToast("该消息暂不支持复读")
-                }
+        val confirm = confirm@{
+            if (confirmed) return@confirm
+            confirmed = true
+            if (!resources.isClosed() && isRepeatEnabled() &&
+                !activity.isFinishing && !activity.isDestroyed && row.isAttachedToWindow &&
+                WeChatApis.chatPage()?.currentTalker() == pendingTarget.talker
+            ) {
+                if (!repeatNativeMessage(pendingTarget)) showToast("该消息暂不支持复读")
             }
+        }
+        val mode = SwipeRepeatPresentation.choose()
+        val message = if (mode == SwipeRepeatPresentation.Mode.GENTLE) runCatching {
+            SwipeRepeatPresentation.gentleText(activity, context.hostClassLoader())
+        }.getOrElse {
+            logger("右划复读微信表情解析失败", it)
+            SwipeRepeatPresentation.GENTLE
+        } else SwipeRepeatPresentation.ORIGINAL
+        val dialog = if (mode == SwipeRepeatPresentation.Mode.FINGERPRINT) {
+            SwipeRepeatPresentation.fingerprint(activity, confirm)
+        } else AlertDialog.Builder(activity)
+            .setTitle(" ")
+            .setMessage(message)
+            .setNegativeButton("假的", null)
+            .setPositiveButton("真的") { _, _ -> confirm() }
             .create()
         val detachListener = object : View.OnAttachStateChangeListener {
             override fun onViewAttachedToWindow(view: View) = Unit
@@ -776,7 +786,9 @@ private class SwipeQuoteAdapter(
             repeatConfirmation = dialog
             row.addOnAttachStateChangeListener(detachListener)
             dialog.show()
-            SwipeRepeatDialogStyle.apply(dialog)
+            if (mode == SwipeRepeatPresentation.Mode.FINGERPRINT) {
+                SwipeRepeatPresentation.styleFingerprint(dialog)
+            } else SwipeRepeatDialogStyle.apply(dialog, mode == SwipeRepeatPresentation.Mode.ORIGINAL)
             true
         }.getOrElse {
             row.removeOnAttachStateChangeListener(detachListener)

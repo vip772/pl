@@ -83,6 +83,7 @@ class ProfileIdFeature : BaseFeature(), WeContactHeaderApi.Provider {
             create = { resources ->
                 resources.register { JoinTimeRecovery.close(); ProfileGroupInfoFeature.stopJoinTime() }
                 JoinTimeRecovery.open()
+                ProfileGroupInfoFeature.startBindings(host)
                 resources.register { JoinTimeNativeDiagnostics.close() }
                 JoinTimeNativeDiagnostics.install(context.hostClassLoader()) { groupId, eventId, expectedHash ->
                     ProfileGroupInfoFeature.nativeWriteCompleted(groupId, eventId, expectedHash)

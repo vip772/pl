@@ -1,6 +1,10 @@
 package t.mma.hooks.items.swipequote
 
 import android.app.AlertDialog
+import android.graphics.drawable.InsetDrawable
+import android.util.TypedValue
+import android.view.Gravity
+import android.widget.TextView
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.ColorFilter
@@ -17,7 +21,7 @@ import android.view.ViewGroup
 
 /** Styling for the swipe confirmation only; native measurement and click handlers stay intact. */
 internal object SwipeRepeatDialogStyle {
-    fun apply(dialog: AlertDialog) {
+    fun apply(dialog: AlertDialog, centerInTitleSpace: Boolean = true) {
         val window = dialog.window ?: return
         val decor = window.decorView
         // Keep the original title's measured space so the dialog does not change size.
@@ -40,7 +44,9 @@ internal object SwipeRepeatDialogStyle {
             }
             button.backgroundTintList = null
             button.background = RippleDrawable(
-                android.content.res.ColorStateList.valueOf(0x33FFFFFF), fill, mask
+                android.content.res.ColorStateList.valueOf(0x33FFFFFF),
+                InsetDrawable(fill, dp(5f).toInt(), 0, dp(5f).toInt(), 0),
+                InsetDrawable(mask, dp(5f).toInt(), 0, dp(5f).toInt(), 0)
             )
             button.setTextColor(Color.WHITE)
             button.stateListAnimator = null
@@ -72,6 +78,30 @@ internal object SwipeRepeatDialogStyle {
             val inset = (buttonPosition[0] - panelPosition[0] - dp(12f))
                 .coerceIn(0f, panel.width * 0.6f)
             panel.background = CardBackground(inset, shoulder, dp(20f))
+            val message = panel.findViewById<TextView>(android.R.id.message)
+            if (message != null) {
+                if (!centerInTitleSpace) return@post
+                // Preserve the original mode's outer size while changing its text metrics.
+                panel.layoutParams = panel.layoutParams.apply { width = panel.width; height = panel.height }
+                message.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                message.gravity = Gravity.CENTER
+                message.textAlignment = View.TEXT_ALIGNMENT_CENTER
+                // Reuse the hidden title space without changing the card outline.
+                var ancestor = message.parent
+                while (ancestor is ViewGroup && ancestor !== panel) {
+                    ancestor.clipChildren = false
+                    ancestor.clipToPadding = false
+                    ancestor = ancestor.parent
+                }
+                message.post positionMessage@{
+                    if (!dialog.isShowing) return@positionMessage
+                    val position = IntArray(2)
+                    message.getLocationInWindow(position)
+                    val targetCenter = panelPosition[1] + shoulder / 2f
+                    val currentCenter = position[1] + message.height / 2f
+                    message.translationY += targetCenter - currentCenter
+                }
+            }
         }
     }
 

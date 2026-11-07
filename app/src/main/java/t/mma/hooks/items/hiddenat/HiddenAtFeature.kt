@@ -199,8 +199,11 @@ internal class HiddenAtRuntime(private val context: FeatureContext) {
                                         val contacts = WeChatApis.contact().contacts()
                                         for (id in users) {
                                             if (id == "notify@all") continue
-                                            contacts?.getGroupMemberDisplayName(talker, id)?.takeIf { it.isNotEmpty() && it != id }?.let { names += it }
-                                            contacts?.getDisplayName(id)?.takeIf { it.isNotEmpty() && it != id }?.let { names += it }
+                                            // Names are optional hints; one failed lookup must not disable delimiter parsing.
+                                            runCatching { contacts?.getGroupMemberDisplayName(talker, id) }.getOrNull()
+                                                ?.takeIf { it.isNotEmpty() && it != id }?.let { names += it }
+                                            runCatching { contacts?.getDisplayName(id) }.getOrNull()
+                                                ?.takeIf { it.isNotEmpty() && it != id }?.let { names += it }
                                         }
                                     }
                                     cleaned = HiddenAtText.match(content, users.size, names)?.text ?: return

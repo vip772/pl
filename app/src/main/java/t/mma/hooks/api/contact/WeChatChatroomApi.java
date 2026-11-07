@@ -175,9 +175,13 @@ public final class WeChatChatroomApi {
      */
     private static final class JoinTimeResult extends LinkedHashMap<String, Long> {
         boolean complete = true;
+        final Map<String, String> sources = new LinkedHashMap<>();
     }
     public boolean isJoinTimeResultComplete(Map<String, Long> result) {
         return result instanceof JoinTimeResult && ((JoinTimeResult) result).complete;
+    }
+    public String memberJoinTimeSource(Map<String, Long> result, String memberId) {
+        return result instanceof JoinTimeResult ? ((JoinTimeResult) result).sources.getOrDefault(memberId, "history") : "history";
     }
     public void logPersistedJoinTimes(String groupId, long eventId, String expectedHash) {
         NativeJoinDiagnostics diagnostic = new NativeJoinDiagnostics();
@@ -185,7 +189,22 @@ public final class WeChatChatroomApi {
         log("JOIN_DIAG persistedRead event=" + eventId + " group=" + groupId + " expectedHash=" + expectedHash
                 + " hashMatches=" + expectedHash.equals(diagnostic.blobHash) + " " + diagnostic);
     }
+    /** Lightweight metadata read: never scans message history. */
+    public Map<String, Long> getNativeMemberJoinTimes(String chatroomId) {
+        JoinTimeResult result = new JoinTimeResult();
+        for (Map.Entry<String, RoomDataMember> entry : getRoomDataMembers(chatroomId).entrySet()) {
+            if (entry.getValue().joinTimeMillis > 0L) {
+                result.put(entry.getKey(), entry.getValue().joinTimeMillis);
+                result.sources.put(entry.getKey(), "native");
+            }
+        }
+        return result;
+    }
     public Map<String, Long> getMemberJoinTimes(String chatroomId) {
+        return getMemberJoinTimes(chatroomId, Collections.emptyMap(), Collections.emptyMap());
+    }
+    /** Existing bindings skip history; departed memberships impose a history timestamp floor. */
+    public Map<String, Long> getMemberJoinTimes(String chatroomId, Map<String, Long> bound, Map<String, Long> floors) {
         JoinTimeResult result = new JoinTimeResult();
         if (TextUtils.isEmpty(chatroomId) || databaseApi == null) {
             result.complete = false;
@@ -199,7 +218,10 @@ public final class WeChatChatroomApi {
         log("JOIN_DIAG native group=" + chatroomId + " " + nativeDiagnostics);
         if (!"complete".equals(nativeDiagnostics.state) || nativeDiagnostics.parseErrors > 0) result.complete = false;
         for (Map.Entry<String, RoomDataMember> entry : roomMembers.entrySet()) {
-            if (entry.getValue().joinTimeMillis > 0L) result.put(entry.getKey(), entry.getValue().joinTimeMillis);
+            if (entry.getValue().joinTimeMillis > floors.getOrDefault(entry.getKey(), 0L)) {
+                result.put(entry.getKey(), entry.getValue().joinTimeMillis);
+                result.sources.put(entry.getKey(), "native");
+            }
         }
         int nativeHits = result.size();
         long queryStarted = android.os.SystemClock.elapsedRealtime();
@@ -211,6 +233,10 @@ public final class WeChatChatroomApi {
             result.complete = false;
             log("群成员进群时间暂不可查: group=" + chatroomId + " reason=member-list-empty");
             return result;
+        }
+        for (Map.Entry<String, Long> entry : bound.entrySet()) {
+            if (members.contains(entry.getKey()) && entry.getValue() > floors.getOrDefault(entry.getKey(), 0L))
+                result.putIfAbsent(entry.getKey(), entry.getValue());
         }
         java.util.Set<String> missingMembers = new java.util.LinkedHashSet<>(members);
         missingMembers.removeAll(result.keySet());
@@ -265,6 +291,7 @@ public final class WeChatChatroomApi {
                         for (String memberWxId : missingMembers) {
                             if (TextUtils.isEmpty(content) || !content.contains(memberWxId)) continue;
                             identityMatch = true;
+                            if (millis <= floors.getOrDefault(memberWxId, 0L)) continue;
                             if (!isMemberJoinSystemMessage(type, content, memberWxId)) continue;
                             accepted = true;
                             Long previous = result.get(memberWxId);
@@ -369,18 +396,21 @@ public final class WeChatChatroomApi {
         }
     }
 
+    // Compatibility: retain the permissive history matcher from 32580f7.
     private boolean isMemberJoinSystemMessage(int type, String content, String memberWxId) {
         if (TextUtils.isEmpty(content) || TextUtils.isEmpty(memberWxId)
                 || !content.contains(memberWxId)) return false;
-        // Unknown message types must not supply a claimed join date.
-        // An invitation can mention the inviter, invitees and unrelated users.
-        // Until a structured role has been verified, only accept an explicit
-        // plain-text subject immediately followed by a completed join event.
-        if (type != 10000 && type != 10002) return false;
-        if (content.indexOf('<') >= 0 || content.length() > 16384) return false;
-        String id = java.util.regex.Pattern.quote(memberWxId);
-        return java.util.regex.Pattern.compile("^\\s*[\"'“”‘’]?" + id
-                + "[\"'“”‘’]?\\s*加入了群聊[。.!！]?\\s*$").matcher(content).matches();
+        String lower = content.toLowerCase();
+        boolean systemType = WeChatMessageTypes.INSTANCE.isSystem(type)
+                || type == 64 || type == 603979825 || type == 268445456
+                || type == 268445458 || type == 285222674
+                || type == 889192497 || type == 922746929;
+        if (!systemType) return false;
+        return lower.contains("加入") || lower.contains("邀请") || lower.contains("进群")
+                || lower.contains("加入了群聊") || lower.contains("邀请加入")
+                || lower.contains("addchatroommember") || lower.contains("invite")
+                || lower.contains("sysmsgtemplate") || lower.contains("chatroommember")
+                || lower.contains("linkname");
     }
 
 

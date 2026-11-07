@@ -3,6 +3,15 @@ import subprocess,tempfile
 repo=Path(__file__).resolve().parents[3]
 lib=Path('/tmp/pl-kotlin-libs');jars=list(lib.glob('*.jar'));stdlib=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
 sources={
+'Creation.kt':'''package t.mma.hooks.items.profileid
+class InitialGroupJoinObserver {fun start(l:ClassLoader?,f:(String,String,Set<String>)->Unit){};fun close(){}}
+''',
+'Bindings.kt':'''package t.mma.hooks.items.profileid
+class JoinTimeBindingStore(c:android.content.Context) {class Binding(val time:Long,val source:String="history"); class Group {val creator="";val initialMembers=emptySet<String>();fun recordCreation(a:String,s:Set<String>){};fun bindInitialMembers(t:Long){};val bindings=emptyMap<String,Binding>();val floors=emptyMap<String,Long>();fun reconcile(m:Set<String>,t:Long){};fun merge(m:Map<String,Long>,s:(String)->String){}};fun contains(a:String,g:String)=false;fun read(a:String,g:String)=Group();fun write(a:String,g:String,s:Group){}}''',
+'Context.kt':'''package android.content
+open class Context''',
+'Changes.kt':'''package t.mma.hooks.api.contact
+class WeChatChatroomChangeApi {class Subscription {val isActive=true;fun unsubscribe(){}};class Change {val chatroom:Room?=null;fun mayMemberListChanged()=false;fun chatroomId()=""};class Room {val memberIds=emptyList<String>()};fun install(){};fun subscribe(f:(Change)->Unit)=Subscription()}''',
 'Recovery.kt':'''package t.mma.hooks.items.profileid
 object JoinTimeRecovery {@Volatile var account="fixture-account";fun accountKey(l:ClassLoader?)=account;fun read(l:ClassLoader?,g:String):Map<String,Long> = emptyMap()}''',
  'Clock.kt':'''package android.os
@@ -32,8 +41,14 @@ object WeContactHeaderApi {
 }
 ''',
 'Apis.kt':'''package t.mma.hooks.api.core
-object WeChatApis {val api=Rooms();fun chatrooms()=api}
+object WeChatApis {val api=Rooms();fun chatrooms()=api;fun chatroomChanges():t.mma.hooks.api.contact.WeChatChatroomChangeApi?=null}
 class Rooms {
+ class Room {val memberIds=emptyList<String>()}
+ fun getChatroom(g:String):Room?=null
+ fun getNativeMemberJoinTimes(g:String):Map<String,Long> = emptyMap()
+ fun getMemberJoinTimes(g:String,b:Map<String,Long>,f:Map<String,Long>)=getMemberJoinTimes(g)
+ fun memberJoinTimeSource(m:Map<String,Long>,i:String)="history"
+
  @Volatile var calls=0
  @Volatile var result:Map<String,Long> = emptyMap()
  val started=java.util.concurrent.CountDownLatch(1);val release=java.util.concurrent.CountDownLatch(1)
