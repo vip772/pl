@@ -750,7 +750,7 @@ private class SwipeQuoteAdapter(
         val pendingTarget = target.copy(talker = talker)
         var confirmed = false
         val dialog = AlertDialog.Builder(activity)
-            .setTitle("复读消息")
+            .setTitle(" ")
             .setMessage("你最好是真的在复读，而不是误碰，艹！")
             .setNegativeButton("假的", null)
             .setPositiveButton("真的") { _, _ ->
@@ -776,6 +776,7 @@ private class SwipeQuoteAdapter(
             repeatConfirmation = dialog
             row.addOnAttachStateChangeListener(detachListener)
             dialog.show()
+            SwipeRepeatDialogStyle.apply(dialog)
             true
         }.getOrElse {
             row.removeOnAttachStateChangeListener(detachListener)
