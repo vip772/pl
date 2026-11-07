@@ -144,3 +144,5 @@
 ### 本轮验证与阻塞边界
 2026-11-07续查重新运行 scripts/tests/profile-demand/run.py，完整PASS且进程退出0，本机日志 /tmp/join-demand-final.log。覆盖完整标志保留、缺失/不完整重试、原生写入失效、stop/reopen、忽略中断旧查询不覆盖新代结果、切号不返回旧命中缓存。此前SDK检查结束文件再次核验为0，日志有完整解析、完整性回归及Kotlin/Java编译PASS；没有新生产修改需要重复SDK检查。
 已完成精确字段全目录引用核查和新增原生写入链静态闭环。既有数据不足以还原其他目标成员真实日期；没有已验证的新协议可替代日期为0的完整551回包。公共数据库缓存对象切号复用、Provider异常隔离仍是待验证风险。没有运行Gradle、生成/安装新版APK或完成新版实机验收，未测量内存收益。调查清单仍5/6，资源生命周期仍0/7，功能总体未完成。
+
+本次收口重新运行 recovery.py --production-reflector、test_preference_runtime_owner.py、check_native_probes.py，均取得完整PASS及退出码0；日志分别为 /tmp/join-reflector-final.log、/tmp/join-owner-final.log、/tmp/join-probes-final.log。受控并发回归仍含短sleep，未穷尽交错，不将专项等同完整并发证明。
