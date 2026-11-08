@@ -2,7 +2,7 @@
 from pathlib import Path
 import subprocess, tempfile
 r=Path(__file__).resolve().parents[1]
-s=(r/'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatHeaderFeature.kt').read_text()
+s=(r/'app/src/main/java/t/mma/hooks/items/floatingchat/ChatHeaderMount.kt').read_text()
 a=s.index('    private fun enableWindowOverlay(');b=s.index('    private fun createState(',a)
 c=s.index('    private fun releaseSafely(');d=s.index('    @Synchronized',c)
 bg=(r/'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatActionBarBackgrounds.kt').read_text()

@@ -5,7 +5,7 @@ import subprocess,tempfile
 r=Path(__file__).resolve().parents[1]
 src=r/'app/src/main/java/t/mma/hooks/items/chattoolbar/ChatToolbarNewMessagePosition.kt'
 runtime=(src.parent/'ChatToolbarRuntime.kt').read_text()
-header=(src.parent.parent/'floatingchat/FloatingChatHeaderFeature.kt').read_text()
+header=(src.parent.parent/'floatingchat/ChatHeaderMount.kt').read_text()
 assert 'applyBottomNewMessageChip' not in header and 'newMessageChipMargins' not in header
 assert 'binding.chipPosition.close()' in runtime
 assert runtime.count('chipPosition.attach()')==4 and 'chipPosition.close()' in runtime

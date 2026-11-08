@@ -132,6 +132,7 @@ object FeatureRegistry {
             .register(t.mma.hooks.items.emojiat.EmojiAtFeature())
             .register(FloatingShortcutFeature())
             .register(FloatingChatHeaderFeature())
+            .register(t.mma.hooks.items.floatingchat.GroupMemberStatisticsFeature())
             .register(CustomBottomBarFeature())
             .register(DynamicBadgeFeature())
 

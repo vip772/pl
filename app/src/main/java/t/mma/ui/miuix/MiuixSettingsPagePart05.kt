@@ -2237,8 +2237,6 @@ internal fun FloatingChatToggleMiuixPage(
     var transparency by remember(transparencyKey) {
         mutableStateOf(store.getInt(transparencyKey, 10).coerceIn(0, 100))
     }
-    val statisticsKey = "floating_chat_header_member_statistics_enabled"
-    var statisticsEnabled by remember { mutableStateOf(store.getBoolean(statisticsKey, false)) }
     PageScaffold(
         title = provider.title(),
         largeTitle = provider.title(),
@@ -2261,11 +2259,6 @@ internal fun FloatingChatToggleMiuixPage(
                         store.edit().putBoolean(key, it).apply()
                     })
                     if (enabled) {
-                        InsetDivider()
-                        SwitchRow(statisticsEnabled, "群员性别好友统计", "群名称下方显示本群性别人数与好友人数", onCheckedChange = {
-                            statisticsEnabled = it
-                            store.edit().putBoolean(statisticsKey, it).apply()
-                        })
                         InsetDivider()
                         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp)) {
                             Text(text = "背景透明度 ${transparency}%", color = MiuixTheme.colorScheme.onSurface)
@@ -2604,6 +2597,28 @@ internal fun MessageDetailsConfigPage(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+internal fun GroupMemberStatisticsMiuixPage(context: Context, provider: FeatureSettingsProvider, onBack: () -> Unit) {
+    val store = remember { HchatStorage.preferences(context, "Hchat_global_config") }
+    val key = "${provider.featureId()}_enabled"
+    var enabled by remember(key) { mutableStateOf(store.getBoolean(key, false)) }
+    val scrollBehavior = MiuixScrollBehavior()
+    PageScaffold(title = provider.title(), largeTitle = provider.title(), scrollBehavior = scrollBehavior,
+        bottomBar = { BottomActionBar("返回", onBack) }) { padding ->
+        LazyColumn(modifier = Modifier.fillMaxSize().nestedScroll(scrollBehavior.nestedScrollConnection),
+            contentPadding = PaddingValues(top = padding.calculateTopPadding() + 8.dp,
+                bottom = padding.calculateBottomPadding() + 12.dp)) {
+            item { SmallTitle(text = "功能开关") }
+            item { SettingsCard {
+                SwitchRow(enabled, provider.title(), provider.subtitle(), onCheckedChange = {
+                    enabled = it
+                    store.edit().putBoolean(key, it).apply()
+                })
+            } }
         }
     }
 }

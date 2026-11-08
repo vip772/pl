@@ -3,8 +3,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 r = Path(__file__).resolve().parents[1]
-s = (r/'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatHeaderCapsule.kt').read_text()
-method = s[s.index('    private fun statisticsText('):s.index('    private fun fail(')]
+s = (r/'app/src/main/java/t/mma/hooks/items/floatingchat/GroupMemberStatisticsSurface.kt').read_text()
+method = s[s.index('    private fun statisticsText('):s.index('\n}',s.index('    private fun statisticsText('))]
 code = '''
 class Context {val classLoader=javaClass.classLoader}
 class ViewGroup {val context=Context()}

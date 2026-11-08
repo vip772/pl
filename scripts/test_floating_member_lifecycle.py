@@ -40,7 +40,7 @@ import android.view.ViewGroup
 import t.mma.hooks.api.core.WeChatApis as A
 fun await(p:()->Boolean){val end=System.nanoTime()+2_000_000_000;while(!p()){check(System.nanoTime()<end);Thread.sleep(2)}}
 fun main(){
- var changes=0;val owner=FloatingChatMemberStatistics{changes++};val view=ViewGroup()
+ var changes=0;val owner=GroupMemberStatisticsRuntime{changes++};val view=ViewGroup()
  check(owner.bind(view,false)==null&&A.contacts.calls.get()==0)
  A.contacts.block=true;check(owner.bind(view,true)!!.contains("—"));await{A.contacts.entered}
  repeat(1000){owner.bind(view,true)};check(A.contacts.calls.get()==1)
@@ -60,6 +60,6 @@ fun main(){
 with tempfile.TemporaryDirectory() as td:
  p=Path(td)
  for name,text in sources.items():(p/name).write_text(text)
- production=r/'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatMemberStatistics.kt'
+ production=r/'app/src/main/java/t/mma/hooks/items/floatingchat/GroupMemberStatisticsRuntime.kt'
  subprocess.run(['java','-Xmx256m','-cp',':'.join(map(str,lib.glob('*.jar'))),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','-nowarn','-no-stdlib','-no-reflect','-classpath',str(std),'-d',str(p/'out'),*map(str,p.glob('*.kt')),str(production)],check=True,timeout=60)
  subprocess.run(['java','-cp',f'{p/"out"}:{std}','t.mma.hooks.items.floatingchat.TestKt'],check=True,timeout=15)

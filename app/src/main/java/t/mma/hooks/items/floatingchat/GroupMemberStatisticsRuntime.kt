@@ -14,7 +14,7 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.TimeUnit
 
 /** One visible room, one running read and at most one queued replacement. No disk cache. */
-internal class FloatingChatMemberStatistics(private val changed: () -> Unit) : AutoCloseable {
+internal class GroupMemberStatisticsRuntime(private val changed: () -> Unit) : AutoCloseable {
     companion object { const val KEY = "floating_chat_header_member_statistics_enabled" }
     private val main = Handler(Looper.getMainLooper())
     private var executor: ThreadPoolExecutor? = null

@@ -1,10 +1,10 @@
-# 悬浮标题栏：群员性别好友统计
+# 群员性别好友统计
 
-设置入口为“悬浮标题栏 → 群员性别好友统计”，独立开关默认关闭。当前展示限定既有胶囊支持的微信 8.0.78。用户配置保存于统一管理的 `Hchat_global_config`，键为 `floating_chat_header_member_statistics_enabled`，自动参与配置备份。没有新增资源文件或持久化运行缓存。
+设置入口为“美化 → 群员性别好友统计”和“新功能 → 群员性别好友统计”，复用同一个 Provider 与独立设置页，开关默认关闭。悬浮标题栏设置页不再包含统计项。当前展示限定既有胶囊支持的微信 8.0.78。用户配置保存于统一管理的 `Hchat_global_config`，键为 `floating_chat_header_member_statistics_enabled`，自动参与配置备份。没有新增资源文件或持久化运行缓存。
 
 ## 显示和布局依据
 
-显示 `男[原生男图标]N · 女[原生女图标]N · 未知 N · 好友 N`，位于模块中段标题 TextView 实际底部下方 3dp，水平居中。固定半透明背景适配深浅模式，文字不随背景降低 alpha。窄屏保持单行并尾部省略。标题尚未测量时隐藏统计，等待既有布局收敛。
+显示 `男[原生男图标]N · 女[原生女图标]N · 未知 N · 好友 N`，位于当前群名 TextView 实际底部下方 3dp（悬浮标题栏开启时使用模块标题，关闭时使用原生 obn），水平居中。固定半透明背景适配深浅模式，文字不随背景降低 alpha。窄屏保持单行并尾部省略。标题尚未测量时隐藏统计，等待既有布局收敛。
 
 证据来自用户指定的 `wechat8078_decoded`：`res/layout/ba.xml` 的 `obn`、`obr`、`coy` 和 `actionbar_up_indicator`；`smali_classes11/com/tencent/mm/ui/chatting/component/fg.smali` 的 `I0` 加载标题布局。`smali_classes3/com/tencent/mm/ui/tipsbar/ChatTipsBarGroup.smali` 加载 `0x7f0e02f4`，由 `public.xml` 映射到 `s3.xml`，包含 `hyi`、`m98`、`ow1` 等既有提示卡片维护目标。
 
@@ -34,3 +34,13 @@
 ## 原生性别图标
 
 8.0.78 `public.xml` 定义 raw/ic_sex_male（0x7f1104c9）、raw/ic_sex_female（0x7f1104c8）。`smali_classes16/com/tencent/mm/plugin/profile/ui/tab/m5.smali` 第5533–5539及5566–5572行均调用 `ke5.a.i(Context,int):Drawable`；资料页关闭额外染色。模块仅在已确认的8.0.78胶囊内，通过 KavaReflector 调用同一方法，保留原色，以14dp ImageSpan置于男女标签之后。每个胶囊状态只加载一次，销毁随状态释放；失败限每状态记录一次并保留可读文本，不绘制替代图标。其他版本未验证。
+
+## 独立功能与共享挂载
+
+独立注册 `GroupMemberStatisticsFeature`；为兼容旧配置，功能 ID 保留 `floating_chat_header_member_statistics`，原开关键不变。默认的 FeatureToggleRegistry 按 `${featureId}_enabled` 读取，因此“已开启功能”、搜索和两个分组入口共用一致状态。无需迁移或复制开关；统一配置备份继续包含此键，内存快照不备份。
+
+`ChatHeaderMount` 是两个功能共用的唯一宿主 Hook owner，以引用计数维护安装与释放，最后一个 owner 销毁时清理 scheduler lease、Hook 和视图。`FloatingChatHeaderFeature` 只保留标题栏功能注册；数据 owner 为 `GroupMemberStatisticsRuntime`，展示由 `GroupMemberStatisticsSurface` 独立管理，标题胶囊只提供标题锚点并排除统计子 View。
+
+仅统计开启时，使用原生标题，不执行标题栏重排、透明背景、阴影、边距或窗口 overlay 改写。固定原标题直接子容器的基础高度，避免标题随统计扩高重新居中；扩展标题栏为胶囊占位，继续保留原生内容与公告布局关系。两项同时开启时，在公告及消息区域定位前应用统计实际高度。切换标题栏模式先恢复旧展示和统计占位，再在布局收敛时挂载。关闭统计移除 label 并恢复原高度；两项关闭取消数据任务并恢复挂载。
+
+本次拆分检查记录见 [独立功能验证](GROUP_MEMBER_STATISTICS_INDEPENDENT.md)。旧专项记录是上次提交的历史证据，不代表本次实机验收。

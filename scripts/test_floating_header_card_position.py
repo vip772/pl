@@ -1,7 +1,7 @@
 """Run production header-zone card placement with distinct screen/local origins."""
 from pathlib import Path
 import subprocess,tempfile
-r=Path(__file__).resolve().parents[1];s=(r/'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatHeaderFeature.kt').read_text()
+r=Path(__file__).resolve().parents[1];s=(r/'app/src/main/java/t/mma/hooks/items/floatingchat/ChatHeaderMount.kt').read_text()
 a=s.index('    private fun applyHeaderZoneCards(');b=s.index('    private fun applyTrackedTipsGroup(',a)
 code='''import java.util.WeakHashMap
 import kotlin.math.roundToInt

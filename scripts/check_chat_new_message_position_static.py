@@ -28,7 +28,7 @@ def source_checks():
     position = (BASE / "ChatToolbarNewMessagePosition.kt").read_text()
     runtime = (BASE / "ChatToolbarRuntime.kt").read_text()
     feature = (BASE / "ChatToolbarFeature.kt").read_text()
-    header = (BASE.parent / "floatingchat/FloatingChatHeaderFeature.kt").read_text()
+    header = (BASE.parent / "floatingchat/ChatHeaderMount.kt").read_text()
     assert 'val historyId = named("bm4")' in position
     assert 'val quoteId = named("bm2")' in position
     assert 'chips = arrayOf(Chip(historyId), Chip(quoteId))' in position

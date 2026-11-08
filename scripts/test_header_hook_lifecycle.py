@@ -1,7 +1,7 @@
 """Exercise production floating-header Hook ownership and per-entry cleanup."""
 from pathlib import Path
 import subprocess,tempfile
-r=Path(__file__).resolve().parents[1];s=(r/'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatHeaderFeature.kt').read_text()
+r=Path(__file__).resolve().parents[1];s=(r/'app/src/main/java/t/mma/hooks/items/floatingchat/ChatHeaderMount.kt').read_text()
 a=s.index('    @Synchronized\n    private fun hookBefore');b=s.index('    private fun scheduleApply',a)
 x=s.index('    private fun releaseSafely');y=s.index('    @Synchronized\n    fun destroy()',x)
 code='''package t.mma.hooks.core

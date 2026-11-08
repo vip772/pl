@@ -1,7 +1,7 @@
 """Execute production inset calculation with platform geometry stubs, no Gradle."""
 from pathlib import Path
 import subprocess,tempfile
-r=Path(__file__).resolve().parents[1];s=(r/'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatHeaderFeature.kt').read_text();a=s.index('    private fun applyChatListTopInset');z=s.index('    private fun collect(',a)
+r=Path(__file__).resolve().parents[1];s=(r/'app/src/main/java/t/mma/hooks/items/floatingchat/ChatHeaderMount.kt').read_text();a=s.index('    private fun applyChatListTopInset');z=s.index('    private fun collect(',a)
 lib=Path('/tmp/pl-kotlin-libs');std=next(lib.glob('kotlin-stdlib-[0-9]*.jar'))
 code="""import java.util.WeakHashMap
 open class View(var y:Int=0,var height:Int=0){var isLayoutRequested=false;fun getLocationOnScreen(a:IntArray){a[1]=y}}

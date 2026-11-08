@@ -5,7 +5,7 @@ from pathlib import Path
 import subprocess,tempfile
 r=Path(__file__).resolve().parents[1];base=r/'app/src/main/java/t/mma/hooks/items'
 toolbar=(base/'chattoolbar/ChatToolbarRuntime.kt').read_text()
-header=(base/'floatingchat/FloatingChatHeaderFeature.kt').read_text()
+header=(base/'floatingchat/ChatHeaderMount.kt').read_text()
 assert 'applyBottomNewMessageChip' not in header and 'newMessageChipMargins' not in header
 assert toolbar.count('ChatToolbarSettings.TOOLBAR_TAG')==2
 assert 'const val TOOLBAR_TAG' not in toolbar

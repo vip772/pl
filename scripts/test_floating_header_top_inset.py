@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 
 root = Path(__file__).resolve().parents[1]
-source = (root / 'app/src/main/java/t/mma/hooks/items/floatingchat/FloatingChatHeaderFeature.kt').read_text()
+source = (root / 'app/src/main/java/t/mma/hooks/items/floatingchat/ChatHeaderMount.kt').read_text()
 start = source.index('    private fun applyChatTopInset(')
 end = source.index('    private fun applyChatStatusWrapper(', start)
 helpers = source[start:end].replace('private fun ', 'fun ')

@@ -1119,6 +1119,7 @@ internal fun FeatureSettingsPage(
         PluginAgentEntryProvider.ID -> PluginAgentEntryMiuixPage(context, provider, onBack)
         SpecialMessageFeature.ID -> SpecialMessageMiuixPage(context, onBack)
         FloatingShortcutFeature.ID -> FloatingShortcutMiuixPage(context, provider, onBack)
+        t.mma.hooks.items.floatingchat.GroupMemberStatisticsFeature.ID -> GroupMemberStatisticsMiuixPage(context, provider, onBack)
         FloatingChatHeaderFeature.ID -> FloatingChatToggleMiuixPage(context, provider, onBack)
         MessageDetailsSettingsProvider.FEATURE_ID -> MessageDetailsConfigPage(
             context = context,

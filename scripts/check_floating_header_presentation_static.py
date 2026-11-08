@@ -22,7 +22,7 @@ class HeaderPresentationContracts(unittest.TestCase):
         self.assertIn('val nativeMore = findVerifiedMore(menu, header) ?: return fail(header)', capsule)
 
     def test_single_legacy_gate_controls_surface_shadow_and_clip(self):
-        header = source("floatingchat/FloatingChatHeaderFeature.kt")
+        header = source("floatingchat/ChatHeaderMount.kt")
         self.assertIn("val legacyCard = capsule.usesLegacyPresentation() && !split", header)
         self.assertIn("if (legacyCard) FloatingChatCardVisuals.apply(header,", header)
         self.assertNotIn("if (!split) FloatingChatCardVisuals.apply(header,", header)

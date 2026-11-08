@@ -1280,7 +1280,8 @@ internal fun practicalFeatureGroups(
                 t.mma.hooks.items.homeextension.HomeExtensionFeature.ID,
                 DynamicBadgeSettings.ID,
                 FloatingBottomBarSettings.FEATURE_ID,
-                FloatingChatHeaderFeature.ID
+                FloatingChatHeaderFeature.ID,
+                t.mma.hooks.items.floatingchat.GroupMemberStatisticsFeature.ID
             )
         ),
         FeatureGroupEntry(
